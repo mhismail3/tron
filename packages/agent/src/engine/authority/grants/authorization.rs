@@ -212,9 +212,17 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "worker.lifecycle.read");
             push_unique(&mut scopes, "resource.read");
         }
-        Some("subagent_task_list" | "subagent_task_inspect") => {
+        Some(
+            "subagent_status" | "subagent_result" | "subagent_task_list" | "subagent_task_inspect",
+        ) => {
             push_unique(&mut scopes, "subagents.read");
             push_unique(&mut scopes, "resource.read");
+        }
+        Some("subagent_launch" | "subagent_cancel") => {
+            push_unique(&mut scopes, "subagents.read");
+            push_unique(&mut scopes, "subagents.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
         }
         _ => {}
     }
@@ -278,7 +286,14 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("worker_package_inspect") => worker_package_inspect_kind(invocation)
             .map(|kind| vec![kind])
             .unwrap_or_default(),
-        Some("subagent_task_list" | "subagent_task_inspect") => vec!["subagent_task"],
+        Some(
+            "subagent_launch"
+            | "subagent_status"
+            | "subagent_result"
+            | "subagent_cancel"
+            | "subagent_task_list"
+            | "subagent_task_inspect",
+        ) => vec!["subagent_task"],
         _ => Vec::new(),
     }
 }
@@ -343,6 +358,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("question_answer") => push_unique(&mut kinds, "goal_answer"),
         Some("web_fetch") => push_unique(&mut kinds, "web_source"),
         Some("web_robots_check") => push_unique(&mut kinds, "web_robots_policy"),
+        Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }
     kinds

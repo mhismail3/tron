@@ -482,9 +482,14 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("web_source_archive"));
     assert!(result.contains("expectedWebSourceVersionId"));
+    assert!(result.contains("subagent_launch"));
+    assert!(result.contains("subagent_status"));
+    assert!(result.contains("subagent_result"));
+    assert!(result.contains("subagent_cancel"));
+    assert!(result.contains("modelPolicy: bounded_placeholder_v1"));
     assert!(result.contains("subagent_task_list"));
     assert!(result.contains("subagent_task_inspect"));
-    assert!(result.contains("bounded/redacted inert subagent task lifecycle evidence only"));
+    assert!(result.contains("bounded-placeholder subagent lifecycle records"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
     for non_goal in [
@@ -502,6 +507,7 @@ fn clarification_includes_capability_execution_guidance() {
         "subagent_task_cancel",
         "subagent_task_result",
         "subagent_task_status",
+        "subagent_delegate",
         "spawn_subagent",
         "subagent_spawn",
     ] {

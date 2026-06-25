@@ -43,6 +43,7 @@ pub(super) fn subagent_resource_type_definitions() -> Vec<RegisterResourceType> 
                 "result": {"type": ["object", "null"]},
                 "error": {"type": ["object", "null"]},
                 "authority": {"type": "object"},
+                "execution": {"type": "object"},
                 "activation": {"type": "object"},
                 "network": {"type": "object"},
                 "redaction": {"type": "object"},

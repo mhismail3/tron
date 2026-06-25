@@ -329,20 +329,21 @@ and local paths. It does not propose, install, enable, disable, launch, stop,
 retire, register, execute, promote trust, expand public `/engine`, or add
 native fixed package UI.
 
-`P2AER-INV-009` is current baseline for accepted Slice 10A: Subagent Task
-Lifecycle Foundation. The accepted implementation adds a `subagents` domain and
-one `subagent_task` resource kind for inert lifecycle/provenance records only.
-Trusted internal system/admin writes can create/update bounded task records
-with parent session/workspace/trace refs, objective/prompt summaries,
-evidence/output refs, result/error placeholders, idempotency, explicit
-non-wildcard `subagent_task` resource authority, and `networkPolicy: none`.
-Agent access is read-only through `subagent_task_list` and
-`subagent_task_inspect` under `capability::execute`; those reads require
-trusted current-session context, `subagents.read`, `resource.read`, explicit
-resource-kind grants, matching `kind:subagent_task` selectors, stored
-kind/schema revalidation, allowlisted bounded/redacted projection independent
-of stored payload trust, scope isolation, and no network. Actual child-agent
-spawn, worker/package launch, job/process start, tool execution, scheduling,
-cancellation of real workers, result merge into conversation state, public
-`/engine` expansion, and native fixed iOS subagent UI remain deferred to later
-Slice 10 work.
+`P2AER-INV-009` is current branch baseline after Slice 10B implementation:
+Subagent Worker Launch Foundation. Accepted Slice 10A adds inert `subagents`
+domain coverage and one `subagent_task` resource kind for lifecycle/provenance
+records. Slice 10B keeps `subagent_task` as the parent causality anchor and adds
+provider-visible `subagent_launch`, `subagent_status`, `subagent_result`, and
+`subagent_cancel` lifecycle operations under the existing `capability::execute`
+primitive. Launch requires trusted current-session context,
+`subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
+authority, exact `kind:subagent_task` selectors, idempotency, explicit
+`modelPolicy: bounded_placeholder_v1`, bounded objective/prompt summaries,
+one-running-task-per-scope concurrency, parent session/workspace/trace refs,
+replay refs, and no-network policy. Status/result return allowlisted
+bounded/redacted projections; cancel records idempotent cancellation provenance
+with optional expected-version freshness. Actual child-agent process execution,
+worker/package launch, job/process start, tool execution, scheduling, result
+merge into conversation state, public `/engine` expansion, settings/profile
+migrations, actual spawn/status/result/cancel workers and iOS chips/sheets, and
+native fixed iOS subagent UI remain deferred to later Slice 10 work.

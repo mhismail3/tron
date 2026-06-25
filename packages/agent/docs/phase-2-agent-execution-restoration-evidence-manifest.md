@@ -1682,6 +1682,67 @@ Slice 10A accepted evidence:
   documents its audit-timestamp ownership without widening the deferred DRC
   cleanup scope.
 
+## Phase 2 Slice 10B Implementation Evidence: Subagent Worker Launch Foundation
+
+Slice 10B implementation evidence:
+
+- Delegation source thread `019ef914-ed80-78f2-b253-229240d49444` and
+  discovery thread `019efddb-9995-71f3-8e44-175d81b87adc` selected Subagent
+  Worker Launch Foundation from
+  `origin/main@414cb54119453afbdaf496c7063fcea7dd8e694f`.
+- Implementation branch
+  `codex/phase-2-slice-10b-subagent-worker-launch-foundation` in worktree
+  `/Users/<USER>/.codex/worktrees/03e5/tron` adds controlled
+  `subagent_launch`, `subagent_status`, `subagent_result`, and
+  `subagent_cancel` provider-visible operation values behind the existing
+  `capability::execute` primitive.
+- The implementation keeps `subagent_task` as the durable parent task and
+  causality anchor. Launch requires trusted current-session/workspace context,
+  exact `kind:subagent_task` selectors, explicit `subagents.read`,
+  `subagents.write`, `resource.read`, and `resource.write` authority,
+  idempotency, `modelPolicy: bounded_placeholder_v1`, parent
+  session/workspace/trace refs, bounded objective/prompt summaries, one
+  running task per session/workspace scope, no-network policy, and stored
+  proof that no worker/job/process/tool/package/network/result-merge side
+  effects occurred.
+- Status/result use allowlisted bounded/redacted projections with trace,
+  replay, resource, model-policy, concurrency, worker/job/process, and
+  side-effect proof refs rather than trusting arbitrary stored payload fields.
+  Cancel records idempotent cancellation provenance and optional
+  expected-version freshness while remaining a resource-state transition only.
+- Runtime grant derivation, pre-handler authorization, OpenAI provider
+  guidance, provider schema operation exposure, and resource schema coverage
+  were updated only for the intended lifecycle operation names. Provider/static
+  guards continue to reject broad delegation/spawn, arbitrary tool execution,
+  package install/launch, MCP start, public `/engine`, browser/search/login,
+  and network scope.
+- Focused validation passed `cargo test --manifest-path
+  packages/agent/Cargo.toml --lib domains::subagents -- --nocapture` with 19
+  tests, `cargo test --manifest-path packages/agent/Cargo.toml --lib
+  domains::capability::contract -- --nocapture`, `cargo test --manifest-path
+  packages/agent/Cargo.toml --lib
+  domains::model::providers::openai::message_converter -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib
+  subagent_launch_and_cancel_runtime_grants_are_scoped_writes -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib
+  subagent_status_and_result_runtime_grants_are_read_only -- --nocapture`, and
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib
+  unsupported_subagent_task_operation_does_not_gain_lifecycle_authority --
+  --nocapture`.
+- Static validation passed `cargo fmt --manifest-path
+  packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path
+  packages/agent/Cargo.toml`, SACB, CSD, HRA, TMB, TPC, PCC, BPRC, DESI,
+  public-protocol, performance-resource, and PMBD invariant targets.
+- The DRC invariant target was run and failed only on the known non-subagents
+  UTC allow-list gap in `goals`, `web`, and `tool_sources`. The failure list
+  did not include `domains/subagents`.
+- Real child-agent execution, actual worker/package/job/process start, tool
+  execution, scheduler/autonomy, cancellation signalling to workers, result
+  merge into conversation state, model-profile policy, approval triggers,
+  public `/engine`, settings/profile/migrations, network/browser/search/login,
+  catalog registration, trust promotion, and native fixed subagent UI remain
+  deferred.
+
 ## Validation Log
 
 | Command | Result | Evidence |

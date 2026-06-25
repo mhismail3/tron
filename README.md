@@ -962,8 +962,12 @@ Current primitive operations:
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
 | `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
-| `subagent_task_list` | List scoped inert `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no child agent, worker, job, process, network, or result-merge side effects. |
-| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, worker launch data, process metadata, or network scope. |
+| `subagent_launch` | Record a scoped `subagent_task` launch lifecycle under explicit `modelPolicy: bounded_placeholder_v1`, one-running-task-per-scope concurrency, parent trace/replay refs, bounded evidence, and proof that no worker, job, process, tool, network, package, or result merge started. |
+| `subagent_status` | Inspect one scoped `subagent_task` status using bounded/redacted task projections with placeholder worker/job policy and no raw prompt/result payload. |
+| `subagent_result` | Read bounded/redacted result/error/refs for one scoped `subagent_task` without merging output into conversation state. |
+| `subagent_cancel` | Cancel one nonterminal scoped `subagent_task` with idempotency and optional expected-version freshness, recording cancellation provenance without signalling any worker, job, or process. |
+| `subagent_task_list` | List scoped `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no child-agent, worker, job, process, network, or result-merge side effects. |
+| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, process metadata, or network scope. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
@@ -1133,11 +1137,24 @@ read-only through `subagent_task_list` and `subagent_task_inspect` under
 context, `subagents.read`, `resource.read`, explicit `subagent_task` resource
 authority plus a matching `kind:subagent_task` selector, stored kind/schema
 revalidation, allowlisted bounded/redacted projection, scope isolation, and
-`networkPolicy: none`. Slice 10A does not
-spawn child agents, launch workers, start jobs or processes, execute tools,
-open network/browser/search/login scope, register catalog entries, promote
-trust, merge results into conversation state, schedule work, expand public
-`/engine` APIs, or add fixed native iOS subagent UI.
+`networkPolicy: none`.
+
+Slice 10B adds controlled provider-visible subagent lifecycle operation values
+`subagent_launch`, `subagent_status`, `subagent_result`, and
+`subagent_cancel` behind the same single `capability::execute` primitive.
+Launch requires trusted current-session context, derived non-bootstrap
+`subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
+authority, exact `kind:subagent_task` selectors, idempotency, explicit
+`modelPolicy: bounded_placeholder_v1`, bounded objective/prompt summaries,
+one running subagent task per current scope, parent session/workspace/trace
+refs, replay refs, and append-only `subagent_task` resource evidence. Status
+and result are read-only bounded projections; cancel uses idempotency plus
+optional expected-version freshness and records cancellation provenance.
+Slice 10B still does not spawn child agents, launch workers or packages, start
+jobs or processes, execute tools, open network/browser/search/login scope,
+register catalog entries, promote trust, merge results into conversation state,
+schedule autonomous work, expand public `/engine` APIs, add settings/profile
+migrations, or add fixed native iOS subagent UI.
 
 The accepted Slice 9B foundation adds read-only worker package lifecycle
 inspection under the same `capability::execute` primitive. `worker_package_list` and
@@ -1363,11 +1380,12 @@ catalog/resource truth and writes only append-oriented `catalog_discovery_report
 evidence. Tool-source inspection reads scoped `tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
 writes are provenance evidence and explicitly do not activate external tools.
-Subagent task inspection reads scoped `subagent_task` resources only and
-projects allowlisted, bounded, redacted lifecycle fields instead of raw stored
-payloads; internal task lifecycle writes are provenance evidence and explicitly
-do not start child agents, launch workers, start jobs, run tools, schedule
-work, or merge results.
+Subagent lifecycle operations read and mutate only scoped `subagent_task`
+resources. Launch/status/result/cancel project allowlisted, bounded, redacted
+lifecycle fields and placeholder worker/job policy instead of raw stored
+payloads; internal task writes and provider-visible launch/cancel evidence
+explicitly do not start child agents, launch workers or packages, start jobs or
+processes, run tools, schedule work, or merge results.
 Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,

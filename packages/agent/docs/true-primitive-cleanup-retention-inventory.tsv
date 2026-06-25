@@ -1781,6 +1781,8 @@ packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	test	test_harnes
 packages/agent/src/domains/capability/operations/subagents.rs	implementation	capability_execute	TPC-10/P2AER-S10A	read-only provider execute adapter for inert subagent task lifecycle inspection
 packages/agent/src/domains/subagents/mod.rs	implementation	subagents	TPC-10/P2AER-S10A	inert subagent task lifecycle domain docs and worker registration boundary
 packages/agent/src/domains/subagents/projection.rs	implementation	subagents	TPC-10/P2AER-S10A-FIX1	allowlisted bounded redacted subagent task list/inspect projection owner
+packages/agent/src/domains/subagents/execution.rs	implementation	subagents	TPC-10/P2AER-S10B	controlled subagent launch status result and cancel lifecycle owner with placeholder worker job policy and no execution side effects
+packages/agent/src/domains/subagents/execution_tests.rs	test	test_harness	TPC-10/P2AER-S10B	split Slice 10B subagent execution regression coverage
 packages/agent/src/domains/subagents/service.rs	implementation	subagents	TPC-10/P2AER-S10A	trusted internal lifecycle record service and read-only scoped projections
 packages/agent/src/domains/subagents/tests.rs	test	test_harness	TPC-10/P2AER-S10A	focused Slice 10A subagent lifecycle authority scope schema bounds and non-goal regression coverage
 packages/agent/src/domains/subagents/validation.rs	implementation	subagents	TPC-10/P2AER-S10A	bounded summary ref placeholder validation and secret execution-field rejection

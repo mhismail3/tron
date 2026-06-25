@@ -1,33 +1,36 @@
-//! Subagent task lifecycle foundation.
+//! Subagent task lifecycle and worker-launch foundation.
 //!
-//! Slice 10A restores only inert delegation task records. Trusted internal
-//! callers can create and update `subagent_task` resources as bounded lifecycle
-//! evidence, while model-visible access remains read-only through
-//! `capability::execute` operation values `subagent_task_list` and
-//! `subagent_task_inspect`. List/inspect revalidate stored resource
-//! kind/schema before returning allowlisted, bounded, redacted projections.
+//! Slice 10A restored inert delegation task records. Slice 10B keeps
+//! `subagent_task` as the durable parent causality anchor and adds a controlled
+//! launch/status/result/cancel lifecycle over the same resource. The launch path
+//! records a bounded placeholder worker/job policy, parent refs, concurrency
+//! decision, cancellation path, and replay/evidence refs, but it still does not
+//! start a child process, external worker, package, tool, browser, network
+//! action, scheduler, or result merge.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `execution` | Controlled launch/status/result/cancel lifecycle over `subagent_task` |
 //! | `projection` | Allowlisted, bounded, redacted read projections for list/inspect |
 //! | `service` | Internal lifecycle writes plus read-only list/inspect projection |
 //! | `validation` | Bounded payload readers and redaction/non-goal guards |
 //! | `tests` | Authority, scoping, idempotency, schema, and non-goal guards |
 //!
-//! # INVARIANT: lifecycle records are not delegation execution
+//! # INVARIANT: launch records are not child execution
 //!
-//! This domain must never start workers, processes, jobs, MCP servers, tool
-//! execution, browser/search/network work, trust promotion, or result merging.
-//! It records only task identity, parent session/trace/workspace scope,
-//! objective/prompt summaries, lifecycle state, bounded refs, and optional
-//! result/error placeholders for later inspection.
+//! This domain must never start OS processes, external workers, package
+//! launchers, MCP servers, tool execution, browser/search/network work, trust
+//! promotion, autonomous scheduling, or result merging. Launch means "record a
+//! scoped subagent worker lifecycle resource under explicit placeholder policy",
+//! not "spawn an agent".
 
 #![allow(dead_code)]
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+pub(crate) mod execution;
 mod projection;
 pub(crate) mod service;
 mod validation;
@@ -64,5 +67,7 @@ pub(crate) fn worker_module(
     )
 }
 
+#[cfg(test)]
+mod execution_tests;
 #[cfg(test)]
 mod tests;

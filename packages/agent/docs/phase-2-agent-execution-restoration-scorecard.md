@@ -37,7 +37,7 @@ extraction evidence, and accepted Slice 8D web source archive lifecycle
 evidence, accepted Slice 8E web robots policy evidence, accepted Slice 8F web
 fetch robots evidence linkage, accepted Slice 9A tool-source proposal
 provenance evidence, and accepted Slice 9B worker-package lifecycle inspection
-evidence.
+evidence, and Slice 10B subagent worker launch foundation evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -186,19 +186,28 @@ Completed Phase 2 restoration slices at this baseline:
   scope isolation, allowlisted bounded/redacted read projections, and no
   child-agent, worker, job, process, network, scheduling, or result-merge
   behavior.
+- Slice 10B implementation: controlled `subagent_launch`,
+  `subagent_status`, `subagent_result`, and `subagent_cancel` lifecycle
+  operations through `capability::execute`, preserving `subagent_task` as the
+  parent causality anchor with explicit bounded placeholder model policy,
+  one-running-task-per-scope concurrency, idempotency/freshness, bounded
+  evidence, trace/replay refs, and no worker/job/process/tool/network/package
+  launch or result merge.
 
 Current next action:
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
-inspection, and Slice 10A subagent task lifecycle are accepted. Start fresh
-discovery for the next Phase 2 slice from `origin/main`. Search providers, browser
+inspection, Slice 10A subagent task lifecycle, and Slice 10B subagent worker
+launch foundation are implemented on this branch. Start independent review
+from this branch, then continue fresh discovery for the next Phase 2 slice from
+`origin/main` after acceptance. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package
-install/launch/registration/execution, subagent worker launch, real subagent
-cancellation, result merge, scheduling, fetch/pull/push, PR handoff,
+install/launch/registration/execution, real subagent worker/process execution,
+subagent result merge, scheduling, fetch/pull/push, PR handoff,
 production deployment behavior, and native SourceChanges UI remain deferred
 until separately scoped and reviewed.
 

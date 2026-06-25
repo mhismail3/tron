@@ -64,6 +64,7 @@ fn projected_task_payload(resource: &EngineResource, payload: &Value) -> Value {
         "result": projected_placeholder(payload.get("result")),
         "error": projected_placeholder(payload.get("error")),
         "authority": projected_authority(payload.get("authority")),
+        "execution": projected_execution(payload.get("execution")),
         "activation": projected_activation(payload.get("activation")),
         "network": projected_network(payload.get("network")),
         "redaction": projected_redaction(payload.get("redaction")),
@@ -237,6 +238,67 @@ fn projected_authority(value: Option<&Value>) -> Value {
     })
 }
 
+fn projected_execution(value: Option<&Value>) -> Value {
+    let Some(Value::Object(execution)) = value else {
+        return Value::Null;
+    };
+    json!({
+        "schemaVersion": execution
+            .get("schemaVersion")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_ID_BYTES))
+            .unwrap_or(Value::Null),
+        "modelPolicy": execution
+            .get("modelPolicy")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_ID_BYTES))
+            .unwrap_or(Value::Null),
+        "profilePolicy": projected_object_strings(
+            execution.get("profilePolicy"),
+            &["mode"],
+            &["settingsMigrationRequired"]
+        ),
+        "concurrency": projected_object_numbers_and_strings(
+            execution.get("concurrency"),
+            &["maxRunningPerScope"],
+            &["scopeKind"]
+        ),
+        "worker": projected_object_strings(
+            execution.get("worker"),
+            &["kind"],
+            &["started"]
+        ),
+        "job": projected_object_strings(
+            execution.get("job"),
+            &["backing"],
+            &["jobStarted", "processStarted"]
+        ),
+        "cancellation": projected_object_strings(
+            execution.get("cancellation"),
+            &["reason"],
+            &[
+                "supported",
+                "requested",
+                "workerCancelRequested",
+                "jobCancelRequested",
+                "processSignalSent"
+            ]
+        ),
+        "sideEffects": projected_object_strings(
+            execution.get("sideEffects"),
+            &[],
+            &[
+                "toolExecution",
+                "network",
+                "browser",
+                "packageLaunch",
+                "catalogRegistration",
+                "trustPromotion"
+            ]
+        )
+    })
+}
+
 fn projected_activation(value: Option<&Value>) -> Value {
     let Some(Value::Object(activation)) = value else {
         return Value::Null;
@@ -247,6 +309,7 @@ fn projected_activation(value: Option<&Value>) -> Value {
         "subagentStarted",
         "workerStarted",
         "jobStarted",
+        "processStarted",
         "catalogRegistration",
         "toolExecution",
         "resultMerged",
@@ -254,6 +317,46 @@ fn projected_activation(value: Option<&Value>) -> Value {
         if let Some(flag) = activation.get(key).and_then(Value::as_bool) {
             projected.insert(key.to_owned(), json!(flag));
         }
+    }
+    Value::Object(projected)
+}
+
+fn projected_object_strings(
+    value: Option<&Value>,
+    string_keys: &[&str],
+    bool_keys: &[&str],
+) -> Value {
+    let Some(Value::Object(map)) = value else {
+        return Value::Null;
+    };
+    let mut projected = Map::new();
+    for key in string_keys {
+        insert_projected_string(map, &mut projected, key, PROJECTION_STRING_BYTES);
+    }
+    for key in bool_keys {
+        if let Some(flag) = map.get(*key).and_then(Value::as_bool) {
+            projected.insert((*key).to_owned(), json!(flag));
+        }
+    }
+    Value::Object(projected)
+}
+
+fn projected_object_numbers_and_strings(
+    value: Option<&Value>,
+    number_keys: &[&str],
+    string_keys: &[&str],
+) -> Value {
+    let Some(Value::Object(map)) = value else {
+        return Value::Null;
+    };
+    let mut projected = Map::new();
+    for key in number_keys {
+        if let Some(number) = map.get(*key).and_then(Value::as_u64) {
+            projected.insert((*key).to_owned(), json!(number));
+        }
+    }
+    for key in string_keys {
+        insert_projected_string(map, &mut projected, key, PROJECTION_STRING_BYTES);
     }
     Value::Object(projected)
 }

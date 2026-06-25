@@ -234,6 +234,55 @@ async fn subagent_task_inspect_runtime_grant_authorizes_only_read_projection_kin
 }
 
 #[tokio::test]
+async fn subagent_status_and_result_runtime_grants_are_read_only() {
+    for operation in ["subagent_status", "subagent_result"] {
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+            "operation": operation,
+            "subagentTaskResourceId": "subagent_task:runtime-grant",
+            "idempotencyKey": format!("{operation}-grant")
+        }))
+        .await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_subagent_task_runtime_grant_is_read_only(&grant);
+    }
+}
+
+#[tokio::test]
+async fn subagent_launch_and_cancel_runtime_grants_are_scoped_writes() {
+    for operation in ["subagent_launch", "subagent_cancel"] {
+        let payload = if operation == "subagent_launch" {
+            json!({
+                "operation": operation,
+                "objectiveSummary": "bounded objective",
+                "promptSummary": "bounded prompt",
+                "modelPolicy": "bounded_placeholder_v1",
+                "idempotencyKey": format!("{operation}-grant")
+            })
+        } else {
+            json!({
+                "operation": operation,
+                "subagentTaskResourceId": "subagent_task:runtime-grant",
+                "expectedSubagentTaskVersionId": "version-runtime-grant",
+                "idempotencyKey": format!("{operation}-grant")
+            })
+        };
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_subagent_task_runtime_grant_is_scoped_write(&grant);
+    }
+}
+
+#[tokio::test]
 async fn unsupported_subagent_task_operation_does_not_gain_lifecycle_authority() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_create",
@@ -356,6 +405,65 @@ fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::Engine
             "state::set".to_owned(),
         ]
     );
+}
+
+fn assert_subagent_task_runtime_grant_is_scoped_write(grant: &crate::engine::EngineGrant) {
+    assert_eq!(grant.network_policy, "none");
+    for scope in [
+        "subagents.read",
+        "subagents.write",
+        "resource.read",
+        "resource.write",
+    ] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "subagent task write grant should include {scope}"
+        );
+    }
+    for forbidden_scope in [
+        "worker.lifecycle.read",
+        "worker.lifecycle.write",
+        "web.read",
+        "web.write",
+        "catalog.write",
+        "mcp.write",
+        "tool.execute",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "subagent task write grant must not include {forbidden_scope}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_resource_kinds,
+        vec!["agent_state".to_owned(), "subagent_task".to_owned()]
+    );
+    assert_eq!(
+        grant.resource_selectors,
+        vec![
+            "kind:agent_state".to_owned(),
+            "kind:subagent_task".to_owned()
+        ]
+    );
+    for forbidden_capability in [
+        "subagents::create_task",
+        "subagents::update_task",
+        "worker_lifecycle::launch_worker",
+        "jobs::start",
+        "process::run",
+        "mcp::start_server",
+        "tool::execute",
+        "catalog::register",
+    ] {
+        assert!(
+            !grant
+                .allowed_capabilities
+                .contains(&forbidden_capability.to_owned()),
+            "subagent task write grant must not include capability {forbidden_capability}"
+        );
+    }
 }
 
 fn assert_worker_package_runtime_grant_is_read_only_for_kind(

@@ -58,3 +58,109 @@ pub(super) async fn subagent_task_inspect(
         }),
     ))
 }
+
+pub(super) async fn subagent_launch(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let subagent_deps = crate::domains::subagents::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let value = crate::domains::subagents::execution::launch_subagent_value(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Launched subagent lifecycle {}.",
+            value["subagentTaskResourceId"]
+                .as_str()
+                .unwrap_or("subagent_task")
+        ),
+        json!({
+            "primitiveOperation": "subagent_launch",
+            "status": value["status"],
+            "subagentTasks": value
+        }),
+    ))
+}
+
+pub(super) async fn subagent_status(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let subagent_deps = crate::domains::subagents::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let value = crate::domains::subagents::execution::status_subagent_value(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Subagent status {}.",
+            value["status"].as_str().unwrap_or("unknown")
+        ),
+        json!({
+            "primitiveOperation": "subagent_status",
+            "status": value["status"],
+            "subagentTasks": value
+        }),
+    ))
+}
+
+pub(super) async fn subagent_result(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let subagent_deps = crate::domains::subagents::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let value = crate::domains::subagents::execution::result_subagent_value(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Subagent result status {}.",
+            value["status"].as_str().unwrap_or("unknown")
+        ),
+        json!({
+            "primitiveOperation": "subagent_result",
+            "status": value["status"],
+            "subagentTasks": value
+        }),
+    ))
+}
+
+pub(super) async fn subagent_cancel(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let subagent_deps = crate::domains::subagents::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let value = crate::domains::subagents::execution::cancel_subagent_value(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Subagent cancel status {}.",
+            value["status"].as_str().unwrap_or("unknown")
+        ),
+        json!({
+            "primitiveOperation": "subagent_cancel",
+            "status": value["status"],
+            "subagentTasks": value
+        }),
+    ))
+}

@@ -69,7 +69,10 @@ use memory::{memory_inspect, memory_list, memory_status};
 use process::process_run;
 use replay::replay_manifest;
 use state::{state_get, state_list, state_set};
-use subagents::{subagent_task_inspect, subagent_task_list};
+use subagents::{
+    subagent_cancel, subagent_launch, subagent_result, subagent_status, subagent_task_inspect,
+    subagent_task_list,
+};
 use tool_sources::{tool_source_inspect, tool_source_list};
 use trace::{complete_trace_record, started_trace_record, trace_get, trace_list};
 use web::{web_fetch, web_robots_check, web_source_archive, web_source_inspect, web_source_list};
@@ -241,6 +244,10 @@ fn validate_execute_context(
             | "web_source_archive"
             | "tool_source_list"
             | "tool_source_inspect"
+            | "subagent_launch"
+            | "subagent_status"
+            | "subagent_result"
+            | "subagent_cancel"
             | "subagent_task_list"
             | "subagent_task_inspect"
             | "worker_package_list"
@@ -268,7 +275,9 @@ fn validate_execute_context(
         | "question_answer"
         | "web_fetch"
         | "web_robots_check"
-        | "web_source_archive" => require_idempotency_key(invocation, operation),
+        | "web_source_archive"
+        | "subagent_launch"
+        | "subagent_cancel" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
 }
@@ -369,6 +378,10 @@ async fn execute_operation(
         "memory_inspect" => memory_inspect(invocation, deps).await?,
         "tool_source_list" => tool_source_list(invocation, deps).await?,
         "tool_source_inspect" => tool_source_inspect(invocation, deps).await?,
+        "subagent_launch" => subagent_launch(invocation, deps).await?,
+        "subagent_status" => subagent_status(invocation, deps).await?,
+        "subagent_result" => subagent_result(invocation, deps).await?,
+        "subagent_cancel" => subagent_cancel(invocation, deps).await?,
         "subagent_task_list" => subagent_task_list(invocation, deps).await?,
         "subagent_task_inspect" => subagent_task_inspect(invocation, deps).await?,
         "worker_package_list" => worker_package_list(invocation, deps).await?,
@@ -381,7 +394,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }
