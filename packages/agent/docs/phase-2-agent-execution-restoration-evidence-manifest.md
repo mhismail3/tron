@@ -1843,13 +1843,21 @@ Slice 10B accepted evidence:
   login scope, native fixed procedural UI, result merge into conversation
   state and disable/edit/delete behavior.
 
-## Slice 12 Implementation Evidence
+## Accepted Slice 12: Scheduling, Reminders, Automations, And Background Work
 
 Branch:
-`codex/phase-2-slice-12-scheduling-reminders-automations-background-work`
+`codex/phase-2-slice-12-scheduling-reminders-automations-background-work-fix1`
 
 Baseline HEAD:
 `20f24624913e1b9a8ffe9c4ecdf3a0180a5918e5`
+
+Accepted status: current baseline after implementation worker
+`019efe6e-e218-7910-889b-3e50c5387639`, review worker
+`019efea0-8930-76a1-9e6a-70da59bf1199`, focused fix worker
+`019efea4-166a-7661-bbe9-1d739bfe6aa2`, and accepting re-review worker
+`019efeb3-38be-76d3-af75-f8c520923a94`. Accepted commits are
+`2ae31c48e0ba8246e61bf6b2b63ed67cd7de88ee` and
+`7e5a3a85d21eecef7ea3fa1b73bbdcae0c111c88`.
 
 Scope implemented:
 
@@ -1871,6 +1879,10 @@ Scope implemented:
   tests for catch-up firing, missed-run skip evidence, cancellation terminality,
   missing authority, wildcard target rejection, and resource schema
   registration.
+- Focused review fix hardened inspect projection redaction, bounded
+  fire/inspect scans before provider-visible collection, fail-closed
+  no-context scheduler service calls, and BPRC/README pending-review wording
+  before acceptance.
 - Kept Slice 12 narrow: no hidden cron tables, no uncontrolled background loop,
   no feature-work execution, no process/worker/network launch, no APNs/device
   notification delivery, no public scheduler API expansion, no native fixed iOS
@@ -1880,10 +1892,19 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Formatting passed after accepted Slice 12 docs and static assertion updates. |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust crate checked after scheduler/resource/capability wiring; only pre-existing warning classes remained. |
-| `cargo test --manifest-path packages/agent/Cargo.toml scheduler::tests -- --nocapture` | exit 0 | 6 scheduler tests passed: deterministic clock injection, interval catch-up, missed-run skip evidence, multi-schedule run-id protection, cancellation, authority/selector denial, and schema registration. |
+| `cargo test --manifest-path packages/agent/Cargo.toml scheduler::tests -- --nocapture` | exit 0 | 10 scheduler tests passed after the focused fix, including inspect redaction, bounded fire, bounded inspect runs, and no-context service rejection regressions. |
+| `cargo test --manifest-path packages/agent/Cargo.toml engine::durability::resources -- --nocapture` | exit 0 | 7 resource durability tests passed after bounded source-link lookup changes. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after the narrow accepted scheduler foundation allowance. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 CSD tests passed; no hidden timer loop or unmanaged scheduler path was introduced. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after adding scheduler authority/resource inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test documentation_evidence_scorecard_integrity_invariants --test hierarchical_rearchitecture_invariants --test concurrency_scheduling_discipline_invariants --test security_authority_capability_boundaries_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test self_updating_worker_runtime_foundation_invariants --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | BPRC, DESI, HRA, CSD, SACB, TMB, TPC, PCC, public-protocol, performance-resource, SUWRF, and IARM gates passed after the accepted-current-baseline closeout wording and static assertions. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 101 | Scheduler `Utc::now()` violations were removed. Remaining DRC failure is the known non-scheduler allow-list gap in `domains/goals`, `domains/web`, and `domains/tool_sources/tool_sources_inspect_tests.rs`. |
+| `scripts/personal-info-guard.sh` | exit 0 | No personal-info literals were introduced. |
+| `git diff --check` | exit 0 | Closeout docs and static assertion diffs contain no whitespace errors. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No ignored files are staged or tracked by the closeout. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
 
 ## Validation Log
 

@@ -37,8 +37,9 @@ extraction evidence, and accepted Slice 8D web source archive lifecycle
 evidence, accepted Slice 8E web robots policy evidence, accepted Slice 8F web
 fetch robots evidence linkage, accepted Slice 9A tool-source proposal
 provenance evidence, accepted Slice 9B worker-package lifecycle inspection
-evidence, accepted Slice 10B subagent worker launch foundation evidence, and
-accepted Slice 11A procedural state provenance and inspection evidence.
+evidence, accepted Slice 10B subagent worker launch foundation evidence,
+accepted Slice 11A procedural state provenance and inspection evidence, and
+accepted Slice 12 scheduler foundation evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -203,22 +204,33 @@ Completed Phase 2 restoration slices at this baseline:
   activation, trigger firing, prompt injection, learned behavior, autonomous
   execution, scheduler work, tool execution, worker/package/job/process/network
   launch, result merge, repo-managed skills, or bootstrap skill-copy wiring.
+- Accepted Slice 12: durable `schedule` and `schedule_run` resource contracts,
+  `domains/scheduler`, and execute-only `schedule_create`, `schedule_list`,
+  `schedule_inspect`, `schedule_cancel`, and `schedule_fire_due` operations
+  through `capability::execute`, with explicit `scheduler.read`,
+  `scheduler.write`, `scheduler.fire`, and resource authority, non-wildcard
+  target selectors, deterministic clock injection, bounded/redacted
+  projections, cancellation terminality, bounded fire/inspect scans, and no
+  hidden cron loop, direct feature execution, native fixed schedule UI, APNs
+  delivery, public scheduler API, autonomous planning, or result merge.
 
 Current next action:
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
-inspection, Slice 10A subagent task lifecycle, and Slice 10B subagent worker
-launch foundation are accepted. Slice 11A procedural state provenance and
-inspection is accepted current baseline after independent review/fix/re-review.
+inspection, Slice 10A subagent task lifecycle, Slice 10B subagent worker launch
+foundation, Slice 11A procedural state provenance inspection, and Slice 12
+scheduler foundation are accepted current baseline after independent
+review/fix/re-review loops.
 Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package
 install/launch/registration/execution, real subagent worker/process execution,
 subagent result merge, procedural activation/triggers/prompt injection/learned
-behavior, scheduling, fetch/pull/push, PR handoff,
+behavior, richer schedule grammar/timezone conversion, real feature-domain
+scheduled execution, APNs notification delivery, fetch/pull/push, PR handoff,
 production deployment behavior, and native SourceChanges UI remain deferred
 until separately scoped and reviewed.
 
@@ -2334,7 +2346,7 @@ Docs/static updates: README event/database/settings, CSD inventory.
 User decisions: supported schedule grammar, timezone behavior, missed-run
 policy, and default notification path.
 
-Implementation status: Slice 12 review candidate adds durable `schedule` and
+Implementation status: Accepted Slice 12 adds durable `schedule` and
 `schedule_run` resources, `domains/scheduler`, execute-only
 `schedule_create`, `schedule_list`, `schedule_inspect`, `schedule_cancel`, and
 `schedule_fire_due`, explicit non-wildcard target selectors, authority records,

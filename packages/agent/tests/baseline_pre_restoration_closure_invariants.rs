@@ -720,15 +720,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-17",
         "cron_scheduling",
         "Slice 12: Scheduling, Reminders, Automations, And Background Work",
-        "pending_review",
+        "current_baseline",
         &[
-            "Slice 12 review candidate adds the scheduler domain",
+            "Accepted Slice 12 adds the scheduler domain",
             "schedule_fire_due",
             "Hidden cron tables",
             "autonomous planning remain deferred",
         ],
         &[
-            "Slice 12 Implementation Evidence",
+            "Accepted Slice 12: Scheduling, Reminders, Automations, And Background Work",
             "Added `domains/scheduler`",
             "no hidden cron tables",
         ],

@@ -716,7 +716,7 @@ goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
 does not run autonomous goals, plan task decomposition, launch subagents,
 create notification inboxes, or add native Work/question UI.
-`domains/scheduler` owns the Slice 12 review-candidate backend foundation for durable
+`domains/scheduler` owns the accepted Slice 12 backend foundation for durable
 schedule and schedule-run records. It records UTC-instant trigger policy,
 timezone labels, missed-run policy, cancellation evidence, run retention,
 resource leases, trace/replay refs, and bounded inspection projections behind
@@ -1055,7 +1055,7 @@ empty, oversized, missing-reason, or untrusted-context calls fail closed.
 This foundation does not add an autonomous goal runner, planner, hidden prompt
 queue, notification/APNs behavior, subagents, public
 `/engine` goal API expansion, settings fields, or native Work/question UI.
-The Slice 12 review-candidate foundation adds `domains/scheduler`, built-in `schedule`
+The accepted Slice 12 foundation adds `domains/scheduler`, built-in `schedule`
 and `schedule_run` resource schemas, the `scheduler.lifecycle` stream, and
 provider-visible `schedule_create`, `schedule_list`, `schedule_inspect`,
 `schedule_cancel`, and `schedule_fire_due` operation values behind the same

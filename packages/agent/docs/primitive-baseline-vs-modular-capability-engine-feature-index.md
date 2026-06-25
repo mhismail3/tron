@@ -651,7 +651,7 @@ Old surface:
 
 Current state:
 
-- Slice 12 review candidate adds the scheduler backend foundation through
+- Accepted Slice 12 adds the scheduler backend foundation through
   `domains/scheduler`, built-in `schedule` and `schedule_run` resource
   schemas, `scheduler.lifecycle` stream evidence, and execute-only
   `schedule_create`, `schedule_list`, `schedule_inspect`, `schedule_cancel`,

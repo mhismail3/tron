@@ -372,9 +372,9 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
         assert!(
             phase_two_inventory
                 .contains("P2AER-INV-028\tscheduling reminders automations background work")
-                && phase_two_inventory.contains("Slice 12 pending review")
-                && phase_two_inventory.contains("pending_review\tBPRC-FEATURE-17"),
-            "domains/scheduler is allowed only as the narrow pending-review Slice 12 foundation"
+                && phase_two_inventory.contains("Accepted Slice 12")
+                && phase_two_inventory.contains("current_baseline\tBPRC-FEATURE-17"),
+            "domains/scheduler is allowed only as the narrow accepted Slice 12 foundation"
         );
     }
     let memory_root = repo_path("packages/agent/src/domains/memory");
