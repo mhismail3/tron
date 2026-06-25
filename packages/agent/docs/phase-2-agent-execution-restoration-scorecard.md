@@ -23,9 +23,9 @@ Canonical plan file: this scorecard. The README names this file as the durable
 Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
-Current implementation baseline verified for Slice 8D closeout:
-`main@3a9d4f35674b166528d7e15aea0e17802d634cea`
-(`feat: add web source archive lifecycle`) plus this Slice 8D closeout
+Current implementation baseline verified for Slice 8E closeout:
+`main@21d3d24a7f757b43d3f51599fe35a14e7f0f3633`
+(`fix: require robots policy resource read grant`) plus this Slice 8E closeout
 documentation commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
@@ -34,7 +34,7 @@ evidence, accepted Slice 7A goal/question lifecycle evidence, accepted Slice 8A
 web fetch/source provenance evidence, and accepted Slice 8B web source
 citation/inspection evidence, accepted Slice 8C HTML/XHTML readable-text
 extraction evidence, and accepted Slice 8D web source archive lifecycle
-evidence.
+evidence, and accepted Slice 8E web robots policy evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -61,13 +61,19 @@ policy, login/cookies/session reuse, native source UI, public `/engine` web
 APIs, deletion/pruning/automatic TTL cleanup, and network-enabled jobs remain
 deferred.
 
-Candidate note: Slice 8E is an implementation candidate on branch
-`codex/phase-2-slice-8e-web-robots-policy` after discovery thread
-`019efbe3-8098-7372-9c03-e3ef645badb3` selected Web Robots Policy
-Foundation. It adds execute-only `web_robots_check`, session-scoped
-`web_robots_policy` evidence, existing web URL/redirect/DNS safety reuse, and
-robots parser tests, but remains pending review and is not part of the accepted
-mainline baseline in this branch documentation.
+Closeout note: Slice 8E is accepted after implementation thread
+`019efbe9-ea1a-7e73-93a9-5c2ddcf67e76`, review thread
+`019efc06-2c7d-76b2-a773-8cbcf0a2ca8a`, first focused fix thread
+`019efc0a-d75e-7032-810f-f81f0f5ed15b`, first re-review thread
+`019efc18-7248-7ad3-9f38-647283af6f0f`, second focused fix thread
+`019efc1e-0ce8-79a1-a89a-d028333b7e9a`, and accepting re-review thread
+`019efc26-2fca-7dc3-abf2-c8d1dbab81b5`. Implementation commit
+`ca336f6aed4f9582bd4e7d6738ebc2410728f80f` added execute-only
+`web_robots_check`; fix commits `b0352fbb79f30b267d8725deaf3fc2e234ec5998`
+and `21d3d24a7f757b43d3f51599fe35a14e7f0f3633` addressed production HTTP
+loopback rejection, robots module hard-budget split, and `resource.read`
+authority enforcement for `web_robots_policy` cache/evidence reads. Final
+re-review returned `slice accepted` with no findings.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -101,12 +107,15 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 8D: current-session `web_source_archive` lifecycle updates,
   default active-source listing, explicit archived-source inclusion, and exact
   archived inspection for replay/citation audit.
+- Slice 8E: declared-network `web_robots_check` for one origin `robots.txt`,
+  bounded `web_robots_policy` evidence, sitemap refs as metadata only, and
+  fail-closed authority/URL/redirect/DNS checks before target network I/O.
 
 Current next action:
-Review the Slice 8E Web Robots Policy Foundation implementation candidate.
+Start fresh discovery for the next Slice 8 sub-slice after accepted Slice 8E.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
-Slice 8C HTML/text extraction, and Slice 8D source archive lifecycle are
-accepted.
+Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
+robots policy evidence are accepted.
 Search providers, browser automation, crawling beyond the narrow robots check,
 sitemap traversal, login/cookies/session reuse, native source UI, public
 `/engine` web APIs, network-enabled jobs, autonomous goal execution,
@@ -1930,17 +1939,19 @@ Accepted validation:
   BPRC/IARM/DESI/public-protocol static guards, `scripts/personal-info-guard.sh`,
   `git diff --check`, and ignored-file audit, then returned `slice accepted`.
 
-#### Slice 8E Implementation Candidate: Web Robots Policy Foundation
+#### Slice 8E Accepted: Web Robots Policy Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8e-web-robots-policy`.
+Accepted fix branch:
+`codex/phase-2-slice-8e-web-robots-policy-fix2`.
 Baseline:
 `origin/main@9a74084d9ce8b241d8fdf4a7865a683bd04e652c`
 (`docs: accept phase 2 slice 8d`).
 Status:
-`implementation candidate; pending review`.
+`accepted`.
 
-Candidate scope:
+Accepted scope:
 
 - Add execute-only `web_robots_check` behind the existing
   `capability::execute` primitive.
@@ -1958,15 +1969,17 @@ Candidate scope:
 - Record sitemap lines as metadata only and never traverse them.
 - Keep `web_fetch`, `web_source_list`, `web_source_inspect`, and
   `web_source_archive` behavior compatible.
+- Keep production robots fetches HTTPS-only, with HTTP loopback available only
+  through explicit test-only fixtures.
 
-Candidate non-goals:
+Accepted non-goals:
 
 - No `web_search`, search provider API, crawling, sitemap traversal, browser
   automation/control, login/cookies/session reuse, credential reuse, public
   `/engine` web APIs, native iOS source UI, deletion/pruning/TTL cleanup,
   settings/profile fields, database migrations, or network-enabled jobs.
 
-Candidate validation:
+Accepted validation:
 
 - Focused web tests cover allow/deny decisions, matched user-agent/rule
   evidence, missing/malformed/oversized body behavior, bounded/truncated
@@ -1977,7 +1990,14 @@ Candidate validation:
   single execute primitive and continued rejection of search/browser/crawl/
   login/network-job non-goals.
 - HRA/TMB/TPC/PCC/SACB inventories classify the new robots implementation and
-  test files as Slice 8E pending-review surfaces.
+  test files as accepted Slice 8E surfaces.
+- Independent review/fix loop required production HTTP loopback rejection, TPC
+  file-budget splitting, and `resource.read` authority before robots
+  cache/evidence reads. Fix commits
+  `b0352fbb79f30b267d8725deaf3fc2e234ec5998` and
+  `21d3d24a7f757b43d3f51599fe35a14e7f0f3633` addressed those findings, and
+  final re-review thread `019efc26-2fca-7dc3-abf2-c8d1dbab81b5` returned
+  `slice accepted`.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

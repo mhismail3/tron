@@ -412,8 +412,8 @@ Current living entry points:
   constraints, first-audit target, accepted deferred scope, and current
   Phase 2 Slice 5A, accepted Slice 6A through Slice 6E source-control
   foundations, accepted Slice 7A goal/question foundation, and accepted Slice
-  8A web fetch/source provenance foundation, and the accepted Slice 8B web
-  source citation/inspection foundation.
+  8A through Slice 8E web source/provenance, citation, extraction, retention,
+  and robots policy foundations.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -956,7 +956,7 @@ Current primitive operations:
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
 | `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, producing redacted `web_source` resource/cache evidence with readable HTML/XHTML text extraction when applicable. |
-| `web_robots_check` | Slice 8E implementation candidate that checks one origin `robots.txt` for one requested URL under declared network authority, producing bounded `web_robots_policy` evidence with no sitemap traversal, crawling, search, browser, or login scope. |
+| `web_robots_check` | Check one origin `robots.txt` for one requested URL under declared network authority, producing bounded `web_robots_policy` evidence with no sitemap traversal, crawling, search, browser, or login scope. |
 | `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
 | `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
@@ -1032,8 +1032,8 @@ Slice 8B foundation adds read-only source list/inspect operations for citation
 assembly. Provider-visible access remains the single
 `capability::execute` primitive with operation values `web_fetch`,
 `web_source_list`, `web_source_inspect`, the accepted Slice 8D
-`web_source_archive`, and this branch's Slice 8E implementation candidate
-`web_robots_check`. Direct fetch requires a trusted
+`web_source_archive`, and the accepted Slice 8E `web_robots_check`. Direct
+fetch requires a trusted
 agent/system runtime context, current session, idempotency key, allowed
 `web_source` write authority, and a derived grant with `networkPolicy:
 declared`; grants with `networkPolicy: none` fail before any HTTP client is
@@ -1064,9 +1064,9 @@ Slice 8D lifecycle operation requiring trusted current-session context,
 `kind:web_source`, stable `idempotencyKey`, bounded non-empty `reason`, and
 `expectedWebSourceVersionId`; it appends an archived resource version with
 actor/grant identity, previous version id, trace/replay refs, and retention
-metadata while preserving source payload/provenance. The Slice 8E
-implementation candidate adds `web_robots_check` as a narrow declared-network
-operation that derives a single origin `robots.txt` URL from one requested URL,
+metadata while preserving source payload/provenance. The accepted Slice 8E
+foundation adds `web_robots_check` as a narrow declared-network operation that
+derives a single origin `robots.txt` URL from one requested URL,
 requires `web.write`, `resource.read`, `resource.write`, and
 `kind:web_robots_policy` authority,
 requires HTTPS in production while preserving an explicit test-only HTTP

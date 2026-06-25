@@ -1291,19 +1291,29 @@ crawling, robots/sitemap policy, login/cookies/session reuse, public `/engine`
 web APIs, native iOS source UI, deletion/erasure/pruning, automatic TTL cleanup,
 settings/profile fields, database migrations, and network-enabled jobs.
 
-### Slice 8E Implementation Candidate Evidence: Web Robots Policy Foundation
+### Slice 8E Accepted Evidence: Web Robots Policy Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8e-web-robots-policy`.
+Accepted fix branch:
+`codex/phase-2-slice-8e-web-robots-policy-fix2`.
 Baseline:
 `origin/main@9a74084d9ce8b241d8fdf4a7865a683bd04e652c`
 (`docs: accept phase 2 slice 8d`).
 Discovery thread:
 `019efbe3-8098-7372-9c03-e3ef645badb3`.
+Implementation thread:
+`019efbe9-ea1a-7e73-93a9-5c2ddcf67e76`.
+Review/fix loop:
+`019efc06-2c7d-76b2-a773-8cbcf0a2ca8a`,
+`019efc0a-d75e-7032-810f-f81f0f5ed15b`,
+`019efc18-7248-7ad3-9f38-647283af6f0f`,
+`019efc1e-0ce8-79a1-a89a-d028333b7e9a`, and
+`019efc26-2fca-7dc3-abf2-c8d1dbab81b5`.
 Status:
-`implementation candidate; pending review`.
+`accepted`.
 
-Candidate evidence:
+Accepted evidence:
 
 - Adds `packages/agent/src/domains/web/robots/mod.rs` as the web-owned
   execute-only robots policy check module.
@@ -1315,6 +1325,11 @@ Candidate evidence:
   append-only robots evidence.
 - Reuses the existing web URL, redirect, and DNS-resolved socket safety policy
   before target network I/O.
+- Requires HTTPS in production for robots network fetches while preserving an
+  explicit test-only HTTP loopback fixture flag.
+- Requires `resource.read` before reading or replaying scoped
+  `web_robots_policy` cache/evidence and `resource.write` before writing new
+  evidence.
 - Records origin, robots URL, fetched-at time, status, captured-byte SHA-256,
   bounded body metadata, parser id/version, matched user-agent, allow/deny
   decision, relevant matched rule, sitemap refs as metadata only, authority
@@ -1324,12 +1339,32 @@ Candidate evidence:
   settings/profile fields, database migrations, and network-enabled jobs out
   of scope.
 
-Candidate validation recorded on branch:
+Review findings and fixes:
+
+- Initial review required production HTTP loopback rejection for
+  `web_robots_check` and a split below the TPC 750-line hard file budget.
+  Fix commit `b0352fbb79f30b267d8725deaf3fc2e234ec5998` addressed both.
+- First re-review required `resource.read` authority for robots policy
+  cache/evidence reads. Fix commit
+  `21d3d24a7f757b43d3f51599fe35a14e7f0f3633` added runtime grant derivation,
+  engine authorization, direct grant inspection, docs/static coverage, and a
+  missing-`resource.read` no-network-I/O regression.
+- Final re-review returned `slice accepted` with no findings and marked
+  `codex/phase-2-slice-8e-web-robots-policy-fix2@21d3d24a7f757b43d3f51599fe35a14e7f0f3633`
+  suitable for mainline integration after closeout docs.
+
+Accepted validation recorded on branch and re-review:
 
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+- `cargo check --manifest-path packages/agent/Cargo.toml`
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::web -- --nocapture`
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`
+- HRA, TMB, TPC, PCC, SACB, BPRC, IARM, DESI, and public-protocol invariant
+  suites.
+- `scripts/personal-info-guard.sh`
+- `git diff --check 9a74084d9ce8b241d8fdf4a7865a683bd04e652c..21d3d24a7f757b43d3f51599fe35a14e7f0f3633`
+- `git ls-files -ci --exclude-standard`
 
 ## Validation Log
 

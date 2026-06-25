@@ -232,8 +232,8 @@ The accepted review/fix loop added explicit `capability::execute` scope,
 resource-kind, and selector checks for goal/question operations before handler
 execution.
 
-`P2AER-INV-012` is current baseline after accepted Slice 8D:
-Web Source Retention And Cache Policy Foundation.
+`P2AER-INV-012` is current baseline after accepted Slice 8E:
+Web Robots Policy Foundation.
 Slice 8A adds
 `domains/web` as the package owner, one execute-only `web_fetch` operation,
 declared-network authority checks, bounded direct fetch, sanitized URL/final
@@ -273,11 +273,13 @@ policy, login/cookies/session reuse, deletion/pruning/automatic TTL cleanup,
 public `/engine` web APIs, native iOS source UI, and network-enabled jobs remain
 deferred.
 
-Slice 8E is an implementation candidate pending review. It adds execute-only
+Slice 8E accepts Web Robots Policy Foundation. It adds execute-only
 `web_robots_check`, fetches one origin `robots.txt` under declared network
-authority after existing URL/redirect/DNS safety checks, records
-`web_robots_policy` evidence with bounded body/hash/parser/decision/sitemap
-metadata, and keeps sitemap traversal, search providers, browser automation,
-crawling beyond the single robots fetch, login/cookies/session reuse, public
-`/engine` web APIs, native iOS source UI, deletion/pruning/TTL cleanup, and
-network-enabled jobs deferred.
+authority after trusted current-session/idempotency, `web.write`,
+`resource.read`, `resource.write`, `kind:web_robots_policy`, and existing
+URL/redirect/DNS safety checks, records `web_robots_policy` evidence with
+bounded body/hash/parser/decision/sitemap metadata, requires HTTPS in production
+with only explicit test-only HTTP loopback fixtures, and keeps sitemap
+traversal, search providers, browser automation, crawling beyond the single
+robots fetch, login/cookies/session reuse, public `/engine` web APIs, native iOS
+source UI, deletion/pruning/TTL cleanup, and network-enabled jobs deferred.
