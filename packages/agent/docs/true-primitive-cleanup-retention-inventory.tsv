@@ -1791,6 +1791,7 @@ packages/agent/src/domains/capability/operations/procedural.rs	implementation	ca
 packages/agent/src/domains/procedural/mod.rs	implementation	procedural	TPC-10/P2AER-S11A	inert procedural state provenance domain docs and boundary
 packages/agent/src/domains/procedural/projection.rs	implementation	procedural	TPC-10/P2AER-S11A	bounded redacted procedural list/inspect projection owner
 packages/agent/src/domains/procedural/service.rs	implementation	procedural	TPC-10/P2AER-S11A	scoped read-only procedural state list/inspect owner
+packages/agent/src/domains/procedural/projection_scalar_tests.rs	test	test_harness	TPC-10/P2AER-S11A-FIX1	focused unsafe projection scalar leak regression coverage under static file budgets
 packages/agent/src/domains/procedural/static_tests.rs	test	test_harness	TPC-10/P2AER-S11A	static Slice 11A procedural resource schema provider non-goal and repo-managed skill absence proof
 packages/agent/src/domains/procedural/tests.rs	test	test_harness	TPC-10/P2AER-S11A	focused Slice 11A procedural authority scope schema lifecycle bounds redaction and non-goal regression coverage
 packages/agent/src/engine/durability/resources/procedural_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S11A	built-in procedural_record resource kind and schema definition

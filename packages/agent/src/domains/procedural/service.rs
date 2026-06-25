@@ -10,7 +10,8 @@ use crate::shared::server::errors::CapabilityError;
 
 use super::{PROCEDURAL_RECORD_KIND, PROCEDURAL_RECORD_SCHEMA_ID, READ_SCOPE, SCHEMA_VERSION};
 use crate::domains::procedural::projection::{
-    STRING_PREVIEW_BYTES, detail_projection, summary_projection,
+    STRING_PREVIEW_BYTES, detail_projection, is_safe_content_hash, is_safe_projection_scalar,
+    summary_projection,
 };
 
 const RESOURCE_READ_SCOPE: &str = "resource.read";
@@ -391,7 +392,60 @@ fn validate_record_payload(
         .and_then(Value::as_str)
         .ok_or_else(|| invalid(format!("{operation} procedural status must be a string")))?;
     ensure_readable_lifecycle(status, operation)?;
+    validate_eval_projection_fields(payload, operation)?;
+    validate_content_hash(payload, operation)?;
     Ok(())
+}
+
+fn validate_eval_projection_fields(
+    payload: &Value,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    let eval = payload
+        .get("eval")
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid(format!("{operation} procedural eval must be an object")))?;
+    validate_optional_safe_scalar(eval.get("status"), "eval.status", operation)?;
+    if let Some(last_run_at) =
+        validate_optional_safe_scalar(eval.get("lastRunAt"), "eval.lastRunAt", operation)?
+    {
+        chrono::DateTime::parse_from_rfc3339(last_run_at).map_err(|_| {
+            invalid(format!(
+                "{operation} procedural eval.lastRunAt must be an RFC3339 timestamp"
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_optional_safe_scalar<'a>(
+    value: Option<&'a Value>,
+    field: &str,
+    operation: &str,
+) -> Result<Option<&'a str>, CapabilityError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if is_safe_projection_scalar(text) => Ok(Some(text.as_str())),
+        Some(Value::String(_)) => Err(invalid(format!(
+            "{operation} procedural {field} must be a bounded safe scalar string"
+        ))),
+        Some(_) => Err(invalid(format!(
+            "{operation} procedural {field} must be a string"
+        ))),
+    }
+}
+
+fn validate_content_hash(payload: &Value, operation: &str) -> Result<(), CapabilityError> {
+    match payload.get("contentHash") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::String(text)) if is_safe_content_hash(text) => Ok(()),
+        Some(Value::String(_)) => Err(invalid(format!(
+            "{operation} procedural contentHash must be a sha256 content hash"
+        ))),
+        Some(_) => Err(invalid(format!(
+            "{operation} procedural contentHash must be a string"
+        ))),
+    }
 }
 
 fn ensure_readable_lifecycle(lifecycle: &str, operation: &str) -> Result<(), CapabilityError> {

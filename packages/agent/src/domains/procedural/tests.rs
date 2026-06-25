@@ -57,6 +57,7 @@ async fn procedural_list_and_inspect_return_bounded_redacted_evidence() {
         .expect("list procedural records");
     assert_eq!(listed["records"].as_array().unwrap().len(), 1);
     assert_eq!(listed["records"][0]["summary"]["truncated"], json!(true));
+    assert_eq!(listed["records"][0]["eval"]["status"], json!("passed"));
     let inspect_invocation = procedural_read_invocation(
         "inspect-redacted",
         json!({

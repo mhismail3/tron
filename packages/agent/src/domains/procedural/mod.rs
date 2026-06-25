@@ -4,7 +4,9 @@
 //! skills, rules, hooks, and procedures are represented as typed
 //! `procedural_record` resources with provenance/eval/status metadata. The
 //! provider-visible surface is limited to bounded read-only list/inspect
-//! helpers called through `capability::execute`.
+//! helpers called through `capability::execute`. Projection inputs are
+//! revalidated for stored kind/schema/scope/lifecycle plus the eval scalar and
+//! content-hash fields that remain visible to providers.
 //!
 //! ## Submodules
 //!
@@ -28,6 +30,8 @@ pub(crate) use crate::engine::{PROCEDURAL_RECORD_KIND, PROCEDURAL_RECORD_SCHEMA_
 pub(crate) const READ_SCOPE: &str = "procedural.read";
 pub(crate) const SCHEMA_VERSION: &str = "tron.procedural_record.v1";
 
+#[cfg(test)]
+mod projection_scalar_tests;
 #[cfg(test)]
 mod static_tests;
 #[cfg(test)]

@@ -1778,6 +1778,12 @@ Slice 10B accepted evidence:
   `codex/phase-2-slice-11a-procedural-state-provenance-foundation` in worktree
   `/Users/<USER>/.codex/worktrees/e852/tron` starts from
   `origin/main@85579a78da54113321cb32de9eb90dd8cd330aef`.
+- Focused review fix branch
+  `codex/phase-2-slice-11a-procedural-state-provenance-foundation-fix1` in
+  `/Users/<USER>/Workspace/tron` addresses review worker
+  `019efe48-be03-7cd1-8798-fad9ad24f0fb` by revalidating provider-visible
+  `eval.status`, `eval.lastRunAt`, and payload `contentHash` before list or
+  inspect projection.
 - Adds a built-in `procedural_record` resource schema for inert skill, rule,
   hook, and procedure provenance/eval/status metadata. The schema is resource
   custody only; it declares read/write authority and redaction/materialization
@@ -1793,10 +1799,11 @@ Slice 10B accepted evidence:
   `networkPolicy: none`.
 - Projection revalidates stored resource kind, schema id, payload
   `schemaVersion`, payload `proceduralKind`, current-version availability,
-  scope, lifecycle/status, and bounded selector values before emitting evidence.
-  It returns allowlisted summaries/details with truncation metadata and redacts
-  secrets, env values, grant ids, unsafe paths, endpoints, raw manifests/logs,
-  raw nested failures/provenance blobs, and private implementation details.
+  scope, lifecycle/status, bounded selector values, provider-visible eval
+  scalar fields, and payload `contentHash` before emitting evidence. It returns
+  allowlisted summaries/details with truncation metadata and redacts secrets,
+  env values, grant ids, unsafe paths, endpoints, raw manifests/logs, raw
+  nested failures/provenance blobs, and private implementation details.
 - Runtime grant derivation and pre-handler authorization were extended only for
   the two read-only procedural state operations. Provider guidance names only
   those read operations and explicitly excludes create/update/delete/activate,
@@ -1805,8 +1812,10 @@ Slice 10B accepted evidence:
 - Regression tests cover list/inspect success and denial for missing grants,
   wildcard/broad authority, wrong session/workspace/scope, missing workspace,
   bad actor, wrong stored kind/schema/version, stale/archived/unsupported
-  states, malformed payloads, bounded/truncated output, and redaction of
-  secret/grant/env/path/raw metadata. Additional tests prove
+  states, malformed payloads, bounded/truncated output, redaction of
+  secret/grant/env/path/raw metadata, and rejection without echoing of
+  malicious nonscalar, oversized, grant-like, secret-like, and path-like values
+  in `eval.status`, `eval.lastRunAt`, and `contentHash`. Additional tests prove
   `packages/agent/skills/` and skill-copy/bootstrap prompt wiring remain
   absent.
 - Validation completed before commit: `cargo fmt --manifest-path

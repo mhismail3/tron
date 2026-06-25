@@ -976,8 +976,8 @@ Current primitive operations:
 | `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, process metadata, or network scope. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
-| `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
-| `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
+| `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
+| `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1173,8 +1173,9 @@ current-session/workspace context, explicit non-wildcard `procedural.read` and
 `resource.read` authority, explicit `procedural_record` resource-kind grants,
 matching `kind:procedural_record` and `proceduralKind:*` selectors, and
 `networkPolicy: none`. They revalidate stored resource kind/schema/version,
-scope, lifecycle/status, and procedural kind before projection, and they return
-bounded/redacted provenance, eval, status, refs, and activation-proof evidence.
+scope, lifecycle/status, procedural kind, provider-visible eval scalar fields,
+and payload content hashes before projection, and they return bounded/redacted
+provenance, eval, status, refs, and activation-proof evidence.
 Slice 11A does not restore repo-managed skills, trigger activation, bootstrap
 prompt injection, learned behavior, autonomous execution, scheduler work, tool
 execution, worker/package/job/process/network launch, MCP lifecycle, package

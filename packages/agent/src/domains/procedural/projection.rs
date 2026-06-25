@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use crate::engine::{EngineResource, EngineResourceVersion};
 
 pub(super) const STRING_PREVIEW_BYTES: usize = 512;
+pub(super) const SAFE_SCALAR_STRING_BYTES: usize = 128;
 const METADATA_MAX_DEPTH: usize = 4;
 const METADATA_MAX_OBJECT_FIELDS: usize = 32;
 
@@ -78,9 +79,9 @@ fn eval_summary(value: Option<&Value>) -> Value {
         return Value::Null;
     };
     json!({
-        "status": value.get("status").cloned().unwrap_or(Value::Null),
+        "status": safe_scalar_projection(value.get("status")),
         "profile": string_preview(value.get("profile")),
-        "lastRunAt": value.get("lastRunAt").cloned().unwrap_or(Value::Null)
+        "lastRunAt": safe_scalar_projection(value.get("lastRunAt"))
     })
 }
 
@@ -112,7 +113,7 @@ fn content_projection(payload: &Value) -> Value {
         "manifestRedacted": payload.get("manifest").is_some(),
         "implementationRedacted": payload.get("implementation").is_some(),
         "contentRefRedacted": payload.get("contentRef").is_some(),
-        "contentHash": payload.get("contentHash").cloned().unwrap_or(Value::Null)
+        "contentHash": content_hash_projection(payload.get("contentHash"))
     })
 }
 
@@ -179,18 +180,7 @@ fn safe_metadata_value(value: &Value, max_items: usize, depth: usize) -> Value {
 }
 
 fn safe_string_preview(text: &str) -> Value {
-    let lower = text.to_ascii_lowercase();
-    if lower.contains("secret")
-        || lower.contains("token")
-        || lower.contains("password")
-        || lower.contains("credential")
-        || lower.contains("apikey")
-        || lower.contains("api_key")
-        || contains_grant_identifier_text(&lower)
-        || lower.contains("/private/")
-        || lower.contains("/users/")
-        || lower.contains("~/.")
-    {
+    if unsafe_projection_text(text) {
         return json!({"redacted": true, "bytes": text.len()});
     }
     let bounded = bounded_utf8(text, STRING_PREVIEW_BYTES);
@@ -255,6 +245,67 @@ fn string_preview(value: Option<&Value>) -> Value {
         return Value::Null;
     };
     safe_string_preview(text)
+}
+
+fn safe_scalar_projection(value: Option<&Value>) -> Value {
+    let Some(value) = value else {
+        return Value::Null;
+    };
+    let Some(text) = value.as_str() else {
+        return Value::Null;
+    };
+    if is_safe_projection_scalar(text) {
+        Value::String(text.to_owned())
+    } else {
+        json!({"redacted": true, "bytes": text.len()})
+    }
+}
+
+fn content_hash_projection(value: Option<&Value>) -> Value {
+    let Some(value) = value else {
+        return Value::Null;
+    };
+    let Some(text) = value.as_str() else {
+        return Value::Null;
+    };
+    if is_safe_content_hash(text) {
+        Value::String(text.to_owned())
+    } else {
+        json!({"redacted": true, "bytes": text.len()})
+    }
+}
+
+pub(super) fn is_safe_projection_scalar(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= SAFE_SCALAR_STRING_BYTES
+        && text.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'-' | b'_' | b'.' | b'+' | b'Z')
+        })
+        && !unsafe_projection_text(text)
+}
+
+pub(super) fn is_safe_content_hash(text: &str) -> bool {
+    let Some(hex) = text.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn unsafe_projection_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("secret")
+        || lower.contains("token")
+        || lower.contains("password")
+        || lower.contains("credential")
+        || lower.contains("apikey")
+        || lower.contains("api_key")
+        || contains_grant_identifier_text(&lower)
+        || lower.contains("/private/")
+        || lower.contains("/users/")
+        || lower.contains("~/")
+        || lower.contains("~/.")
+        || lower.starts_with('/')
+        || lower.contains(":\\")
 }
 
 fn version_ref(resource: &EngineResource, version: &EngineResourceVersion, role: &str) -> Value {

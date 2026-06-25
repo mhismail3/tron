@@ -1836,6 +1836,7 @@ packages/agent/src/domains/capability/operations/procedural.rs	retain	capability
 packages/agent/src/domains/procedural/mod.rs	retain	procedural owner	PCC-10/P2AER-S11A	Slice 11A inert procedural provenance domain docs and boundary.
 packages/agent/src/domains/procedural/projection.rs	retain	procedural owner	PCC-10/P2AER-S11A	Slice 11A bounded redacted procedural projection owner.
 packages/agent/src/domains/procedural/service.rs	retain	procedural owner	PCC-10/P2AER-S11A	Slice 11A scoped read-only procedural state list/inspect service.
+packages/agent/src/domains/procedural/projection_scalar_tests.rs	retain	procedural test owner	PCC-10/P2AER-S11A-FIX1	Focused unsafe projection scalar leak regression tests retained under static file budgets.
 packages/agent/src/domains/procedural/static_tests.rs	retain	procedural test owner	PCC-10/P2AER-S11A	Slice 11A static tests for resource/schema/provider non-goals and repo-managed skill absence.
 packages/agent/src/domains/procedural/tests.rs	retain	procedural test owner	PCC-10/P2AER-S11A	Slice 11A regression tests for authority, scope, schema, lifecycle, bounds, redaction, and non-goals.
 packages/agent/src/engine/durability/resources/procedural_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S11A	Slice 11A built-in procedural_record resource kind/schema definition.
