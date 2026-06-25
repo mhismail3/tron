@@ -179,7 +179,7 @@ Completed Phase 2 restoration slices at this baseline:
   `worker.lifecycle.read`/`resource.read` authority, non-wildcard worker
   selectors, stored kind/schema revalidation, bounded/redacted lifecycle
   evidence, and no package mutation or execution behavior.
-- Slice 10A candidate: inert `subagent_task` lifecycle/provenance records and
+- Slice 10A accepted: inert `subagent_task` lifecycle/provenance records and
   read-only `subagent_task_list`/`subagent_task_inspect` evidence through
   `capability::execute`, with explicit `subagents.read`/`resource.read`
   authority, `kind:subagent_task` selectors, stored kind/schema revalidation,
@@ -188,14 +188,12 @@ Completed Phase 2 restoration slices at this baseline:
   behavior.
 
 Current next action:
-Independently review the Slice 10A implementation candidate before any mainline
-acceptance or follow-on Slice 10 worker-launch work.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
-inspection are accepted. Slice 10A is implementation-candidate evidence only
-until independent review accepts it. Search providers, browser
+inspection, and Slice 10A subagent task lifecycle are accepted. Start fresh
+discovery for the next Phase 2 slice from `origin/main`. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package
@@ -2195,7 +2193,7 @@ whether agent-authored packages can self-propose.
 
 Objective: restore parallel agent work as durable jobs/workers with causality.
 
-Slice 10A candidate scope: establish only the inert task lifecycle foundation:
+Slice 10A accepted scope: establish only the inert task lifecycle foundation:
 `subagent_task` resources, trusted internal create/update service functions,
 and read-only `subagent_task_list`/`subagent_task_inspect` execute operations.
 It deliberately excludes actual child-agent spawn, worker/package launch,

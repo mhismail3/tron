@@ -706,15 +706,12 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-07",
         "subagents",
         "Slice 10: Subagents And Delegation",
-        "pending_review",
+        "current_baseline",
         &[
-            "Slice 10A implementation candidate adds inert",
+            "Accepted Slice 10A adds inert",
             "actual spawn/status/result/cancel workers and iOS chips/sheets remain deferred",
         ],
-        &[
-            "Slice 10A implementation candidate evidence",
-            "`subagent_task`",
-        ],
+        &["Slice 10A accepted evidence", "`subagent_task`"],
     );
     for forbidden in [
         "autostart",

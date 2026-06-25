@@ -329,9 +329,9 @@ and local paths. It does not propose, install, enable, disable, launch, stop,
 retire, register, execute, promote trust, expand public `/engine`, or add
 native fixed package UI.
 
-`P2AER-INV-009` is pending review for Slice 10A: Subagent Task Lifecycle
-Foundation. The implementation candidate adds a `subagents` domain and one
-`subagent_task` resource kind for inert lifecycle/provenance records only.
+`P2AER-INV-009` is current baseline for accepted Slice 10A: Subagent Task
+Lifecycle Foundation. The accepted implementation adds a `subagents` domain and
+one `subagent_task` resource kind for inert lifecycle/provenance records only.
 Trusted internal system/admin writes can create/update bounded task records
 with parent session/workspace/trace refs, objective/prompt summaries,
 evidence/output refs, result/error placeholders, idempotency, explicit

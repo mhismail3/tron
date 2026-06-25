@@ -1121,8 +1121,8 @@ execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
 iOS fixed UI.
 
-The Slice 10A implementation candidate adds the `subagents` domain as an inert
-task lifecycle/provenance boundary. Trusted internal system/admin callers can
+The accepted Slice 10A foundation adds the `subagents` domain as an inert task
+lifecycle/provenance boundary. Trusted internal system/admin callers can
 create and update `subagent_task` resources only with derived non-bootstrap
 `subagents.write` and `resource.write` authority, explicit non-wildcard
 `subagent_task` resource grants, idempotency, bounded objective/prompt

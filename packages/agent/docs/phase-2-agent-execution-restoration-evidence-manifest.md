@@ -1610,17 +1610,19 @@ Slice 9B accepted evidence:
   8ad68584b546b17db06ca256a12e7a9d905e3320..cd97c2f87afa3e961258eedf37a227926e496720`,
   `git ls-files -ci --exclude-standard`, and clean status.
 
-Slice 10A implementation candidate evidence:
+Slice 10A accepted evidence:
 
 - Delegation source thread `019ef914-ed80-78f2-b253-229240d49444`
+  and discovery thread `019efd62-d8e2-73a0-8d94-e217a86248ef`
   selected Subagent Task Lifecycle Foundation from
   `origin/main@de8bac83d7508c0dc99a929e095a3c2240d89910`.
 - Implementation branch
-  `codex/phase-2-slice-10a-subagent-task-lifecycle-foundation` adds an inert
-  `subagents` domain, built-in `subagent_task` resource definition,
-  trusted/internal-only Rust service functions for bounded lifecycle
-  create/update, and read-only `capability::execute` operation values
-  `subagent_task_list` and `subagent_task_inspect`.
+  `codex/phase-2-slice-10a-subagent-task-lifecycle-foundation` at
+  `5d8216085006973c02349ecef3604124a87bf3e3` adds an inert `subagents`
+  domain, built-in `subagent_task` resource definition, trusted/internal-only
+  Rust service functions for bounded lifecycle create/update, and read-only
+  `capability::execute` operation values `subagent_task_list` and
+  `subagent_task_inspect`.
 - Lifecycle records persist bounded task id, parent session/workspace/trace
   refs, objective/prompt summaries, evidence/output refs, timestamps as audit
   metadata, optional result/error placeholders, explicit activation proof,
@@ -1634,22 +1636,41 @@ Slice 10A implementation candidate evidence:
   isolation, allowlisted bounded/redacted projection independent of stored
   payload trust, and `networkPolicy: none`.
 - Focused review-fix branch
-  `codex/phase-2-slice-10a-subagent-task-lifecycle-foundation-fix1` hardens
-  list/inspect projections with `domains/subagents/projection.rs` and aligns
-  OpenAI provider guidance with only the read-only `subagent_task_list` and
-  `subagent_task_inspect` operations.
+  `codex/phase-2-slice-10a-subagent-task-lifecycle-foundation-fix1` at
+  `a7ed577ece4e8a1bb26dc655e818a3c256fa4933` hardens list/inspect projections
+  with `domains/subagents/projection.rs` and aligns OpenAI provider guidance
+  with only the read-only `subagent_task_list` and `subagent_task_inspect`
+  operations.
+- Second focused fix branch
+  `codex/phase-2-slice-10a-subagent-task-lifecycle-foundation-fix2` at
+  `93ad5383dd2b4d21cffe05117bdde736d01a0c99` adds minimal read-only runtime
+  grant derivation and pre-handler authorization for `subagent_task_list` and
+  `subagent_task_inspect`, rejects wildcard/broad selectors even when mixed
+  with `kind:subagent_task`, and adds SACB inventory coverage for
+  `domains/subagents/projection.rs`.
 - Slice 10A does not spawn child agents, launch workers/packages, start jobs or
   processes, execute tools, register catalog entries, perform network/browser/
   search/login work, schedule work, cancel real workers, merge results into
   conversation state, add public `/engine` APIs, change settings/profile
   schemas, add migrations, or add fixed native iOS subagent UI.
+- Initial review thread `019efd86-5fda-7700-b3a5-2da50f144454` returned
+  `changes required` for raw stored-payload projection leakage and missing
+  provider prompt/schema exposure for read-only subagent task list/inspect.
+- Re-review thread `019efdae-6377-7b91-834e-f325c77e1cd2` returned
+  `changes required` for missing provider runtime grant/pre-handler
+  authorization, broad selector acceptance, and missing SACB projection
+  inventory coverage.
+- Accepting re-review thread `019efdc9-fdf2-7172-8bf3-5dffe414ed9e` returned
+  `slice accepted` with no findings for fixed head
+  `93ad5383dd2b4d21cffe05117bdde736d01a0c99`.
 - Focused validation passed `cargo fmt --manifest-path packages/agent/Cargo.toml
   --all -- --check` and `cargo test --manifest-path packages/agent/Cargo.toml
-  subagent -- --nocapture` with 10 focused tests covering creation/update,
-  authority denial, idempotency, scope isolation, selector denial, stored
-  kind/schema mismatch rejection, malformed stored-payload projection
-  redaction/bounding, bounded/redacted validation, resource definition fields,
-  and static no-launch/no-registration/no-network guards.
+  subagent -- --nocapture` with 16 focused tests covering creation/update,
+  runtime grant derivation, pre-handler authorization, authority denial,
+  idempotency, scope isolation, selector denial, stored kind/schema mismatch
+  rejection, malformed stored-payload projection redaction/bounding,
+  bounded/redacted validation, resource definition fields, and static
+  no-launch/no-registration/no-network guards.
 - Final implementation validation also passed `cargo check --manifest-path
   packages/agent/Cargo.toml`, `scripts/personal-info-guard.sh`, `git diff
   --check`, `git ls-files -ci --exclude-standard`, and the relevant HRA, SACB,
