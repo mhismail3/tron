@@ -1565,37 +1565,50 @@ Review and validation evidence:
   `git diff --check 6b3512a4280e0f1c43b3e7bfad813fe86f0ce8c4..HEAD`,
   plain `git diff --check`, and ignored-file audit.
 
-Slice 9B implementation-candidate evidence:
+Slice 9B accepted evidence:
 
-- Branch `codex/phase-2-slice-9b-worker-package-lifecycle-inspection` started
-  from `origin/main@8ad68584b546b17db06ca256a12e7a9d905e3320`.
-- Adds read-only `capability::execute` operation values
-  `worker_package_list` and `worker_package_inspect`; no provider-visible
-  proposal, install, enable, disable, launch, stop, retire, MCP
-  start/restart, package install/update/uninstall, catalog registration,
-  proposed-tool execution, trust promotion, public `/engine` expansion,
-  browser/search/crawl/login scope, settings, migrations, or native fixed UI is
-  added.
-- Adds `worker_lifecycle::inspection` projections for scoped
-  `worker_package`, `worker_package_installation`, `worker_package_proposal`,
-  `worker_package_conformance_report`, and `worker_launch_attempt` resources.
-  The read path requires trusted current-session context,
-  `worker.lifecycle.read`, `resource.read`, explicit non-wildcard resource-kind
-  grants, exact `kind:worker_*` selectors, and `networkPolicy: none`.
-- Revalidates stored resource kind and schema before projection rather than
-  trusting id prefixes, and returns bounded/redacted lifecycle evidence:
-  identity, state, provenance, source metadata, namespace claims, expected
-  functions/triggers, requested grants, conformance and launch status,
-  resource/trace/replay refs, and truncation metadata. Raw manifests,
-  scoped worker tokens, env values, endpoints, token grant details, and local
-  paths stay out of the provider-visible projection.
-- Focused validation run so far: `cargo fmt --manifest-path
-  packages/agent/Cargo.toml --all -- --check`, `cargo test --manifest-path
-  packages/agent/Cargo.toml worker_package -- --nocapture`, and
-  `cargo test --manifest-path packages/agent/Cargo.toml
+- Discovery thread `019efd04-598f-7232-a24e-5ba85f0d4d56` selected Worker
+  Package Lifecycle Inspection Foundation from
+  `origin/main@8ad68584b546b17db06ca256a12e7a9d905e3320` with no discovery
+  docs changes.
+- Implementation thread `019efd0b-3461-79c0-8d28-7a11fdcb9703` produced
+  `codex/phase-2-slice-9b-worker-package-lifecycle-inspection` at
+  `ce56ff609948d0d31dbd76e74a30a87a027738d3`, adding read-only
+  `capability::execute` operation values `worker_package_list` and
+  `worker_package_inspect`; no provider-visible proposal, install, enable,
+  disable, launch, stop, retire, MCP start/restart, package install/update/
+  uninstall, catalog registration, proposed-tool execution, trust promotion,
+  public `/engine` expansion, browser/search/crawl/login scope, settings,
+  migrations, or native fixed UI is added.
+- Initial review thread `019efd21-89f2-7951-9efe-242402f9604d` returned
+  `changes required` for missing provider runtime grants, selector-wildcard
+  acceptance, archived proposal/conformance exposure, inspection module TPC
+  budget overflow, and direct installation `authorityGrantId` leakage.
+- Focused fix thread `019efd2a-de81-7b02-9605-32d93153b9a9` produced
+  `7c794417c1b5b6490324fa6e1062580b73f339a8`, adding exact read grant
+  derivation, selector-wildcard denial, archived record exclusion/denial, the
+  HRA/TPC-compliant inspection module split, and top-level authority-grant
+  omission.
+- Re-review thread `019efd3e-7bac-7ec1-b67e-2c22d60f2886` returned
+  `changes required` for arbitrary metadata grant-id leakage through shared
+  provider-visible projections.
+- Focused fix thread `019efd4b-0240-7a41-a401-701346bee279` produced
+  `cd97c2f87afa3e961258eedf37a227926e496720`, redacting `authorityGrantId`,
+  `authority_grant_id`, `grantId`, `grant_id`, nested grant-id key variants,
+  and obvious grant-id string values across provenance, failure, trace, and
+  replay metadata while preserving non-sensitive lifecycle status text.
+- Accepting re-review thread `019efd54-5da3-7842-bf6e-6e66a1d83472` returned
+  `slice accepted` with no findings. Validation passed: `cargo fmt
+  --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check
+  --manifest-path packages/agent/Cargo.toml`, `cargo test --manifest-path
+  packages/agent/Cargo.toml worker_package -- --nocapture`, `cargo test
+  --manifest-path packages/agent/Cargo.toml
   execute_schema_exposes_primitive_operations_not_catalog_targets --
-  --nocapture` passed during implementation. Full/static closeout validation is
-  recorded in the final implementation report after all required gates run.
+  --nocapture`, SACB/HRA/TMB/TPC/PCC/BPRC/IARM/SUWRF/PMBD/DESI/
+  public-protocol/performance-resource gates, `scripts/personal-info-guard.sh`,
+  `git diff --check
+  8ad68584b546b17db06ca256a12e7a9d905e3320..cd97c2f87afa3e961258eedf37a227926e496720`,
+  `git ls-files -ci --exclude-standard`, and clean status.
 
 ## Validation Log
 

@@ -17,15 +17,15 @@ Companion artifacts:
 
 ## Current Restoration Baseline
 
-Discovery update: 2026-06-24.
+Discovery update: 2026-06-25.
 
 Canonical plan file: this scorecard. The README names this file as the durable
 Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
-Current implementation baseline verified for Slice 9A closeout:
-`main@2c472ed7ded121e1e2210156d89526b70e28ad65`
-(`fix: complete tool source static inventories`) plus this Slice 9A closeout
+Current implementation baseline verified for Slice 9B closeout:
+`main@cd97c2f87afa3e961258eedf37a227926e496720`
+(`fix: redact worker lifecycle grant metadata`) plus this Slice 9B closeout
 documentation commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
@@ -35,8 +35,9 @@ web fetch/source provenance evidence, and accepted Slice 8B web source
 citation/inspection evidence, accepted Slice 8C HTML/XHTML readable-text
 extraction evidence, and accepted Slice 8D web source archive lifecycle
 evidence, accepted Slice 8E web robots policy evidence, accepted Slice 8F web
-fetch robots evidence linkage, and accepted Slice 9A tool-source proposal
-provenance evidence.
+fetch robots evidence linkage, accepted Slice 9A tool-source proposal
+provenance evidence, and accepted Slice 9B worker-package lifecycle inspection
+evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -112,6 +113,24 @@ stale evidence wording, split test-file static inventory coverage, and
 premature README accepted-baseline wording. Final re-review returned
 `slice accepted` with no findings.
 
+Closeout note: Slice 9B is accepted after discovery thread
+`019efd04-598f-7232-a24e-5ba85f0d4d56`, implementation thread
+`019efd0b-3461-79c0-8d28-7a11fdcb9703`, initial review thread
+`019efd21-89f2-7951-9efe-242402f9604d`, focused fix thread
+`019efd2a-de81-7b02-9605-32d93153b9a9`, re-review thread
+`019efd3e-7bac-7ec1-b67e-2c22d60f2886`, second focused fix thread
+`019efd4b-0240-7a41-a401-701346bee279`, and accepting re-review thread
+`019efd54-5da3-7842-bf6e-6e66a1d83472`. Implementation commit
+`ce56ff609948d0d31dbd76e74a30a87a027738d3` added read-only
+`worker_package_list` and `worker_package_inspect` execute operations for
+existing worker lifecycle resources. Fix commits
+`7c794417c1b5b6490324fa6e1062580b73f339a8` and
+`cd97c2f87afa3e961258eedf37a227926e496720` addressed provider runtime grant
+derivation, wildcard selector denial, archived proposal/conformance exclusion,
+inspection file-budget splitting, direct installation authority-grant redaction,
+and nested grant-id metadata redaction. Final re-review returned
+`slice accepted` with no findings.
+
 Completed Phase 2 restoration slices at this baseline:
 
 - Slice 0: planning artifacts and static entry gates;
@@ -155,17 +174,19 @@ Completed Phase 2 restoration slices at this baseline:
   read-only source inspection through `capability::execute`, with trusted
   internal-only writes, bounded/redacted evidence, explicit resource-kind
   authority, and no install/launch/registration/execution behavior.
+- Slice 9B: read-only worker-package lifecycle list/inspect evidence through
+  `capability::execute`, with trusted current-session context, explicit
+  `worker.lifecycle.read`/`resource.read` authority, non-wildcard worker
+  selectors, stored kind/schema revalidation, bounded/redacted lifecycle
+  evidence, and no package mutation or execution behavior.
 
 Current next action:
-Review Slice 9B implementation candidate for worker package lifecycle
-inspection before any acceptance wording or mainline closeout.
+Start fresh discovery for the next Phase 2 slice after accepted Slice 9B.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
-tool-source proposal provenance are accepted. Slice 9B is currently only an
-implementation candidate adding read-only `worker_package_list` and
-`worker_package_inspect` execute operation values for bounded/redacted existing
-worker lifecycle records under explicit read grants. Search providers, browser
+tool-source proposal provenance, and Slice 9B worker-package lifecycle
+inspection are accepted. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package

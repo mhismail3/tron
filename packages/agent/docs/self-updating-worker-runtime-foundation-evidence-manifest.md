@@ -89,7 +89,7 @@ are retained here because they shaped the final implementation.
   reconciliation cell before handling requests, and focused regression coverage
   pauses reconciliation at the old race window to prove current-process launches
   cannot be downgraded by stale startup ownership-loss reconciliation.
-- Phase 2 Slice 9B implementation candidate adds read-only lifecycle
+- Accepted Phase 2 Slice 9B adds read-only lifecycle
   inspection through the existing `capability::execute` primitive:
   `worker_package_list` and `worker_package_inspect` inspect already-stored
   `worker_package`, `worker_package_installation`,
@@ -98,8 +98,9 @@ are retained here because they shaped the final implementation.
   `worker.lifecycle.read`, `resource.read`, exact resource-kind grants,
   matching `kind:worker_*` selectors, and `networkPolicy: none`. Projections
   revalidate stored kind/schema and redact raw manifests, scoped tokens, env
-  values, endpoints, token grant details, and local paths while leaving all
-  lifecycle mutation operations host-only.
+  values, endpoints, token grant details, direct authority grant ids,
+  grant-like nested metadata, and local paths while leaving all lifecycle
+  mutation operations host-only.
 
 ## Command Evidence
 

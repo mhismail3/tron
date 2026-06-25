@@ -69,15 +69,15 @@ observe them without fixed native product panels.
 
 ## Read-Only Inspection
 
-Phase 2 Slice 9B implementation-candidate work adds provider-visible
+Accepted Phase 2 Slice 9B adds provider-visible
 `worker_package_list` and `worker_package_inspect` operation values under the
 existing `capability::execute` primitive. These operations inspect only the
 five worker lifecycle resource kinds listed above, require trusted
 current-session context, exact read grants and selectors, and
 `networkPolicy: none`, and revalidate stored kind/schema before projection.
 They return bounded/redacted lifecycle evidence and do not expose raw
-manifests, scoped tokens, env values, endpoints, token grant details, or local
-paths.
+manifests, scoped tokens, env values, endpoints, token grant details, direct
+authority grant ids, grant-like nested metadata, or local paths.
 
 ## Current Boundary
 

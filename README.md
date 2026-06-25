@@ -1119,8 +1119,8 @@ execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
 iOS fixed UI.
 
-Slice 9B adds a read-only worker package lifecycle inspection foundation under
-the same `capability::execute` primitive. `worker_package_list` and
+The accepted Slice 9B foundation adds read-only worker package lifecycle
+inspection under the same `capability::execute` primitive. `worker_package_list` and
 `worker_package_inspect` require trusted current-session context,
 `worker.lifecycle.read`, `resource.read`, explicit non-wildcard lifecycle
 resource-kind grants, matching `kind:worker_*` selectors, and
@@ -1132,7 +1132,8 @@ trusting id prefixes. The projection returns bounded/redacted identity,
 lifecycle state, provenance, source metadata, namespace claims, expected
 functions/triggers, requested grants, conformance and launch status, refs, and
 truncation metadata while omitting raw manifests, scoped worker tokens, env
-values, endpoints, token grant details, and local paths. It does not add package
+values, endpoints, token grant details, direct authority grant ids,
+grant-like nested metadata, and local paths. It does not add package
 proposal, install, enable, disable, launch, stop, retire, MCP start/restart,
 catalog registration, proposed-tool execution, trust promotion, public
 `/engine` expansion, or fixed native source/package UI.
