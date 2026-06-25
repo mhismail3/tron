@@ -226,6 +226,35 @@ pub(super) fn required_ref(payload: &Value, field: &str) -> Result<Value, Capabi
     sanitize_ref_item(field, value)
 }
 
+pub(super) fn required_ref_kind(
+    payload: &Value,
+    field: &str,
+    expected_kind: &str,
+    expected_id_prefix: &str,
+) -> Result<Value, CapabilityError> {
+    let sanitized = required_ref(payload, field)?;
+    let actual_kind = sanitized
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires kind")))?;
+    if actual_kind != expected_kind {
+        return Err(invalid(format!(
+            "{field} must reference {expected_kind} resources only"
+        )));
+    }
+    let actual_id = sanitized
+        .get("resourceId")
+        .or_else(|| sanitized.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires id or resourceId")))?;
+    if !actual_id.starts_with(expected_id_prefix) {
+        return Err(invalid(format!(
+            "{field} id must start with {expected_id_prefix}"
+        )));
+    }
+    Ok(sanitized)
+}
+
 pub(super) fn optional_ref(payload: &Value, field: &str) -> Result<Option<Value>, CapabilityError> {
     payload
         .get(field)

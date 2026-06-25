@@ -35,8 +35,18 @@ pub(crate) async fn record_import_preview_record_value_at(
         .map(|value| bounded_token("previewId", &value, PREVIEW_ID_MAX_BYTES))
         .transpose()?
         .unwrap_or_else(|| invocation.id.as_str().to_owned());
-    let import_history_ref = required_ref(payload, "importHistoryRef")?;
-    let repository_tree_ref = required_ref(payload, "repositoryTreeRef")?;
+    let import_history_ref = required_ref_kind(
+        payload,
+        "importHistoryRef",
+        "import_history_record",
+        "import_history_record:",
+    )?;
+    let repository_tree_ref = required_ref_kind(
+        payload,
+        "repositoryTreeRef",
+        "repository_tree_snapshot",
+        "repository_tree_snapshot:",
+    )?;
     let repository_ref = optional_ref(payload, "repositoryRef")?;
     let root_ref = optional_ref(payload, "rootRef")?;
     let preview_fingerprint = bounded_token(

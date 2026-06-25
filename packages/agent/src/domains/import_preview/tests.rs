@@ -323,6 +323,103 @@ async fn import_preview_validation_rejects_raw_contents_unsafe_paths_and_secret_
 }
 
 #[tokio::test]
+async fn import_preview_validation_rejects_wrong_lineage_ref_kinds_and_prefixes() {
+    let fixture = Fixture::new("import-preview-ref-kind").await;
+
+    let wrong_import_history_kind = fixture
+        .record_error(
+            "wrong-import-history-kind",
+            with_ref(
+                preview_payload(),
+                "importHistoryRef",
+                json!({
+                    "kind": "media_artifact",
+                    "resourceId": "media_artifact:raw-audio",
+                    "role": "lineage"
+                }),
+            ),
+        )
+        .await;
+    assert!(
+        wrong_import_history_kind.contains("import_history_record resources only"),
+        "{wrong_import_history_kind}"
+    );
+
+    let wrong_import_history_prefix = fixture
+        .record_error(
+            "wrong-import-history-prefix",
+            with_ref(
+                preview_payload(),
+                "importHistoryRef",
+                json!({
+                    "kind": "import_history_record",
+                    "resourceId": "web_source:raw-import",
+                    "role": "lineage"
+                }),
+            ),
+        )
+        .await;
+    assert!(
+        wrong_import_history_prefix.contains("import_history_record:"),
+        "{wrong_import_history_prefix}"
+    );
+
+    let wrong_repository_tree_kind = fixture
+        .record_error(
+            "wrong-repository-tree-kind",
+            with_ref(
+                preview_payload(),
+                "repositoryTreeRef",
+                json!({
+                    "kind": "import_history_record",
+                    "resourceId": "import_history_record:not-a-tree",
+                    "role": "tree"
+                }),
+            ),
+        )
+        .await;
+    assert!(
+        wrong_repository_tree_kind.contains("repository_tree_snapshot resources only"),
+        "{wrong_repository_tree_kind}"
+    );
+
+    let wrong_repository_tree_prefix = fixture
+        .record_error(
+            "wrong-repository-tree-prefix",
+            with_ref(
+                preview_payload(),
+                "repositoryTreeRef",
+                json!({
+                    "kind": "repository_tree_snapshot",
+                    "resourceId": "web_source:not-a-tree",
+                    "role": "tree"
+                }),
+            ),
+        )
+        .await;
+    assert!(
+        wrong_repository_tree_prefix.contains("repository_tree_snapshot:"),
+        "{wrong_repository_tree_prefix}"
+    );
+
+    let resources = fixture
+        .deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(IMPORT_PREVIEW_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list resources");
+    assert!(
+        resources.is_empty(),
+        "wrong refs must not persist resources"
+    );
+}
+
+#[tokio::test]
 async fn import_preview_idempotency_evidence_is_fingerprinted_without_raw_key_leaks() {
     let fixture = Fixture::new("import-preview-idempotency").await;
     let key = id_token_like_idempotency_key("PREVIEW");
@@ -474,6 +571,11 @@ fn with_path(mut payload: Value, path: &str) -> Value {
 }
 
 fn with_extra(mut payload: Value, field: &str, value: Value) -> Value {
+    payload[field] = value;
+    payload
+}
+
+fn with_ref(mut payload: Value, field: &str, value: Value) -> Value {
     payload[field] = value;
     payload
 }
