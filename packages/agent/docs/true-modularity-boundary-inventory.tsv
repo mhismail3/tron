@@ -1190,3 +1190,12 @@ packages/agent/src/domains/notifications/projection.rs	rust	implementation	agent
 packages/agent/src/domains/notifications/service.rs	rust	implementation	agent:notifications	owner-private durable notification send list inspect mark-read and mark-all-read service using engine resources streams and scoped authority
 packages/agent/src/domains/notifications/validation.rs	rust	implementation	agent:notifications	owner-private notification payload family severity refs resource id and retention validation helpers
 packages/agent/src/engine/durability/resources/notification_definitions.rs	rust	implementation	rust:engine	owner-private device_registration notification and notification_delivery resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/media_contract.rs	rust	contract	rust:capability	media-specific request schema fields split from the central execute contract; behavior stays in media service
+packages/agent/src/domains/capability/operations/media.rs	rust	adapter	rust:capability	execute primitive may call media create/list/inspect/archive service methods with explicit grants and redacted projections
+packages/agent/src/domains/media/authority.rs	rust	implementation	agent:media	owner-private authority guards for media.read media.write resource scopes exact selectors and networkPolicy none
+packages/agent/src/domains/media/contract.rs	rust	contract	agent:media	media worker id stream and authority constants; shared only inside media/capability registration boundaries
+packages/agent/src/domains/media/mod.rs	rust	facade	agent:media	domain root owns media artifact docs and worker registration; behavior stays in owner modules
+packages/agent/src/domains/media/projection.rs	rust	implementation	agent:media	owner-private redacted media list/inspect projection helpers; callers enter through authorized service methods
+packages/agent/src/domains/media/service.rs	rust	implementation	agent:media	owner-private durable media create list inspect and archive service using engine resources streams and scoped authority
+packages/agent/src/domains/media/validation.rs	rust	implementation	agent:media	owner-private MIME size raw payload refs transcription and retention validation helpers
+packages/agent/src/engine/durability/resources/media_definitions.rs	rust	implementation	rust:engine	owner-private media_artifact resource definition module; callers use engine resource facade

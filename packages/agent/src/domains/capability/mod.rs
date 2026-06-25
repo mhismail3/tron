@@ -14,6 +14,9 @@
 //! Memory audit operations are also inspect-only additions: they expose
 //! resource-backed memory status/list/inspect facts without retaining or
 //! injecting private memory body content.
+//! Media operations are resource-backed metadata operations: they create,
+//! list, inspect, and archive `media_artifact` records that point at blob refs
+//! while rejecting raw media bytes and keeping provider projections redacted.
 //!
 //! ## Submodules
 //!
@@ -43,6 +46,7 @@
 //! is not changed by the read.
 
 pub(crate) mod contract;
+mod media_contract;
 mod operations;
 mod scheduler_contract;
 pub(crate) use operations::execute_value;

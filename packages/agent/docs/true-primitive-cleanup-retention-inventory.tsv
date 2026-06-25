@@ -1829,3 +1829,13 @@ packages/agent/src/domains/notifications/tests/mod.rs	test	test_harness	TPC-10/P
 packages/agent/src/domains/notifications/tests/support.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification deterministic fixture grant device and leak assertion support
 packages/agent/src/domains/notifications/validation.rs	implementation	notifications	TPC-10/P2AER-S13	notification payload bounds family severity refs and retention validation helpers
 packages/agent/src/engine/durability/resources/notification_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S13	built-in device_registration notification and notification_delivery resource schemas
+packages/agent/src/domains/capability/media_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14A	media request schema helper split out of the broad capability contract file
+packages/agent/src/domains/capability/operations/media.rs	implementation	capability_execute	TPC-10/P2AER-S14A	provider execute adapter for redacted durable media_artifact create list inspect and archive operations
+packages/agent/src/domains/media/authority.rs	implementation	media	TPC-10/P2AER-S14A	media authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
+packages/agent/src/domains/media/contract.rs	implementation	media	TPC-10/P2AER-S14A	media worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/media/mod.rs	implementation	media	TPC-10/P2AER-S14A	media domain docs and registration boundary for backend-only media artifact custody foundation
+packages/agent/src/domains/media/projection.rs	implementation	media	TPC-10/P2AER-S14A	bounded redacted media list and inspect projection owner
+packages/agent/src/domains/media/service.rs	implementation	media	TPC-10/P2AER-S14A	durable media create list inspect and archive operation owner
+packages/agent/src/domains/media/tests.rs	test	test_harness	TPC-10/P2AER-S14A	focused Slice 14A media bounds MIME redaction retention resource authority scope lifecycle and idempotency coverage
+packages/agent/src/domains/media/validation.rs	implementation	media	TPC-10/P2AER-S14A	media MIME size raw payload refs transcription and retention validation helpers
+packages/agent/src/engine/durability/resources/media_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14A	built-in media_artifact resource schema

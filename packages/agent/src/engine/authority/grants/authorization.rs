@@ -166,6 +166,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "goalResourceId",
         "questionResourceId",
         "answerResourceId",
+        "mediaResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -207,6 +208,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.write");
             push_unique(&mut scopes, "web.read");
             push_unique(&mut scopes, "web.write");
+        }
+        Some("media_list" | "media_inspect") => {
+            push_unique(&mut scopes, "media.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("media_create" | "media_archive") => {
+            push_unique(&mut scopes, "media.read");
+            push_unique(&mut scopes, "media.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
         }
         Some("worker_package_list" | "worker_package_inspect") => {
             push_unique(&mut scopes, "worker.lifecycle.read");
@@ -282,6 +293,9 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         }
         Some("web_source_list" | "web_source_inspect" | "web_source_archive") => {
             vec!["web_source"]
+        }
+        Some("media_create" | "media_list" | "media_inspect" | "media_archive") => {
+            vec!["media_artifact"]
         }
         Some("web_robots_check") => vec!["web_robots_policy"],
         Some("worker_package_list") => {
@@ -363,6 +377,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("question_answer") => push_unique(&mut kinds, "goal_answer"),
         Some("web_fetch") => push_unique(&mut kinds, "web_source"),
         Some("web_robots_check") => push_unique(&mut kinds, "web_robots_policy"),
+        Some("media_create") => push_unique(&mut kinds, "media_artifact"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }

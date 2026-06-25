@@ -9,11 +9,12 @@
 //! goal/question lifecycle records, fetch explicit URLs as web source
 //! provenance, check one origin robots policy as evidence, inspect stored web
 //! sources for citations, archive stored web sources without deleting citation
-//! evidence, manage controlled subagent task launch/status/result/cancel
-//! records, inspect bounded/redacted worker package lifecycle resources without
-//! package activation, inspect inert procedural state provenance resources
-//! without procedural activation, and manage the Slice 13 server-owned
-//! notification inbox/device-registration foundation without live APNs delivery.
+//! evidence, manage durable media/voice-note blob-ref resources, manage
+//! controlled subagent task launch/status/result/cancel records, inspect
+//! bounded/redacted worker package lifecycle resources without package
+//! activation, inspect inert procedural state provenance resources without
+//! procedural activation, and manage the Slice 13 server-owned notification
+//! inbox/device-registration foundation without live APNs delivery.
 
 use serde_json::{Map, Value, json};
 
@@ -23,7 +24,7 @@ use crate::engine::{
     EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel, VisibilityScope,
 };
 
-use super::scheduler_contract;
+use super::{media_contract, scheduler_contract};
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["capability.runtime"];
 
@@ -59,8 +60,8 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, create/list/inspect/cancel/fire due durable schedules and schedule-run records, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, inspect inert external tool-source proposal provenance, record controlled subagent launch/status/result/cancel lifecycle evidence, inspect bounded/redacted worker package lifecycle records, inspect inert procedural state provenance records, inspect agent trace/log records, and inspect catalog discovery evidence. ",
-                            "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Scheduler operations create explicit durable records and never execute feature work directly; notification operations create durable inbox/read/badge/delivery evidence with live APNs transport disabled, while device token registration is trusted internal-only and never returns raw APNs tokens or full token hashes. Tool-source, worker-package, and procedural-state inspection operations are read-only and never install, activate, trigger, inject prompts, learn behavior, launch, register, or execute proposed external tools, packages, skills, rules, hooks, or procedures; subagent lifecycle operations record bounded placeholder worker/job evidence without starting workers, jobs, tools, network, packages, or result merges. ",
+                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, create/list/inspect/cancel/fire due durable schedules and schedule-run records, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, create/list/inspect/archive durable media and voice-note blob-ref resources, inspect inert external tool-source proposal provenance, record controlled subagent launch/status/result/cancel lifecycle evidence, inspect bounded/redacted worker package lifecycle records, inspect inert procedural state provenance records, inspect agent trace/log records, and inspect catalog discovery evidence. ",
+                            "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Scheduler operations create explicit durable records and never execute feature work directly; media operations store blob refs and bounded metadata only, never raw audio bytes, and never send raw audio to providers without an explicit future resource authorization; notification operations create durable inbox/read/badge/delivery evidence with live APNs transport disabled, while device token registration is trusted internal-only and never returns raw APNs tokens or full token hashes. Tool-source, worker-package, and procedural-state inspection operations are read-only and never install, activate, trigger, inject prompts, learn behavior, launch, register, or execute proposed external tools, packages, skills, rules, hooks, or procedures; subagent lifecycle operations record bounded placeholder worker/job evidence without starting workers, jobs, tools, network, packages, or result merges. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -76,7 +77,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, media_create, media_list, media_inspect, media_archive, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(
@@ -397,8 +398,9 @@ fn execute_model_request_schema() -> serde_json::Value {
     );
     properties.insert(
         "sourceRefs".to_owned(),
-        json!({"type": "array", "description": "Bounded non-secret source refs for notification_send replay evidence."}),
+        json!({"type": "array", "description": "Bounded non-secret source refs for notification_send or media_create replay evidence."}),
     );
+    media_contract::insert_media_request_fields(&mut properties);
     insert_string(
         &mut properties,
         "taskId",
@@ -468,7 +470,7 @@ fn execute_model_request_schema() -> serde_json::Value {
     );
     properties.insert(
         "includeArchived".to_owned(),
-        json!({"type": "boolean", "description": "Explicitly include archived web_source records in web_source_list."}),
+        json!({"type": "boolean", "description": "Explicitly include archived web_source or media_artifact records in list operations."}),
     );
     insert_string(
         &mut properties,
@@ -648,52 +650,21 @@ mod tests {
         let operations = schema["properties"]["operation"]["description"]
             .as_str()
             .expect("operation description");
-        assert!(operations.contains("filesystem_read"));
-        assert!(operations.contains("filesystem_write"));
-        assert!(operations.contains("git_status"));
-        assert!(operations.contains("git_diff"));
-        assert!(operations.contains("git_branch_inventory"));
-        assert!(operations.contains("git_stage"));
-        assert!(operations.contains("git_unstage"));
-        assert!(operations.contains("git_commit"));
-        assert!(operations.contains("git_branch_start"));
-        assert!(operations.contains("goal_create"));
-        assert!(operations.contains("goal_list"));
-        assert!(operations.contains("goal_inspect"));
-        assert!(operations.contains("goal_cancel"));
-        assert!(operations.contains("question_create"));
-        assert!(operations.contains("question_list"));
-        assert!(operations.contains("question_inspect"));
-        assert!(operations.contains("question_answer"));
-        assert!(operations.contains("schedule_create"));
-        assert!(operations.contains("schedule_list"));
-        assert!(operations.contains("schedule_inspect"));
-        assert!(operations.contains("schedule_cancel"));
-        assert!(operations.contains("schedule_fire_due"));
-        assert!(operations.contains("web_fetch"));
-        assert!(operations.contains("web_robots_check"));
-        assert!(operations.contains("web_source_list"));
-        assert!(operations.contains("web_source_inspect"));
-        assert!(operations.contains("web_source_archive"));
-        assert!(operations.contains("device_register"));
-        assert!(operations.contains("device_unregister"));
-        assert!(operations.contains("device_list"));
-        assert!(operations.contains("device_inspect"));
-        assert!(operations.contains("notification_send"));
-        assert!(operations.contains("notification_list"));
-        assert!(operations.contains("notification_inspect"));
-        assert!(operations.contains("notification_mark_read"));
-        assert!(operations.contains("notification_mark_all_read"));
-        assert!(operations.contains("tool_source_list"));
-        assert!(operations.contains("tool_source_inspect"));
-        assert!(operations.contains("subagent_launch"));
-        assert!(operations.contains("subagent_status"));
-        assert!(operations.contains("subagent_result"));
-        assert!(operations.contains("subagent_cancel"));
-        assert!(operations.contains("subagent_task_list"));
-        assert!(operations.contains("subagent_task_inspect"));
-        assert!(operations.contains("worker_package_list"));
-        assert!(operations.contains("worker_package_inspect"));
+        for operation in concat!(
+            "filesystem_read filesystem_write git_status git_diff git_branch_inventory git_stage ",
+            "git_unstage git_commit git_branch_start goal_create goal_list goal_inspect goal_cancel ",
+            "question_create question_list question_inspect question_answer schedule_create schedule_list ",
+            "schedule_inspect schedule_cancel schedule_fire_due web_fetch web_robots_check web_source_list ",
+            "web_source_inspect web_source_archive media_create media_list media_inspect media_archive ",
+            "device_register device_unregister device_list device_inspect notification_send notification_list ",
+            "notification_inspect notification_mark_read notification_mark_all_read tool_source_list ",
+            "tool_source_inspect subagent_launch subagent_status subagent_result subagent_cancel ",
+            "subagent_task_list subagent_task_inspect worker_package_list worker_package_inspect",
+        )
+        .split_whitespace()
+        {
+            assert!(operations.contains(operation), "missing {operation}");
+        }
         assert!(
             !operations.contains("file_read") && !operations.contains("file_write"),
             "legacy file operations must not be model-reachable"
@@ -791,6 +762,20 @@ mod tests {
             "sourceRefs",
             "maxAgeDays",
             "maxInboxRecords",
+            "mediaResourceId",
+            "expectedMediaVersionId",
+            "mediaId",
+            "mediaKind",
+            "mimeType",
+            "sizeBytes",
+            "blobRef",
+            "contentHash",
+            "durationMs",
+            "summary",
+            "transcriptionState",
+            "transcriptionText",
+            "transcriptionLanguage",
+            "transcriptionModel",
         ] {
             assert!(schema["properties"].get(property).is_some());
         }

@@ -115,6 +115,19 @@ paths. Live APNs transport, APNs entitlements, native iOS inbox/deep links,
 public `/engine` notification APIs, hidden background loops, and fake
 client-local inbox state remain deferred.
 
+Slice 14A is an implementation candidate for BPRC-FEATURE-13 only:
+`domains/media`, the built-in `media_artifact` resource definition,
+`media.lifecycle` stream evidence, and execute-only `media_create`,
+`media_list`, `media_inspect`, and `media_archive` operations. Media resources
+store blob refs, bounded metadata, retention policy, source/evidence refs,
+trace/replay refs, lifecycle evidence, and bounded local transcription metadata
+only. Raw bytes/base64 payloads are rejected; MIME types are allow-listed;
+provider projections remain redacted and mark raw audio as not sent. Native
+voice-note UI, microphone/camera permission changes, physical-device capture
+validation, server transcription model changes, public `/engine` media APIs,
+imports/session trees, repository visualization, and update diagnostics remain
+deferred to later slices.
+
 It also maps every BPRC backlog row:
 
 - `BPRC-FEATURE-01`: capability discovery, routing, and intent execution.

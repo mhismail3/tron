@@ -1874,3 +1874,13 @@ packages/agent/src/domains/notifications/tests/mod.rs	retain	notifications test 
 packages/agent/src/domains/notifications/tests/support.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification deterministic fixture grant device and token-leak assertion helpers retained.
 packages/agent/src/domains/notifications/validation.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification payload family severity refs and retention validation retained.
 packages/agent/src/engine/durability/resources/notification_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S13	Device registration notification and notification delivery resource schemas retained.
+packages/agent/src/domains/capability/media_contract.rs	retain	capability contract owner	PCC-10/P2AER-S14A	Media request schema helper retained outside the broad capability contract file.
+packages/agent/src/domains/capability/operations/media.rs	retain	capability execute owner	PCC-10/P2AER-S14A	Media execute adapter retained for durable media_artifact create list inspect and archive projections.
+packages/agent/src/domains/media/authority.rs	retain	media owner	PCC-10/P2AER-S14A	Media authority guards retained for exact resource kind selectors scope isolation and networkPolicy none.
+packages/agent/src/domains/media/contract.rs	retain	media owner	PCC-10/P2AER-S14A	Media worker contract constants retained for authority and lifecycle stream ownership.
+packages/agent/src/domains/media/mod.rs	retain	media owner	PCC-10/P2AER-S14A	Media domain facade and docs retained for backend-only artifact custody foundation.
+packages/agent/src/domains/media/projection.rs	retain	media owner	PCC-10/P2AER-S14A	Bounded redacted media list and inspect projections retained.
+packages/agent/src/domains/media/service.rs	retain	media owner	PCC-10/P2AER-S14A	Durable media create list inspect and archive operation owner retained.
+packages/agent/src/domains/media/tests.rs	retain	media test owner	PCC-10/P2AER-S14A	Media bounds MIME redaction retention authority scope lifecycle and idempotency tests retained.
+packages/agent/src/domains/media/validation.rs	retain	media owner	PCC-10/P2AER-S14A	Media MIME size raw payload refs transcription and retention validation retained.
+packages/agent/src/engine/durability/resources/media_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S14A	Media artifact resource schema retained.

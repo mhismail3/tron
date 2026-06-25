@@ -118,6 +118,10 @@ pub const NOTIFICATION_SCHEMA_ID: &str = "tron.resource.notification.v1";
 pub const NOTIFICATION_DELIVERY_KIND: &str = "notification_delivery";
 /// Built-in notification delivery evidence resource schema id.
 pub const NOTIFICATION_DELIVERY_SCHEMA_ID: &str = "tron.resource.notification_delivery.v1";
+/// Built-in durable media/voice-note artifact resource kind.
+pub const MEDIA_ARTIFACT_KIND: &str = "media_artifact";
+/// Built-in durable media/voice-note artifact resource schema id.
+pub const MEDIA_ARTIFACT_SCHEMA_ID: &str = "tron.resource.media_artifact.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

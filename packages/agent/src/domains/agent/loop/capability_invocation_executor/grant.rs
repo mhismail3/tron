@@ -68,6 +68,15 @@ pub(super) async fn derive_capability_runtime_grant(
             "web.read".to_owned(),
             "web.write".to_owned(),
         ]);
+    } else if matches!(operation, "media_list" | "media_inspect") {
+        allowed_authority_scopes.extend(["media.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(operation, "media_create" | "media_archive") {
+        allowed_authority_scopes.extend([
+            "media.read".to_owned(),
+            "media.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(operation, "worker_package_list" | "worker_package_inspect") {
         allowed_authority_scopes.extend([
             "worker.lifecycle.read".to_owned(),
@@ -127,6 +136,11 @@ pub(super) async fn derive_capability_runtime_grant(
         if web_fetch_uses_robots_policy {
             allowed_resource_kinds.push("web_robots_policy".to_owned());
         }
+    } else if matches!(
+        operation,
+        "media_create" | "media_list" | "media_inspect" | "media_archive"
+    ) {
+        allowed_resource_kinds.push("media_artifact".to_owned());
     } else if operation == "worker_package_list" {
         if let Some(kind) = worker_package_list_kind(effective_args) {
             allowed_resource_kinds.push(kind.to_owned());
@@ -176,6 +190,14 @@ pub(super) async fn derive_capability_runtime_grant(
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect::<Vec<_>>();
+    if matches!(operation, "media_inspect" | "media_archive")
+        && let Some(resource_id) = effective_args
+            .get("mediaResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
     if matches!(
         operation,
         "procedural_state_list" | "procedural_state_inspect"

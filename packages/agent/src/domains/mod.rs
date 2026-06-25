@@ -3,11 +3,11 @@
 //! Each declared child module is part of the retained bare loop: startup and
 //! system metadata, provider/auth/settings setup, session/message/log truth,
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
-//! evidence, memory contract custody, durable non-interactive jobs, read-only
-//! Git/worktree observation, goal/question lifecycle records, direct web source
-//! fetch provenance, inert external tool-source proposal provenance, inert
-//! subagent task lifecycle records, inert procedural state provenance records,
-//! and the single model-facing
+//! evidence, memory contract custody, durable media/voice-note resource
+//! custody, durable non-interactive jobs, read-only Git/worktree observation,
+//! goal/question lifecycle records, direct web source fetch provenance, inert
+//! external tool-source proposal provenance, inert subagent task lifecycle
+//! records, inert procedural state provenance records, and the single model-facing
 //! `capability::execute` primitive, plus the narrow iOS workspace-browser
 //! filesystem domain. Product/tool domains are otherwise intentionally not
 //! declared on this branch.
@@ -21,6 +21,7 @@
 //! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
 //! | `device` | Server-owned device registration and redacted APNs token custody |
 //! | `memory` | Memory contract resources, prompt traces, and migration envelopes |
+//! | `media` | Durable media/voice-note resources with blob refs and redacted projections |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -68,8 +69,9 @@
 //! domain is restored only for the iOS workspace selector and must not regain
 //! agent read/write/search/diff/apply-patch tools in Phase 1. The
 //! transcription domain is restored only as local speech-to-text for composer
-//! input; saved voice notes and media storage remain absent. The worker
-//! lifecycle domain is the post-baseline package/launch substrate for
+//! input; saved voice-note/media custody lives in the media domain as blob refs
+//! and bounded metadata, without native capture UI or server transcription
+//! model changes. The worker lifecycle domain is the post-baseline package/launch substrate for
 //! self-updating workers; it is not a restored product tool domain. The git
 //! domain is restored only for read-only status/diff evidence; source-control
 //! mutations remain absent. The procedural domain is resource-backed custody
@@ -100,6 +102,7 @@ pub mod git;
 pub mod goals;
 pub mod jobs;
 pub mod logs;
+pub mod media;
 pub mod memory;
 pub mod message;
 pub mod model;

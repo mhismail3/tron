@@ -898,13 +898,17 @@ primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
 `timeoutMs`, `maxOutputBytes`, `jobResourceId`, `state`, `cleanupAfterSeconds`,
 `goalResourceId`, `questionResourceId`, `scheduleResourceId`,
-`toolSourceResourceId`, `objective`, `prompt`, `answerText`,
+`toolSourceResourceId`, `mediaResourceId`, `expectedMediaVersionId`,
+`objective`, `prompt`, `answerText`,
 `expectedQuestionVersionId`, `expiresAt`, `title`, `scheduleKind`,
 `triggerType`, `startAt`, `createdAt`, `cancelledAt`, `evaluationAt`,
 `intervalSeconds`, `timezone`, `missedRunPolicy`, `maxCatchUpRuns`, `target`,
 `maxRunRecords`, `maxAgeDays`, `allowFreeForm`,
 `successCriteria`, `constraints`, `queueRefs`, `planRefs`, `evidenceRefs`,
-`kind`, `id`, catalog search filters, `idempotencyKey`, and `reason`.
+`kind`, `id`, `mediaId`, `mediaKind`, `mimeType`, `sizeBytes`, `blobRef`,
+`contentHash`, `durationMs`, `summary`, `transcriptionState`,
+`transcriptionText`, `transcriptionLanguage`, `transcriptionModel`, catalog
+search filters, `idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
@@ -989,6 +993,10 @@ Current primitive operations:
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
+| `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, idempotency, and no raw media bytes in the resource payload. |
+| `media_list` | List scoped `media_artifact` resources as bounded/redacted metadata projections with blob refs and transcription summaries only. |
+| `media_inspect` | Inspect one scoped `media_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, lifecycle evidence, storage refs, and local transcription metadata without raw audio. |
+| `media_archive` | Archive one scoped `media_artifact` with expected-version freshness, reason, lifecycle stream evidence, and idempotency; blob deletion/pruning remains a later retention worker concern. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1006,7 +1014,7 @@ provider-visible execute surface; file access goes through the hardened
 
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
-`settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
+`settings`, `auth`, `agent`, `logs`, `session`, `transcription`, `media`,
 `worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
@@ -1091,6 +1099,19 @@ Push-requested sends record inbox-only, no-device, policy-disabled,
 family-opt-out, or transport-disabled delivery evidence; live APNs transport,
 APNs entitlements, public notification APIs, native iOS inbox/deep links,
 hidden background loops, and fake client-local inboxes remain deferred.
+The Slice 14A implementation candidate adds `domains/media` as a narrow
+server-owned resource foundation for media artifacts and voice-note metadata
+behind the same single `capability::execute` primitive. Media records are
+durable `media_artifact` resources that store blob refs, bounded metadata,
+retention policy, source/evidence refs, local transcription result metadata,
+trace/replay refs, and lifecycle evidence. Accepted MIME types are allow-listed
+and upload sizes are bounded by media class; raw bytes/base64 payloads are
+rejected, resources store blob refs only, and provider-visible projections mark
+raw audio as not sent. Local composer transcription remains separate: this
+foundation may record bounded metadata about existing local transcription
+output, but it does not add server transcription models, native capture UI,
+microphone/camera permission changes, public media APIs, or provider-visible
+raw audio.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1304,12 +1325,14 @@ Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
 recording, treats recording startup as cancellation-aware, cancels capture and
-in-flight transcription when leaving chat, the server reports explicit
-disabled/loading/ready/failed model state, and no media or voice notes are
-stored. Product/tool domains such as
+in-flight transcription when leaving chat, and the server reports explicit
+disabled/loading/ready/failed model state. Slice 14A adds backend-only
+`media_artifact` resource custody for blob refs and bounded metadata; native
+voice-note UI, capture flows, and server-side transcription orchestration are
+still absent. Product/tool domains such as
 `process`, `program`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
-`worker`, `voice_notes`, and media/import surfaces are not registered by
+`worker`, `voice_notes`, and import surfaces are not registered by
 default on this branch.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.

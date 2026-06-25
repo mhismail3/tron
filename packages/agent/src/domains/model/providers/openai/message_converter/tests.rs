@@ -481,6 +481,13 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("web_source_archive"));
     assert!(result.contains("expectedWebSourceVersionId"));
+    assert!(result.contains("media_create"));
+    assert!(result.contains("media_list"));
+    assert!(result.contains("media_inspect"));
+    assert!(result.contains("media_archive"));
+    assert!(result.contains("expectedMediaVersionId"));
+    assert!(result.contains("blob refs and bounded metadata only"));
+    assert!(result.contains("provider-visible raw audio disabled"));
     assert!(result.contains("device_register"));
     assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));

@@ -20,6 +20,7 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "agent_result",
         "schedule",
         "schedule_run",
+        "media_artifact",
     ] {
         assert!(
             definitions
