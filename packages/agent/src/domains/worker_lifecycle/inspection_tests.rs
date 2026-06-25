@@ -71,6 +71,42 @@ async fn worker_package_list_and_inspect_return_bounded_redacted_lifecycle_evide
         inspected["resource"]["expectedFunctions"]["truncated"],
         json!(true)
     );
+    assert_eq!(
+        inspected["resource"]["provenance"]["authorityGrantId"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["provenance"]["authority_grant_id"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["provenance"]["nested"]["grantId"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["provenance"]["nested"]["grant_id"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["provenance"]["nested"]["grantIdentifier"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["state"]["failure"]["details"]["grantId"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["traceRefs"]["items"][0]["grant_id"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["replayRefs"]["authority_grant_id"]["redacted"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["resource"]["provenance"]["nested"]["lifecycleStatus"]["text"],
+        json!("grant request pending")
+    );
     let serialized = serde_json::to_string(&inspected).expect("serialize projection");
     for forbidden in [
         "workerToken",
@@ -80,13 +116,23 @@ async fn worker_package_list_and_inspect_return_bounded_redacted_lifecycle_evide
         "/private/worker/root",
         "token-grant-secret",
         "127.0.0.1:17345",
-        "failed with token-grant-secret at /private/worker/root",
+        "grant-prod-lifecycle-123",
+        "grant-prod-lifecycle-snake-123",
+        "grant-prod-lifecycle-camel-123",
+        "grant-prod-lifecycle-nested-snake-123",
+        "worker-package-read-sensitive",
+        "grant-prod-failure-123",
+        "grant-prod-failure-camel-123",
+        "grant-prod-trace-snake-123",
+        "grant-prod-replay-snake-123",
+        "failed with grant-prod-failure-123 at /private/worker/root",
     ] {
         assert!(
             !serialized.contains(forbidden),
             "projection leaked forbidden material {forbidden}: {serialized}"
         );
     }
+    assert!(serialized.contains("grant request pending"), "{serialized}");
     drop(temp);
 }
 

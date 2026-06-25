@@ -137,7 +137,15 @@ pub(crate) fn package_payload_for_inspection(package: &Path) -> Value {
         "provenance": {
             "source": "inspection-test",
             "sourcePath": package.display().to_string(),
-            "nested": {"credential": "token-grant-secret"}
+            "authorityGrantId": "grant-prod-lifecycle-123",
+            "authority_grant_id": "grant-prod-lifecycle-snake-123",
+            "nested": {
+                "credential": "token-grant-secret",
+                "grantId": "grant-prod-lifecycle-camel-123",
+                "grant_id": "grant-prod-lifecycle-nested-snake-123",
+                "grantIdentifier": "worker-package-read-sensitive",
+                "lifecycleStatus": "grant request pending"
+            }
         },
         "source": {
             "kind": SOURCE_KIND_LOCAL_FILESYSTEM,
@@ -165,8 +173,21 @@ pub(crate) fn package_payload_for_inspection(package: &Path) -> Value {
         "sourceRoot": package.display().to_string(),
         "status": "installed",
         "failure": {
-            "message": "failed with token-grant-secret at /private/worker/root",
-            "details": {"env": {"SECRET_ENV": "secret-env-value"}}
+            "message": "failed with grant-prod-failure-123 at /private/worker/root",
+            "details": {
+                "env": {"SECRET_ENV": "secret-env-value"},
+                "grantId": "grant-prod-failure-camel-123"
+            }
+        },
+        "traceRefs": [
+            {
+                "traceId": "trace-safe-worker-lifecycle",
+                "grant_id": "grant-prod-trace-snake-123"
+            }
+        ],
+        "replayRefs": {
+            "authority_grant_id": "grant-prod-replay-snake-123",
+            "note": "replay reference retained"
         },
         "workerToken": {"secret": "token-grant-secret"},
         "env": {"SECRET_ENV": "secret-env-value"},

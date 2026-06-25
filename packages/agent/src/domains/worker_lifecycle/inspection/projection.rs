@@ -271,6 +271,7 @@ fn safe_string_preview(text: &str) -> Value {
         || lower.contains("credential")
         || lower.contains("apikey")
         || lower.contains("api_key")
+        || contains_grant_identifier_text(&lower)
         || lower.contains("/private/")
         || lower.contains("/users/")
     {
@@ -293,6 +294,7 @@ fn sensitive_metadata_key(key: &str) -> bool {
         || lower.contains("credential")
         || lower.contains("apikey")
         || lower.contains("api_key")
+        || contains_grant_identifier_key(&lower)
         || lower.contains("env")
         || lower.contains("path")
         || lower.contains("root")
@@ -300,6 +302,37 @@ fn sensitive_metadata_key(key: &str) -> bool {
         || lower == "argv"
         || lower.contains("command")
         || lower.contains("manifest")
+}
+
+fn contains_grant_identifier_key(lower: &str) -> bool {
+    let compact = compact_ascii_alphanumeric(lower);
+    compact == "grant"
+        || compact.contains("grantid")
+        || compact.contains("grantidentifier")
+        || compact.contains("grantreference")
+        || compact.contains("grantref")
+        || compact.contains("authoritygrant")
+        || compact.contains("tokengrant")
+        || compact.contains("secretgrant")
+        || compact.contains("lifecyclegrant")
+}
+
+fn contains_grant_identifier_text(lower: &str) -> bool {
+    let compact = compact_ascii_alphanumeric(lower);
+    compact.contains("authoritygrantid")
+        || compact.contains("grantid")
+        || compact.contains("grantidentifier")
+        || lower.contains("grant-")
+        || lower.contains("grant_")
+        || lower.contains("grant:")
+        || lower.contains("grant/")
+}
+
+fn compact_ascii_alphanumeric(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect()
 }
 
 fn string_preview(value: Option<&Value>) -> Value {

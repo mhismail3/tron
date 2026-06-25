@@ -3,7 +3,8 @@
 //! These projections are the provider-visible foundation for inspecting
 //! host-owned worker lifecycle resources through `capability::execute`. They
 //! intentionally do not install, enable, launch, stop, register, or execute
-//! packages.
+//! packages, and shared metadata projections redact direct lifecycle grant
+//! identifiers from provenance, failure, trace, and replay evidence.
 
 use serde_json::{Value, json};
 
