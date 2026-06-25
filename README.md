@@ -1000,6 +1000,9 @@ Current primitive operations:
 | `import_history_record` | Record one scoped `import_history_record` resource for generic session/resource lineage only, with bounded parent/child/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, repository trees, or unsafe paths. |
 | `import_history_list` | List scoped `import_history_record` resources as bounded/redacted generic graph summaries with lineage counts and metadata only. |
 | `import_history_inspect` | Inspect one scoped `import_history_record` after stored kind/schema/scope revalidation, returning bounded/redacted generic graph lineage metadata, refs, and lifecycle evidence without raw import payloads, repository trees, or raw authority ids. |
+| `repository_tree_snapshot` | Review-candidate Slice 14D operation that records one scoped `repository_tree_snapshot` resource for content-free repository tree metadata only, with repository/root/head refs, tree object refs, bounded normalized relative path metadata, aggregate counts, source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw file contents, blob bytes, absolute paths, unbounded tree dumps, repository visualization, or git mutation. |
+| `repository_tree_list` | Review-candidate Slice 14D operation that lists scoped `repository_tree_snapshot` resources as bounded/redacted metadata projections with counts and path previews only. |
+| `repository_tree_inspect` | Review-candidate Slice 14D operation that inspects one scoped `repository_tree_snapshot` after stored kind/schema/scope revalidation, returning bounded/redacted repository tree metadata, refs, lifecycle evidence, and content-free proof without raw repository contents, unsafe paths, or raw authority ids. |
 | `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
 | `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
@@ -1140,6 +1143,18 @@ commands, restart commands, deploy commands, or provider-visible raw update
 metadata. This foundation records metadata only: live production update checks,
 installer/restart/self-update flows, deploy automation, package/catalog
 registration, native iOS update panels, and public update APIs remain deferred.
+Slice 14D is a review candidate that adds a backend-only
+`domains/repository_tree` foundation behind `capability::execute`.
+Repository tree snapshots are durable `repository_tree_snapshot` resources
+that store repository/root/head refs, tree object refs, bounded normalized
+relative path metadata, aggregate counts, source/evidence refs, retention
+policy, trace/replay refs, lifecycle evidence, and fingerprinted idempotency
+evidence. They do not store raw file contents, blob bytes, absolute paths,
+unbounded repository tree dumps, raw import payloads, unsafe paths,
+repository visualization state, git mutation state, or provider-visible raw
+tree payloads. Native tree UI, import preview/execute behavior, repository
+visualization, and git mutation workflows remain deferred unless this
+review-candidate slice is accepted.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1368,6 +1383,10 @@ only import surface is the bounded `import_history_*` execute foundation.
 Slice 14C adds an accepted backend-only `update_diagnostic_record`
 metadata foundation; native update panels, live update checks, install/restart
 flows, and deploy automation are still absent.
+Slice 14D is a review candidate for a backend-only
+`repository_tree_snapshot` metadata foundation; raw file contents, blob bytes,
+absolute paths, repository visualization, import preview/execute, native tree
+UI, and git mutation workflows remain absent pending acceptance.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,

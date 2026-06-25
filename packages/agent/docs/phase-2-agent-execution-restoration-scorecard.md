@@ -2481,6 +2481,14 @@ authority/selectors, trusted current-session/workspace scope, lifecycle and
 trace/replay evidence, redacted projections, fingerprinted idempotency
 evidence, deterministic injected timestamps with no update-diagnostics DRC
 finding, and no raw update/package/endpoint/command leakage. Broader Slice 14
+review-candidate Slice 14D requires content-free `repository_tree_snapshot`
+metadata only, exact `repository_tree_snapshot` authority/selectors, trusted
+current-session/workspace scope, lifecycle and trace/replay evidence,
+redacted projections, fingerprinted idempotency evidence, deterministic
+injected timestamps with no repository-tree DRC finding, and no raw file
+contents, blob bytes, absolute paths, repository visualization, import
+preview/execute, native tree UI, or git mutation workflows.
+Broader Slice 14
 acceptance still requires storage/migration/retention policy, settings parity,
 event schemas, dependency review, iOS parity decision, and no deploy
 automation.
@@ -2494,8 +2502,12 @@ redaction, deterministic timestamp handling, and no raw import/repository/path
 leaks. Slice 14C tests cover update-diagnostic resource schema,
 authority/scope isolation, bounded signed-release projections, lifecycle
 evidence, idempotency fingerprint redaction, deterministic timestamp handling,
-and no raw update/package/endpoint/command leakage. Later Slice 14 sub-slices
-cover import preview/execute, repository trees, live update execution, settings
+and no raw update/package/endpoint/command leakage. Slice 14D review-candidate
+tests cover repository-tree resource schema, authority/scope isolation,
+bounded content-free path metadata projections, path normalization/rejection,
+lifecycle evidence, idempotency fingerprint redaction, deterministic timestamp
+handling, and no raw content/path/authority leakage. Later Slice 14 sub-slices
+cover import preview/execute, live update execution, settings
 parity, migration rollback, and iOS decoder tests.
 
 iOS validation: not run for Slice 14A because no Swift source, native media

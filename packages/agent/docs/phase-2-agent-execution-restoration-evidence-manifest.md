@@ -2138,6 +2138,48 @@ Acceptance validation:
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` | exit 0 | No personal-info literals, whitespace errors, ignored tracked files, or repo-managed first-party skills were present. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; accepting re-review found no update/system DRC findings. |
 
+## Slice 14D Review Candidate: Repository Tree Snapshot Resource Foundation
+
+Implementation thread: active Codex thread from orchestration
+`019efe16-09d7-73d3-9708-6c6ba5bc6493`.
+
+Review-candidate branch:
+`codex/phase-2-slice-14d-repository-tree-snapshot-foundation`.
+
+Baseline HEAD:
+`da1955d73c5a6244805afbde54d9adc7a1760f11`
+
+Review-candidate scope:
+
+- Adds `domains/repository_tree` as the server owner for durable
+  `repository_tree_snapshot` resources containing content-free repository/root
+  refs, optional head refs, tree object refs, bounded normalized relative path
+  metadata, aggregate counts, source/evidence refs, retention metadata,
+  trace/replay refs, lifecycle evidence, and fingerprinted idempotency evidence.
+- Adds the built-in `repository_tree_snapshot` resource definition with
+  append-only versions, active lifecycle state, metadata-only materialization,
+  and explicit repository-tree/resource capability requirements.
+- Adds execute-only operation values `repository_tree_snapshot`,
+  `repository_tree_list`, and `repository_tree_inspect` behind the existing
+  single `capability::execute` primitive.
+- Requires trusted current-session/workspace context, exact non-wildcard
+  `repository_tree_snapshot` resource selectors, `repository_tree.read` /
+  `repository_tree.write` plus resource scopes, idempotency for writes, and
+  `networkPolicy: none`.
+- Keeps Slice 14D narrow: no raw file contents, no blob bytes, no absolute
+  paths, no unbounded repository tree dumps, no repository visualization, no
+  import preview/execute behavior, no native iOS tree UI, and no git mutation
+  workflows.
+
+Review-candidate validation so far:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml repository_tree --lib -- --nocapture` | exit 0 | Focused repository-tree domain, projection, idempotency, validation, authorization, and runtime-grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml repository_tree_resource_id_is_selector_enforced --lib -- --nocapture` | exit 0 | Regression proved `repositoryTreeResourceId` is extracted by the generic engine authorization scanner and a grant scoped to one `repository_tree_snapshot` denies another same-kind resource. |
+| `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | exit 0 | Provider prompt guidance includes repository-tree operations and metadata-only/raw-content rejection language. |
+
 ## Validation Log
 
 | Command | Result | Evidence |

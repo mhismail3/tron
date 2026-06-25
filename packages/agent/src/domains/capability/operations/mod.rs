@@ -32,6 +32,7 @@ mod notifications;
 mod procedural;
 mod process;
 mod replay;
+mod repository_tree;
 mod scheduler;
 mod state;
 mod subagents;
@@ -68,6 +69,7 @@ use notifications::{
 use procedural::{procedural_state_inspect, procedural_state_list};
 use process::process_run;
 use replay::replay_manifest;
+use repository_tree::{repository_tree_inspect, repository_tree_list, repository_tree_snapshot};
 use scheduler::{
     schedule_cancel, schedule_create, schedule_fire_due, schedule_inspect, schedule_list,
 };
@@ -257,6 +259,11 @@ async fn execute_operation(
         "import_history_record" => import_history_record(invocation, deps, operation_at).await?,
         "import_history_list" => import_history_list(invocation, deps).await?,
         "import_history_inspect" => import_history_inspect(invocation, deps).await?,
+        "repository_tree_snapshot" => {
+            repository_tree_snapshot(invocation, deps, operation_at).await?
+        }
+        "repository_tree_list" => repository_tree_list(invocation, deps).await?,
+        "repository_tree_inspect" => repository_tree_inspect(invocation, deps).await?,
         "update_diagnostic_record" => {
             update_diagnostic_record(invocation, deps, operation_at).await?
         }
@@ -298,7 +305,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, media_create, media_list, media_inspect, media_archive, import_history_record, import_history_list, import_history_inspect, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, media_create, media_list, media_inspect, media_archive, import_history_record, import_history_list, import_history_inspect, repository_tree_snapshot, repository_tree_list, repository_tree_inspect, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

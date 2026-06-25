@@ -20,6 +20,10 @@
 //! Import-history operations are resource-backed lineage operations: they
 //! record, list, and inspect bounded `import_history_record` graph metadata
 //! without storing raw import payloads, repository trees, or native UI state.
+//! Repository-tree operations are resource-backed metadata operations: they
+//! snapshot, list, and inspect content-free `repository_tree_snapshot` records
+//! with bounded relative path metadata, refs, and counts, without raw file
+//! contents, blob bytes, absolute paths, visualization, or git mutation.
 //! Update-diagnostics operations are resource-backed metadata operations: they
 //! record, list, and inspect bounded `update_diagnostic_record` signed-release
 //! and provenance facts without live update checks, package bytes, install or
@@ -56,6 +60,7 @@ pub(crate) mod contract;
 mod import_history_contract;
 mod media_contract;
 mod operations;
+mod repository_tree_contract;
 mod scheduler_contract;
 mod update_diagnostics_contract;
 pub(crate) use operations::execute_value;

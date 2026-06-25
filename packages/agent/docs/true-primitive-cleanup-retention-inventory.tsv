@@ -1861,3 +1861,14 @@ packages/agent/src/domains/update_diagnostics/service.rs	implementation	update_d
 packages/agent/src/domains/update_diagnostics/tests.rs	test	test_harness	TPC-10/P2AER-S14C	focused Slice 14C update-diagnostics bounds redaction retention resource authority scope lifecycle and idempotency coverage
 packages/agent/src/domains/update_diagnostics/validation.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics raw-payload package endpoint command refs idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/update_diagnostics_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14C	built-in update_diagnostic_record resource schema
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_repository_tree_tests.rs	test	test_harness	TPC-10/P2AER-S14D	focused Slice 14D review-candidate repository-tree runtime grant regression coverage
+packages/agent/src/domains/capability/repository_tree_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14D	repository-tree request schema helper split out of the broad capability contract file
+packages/agent/src/domains/capability/operations/repository_tree.rs	implementation	capability_execute	TPC-10/P2AER-S14D	provider execute adapter for redacted durable repository_tree_snapshot snapshot list and inspect operations
+packages/agent/src/domains/repository_tree/authority.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
+packages/agent/src/domains/repository_tree/contract.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/repository_tree/mod.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree domain docs and registration boundary for backend-only content-free snapshot foundation
+packages/agent/src/domains/repository_tree/projection.rs	implementation	repository_tree	TPC-10/P2AER-S14D	bounded redacted repository-tree list and inspect projection owner
+packages/agent/src/domains/repository_tree/service.rs	implementation	repository_tree	TPC-10/P2AER-S14D	durable repository-tree snapshot list and inspect operation owner
+packages/agent/src/domains/repository_tree/tests.rs	test	test_harness	TPC-10/P2AER-S14D	focused Slice 14D repository-tree bounds redaction retention resource authority scope lifecycle path and idempotency coverage
+packages/agent/src/domains/repository_tree/validation.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree raw-content unsafe-path refs idempotency count and retention validation helpers
+packages/agent/src/engine/durability/resources/repository_tree_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14D	built-in repository_tree_snapshot resource schema

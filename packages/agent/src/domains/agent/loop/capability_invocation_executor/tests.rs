@@ -22,6 +22,8 @@ use std::collections::{BTreeMap, HashSet};
 mod grant_import_history_tests;
 #[path = "grant_notification_device_tests.rs"]
 mod grant_notification_device_tests;
+#[path = "grant_repository_tree_tests.rs"]
+mod grant_repository_tree_tests;
 #[path = "grant_tests.rs"]
 mod grant_tests;
 #[path = "grant_update_diagnostics_tests.rs"]

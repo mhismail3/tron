@@ -168,6 +168,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "answerResourceId",
         "mediaResourceId",
         "importHistoryResourceId",
+        "repositoryTreeResourceId",
         "updateDiagnosticResourceId",
     ]
     .into_iter()
@@ -228,6 +229,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("import_history_record") => {
             push_unique(&mut scopes, "import_history.read");
             push_unique(&mut scopes, "import_history.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("repository_tree_list" | "repository_tree_inspect") => {
+            push_unique(&mut scopes, "repository_tree.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("repository_tree_snapshot") => {
+            push_unique(&mut scopes, "repository_tree.read");
+            push_unique(&mut scopes, "repository_tree.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
@@ -322,6 +333,9 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("import_history_record" | "import_history_list" | "import_history_inspect") => {
             vec!["import_history_record"]
         }
+        Some("repository_tree_snapshot" | "repository_tree_list" | "repository_tree_inspect") => {
+            vec!["repository_tree_snapshot"]
+        }
         Some(
             "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect",
         ) => {
@@ -409,6 +423,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("web_robots_check") => push_unique(&mut kinds, "web_robots_policy"),
         Some("media_create") => push_unique(&mut kinds, "media_artifact"),
         Some("import_history_record") => push_unique(&mut kinds, "import_history_record"),
+        Some("repository_tree_snapshot") => push_unique(&mut kinds, "repository_tree_snapshot"),
         Some("update_diagnostic_record") => push_unique(&mut kinds, "update_diagnostic_record"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
@@ -565,6 +580,41 @@ mod tests {
             .to_string();
         assert!(
             error.contains("does not allow resource update_diagnostic_record:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn repository_tree_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "repository_tree.read",
+                "resource.read",
+            ],
+            &["repository_tree_snapshot"],
+            &[
+                "kind:repository_tree_snapshot",
+                "resource:repository_tree_snapshot:first",
+            ],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "repository_tree_inspect",
+            "repositoryTreeResourceId": "repository_tree_snapshot:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first resource allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "repository_tree_inspect",
+            "repositoryTreeResourceId": "repository_tree_snapshot:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind resource must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource repository_tree_snapshot:second"),
             "{error}"
         );
     }

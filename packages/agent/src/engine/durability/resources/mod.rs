@@ -24,6 +24,7 @@ mod media_definitions;
 mod memory_definitions;
 mod notification_definitions;
 mod procedural_definitions;
+mod repository_tree_definitions;
 mod scheduler_definitions;
 mod store;
 mod subagent_definitions;

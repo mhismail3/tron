@@ -493,6 +493,11 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("import_history_inspect"));
     assert!(result.contains("bounded generic graph lineage refs only"));
     assert!(result.contains("render hints fixed to `generic_graph`"));
+    assert!(result.contains("repository_tree_snapshot"));
+    assert!(result.contains("repository_tree_list"));
+    assert!(result.contains("repository_tree_inspect"));
+    assert!(result.contains("content-free repository/root refs"));
+    assert!(result.contains("raw file contents, blob bytes, absolute paths"));
     assert!(result.contains("device_register"));
     assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));

@@ -29,7 +29,8 @@ use crate::engine::{
 };
 
 use super::{
-    import_history_contract, media_contract, scheduler_contract, update_diagnostics_contract,
+    import_history_contract, media_contract, repository_tree_contract, scheduler_contract,
+    update_diagnostics_contract,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["capability.runtime"];
@@ -83,7 +84,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, media_create, media_list, media_inspect, media_archive, import_history_record, import_history_list, import_history_inspect, update_diagnostic_record, update_diagnostic_list, update_diagnostic_inspect, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, media_create, media_list, media_inspect, media_archive, import_history_record, import_history_list, import_history_inspect, repository_tree_snapshot, repository_tree_list, repository_tree_inspect, update_diagnostic_record, update_diagnostic_list, update_diagnostic_inspect, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(
@@ -404,10 +405,11 @@ fn execute_model_request_schema() -> serde_json::Value {
     );
     properties.insert(
         "sourceRefs".to_owned(),
-        json!({"type": "array", "description": "Bounded non-secret source refs for notification_send, media_create, import_history_record, or update_diagnostic_record replay evidence."}),
+        json!({"type": "array", "description": "Bounded non-secret source refs for notification_send, media_create, import_history_record, repository_tree_snapshot, or update_diagnostic_record replay evidence."}),
     );
     media_contract::insert_media_request_fields(&mut properties);
     import_history_contract::insert_import_history_request_fields(&mut properties);
+    repository_tree_contract::insert_repository_tree_request_fields(&mut properties);
     update_diagnostics_contract::insert_update_diagnostics_request_fields(&mut properties);
     insert_string(
         &mut properties,
@@ -665,6 +667,7 @@ mod tests {
             "schedule_inspect schedule_cancel schedule_fire_due web_fetch web_robots_check web_source_list ",
             "web_source_inspect web_source_archive media_create media_list media_inspect media_archive ",
             "import_history_record import_history_list import_history_inspect ",
+            "repository_tree_snapshot repository_tree_list repository_tree_inspect ",
             "device_register device_unregister device_list device_inspect notification_send notification_list ",
             "notification_inspect notification_mark_read notification_mark_all_read tool_source_list ",
             "tool_source_inspect subagent_launch subagent_status subagent_result subagent_cancel ",

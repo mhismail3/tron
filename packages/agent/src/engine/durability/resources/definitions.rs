@@ -11,6 +11,7 @@ use super::media_definitions::media_resource_type_definitions;
 use super::memory_definitions::memory_resource_type_definitions;
 use super::notification_definitions::notification_resource_type_definitions;
 use super::procedural_definitions::procedural_resource_type_definitions;
+use super::repository_tree_definitions::repository_tree_resource_type_definitions;
 use super::scheduler_definitions::scheduler_resource_type_definitions;
 use super::subagent_definitions::subagent_resource_type_definitions;
 use super::tool_source_definitions::tool_source_resource_type_definitions;
@@ -659,6 +660,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(import_history_resource_type_definitions());
+    definitions.extend(repository_tree_resource_type_definitions());
     definitions.extend(update_diagnostics_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions.extend(media_resource_type_definitions());

@@ -89,6 +89,21 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "repository_tree_list" | "repository_tree_inspect"
+    ) {
+        allowed_authority_scopes.extend([
+            "repository_tree.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if operation == "repository_tree_snapshot" {
+        allowed_authority_scopes.extend([
+            "repository_tree.read".to_owned(),
+            "repository_tree.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_authority_scopes.extend([
@@ -173,6 +188,11 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.push("import_history_record".to_owned());
     } else if matches!(
         operation,
+        "repository_tree_snapshot" | "repository_tree_list" | "repository_tree_inspect"
+    ) {
+        allowed_resource_kinds.push("repository_tree_snapshot".to_owned());
+    } else if matches!(
+        operation,
         "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_resource_kinds.push("update_diagnostic_record".to_owned());
@@ -236,6 +256,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "import_history_inspect"
         && let Some(resource_id) = effective_args
             .get("importHistoryResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "repository_tree_inspect"
+        && let Some(resource_id) = effective_args
+            .get("repositoryTreeResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {
