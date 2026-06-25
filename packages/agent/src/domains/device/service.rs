@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{CreateResource, Invocation, ListResources, UpdateResource};
@@ -10,10 +10,11 @@ use super::support::*;
 use super::validation::*;
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
 
-pub(crate) async fn register_device_value(
+pub(crate) async fn register_device_value_at(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
+    operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     ensure_internal_write_authority(deps, invocation, "device_register").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
@@ -39,7 +40,7 @@ pub(crate) async fn register_device_value(
     }
     let event_families = event_families(payload)?;
     let retention = retention_policy(payload)?;
-    let now = Utc::now().to_rfc3339();
+    let now = operation_at.to_rfc3339();
     let resource_id = device_resource_id(&scope, &platform, &environment, &device_id);
 
     if let Some(existing) = deps
@@ -206,10 +207,11 @@ pub(crate) async fn register_device_value(
     }))
 }
 
-pub(crate) async fn unregister_device_value(
+pub(crate) async fn unregister_device_value_at(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
+    operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     ensure_internal_write_authority(deps, invocation, "device_unregister").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
@@ -247,7 +249,7 @@ pub(crate) async fn unregister_device_value(
             "resourceRefs": [version_ref(&inspection.resource, current_version, "device_registration")]
         }));
     }
-    let now = Utc::now().to_rfc3339();
+    let now = operation_at.to_rfc3339();
     let mut record = current.clone();
     record["state"] = json!("unregistered");
     record["updatedAt"] = json!(now);

@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -18,10 +18,11 @@ use super::projection::{inspected_notification, notification_summary};
 use super::validation::*;
 use super::{Deps, NOTIFICATION_DELIVERY_KIND, NOTIFICATION_KIND, NOTIFICATION_SCHEMA_ID};
 
-pub(crate) async fn send_notification_value(
+pub(crate) async fn send_notification_value_at(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
+    operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     let push_requested = optional_bool(payload, "pushRequested")?.unwrap_or(false);
     ensure_write_authority(deps, invocation, "notification_send", push_requested).await?;
@@ -44,7 +45,7 @@ pub(crate) async fn send_notification_value(
     validate_refs("sourceRefs", &source_refs)?;
     validate_refs("evidenceRefs", &evidence_refs)?;
     let retention = retention_policy(payload)?;
-    let now = Utc::now().to_rfc3339();
+    let now = operation_at.to_rfc3339();
     let resource_id = notification_resource_id(&scope, &family, &notification_id, &idempotency_key);
 
     if let Some(existing) = deps
@@ -121,6 +122,7 @@ pub(crate) async fn send_notification_value(
         &family,
         push_requested,
         badge_count,
+        &operation_at,
     )
     .await?;
     publish_lifecycle_event(
@@ -252,10 +254,11 @@ pub(crate) async fn inspect_notification_value(
     }))
 }
 
-pub(crate) async fn mark_notification_read_value(
+pub(crate) async fn mark_notification_read_value_at(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
+    operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     ensure_write_authority(deps, invocation, "notification_mark_read", false).await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
@@ -292,7 +295,7 @@ pub(crate) async fn mark_notification_read_value(
             "resourceRefs": [version_ref(&inspection.resource, current_version, "notification")]
         }));
     }
-    let now = Utc::now().to_rfc3339();
+    let now = operation_at.to_rfc3339();
     let mut record = current.clone();
     record["state"] = json!("read");
     record["updatedAt"] = json!(now);
@@ -345,10 +348,11 @@ pub(crate) async fn mark_notification_read_value(
     }))
 }
 
-pub(crate) async fn mark_all_notifications_read_value(
+pub(crate) async fn mark_all_notifications_read_value_at(
     deps: &Deps,
     invocation: &Invocation,
     payload: &Value,
+    operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     ensure_write_authority(deps, invocation, "notification_mark_all_read", false).await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
@@ -373,6 +377,7 @@ pub(crate) async fn mark_all_notifications_read_value(
         .map_err(engine_error)?;
     let truncated = resources.len() > limit;
     let mut updated = Vec::new();
+    let now = operation_at.to_rfc3339();
     for resource in resources.into_iter().take(limit) {
         let Some(mut inspection) = deps
             .engine_host
@@ -386,7 +391,6 @@ pub(crate) async fn mark_all_notifications_read_value(
         ensure_scope(&inspection, &scope, "notification_mark_all_read")?;
         let (current_version, current) =
             current_payload(&inspection, "notification_mark_all_read")?;
-        let now = Utc::now().to_rfc3339();
         let mut record = current.clone();
         record["state"] = json!("read");
         record["updatedAt"] = json!(now);
@@ -437,8 +441,8 @@ pub(crate) async fn mark_all_notifications_read_value(
             current_version_id: None,
             trace_id: invocation.causal_context.trace_id.clone(),
             created_by_invocation_id: Some(invocation.id.clone()),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: operation_at.clone(),
+            updated_at: operation_at,
         },
         json!({"state": "read", "updatedCount": updated.len(), "badgeCount": badge_count}),
     )

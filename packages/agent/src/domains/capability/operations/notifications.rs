@@ -1,5 +1,6 @@
 //! Notification execute operation adapters.
 
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::{Deps, ok_result};
@@ -10,14 +11,16 @@ use crate::shared::server::errors::CapabilityError;
 pub(super) async fn notification_send(
     invocation: &Invocation,
     deps: &Deps,
+    operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let details = crate::domains::notifications::service::send_notification_value(
+    let details = crate::domains::notifications::service::send_notification_value_at(
         &notification_deps,
         invocation,
         &invocation.payload,
+        operation_at,
     )
     .await?;
     Ok(result(
@@ -74,14 +77,16 @@ pub(super) async fn notification_inspect(
 pub(super) async fn notification_mark_read(
     invocation: &Invocation,
     deps: &Deps,
+    operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let details = crate::domains::notifications::service::mark_notification_read_value(
+    let details = crate::domains::notifications::service::mark_notification_read_value_at(
         &notification_deps,
         invocation,
         &invocation.payload,
+        operation_at,
     )
     .await?;
     Ok(result(
@@ -94,14 +99,16 @@ pub(super) async fn notification_mark_read(
 pub(super) async fn notification_mark_all_read(
     invocation: &Invocation,
     deps: &Deps,
+    operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let details = crate::domains::notifications::service::mark_all_notifications_read_value(
+    let details = crate::domains::notifications::service::mark_all_notifications_read_value_at(
         &notification_deps,
         invocation,
         &invocation.payload,
+        operation_at,
     )
     .await?;
     Ok(result(

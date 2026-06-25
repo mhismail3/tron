@@ -7,7 +7,7 @@
 
 use std::time::Instant;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::Deps;
@@ -113,7 +113,8 @@ pub(crate) async fn execute_value(
         return result_value(replay_manifest(invocation, deps).await?);
     }
 
-    let started_at = Utc::now().to_rfc3339();
+    let operation_at = Utc::now();
+    let started_at = operation_at.to_rfc3339();
     let start = Instant::now();
     let mut trace_record = started_trace_record(invocation, deps, &operation, &started_at)?;
     deps.event_store
@@ -132,7 +133,7 @@ pub(crate) async fn execute_value(
         "primitive execute trace record started"
     );
 
-    let result = execute_operation(&operation, invocation, deps).await;
+    let result = execute_operation(&operation, invocation, deps, operation_at).await;
     match result {
         Ok(result) => {
             complete_trace_record(
@@ -194,6 +195,7 @@ async fn execute_operation(
     operation: &str,
     invocation: &Invocation,
     deps: &Deps,
+    operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
     Ok(match operation {
         "observe" => observe(invocation)?,
@@ -240,15 +242,17 @@ async fn execute_operation(
         "memory_status" => memory_status(invocation, deps).await?,
         "memory_list" => memory_list(invocation, deps).await?,
         "memory_inspect" => memory_inspect(invocation, deps).await?,
-        "device_register" => device_register(invocation, deps).await?,
-        "device_unregister" => device_unregister(invocation, deps).await?,
+        "device_register" => device_register(invocation, deps, operation_at).await?,
+        "device_unregister" => device_unregister(invocation, deps, operation_at).await?,
         "device_list" => device_list(invocation, deps).await?,
         "device_inspect" => device_inspect(invocation, deps).await?,
-        "notification_send" => notification_send(invocation, deps).await?,
+        "notification_send" => notification_send(invocation, deps, operation_at).await?,
         "notification_list" => notification_list(invocation, deps).await?,
         "notification_inspect" => notification_inspect(invocation, deps).await?,
-        "notification_mark_read" => notification_mark_read(invocation, deps).await?,
-        "notification_mark_all_read" => notification_mark_all_read(invocation, deps).await?,
+        "notification_mark_read" => notification_mark_read(invocation, deps, operation_at).await?,
+        "notification_mark_all_read" => {
+            notification_mark_all_read(invocation, deps, operation_at).await?
+        }
         "procedural_state_list" => procedural_state_list(invocation, deps).await?,
         "procedural_state_inspect" => procedural_state_inspect(invocation, deps).await?,
         "schedule_create" => schedule_create(invocation, deps).await?,

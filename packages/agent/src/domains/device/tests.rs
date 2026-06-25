@@ -1,10 +1,11 @@
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::contract::{
     DEVICE_LIFECYCLE_TOPIC, READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE,
 };
 use super::service::{
-    inspect_device_value, list_devices_value, register_device_value, unregister_device_value,
+    inspect_device_value, list_devices_value, register_device_value_at, unregister_device_value_at,
 };
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
 use crate::engine::{
@@ -14,6 +15,7 @@ use crate::engine::{
 use crate::shared::server::test_support::make_test_context;
 
 const APNS_TOKEN: &str = "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0fedcba9876543210";
+const DEFAULT_OPERATION_AT: &str = "2026-06-25T12:00:00Z";
 
 #[tokio::test]
 async fn register_records_hash_only_token_and_redacted_projection() {
@@ -159,6 +161,76 @@ async fn unregister_preserves_durable_state_and_default_list_hides_it() {
 }
 
 #[tokio::test]
+async fn device_timestamps_use_injected_operation_time() {
+    let fixture = Fixture::new("timestamps").await;
+    let registered_at = dt("2026-06-25T08:00:00Z");
+    let updated_at = dt("2026-06-25T08:05:00Z");
+    let unregistered_at = dt("2026-06-25T08:10:00Z");
+    let registered = fixture
+        .register_at("timestamps-register", register_payload(), registered_at)
+        .await;
+    let resource_id = registered["deviceRegistrationResourceId"].as_str().unwrap();
+
+    let inspection = fixture
+        .deps
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect registered")
+        .expect("device registration");
+    let payload = current_payload(&inspection);
+    assert_eq!(payload["createdAt"], json!(registered_at.to_rfc3339()));
+    assert_eq!(payload["updatedAt"], json!(registered_at.to_rfc3339()));
+    assert_eq!(
+        payload["apns"]["registeredAt"],
+        json!(registered_at.to_rfc3339())
+    );
+
+    let mut update_payload = register_payload();
+    update_payload["label"] = json!("primary phone");
+    fixture
+        .register_at("timestamps-update", update_payload, updated_at)
+        .await;
+    let inspection = fixture
+        .deps
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect updated")
+        .expect("device registration");
+    let payload = current_payload(&inspection);
+    assert_eq!(payload["createdAt"], json!(registered_at.to_rfc3339()));
+    assert_eq!(payload["updatedAt"], json!(updated_at.to_rfc3339()));
+    assert_eq!(
+        payload["apns"]["registeredAt"],
+        json!(updated_at.to_rfc3339())
+    );
+
+    fixture
+        .unregister_at(
+            "timestamps-unregister",
+            resource_id,
+            "deterministic test",
+            unregistered_at,
+        )
+        .await;
+    let inspection = fixture
+        .deps
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect unregistered")
+        .expect("device registration");
+    let payload = current_payload(&inspection);
+    assert_eq!(payload["createdAt"], json!(registered_at.to_rfc3339()));
+    assert_eq!(payload["updatedAt"], json!(unregistered_at.to_rfc3339()));
+    assert_eq!(
+        payload["unregistered"]["at"],
+        json!(unregistered_at.to_rfc3339())
+    );
+}
+
+#[tokio::test]
 async fn device_registration_rejects_broad_or_untrusted_authority() {
     let fixture = Fixture::new("authority").await;
     let agent_error = fixture
@@ -183,10 +255,11 @@ async fn device_registration_rejects_broad_or_untrusted_authority() {
         &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
         &fixture.session_id,
     );
-    let wildcard = register_device_value(
+    let wildcard = register_device_value_at(
         &fixture.deps,
         &wildcard_invocation,
         &wildcard_invocation.payload,
+        default_operation_at(),
     )
     .await
     .expect_err("wildcard denied")
@@ -283,8 +356,12 @@ impl Fixture {
     }
 
     async fn register(&self, key: &str, payload: Value) -> Value {
+        self.register_at(key, payload, default_operation_at()).await
+    }
+
+    async fn register_at(&self, key: &str, payload: Value, operation_at: DateTime<Utc>) -> Value {
         let invocation = self.write_invocation(key, payload, ActorKind::System);
-        register_device_value(&self.deps, &invocation, &invocation.payload)
+        register_device_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
             .await
             .expect("register device")
     }
@@ -301,19 +378,35 @@ impl Fixture {
         payload: Value,
     ) -> String {
         let invocation = self.write_invocation(key, payload, actor_kind);
-        register_device_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("register should fail")
-            .to_string()
+        register_device_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect_err("register should fail")
+        .to_string()
     }
 
     async fn unregister(&self, key: &str, resource_id: &str, reason: &str) -> Value {
+        self.unregister_at(key, resource_id, reason, default_operation_at())
+            .await
+    }
+
+    async fn unregister_at(
+        &self,
+        key: &str,
+        resource_id: &str,
+        reason: &str,
+        operation_at: DateTime<Utc>,
+    ) -> Value {
         let invocation = self.write_invocation(
             key,
             json!({"deviceRegistrationResourceId": resource_id, "reason": reason}),
             ActorKind::System,
         );
-        unregister_device_value(&self.deps, &invocation, &invocation.payload)
+        unregister_device_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
             .await
             .expect("unregister")
     }
@@ -485,6 +578,16 @@ fn register_payload() -> Value {
         "apnsEnvironment": "development",
         "apnsToken": APNS_TOKEN
     })
+}
+
+fn default_operation_at() -> DateTime<Utc> {
+    dt(DEFAULT_OPERATION_AT)
+}
+
+fn dt(value: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(value)
+        .expect("test timestamp")
+        .with_timezone(&Utc)
 }
 
 fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Value {

@@ -14,7 +14,7 @@
 //! |--------|---------|
 //! | `contract` | Worker id, stream topic, and authority scope constants |
 //! | `projection` | Bounded redacted device list/inspect projections |
-//! | `service` | Register, unregister, list, and inspect behavior |
+//! | `service` | Timestamp-injected register, unregister, list, and inspect behavior |
 //! | `support` | Record construction, authority guards, refs, and redaction helpers |
 //! | `validation` | Payload parsing, APNs environment/token, and bounds checks |
 //! | `tests` | Token redaction, authority, environment, and scope regressions |
@@ -25,7 +25,9 @@
 //! calls. Stored resources retain only full SHA-256 hash custody evidence;
 //! projections and lifecycle events never return raw tokens, raw-token
 //! prefixes/suffixes/previews, or full token hashes. Push remains opt-in and
-//! live APNs transport is disabled by default in this foundation.
+//! live APNs transport is disabled by default in this foundation. Register and
+//! unregister timestamps are supplied by the `capability::execute` adapter or
+//! explicit test seams; this domain does not sample wall-clock time directly.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

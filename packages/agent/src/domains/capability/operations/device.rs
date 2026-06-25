@@ -1,5 +1,6 @@
 //! Device execute operation adapters.
 
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::{Deps, ok_result};
@@ -10,14 +11,16 @@ use crate::shared::server::errors::CapabilityError;
 pub(super) async fn device_register(
     invocation: &Invocation,
     deps: &Deps,
+    operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
     let device_deps = crate::domains::device::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let details = crate::domains::device::service::register_device_value(
+    let details = crate::domains::device::service::register_device_value_at(
         &device_deps,
         invocation,
         &invocation.payload,
+        operation_at,
     )
     .await?;
     Ok(result(
@@ -30,14 +33,16 @@ pub(super) async fn device_register(
 pub(super) async fn device_unregister(
     invocation: &Invocation,
     deps: &Deps,
+    operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
     let device_deps = crate::domains::device::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let details = crate::domains::device::service::unregister_device_value(
+    let details = crate::domains::device::service::unregister_device_value_at(
         &device_deps,
         invocation,
         &invocation.payload,
+        operation_at,
     )
     .await?;
     Ok(result(

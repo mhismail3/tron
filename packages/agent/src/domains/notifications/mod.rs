@@ -12,9 +12,9 @@
 //! |--------|---------|
 //! | `authority` | Explicit notification/device grant and selector checks |
 //! | `contract` | Worker id, stream topic, and authority scope constants |
-//! | `delivery` | Durable `notification_delivery` evidence creation and readback |
+//! | `delivery` | Timestamp-injected durable `notification_delivery` evidence creation and readback |
 //! | `projection` | Bounded redacted inbox and delivery projections |
-//! | `service` | Send/list/inspect/mark-read/mark-all-read behavior |
+//! | `service` | Timestamp-injected send/list/inspect/mark-read/mark-all-read behavior |
 //! | `validation` | Request parsing, event-family, text, and retention bounds |
 //! | `tests` | Inbox, badge, delivery evidence, authority, and scope regressions |
 //!
@@ -24,6 +24,8 @@
 //! session or workspace. iOS can later render this server truth, but this domain
 //! does not create client-local-only state, APNs entitlements, permission
 //! prompts, hidden workers, background loops, or public `/engine` routes.
+//! Notification and delivery timestamps are supplied by `capability::execute` or
+//! explicit test seams; this domain does not sample wall-clock time directly.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

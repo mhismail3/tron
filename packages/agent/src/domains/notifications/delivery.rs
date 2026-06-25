@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -28,6 +28,7 @@ pub(super) async fn create_delivery_evidence(
     family: &str,
     push_requested: bool,
     badge_count: u64,
+    operation_at: &DateTime<Utc>,
 ) -> Result<Vec<Value>, CapabilityError> {
     if !push_requested {
         let record = create_delivery_resource(
@@ -43,6 +44,7 @@ pub(super) async fn create_delivery_evidence(
             false,
             badge_count,
             0,
+            operation_at,
         )
         .await?;
         return Ok(vec![record]);
@@ -63,6 +65,7 @@ pub(super) async fn create_delivery_evidence(
             true,
             badge_count,
             0,
+            operation_at,
         )
         .await?;
         return Ok(vec![record]);
@@ -86,6 +89,7 @@ pub(super) async fn create_delivery_evidence(
                 true,
                 badge_count,
                 index,
+                operation_at,
             )
             .await?,
         );
@@ -134,8 +138,9 @@ async fn create_delivery_resource(
     push_requested: bool,
     badge_count: u64,
     index: usize,
+    operation_at: &DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
-    let now = Utc::now().to_rfc3339();
+    let now = operation_at.to_rfc3339();
     let (device_id, environment, token_hash) = if let Some(inspection) = device {
         let (_, payload) = current_payload(inspection, "notification_delivery device")?;
         (
