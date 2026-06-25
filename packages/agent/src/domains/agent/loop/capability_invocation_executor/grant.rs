@@ -68,6 +68,8 @@ pub(super) async fn derive_capability_runtime_grant(
             "worker.lifecycle.read".to_owned(),
             "resource.read".to_owned(),
         ]);
+    } else if matches!(operation, "subagent_task_list" | "subagent_task_inspect") {
+        allowed_authority_scopes.extend(["subagents.read".to_owned(), "resource.read".to_owned()]);
     }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
@@ -95,6 +97,8 @@ pub(super) async fn derive_capability_runtime_grant(
         && let Some(kind) = worker_package_inspect_kind(effective_args)
     {
         allowed_resource_kinds.push(kind.to_owned());
+    } else if matches!(operation, "subagent_task_list" | "subagent_task_inspect") {
+        allowed_resource_kinds.push("subagent_task".to_owned());
     }
     let resource_selectors = allowed_resource_kinds
         .iter()

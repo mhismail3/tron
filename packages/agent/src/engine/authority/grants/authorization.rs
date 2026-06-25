@@ -212,6 +212,10 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "worker.lifecycle.read");
             push_unique(&mut scopes, "resource.read");
         }
+        Some("subagent_task_list" | "subagent_task_inspect") => {
+            push_unique(&mut scopes, "subagents.read");
+            push_unique(&mut scopes, "resource.read");
+        }
         _ => {}
     }
     scopes
@@ -274,6 +278,7 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("worker_package_inspect") => worker_package_inspect_kind(invocation)
             .map(|kind| vec![kind])
             .unwrap_or_default(),
+        Some("subagent_task_list" | "subagent_task_inspect") => vec!["subagent_task"],
         _ => Vec::new(),
     }
 }

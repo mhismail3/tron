@@ -169,7 +169,7 @@ async fn read_operations_are_scoped_and_require_explicit_selector() {
             "no-selector",
             &[READ_SCOPE, "resource.read"],
             &[SUBAGENT_TASK_KIND],
-            &["*"],
+            &["resource:subagent_task:other"],
             "none",
         )
         .await;

@@ -374,6 +374,7 @@ async fn ensure_internal_write_authority(
         operation,
     )?;
     require_explicit_grant_item(&grant.allowed_resource_kinds, SUBAGENT_TASK_KIND, operation)?;
+    require_explicit_subagent_task_selector(&grant.resource_selectors, operation)?;
     if grant.network_policy != "none" {
         return Err(policy(format!("{operation} requires networkPolicy none")));
     }
@@ -405,7 +406,22 @@ async fn inspect_read_grant(
 
 fn require_read_kind_selector(grant: &EngineGrant, operation: &str) -> Result<(), CapabilityError> {
     require_explicit_grant_item(&grant.allowed_resource_kinds, SUBAGENT_TASK_KIND, operation)?;
-    if !allows_explicit_selector(&grant.resource_selectors) {
+    require_explicit_subagent_task_selector(&grant.resource_selectors, operation)
+}
+
+fn require_explicit_subagent_task_selector(
+    selectors: &[String],
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    if let Some(selector) = selectors
+        .iter()
+        .find(|selector| is_broad_resource_selector(selector))
+    {
+        return Err(invalid(format!(
+            "{operation} rejects broad resource selector {selector}"
+        )));
+    }
+    if !allows_explicit_selector(selectors) {
         return Err(invalid(format!(
             "{operation} requires an explicit kind:{SUBAGENT_TASK_KIND} selector"
         )));
@@ -433,6 +449,16 @@ fn allows_explicit_selector(values: &[String]) -> bool {
     values
         .iter()
         .any(|selector| selector == &format!("kind:{SUBAGENT_TASK_KIND}"))
+}
+
+fn is_broad_resource_selector(selector: &str) -> bool {
+    let trimmed = selector.trim();
+    trimmed == "*"
+        || trimmed == "kind:*"
+        || trimmed == "resource:*"
+        || trimmed == "kind:"
+        || trimmed == "resource:"
+        || trimmed.ends_with(":*")
 }
 
 fn ensure_scope(
@@ -620,5 +646,38 @@ fn policy(message: impl Into<String>) -> CapabilityError {
         code: "SUBAGENT_TASK_POLICY_DENIED".to_owned(),
         message: message.into(),
         details: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subagent_task_selector_gate_rejects_broad_selectors_mixed_with_exact_kind() {
+        for (selector, expected) in [
+            ("*", "broad resource selector *"),
+            ("kind:*", "broad resource selector kind:*"),
+            ("resource:*", "broad resource selector resource:*"),
+        ] {
+            let selectors = vec![selector.to_owned(), "kind:subagent_task".to_owned()];
+            let error = require_explicit_subagent_task_selector(&selectors, "selector_test")
+                .expect_err("broad selector denied")
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn subagent_task_selector_gate_preserves_exact_non_wildcard_kind_behavior() {
+        let exact = vec!["kind:subagent_task".to_owned()];
+        require_explicit_subagent_task_selector(&exact, "selector_test")
+            .expect("exact kind selector accepted");
+
+        let missing = vec!["resource:subagent_task:other".to_owned()];
+        let error = require_explicit_subagent_task_selector(&missing, "selector_test")
+            .expect_err("exact kind selector required")
+            .to_string();
+        assert!(error.contains("kind:subagent_task"), "{error}");
     }
 }

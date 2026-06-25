@@ -199,6 +199,165 @@ async fn worker_package_inspect_runtime_grant_authorizes_only_resource_id_kind()
     );
 }
 
+#[tokio::test]
+async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "subagent_task_list",
+        "limit": 10,
+        "idempotencyKey": "subagent-task-list-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_subagent_task_runtime_grant_is_read_only(&grant);
+}
+
+#[tokio::test]
+async fn subagent_task_inspect_runtime_grant_authorizes_only_read_projection_kind() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "subagent_task_inspect",
+        "subagentTaskResourceId": "subagent_task:runtime-grant",
+        "idempotencyKey": "subagent-task-inspect-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_subagent_task_runtime_grant_is_read_only(&grant);
+}
+
+#[tokio::test]
+async fn unsupported_subagent_task_operation_does_not_gain_lifecycle_authority() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "subagent_task_create",
+        "idempotencyKey": "subagent-task-create-no-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    for forbidden_scope in [
+        "subagents.read",
+        "subagents.write",
+        "resource.read",
+        "resource.write",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "unsupported subagent operation must not include {forbidden_scope}"
+        );
+    }
+    assert!(
+        !grant
+            .allowed_resource_kinds
+            .contains(&"subagent_task".to_owned())
+    );
+    assert!(
+        !grant
+            .resource_selectors
+            .contains(&"kind:subagent_task".to_owned())
+    );
+}
+
+fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::EngineGrant) {
+    assert_eq!(grant.network_policy, "none");
+    for scope in ["subagents.read", "resource.read"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "subagent task read grant should include {scope}"
+        );
+    }
+    for forbidden_scope in [
+        "subagents.write",
+        "resource.write",
+        "worker.lifecycle.read",
+        "worker.lifecycle.write",
+        "web.read",
+        "web.write",
+        "catalog.write",
+        "mcp.write",
+        "tool.execute",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "subagent task read grant must not include {forbidden_scope}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_resource_kinds,
+        vec!["agent_state".to_owned(), "subagent_task".to_owned()]
+    );
+    assert_eq!(
+        grant.resource_selectors,
+        vec![
+            "kind:agent_state".to_owned(),
+            "kind:subagent_task".to_owned()
+        ]
+    );
+    for forbidden_kind in [
+        "worker_package",
+        "worker_launch_attempt",
+        "web_source",
+        "web_robots_policy",
+        "tool_source_proposal",
+        "tool_source_conformance_report",
+    ] {
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&forbidden_kind.to_owned()),
+            "subagent task read grant must not include kind {forbidden_kind}"
+        );
+        assert!(
+            !grant
+                .resource_selectors
+                .contains(&format!("kind:{forbidden_kind}")),
+            "subagent task read grant must not include selector kind:{forbidden_kind}"
+        );
+    }
+    for forbidden_capability in [
+        "subagents::create_task",
+        "subagents::update_task",
+        "worker_lifecycle::launch_worker",
+        "job::start",
+        "process::run",
+        "mcp::start_server",
+        "mcp::restart_server",
+        "tool::execute",
+        "catalog::register",
+    ] {
+        assert!(
+            !grant
+                .allowed_capabilities
+                .contains(&forbidden_capability.to_owned()),
+            "subagent task read grant must not include capability {forbidden_capability}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec![
+            "capability::execute".to_owned(),
+            "state::get".to_owned(),
+            "state::list".to_owned(),
+            "state::set".to_owned(),
+        ]
+    );
+}
+
 fn assert_worker_package_runtime_grant_is_read_only_for_kind(
     grant: &crate::engine::EngineGrant,
     expected_kind: &str,
