@@ -2292,3 +2292,77 @@ skills, and deployment automation remain deferred.
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git diff --cached --check` | exit 0 | No whitespace errors were reported in the staged diff. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+
+### Slice 15A Implementation Candidate: Program Execution Resource Foundation
+
+Discovery thread `019f00d8-de03-75c3-b9a0-8f84e83866e3` selected Slice 15A
+with exact final status `implementation may start` from baseline
+`origin/main@9ed77be8e2bfc8ad7b8e7b3f05d2331889a2416a`.
+
+Implementation branch:
+`codex/phase-2-slice-15a-program-execution-resource-foundation`.
+
+Baseline HEAD:
+`9ed77be8e2bfc8ad7b8e7b3f05d2331889a2416a`
+
+Implementation-candidate scope:
+
+- Adds `domains/program_execution` as the server owner for durable
+  `program_execution_record` resources containing content-free program execution
+  metadata only: runtime/language identifiers, resource-limit policy,
+  I/O-envelope metadata, source/input/output refs or fingerprints, retention
+  metadata, trace/replay refs, lifecycle evidence, and fingerprinted
+  idempotency evidence.
+- Adds the built-in `program_execution_record` resource definition with
+  append-only versions, active lifecycle state, metadata-only materialization,
+  and explicit program-execution/resource capability requirements.
+- Adds execute-only operation values `program_execution_record`,
+  `program_execution_list`, and `program_execution_inspect` behind the existing
+  single `capability::execute` primitive.
+- Requires trusted current-session/workspace context, exact non-wildcard
+  `program_execution_record` resource selectors including
+  `programExecutionResourceId`, `program_execution.read` /
+  `program_execution.write` plus resource scopes, idempotency for writes, and
+  `networkPolicy: none`.
+- Keeps Slice 15A narrow: no raw code, no raw stdin/stdout/stderr, no command
+  strings or shell snippets, no package-manager/runtime install directives, no
+  embedded runtime execution, no subprocess/job launch, no process control, no
+  file writes, no live network behavior, no notebook/PTY surface, no result
+  merge, no native iOS UI, and no public `/engine` expansion.
+
+Implementation-candidate validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | exit 0 | Rust sources were formatted during implementation. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml program_execution --lib` | exit 0 | Focused program-execution domain, validation, projection, idempotency, authorization scanner, and runtime-grant tests passed before static-inventory closeout. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants tracked_files_have_rearchitecture_inventory_rows -- --nocapture` | exit 0 | HRA file inventory covered the new program-execution files after Slice 15A inventory rows were added. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants primitive_code_cleanup_inventory_covers_tracked_files -- --nocapture` | exit 0 | PCC file inventory covered the new program-execution files after Slice 15A inventory rows were added. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Slice 15A Rust sources remained formatted after docs/static-inventory closeout. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml program_execution --lib -- --nocapture` | exit 0 | Focused program-execution tests passed after final docs/static-inventory closeout. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC gate passed with Slice 15A recorded as implementation candidate, not accepted/current baseline. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | IARM gate passed; Slice 15A added no native iOS UI. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB gate passed, including program-execution security-marker inventory coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | HRA gate passed with program-execution ownership rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | TMB gate passed with program-execution boundary rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC gate passed after recording the Slice 15A authorization-scanner budget obligation and refreshing retention summaries. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC gate passed with program-execution retained-file rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI gate passed with Slice 15A evidence and scorecard wording. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | CSD gate passed; Slice 15A added no runtime execution, subprocess/job launch, or new scheduling primitive. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | PMBD gate passed after provider instruction/schema text changed for program-execution operations. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | Public protocol gate passed; Slice 15A added no public `/engine` expansion. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants -- --nocapture` | exit 0 | Performance/resource governance gate passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; the failure list contained no program-execution findings. |
+| `rg -n "Utc::now|chrono::Utc::now|SystemTime::now|Instant::now|thread_rng|random" packages/agent/src/domains/program_execution packages/agent/src/domains/capability/operations/program_execution.rs packages/agent/src/engine/durability/resources/program_execution_definitions.rs packages/agent/src/domains/capability/program_execution_contract.rs packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_program_execution_tests.rs` | exit 1 | Direct Slice 15A entropy scan found no matches in program-execution implementation files. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+
+Deferred scope remains unchanged: embedded JS/Python/Wasm runtimes, runtime
+execution, subprocess/job launch, package installation, shell execution,
+process control, file writes, live network behavior, notebook/PTY surfaces,
+result merge, native iOS UI, public `/engine` expansion, repo-managed skills,
+and deployment automation remain deferred.

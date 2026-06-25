@@ -32,8 +32,8 @@ use crate::domains::registration::worker::{
 use crate::domains::{
     agent, approval, auth, blob, capability, catalog_discovery, device, filesystem, git,
     import_history, import_preview, jobs, logs, media, memory, message, model, notifications,
-    repository_tree, scheduler, session, settings, subagents, system, tool_sources, transcription,
-    update_diagnostics, web, worker_lifecycle,
+    program_execution, repository_tree, scheduler, session, settings, subagents, system,
+    tool_sources, transcription, update_diagnostics, web, worker_lifecycle,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -70,6 +70,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         import_history::worker_module(&deps)?,
         repository_tree::worker_module(&deps)?,
         import_preview::worker_module(&deps)?,
+        program_execution::worker_module(&deps)?,
         update_diagnostics::worker_module(&deps)?,
         memory::worker_module(&deps)?,
         jobs::worker_module(&deps)?,

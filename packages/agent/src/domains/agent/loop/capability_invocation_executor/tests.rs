@@ -24,6 +24,8 @@ mod grant_import_history_tests;
 mod grant_import_preview_tests;
 #[path = "grant_notification_device_tests.rs"]
 mod grant_notification_device_tests;
+#[path = "grant_program_execution_tests.rs"]
+mod grant_program_execution_tests;
 #[path = "grant_repository_tree_tests.rs"]
 mod grant_repository_tree_tests;
 #[path = "grant_tests.rs"]

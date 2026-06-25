@@ -114,6 +114,21 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "program_execution_list" | "program_execution_inspect"
+    ) {
+        allowed_authority_scopes.extend([
+            "program_execution.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if operation == "program_execution_record" {
+        allowed_authority_scopes.extend([
+            "program_execution.read".to_owned(),
+            "program_execution.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_authority_scopes.extend([
@@ -208,6 +223,11 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.push("import_preview".to_owned());
     } else if matches!(
         operation,
+        "program_execution_record" | "program_execution_list" | "program_execution_inspect"
+    ) {
+        allowed_resource_kinds.push("program_execution_record".to_owned());
+    } else if matches!(
+        operation,
         "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_resource_kinds.push("update_diagnostic_record".to_owned());
@@ -287,6 +307,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "import_preview_inspect"
         && let Some(resource_id) = effective_args
             .get("importPreviewResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "program_execution_inspect"
+        && let Some(resource_id) = effective_args
+            .get("programExecutionResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

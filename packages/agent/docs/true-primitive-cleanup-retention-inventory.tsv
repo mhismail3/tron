@@ -1883,3 +1883,14 @@ packages/agent/src/domains/import_preview/service.rs	implementation	import_previ
 packages/agent/src/domains/import_preview/tests.rs	test	test_harness	TPC-10/P2AER-S14E	focused Slice 14E import-preview bounds redaction retention resource authority scope lifecycle path and idempotency coverage
 packages/agent/src/domains/import_preview/validation.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview raw-payload unsafe-path refs idempotency count and retention validation helpers
 packages/agent/src/engine/durability/resources/import_preview_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14E	built-in import_preview resource schema
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_program_execution_tests.rs	test	test_harness	TPC-10/P2AER-S15A	focused Slice 15A implementation-candidate program-execution runtime grant regression coverage
+packages/agent/src/domains/capability/program_execution_contract.rs	implementation	capability_execute	TPC-10/P2AER-S15A	program-execution request schema helper split out of the broad capability contract file
+packages/agent/src/domains/capability/operations/program_execution.rs	implementation	capability_execute	TPC-10/P2AER-S15A	provider execute adapter for redacted durable program_execution_record record list and inspect operations
+packages/agent/src/domains/program_execution/authority.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
+packages/agent/src/domains/program_execution/contract.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/program_execution/mod.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution domain docs and registration boundary for backend-only content-free execution metadata foundation
+packages/agent/src/domains/program_execution/projection.rs	implementation	program_execution	TPC-10/P2AER-S15A	bounded redacted program-execution list and inspect projection owner
+packages/agent/src/domains/program_execution/service.rs	implementation	program_execution	TPC-10/P2AER-S15A	durable program-execution record list and inspect operation owner
+packages/agent/src/domains/program_execution/tests.rs	test	test_harness	TPC-10/P2AER-S15A	focused Slice 15A program-execution bounds redaction retention resource authority scope lifecycle selector and idempotency coverage
+packages/agent/src/domains/program_execution/validation.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution raw-code raw-IO command path secret idempotency and retention validation helpers
+packages/agent/src/engine/durability/resources/program_execution_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S15A	built-in program_execution_record resource schema

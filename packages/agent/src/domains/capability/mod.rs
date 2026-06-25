@@ -29,6 +29,11 @@
 //! import-history and repository-tree refs with bounded path metadata and
 //! fingerprints, without raw import payloads, file contents, import execution,
 //! visualization, or git mutation.
+//! Program-execution operations are resource-backed metadata operations: they
+//! record, list, and inspect content-free `program_execution_record` records
+//! with runtime/language identifiers, resource-limit policy, I/O-envelope refs,
+//! fingerprints, and lifecycle evidence, without storing code or I/O bytes and
+//! without launching runtimes, subprocesses, package managers, or networks.
 //! Update-diagnostics operations are resource-backed metadata operations: they
 //! record, list, and inspect bounded `update_diagnostic_record` signed-release
 //! and provenance facts without live update checks, package bytes, install or
@@ -66,6 +71,7 @@ mod import_history_contract;
 mod import_preview_contract;
 mod media_contract;
 mod operations;
+mod program_execution_contract;
 mod repository_tree_contract;
 mod scheduler_contract;
 mod update_diagnostics_contract;

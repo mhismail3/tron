@@ -115,6 +115,7 @@ next focused decomposition pass brings them back under the TPC hard targets.
 | `packages/agent/src/domains/capability/contract.rs` | capability contract owner | Phase 2 Slice 13 extended the single provider-visible `capability::execute` schema with durable device and notification operation fields while preserving provider portability. | 898 / 750 | Split operation-specific schema field builders into focused contract modules before adding more execute operations. |
 | `packages/agent/src/domains/media/tests.rs` | media test owner | Slice 14A idempotency redaction fix adds durable-payload, provider-projection, and lifecycle leak regressions for media artifact resources. | 831 / 800 | Split idempotency/redaction regressions into focused media test modules before adding more media resource coverage. |
 | `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` | IARM invariant owner | Historical iOS affordance map closure guards remain broad after retrospective hardening. | 1106 / 800 | Split helper parsing, physical-device, queue/phase, APNs defer, and stale-wording guards into modules before extending IARM coverage. |
+| `packages/agent/src/engine/authority/grants/authorization.rs` | engine authority owner | Slice 15A added another explicit resource selector scanner for `programExecutionResourceId` while preserving the single generic authorization path. | 799 / 750 | Split operation/resource selector extraction helpers into owner modules before adding more execute-resource families. |
 
 ## Static Gates
 
