@@ -18,6 +18,8 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "patch_proposal",
         "execution_output",
         "agent_result",
+        "schedule",
+        "schedule_run",
     ] {
         assert!(
             definitions

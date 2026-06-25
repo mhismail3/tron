@@ -1,25 +1,9 @@
 //! Primitive execute operations for the bare engine loop.
 //!
-//! `capability::execute` is the only model-facing tool on this branch. It does
-//! not route, bind, approve, or execute catalog targets. It performs one direct
-//! host primitive operation and returns a model-visible observation with engine
-//! details for audit. Catalog search/inspect/conformance operations are
-//! discovery-only: they inspect metadata and write only catalog-discovery
-//! evidence. Memory operations are read-only audit views over the resource
-//! memory contract and return redacted status/list/inspect facts only.
-//! Filesystem package operations are bounded working-directory reads/searches
-//! plus preview-first write/patch operations with resource evidence. Job
-//! operations expose a durable non-interactive process lifecycle over the jobs
-//! domain while leaving `process_run` as the short synchronous primitive.
-//! `replay_manifest` is the only read-only operation that bypasses trace-record
-//! creation; tracing that read would mutate the manifest it returns.
-//! The operation gate is intentionally stricter than the provider schema:
-//! `execute` accepts only trusted agent/system runtime contexts, rejects
-//! bootstrap authority grants, requires a derived least-privilege grant for
-//! every effectful call, resolves file/process roots from trusted runtime
-//! metadata, denies system-scoped state, and keeps trace/log/replay/job reads
-//! bound to the current session. Process primitives additionally inspect the
-//! active grant and run only when it carries `networkPolicy none`.
+//! `capability::execute` is the only model-facing tool on this branch. It
+//! performs one direct host primitive operation, records trace evidence, rejects
+//! bootstrap grants, requires least-privilege authority, and keeps delegated
+//! operations bound to trusted runtime context.
 
 use std::time::Instant;
 
@@ -43,6 +27,7 @@ mod memory;
 mod procedural;
 mod process;
 mod replay;
+mod scheduler;
 mod state;
 mod subagents;
 mod tool_sources;
@@ -69,6 +54,10 @@ use memory::{memory_inspect, memory_list, memory_status};
 use procedural::{procedural_state_inspect, procedural_state_list};
 use process::process_run;
 use replay::replay_manifest;
+use scheduler::{
+    is_scheduler_operation, requires_scheduler_idempotency, schedule_cancel, schedule_create,
+    schedule_fire_due, schedule_inspect, schedule_list,
+};
 use state::{state_get, state_list, state_set};
 use subagents::{
     subagent_cancel, subagent_launch, subagent_result, subagent_status, subagent_task_inspect,
@@ -258,6 +247,9 @@ fn validate_execute_context(
     ) {
         require_current_session(invocation, operation)?;
     }
+    if is_scheduler_operation(operation) {
+        require_current_session(invocation, operation)?;
+    }
     match operation {
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
         "trace_list"
@@ -288,6 +280,9 @@ fn validate_execute_context(
         | "web_source_archive"
         | "subagent_launch"
         | "subagent_cancel" => require_idempotency_key(invocation, operation),
+        _ if requires_scheduler_idempotency(operation) => {
+            require_idempotency_key(invocation, operation)
+        }
         _ => Ok(()),
     }
 }
@@ -388,6 +383,11 @@ async fn execute_operation(
         "memory_inspect" => memory_inspect(invocation, deps).await?,
         "procedural_state_list" => procedural_state_list(invocation, deps).await?,
         "procedural_state_inspect" => procedural_state_inspect(invocation, deps).await?,
+        "schedule_create" => schedule_create(invocation, deps).await?,
+        "schedule_list" => schedule_list(invocation, deps).await?,
+        "schedule_inspect" => schedule_inspect(invocation, deps).await?,
+        "schedule_cancel" => schedule_cancel(invocation, deps).await?,
+        "schedule_fire_due" => schedule_fire_due(invocation, deps).await?,
         "tool_source_list" => tool_source_list(invocation, deps).await?,
         "tool_source_inspect" => tool_source_inspect(invocation, deps).await?,
         "subagent_launch" => subagent_launch(invocation, deps).await?,
@@ -406,7 +406,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

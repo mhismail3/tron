@@ -2334,6 +2334,18 @@ Docs/static updates: README event/database/settings, CSD inventory.
 User decisions: supported schedule grammar, timezone behavior, missed-run
 policy, and default notification path.
 
+Implementation status: accepted Slice 12 adds durable `schedule` and
+`schedule_run` resources, `domains/scheduler`, execute-only
+`schedule_create`, `schedule_list`, `schedule_inspect`, `schedule_cancel`, and
+`schedule_fire_due`, explicit non-wildcard target selectors, authority records,
+resource leases during due evaluation, deterministic clock-injection tests,
+explicit provider-visible `evaluationAt`, missed-run skip/catch-up/fire-once policy,
+cancellation terminality,
+retention/bounded projections, and `scheduler.lifecycle` evidence. This slice
+does not add hidden cron loops, direct feature execution, APNs/device
+notification delivery, public scheduler APIs, native fixed schedule UI,
+autonomous planning, or result merge.
+
 ### Slice 13: Notifications, APNs, Device Broker, And Inbox
 
 Objective: restore notification delivery only after server-owned device and

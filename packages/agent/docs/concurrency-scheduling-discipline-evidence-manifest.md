@@ -49,6 +49,7 @@ and
 | `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | exit 0 | XcodeGen produced no tracked project drift. |
 | `git diff --check` | exit 0 | Whitespace check passed. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No ignored tracked artifacts were reported. |
+| Slice 12 scheduler coverage `cargo test --manifest-path packages/agent/Cargo.toml scheduler::tests -- --nocapture` | exit 0 | Scheduler due evaluation is explicit request-scoped work with an injected clock in tests; no production timer loop or hidden background worker was added. |
 
 ## Closed Findings
 

@@ -1162,3 +1162,14 @@ packages/agent/src/domains/procedural/projection_scalar_tests.rs	rust	test-suppo
 packages/agent/src/domains/procedural/static_tests.rs	rust	test-support	agent:procedural	test-only procedural resource schema provider-visible non-goal and repo-managed skill absence proofs; production code must not depend on it
 packages/agent/src/domains/procedural/tests.rs	rust	test-support	agent:procedural	test-only procedural authority scope kind schema lifecycle bounds redaction and non-goal regressions; production code must not depend on it
 packages/agent/src/engine/durability/resources/procedural_definitions.rs	rust	implementation	rust:engine	owner-private procedural_record resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/scheduler.rs	rust	adapter	rust:capability	execute primitive may call scheduler service methods for schedule records and explicit due firing; no hidden loop feature execution notification delivery or result merge routing
+packages/agent/src/domains/capability/scheduler_contract.rs	rust	contract	rust:capability	scheduler request schema helper keeps schedule-specific provider fields out of the broad capability contract module
+packages/agent/src/domains/scheduler/mod.rs	rust	facade	agent:scheduler	domain root owns durable scheduler docs registration and boundary; behavior stays in owner modules
+packages/agent/src/domains/scheduler/errors.rs	rust	implementation	agent:scheduler	owner-private scheduler error mapping helpers
+packages/agent/src/domains/scheduler/planning.rs	rust	implementation	agent:scheduler	owner-private deterministic trigger due planning missed-run policy and next-fire computation; no engine mutation or timer loop
+packages/agent/src/domains/scheduler/projection.rs	rust	implementation	agent:scheduler	owner-private bounded schedule and schedule_run projection helpers; callers enter through authorized service methods
+packages/agent/src/domains/scheduler/service.rs	rust	implementation	agent:scheduler	owner-private durable schedule create cancel inspect list and explicit due-fire service using engine resources leases streams and scoped authority
+packages/agent/src/domains/scheduler/support.rs	rust	implementation	agent:scheduler	owner-private scheduler validation bounds authority scope resource refs and lifecycle stream helpers
+packages/agent/src/domains/scheduler/tests.rs	rust	test-support	agent:scheduler	test-only scheduler clock injection missed-run cancellation authority schema and multi-schedule firing regressions; production code must not depend on it
+packages/agent/src/domains/scheduler/types.rs	rust	implementation	agent:scheduler	owner-private schedule and schedule_run record types
+packages/agent/src/engine/durability/resources/scheduler_definitions.rs	rust	implementation	rust:engine	owner-private schedule and schedule_run resource definition module; callers use engine resource facade

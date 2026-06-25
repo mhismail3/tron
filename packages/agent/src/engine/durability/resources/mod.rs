@@ -21,6 +21,7 @@ mod goal_definitions;
 mod job_definitions;
 mod memory_definitions;
 mod procedural_definitions;
+mod scheduler_definitions;
 mod store;
 mod subagent_definitions;
 mod tool_source_definitions;

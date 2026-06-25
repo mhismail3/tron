@@ -22,6 +22,8 @@ use crate::engine::{
     EffectClass, IdempotencyContract, Result as EngineResult, RiskLevel, VisibilityScope,
 };
 
+use super::scheduler_contract;
+
 pub(crate) const STREAM_TOPICS: &[&str] = &["capability.runtime"];
 
 pub(crate) const EXECUTE_FUNCTION_ID: &str = "capability::execute";
@@ -56,8 +58,8 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, inspect inert external tool-source proposal provenance, record controlled subagent launch/status/result/cancel lifecycle evidence, inspect bounded/redacted worker package lifecycle records, inspect inert procedural state provenance records, inspect agent trace/log records, and inspect catalog discovery evidence. ",
-                    "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Tool-source, worker-package, and procedural-state inspection operations are read-only and never install, activate, trigger, inject prompts, learn behavior, launch, register, or execute proposed external tools, packages, skills, rules, hooks, or procedures; subagent lifecycle operations record bounded placeholder worker/job evidence without starting workers, jobs, tools, network, packages, or result merges. ",
+                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, create/list/inspect/cancel/fire due durable schedules and schedule-run records, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, inspect inert external tool-source proposal provenance, record controlled subagent launch/status/result/cancel lifecycle evidence, inspect bounded/redacted worker package lifecycle records, inspect inert procedural state provenance records, inspect agent trace/log records, and inspect catalog discovery evidence. ",
+                    "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Scheduler operations create explicit durable records and never execute feature work directly; tool-source, worker-package, and procedural-state inspection operations are read-only and never install, activate, trigger, inject prompts, learn behavior, launch, register, or execute proposed external tools, packages, skills, rules, hooks, or procedures; subagent lifecycle operations record bounded placeholder worker/job evidence without starting workers, jobs, tools, network, packages, or result merges. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -77,7 +79,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(
@@ -188,6 +190,11 @@ fn execute_model_request_schema() -> serde_json::Value {
     );
     insert_string(
         &mut properties,
+        "scheduleResourceId",
+        "Durable schedule resource id for schedule_inspect or schedule_cancel.",
+    );
+    insert_string(
+        &mut properties,
         "objective",
         "Bounded objective text for goal_create.",
     );
@@ -211,6 +218,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "expiresAt",
         "Optional RFC3339 expiry timestamp for question_create.",
     );
+    scheduler_contract::insert_scheduler_request_fields(&mut properties);
     properties.insert(
         "allowFreeForm".to_owned(),
         json!({"type": "boolean", "description": "Whether question_create accepts free-form answers when options are also supplied."}),
@@ -548,6 +556,11 @@ mod tests {
         assert!(operations.contains("question_list"));
         assert!(operations.contains("question_inspect"));
         assert!(operations.contains("question_answer"));
+        assert!(operations.contains("schedule_create"));
+        assert!(operations.contains("schedule_list"));
+        assert!(operations.contains("schedule_inspect"));
+        assert!(operations.contains("schedule_cancel"));
+        assert!(operations.contains("schedule_fire_due"));
         assert!(operations.contains("web_fetch"));
         assert!(operations.contains("web_robots_check"));
         assert!(operations.contains("web_source_list"));
@@ -606,6 +619,8 @@ mod tests {
         assert!(!operations.contains("reminder"));
         assert!(!operations.contains("notification"));
         assert!(schema["properties"].get("branchName").is_some());
+        assert!(schema["properties"].get("scheduleResourceId").is_some());
+        assert!(schema["properties"].get("target").is_some());
         assert!(schema["properties"].get("maxBranches").is_some());
         assert!(schema["properties"].get("maxBranchBytes").is_some());
         assert!(schema["properties"].get("goalResourceId").is_some());
@@ -667,7 +682,12 @@ mod tests {
         assert!(schema["properties"].get("maxResponseBytes").is_some());
         assert!(schema["properties"].get("maxRobotsBytes").is_some());
         assert!(schema["properties"].get("maxRedirects").is_some());
-        assert!(schema["properties"].get("target").is_none());
+        assert!(
+            schema["properties"]["target"]["description"]
+                .as_str()
+                .expect("target description")
+                .contains("scheduler records runs only")
+        );
         assert!(schema["properties"].get("contractId").is_none());
         assert!(schema["properties"].get("functionId").is_none());
         assert!(schema["properties"].get("autonomy").is_none());

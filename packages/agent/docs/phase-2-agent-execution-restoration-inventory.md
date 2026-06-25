@@ -86,6 +86,17 @@ Worktree graph resources, arbitrary checkout, branch deletion/rename,
 merges/rebases/resets, stash/clean, fetch/pull/push, PR handoff, conflict
 resolution workflows, and native SourceChanges remain deferred.
 
+Accepted Slice 12 adds the scheduler backend foundation for BPRC-FEATURE-17:
+`domains/scheduler`, built-in `schedule` and `schedule_run` resources,
+`scheduler.lifecycle` stream evidence, and execute-only `schedule_create`,
+`schedule_list`, `schedule_inspect`, `schedule_cancel`, and
+`schedule_fire_due` operations. The scheduler owns UTC-instant trigger
+evaluation, explicit provider-visible `evaluationAt`, timezone policy labels,
+missed-run policy, cancellation, run retention, leases, trace/replay refs, and
+bounded projections; feature domains still own what scheduled work does, and
+hidden cron loops, APNs/device notification delivery, public scheduler APIs,
+native fixed schedule UI, and result merge remain deferred.
+
 It also maps every BPRC backlog row:
 
 - `BPRC-FEATURE-01`: capability discovery, routing, and intent execution.

@@ -27,6 +27,7 @@
 //! | `tool_sources` | Inert external tool-source proposal and preflight evidence |
 //! | `subagents` | Inert subagent task lifecycle evidence |
 //! | `procedural` | Inert skill/rule/hook/procedure provenance inspection evidence |
+//! | `scheduler` | Durable schedules, missed-run policy, cancellation, and run records |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
@@ -98,6 +99,7 @@ pub mod message;
 pub mod model;
 pub mod procedural;
 pub mod registration;
+pub mod scheduler;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;

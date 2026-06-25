@@ -1843,6 +1843,48 @@ Slice 10B accepted evidence:
   login scope, native fixed procedural UI, result merge into conversation
   state and disable/edit/delete behavior.
 
+## Slice 12 Implementation Evidence
+
+Branch:
+`codex/phase-2-slice-12-scheduling-reminders-automations-background-work`
+
+Baseline HEAD:
+`20f24624913e1b9a8ffe9c4ecdf3a0180a5918e5`
+
+Scope implemented:
+
+- Added `domains/scheduler` as the owner for durable scheduling records,
+  missed-run policy, explicit due evaluation, cancellation, retention, and
+  bounded list/inspect projections.
+- Added built-in `schedule` and `schedule_run` resource schemas with lifecycle
+  states, authority requirements, retention/redaction rules, and run-record
+  link relations.
+- Added `schedule_create`, `schedule_list`, `schedule_inspect`,
+  `schedule_cancel`, and `schedule_fire_due` operation values behind the
+  existing single `capability::execute` primitive.
+- Required trusted current-session/workspace context, explicit
+  `scheduler.read`/`scheduler.write`/`scheduler.fire` scopes as appropriate,
+  idempotency for writes/fire, explicit `evaluationAt` for provider-visible
+  fire-due evaluation, bounded non-wildcard target resource kind/action/selectors,
+  and resource leases while mutating due schedules.
+- Added deterministic `Clock` injection for fire-due evaluation and focused
+  tests for catch-up firing, missed-run skip evidence, cancellation terminality,
+  missing authority, wildcard target rejection, and resource schema
+  registration.
+- Kept Slice 12 narrow: no hidden cron tables, no uncontrolled background loop,
+  no feature-work execution, no process/worker/network launch, no APNs/device
+  notification delivery, no public scheduler API expansion, no native fixed iOS
+  UI, no autonomous planning, and no result merge into conversation state.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust crate checked after scheduler/resource/capability wiring; only pre-existing warning classes remained. |
+| `cargo test --manifest-path packages/agent/Cargo.toml scheduler::tests -- --nocapture` | exit 0 | 6 scheduler tests passed: deterministic clock injection, interval catch-up, missed-run skip evidence, multi-schedule run-id protection, cancellation, authority/selector denial, and schema registration. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after adding scheduler authority/resource inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 101 | Scheduler `Utc::now()` violations were removed. Remaining DRC failure is the known non-scheduler allow-list gap in `domains/goals`, `domains/web`, and `domains/tool_sources/tool_sources_inspect_tests.rs`. |
+
 ## Validation Log
 
 | Command | Result | Evidence |

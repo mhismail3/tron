@@ -1795,3 +1795,14 @@ packages/agent/src/domains/procedural/projection_scalar_tests.rs	test	test_harne
 packages/agent/src/domains/procedural/static_tests.rs	test	test_harness	TPC-10/P2AER-S11A	static Slice 11A procedural resource schema provider non-goal and repo-managed skill absence proof
 packages/agent/src/domains/procedural/tests.rs	test	test_harness	TPC-10/P2AER-S11A	focused Slice 11A procedural authority scope schema lifecycle bounds redaction and non-goal regression coverage
 packages/agent/src/engine/durability/resources/procedural_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S11A	built-in procedural_record resource kind and schema definition
+packages/agent/src/domains/capability/operations/scheduler.rs	implementation	capability_execute	TPC-10/P2AER-S12	provider execute adapter for durable scheduler record and explicit fire-due operations
+packages/agent/src/domains/capability/scheduler_contract.rs	implementation	capability_execute	TPC-10/P2AER-S12	scheduler request schema helper split out of the broad capability contract
+packages/agent/src/domains/scheduler/mod.rs	implementation	scheduler	TPC-10/P2AER-S12	scheduler domain docs and registration boundary
+packages/agent/src/domains/scheduler/errors.rs	implementation	scheduler	TPC-10/P2AER-S12	scheduler error helper
+packages/agent/src/domains/scheduler/planning.rs	implementation	scheduler	TPC-10/P2AER-S12	deterministic trigger due planning and missed-run policy helper
+packages/agent/src/domains/scheduler/projection.rs	implementation	scheduler	TPC-10/P2AER-S12	bounded schedule and schedule_run projection helper
+packages/agent/src/domains/scheduler/service.rs	implementation	scheduler	TPC-10/P2AER-S12	durable scheduler service with authority checks leases cancellation and explicit run records
+packages/agent/src/domains/scheduler/support.rs	implementation	scheduler	TPC-10/P2AER-S12	scheduler validation bounds authority and lifecycle event support
+packages/agent/src/domains/scheduler/tests.rs	test	test_harness	TPC-10/P2AER-S12	focused Slice 12 scheduler regression coverage
+packages/agent/src/domains/scheduler/types.rs	implementation	scheduler	TPC-10/P2AER-S12	schedule and schedule_run record types
+packages/agent/src/engine/durability/resources/scheduler_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S12	built-in schedule and schedule_run resource schemas

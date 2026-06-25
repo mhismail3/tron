@@ -1840,3 +1840,14 @@ packages/agent/src/domains/procedural/projection_scalar_tests.rs	retain	procedur
 packages/agent/src/domains/procedural/static_tests.rs	retain	procedural test owner	PCC-10/P2AER-S11A	Slice 11A static tests for resource/schema/provider non-goals and repo-managed skill absence.
 packages/agent/src/domains/procedural/tests.rs	retain	procedural test owner	PCC-10/P2AER-S11A	Slice 11A regression tests for authority, scope, schema, lifecycle, bounds, redaction, and non-goals.
 packages/agent/src/engine/durability/resources/procedural_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S11A	Slice 11A built-in procedural_record resource kind/schema definition.
+packages/agent/src/domains/capability/operations/scheduler.rs	retain	capability execute owner	PCC-10/P2AER-S12	Slice 12 execute adapter for durable scheduler create list inspect cancel and fire-due operations.
+packages/agent/src/domains/capability/scheduler_contract.rs	retain	capability contract owner	PCC-10/P2AER-S12	Slice 12 scheduler request schema helper kept outside the broad capability contract.
+packages/agent/src/domains/scheduler/mod.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 scheduler domain docs and registration boundary.
+packages/agent/src/domains/scheduler/errors.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 scheduler error helper.
+packages/agent/src/domains/scheduler/planning.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 deterministic trigger and missed-run planning helper.
+packages/agent/src/domains/scheduler/projection.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 bounded schedule and schedule_run projection helper.
+packages/agent/src/domains/scheduler/service.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 durable scheduler service with authority checks leases cancellation and run records.
+packages/agent/src/domains/scheduler/support.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 scheduler validation bounds authority and lifecycle support.
+packages/agent/src/domains/scheduler/tests.rs	retain	scheduler test owner	PCC-10/P2AER-S12	Slice 12 scheduler regression tests for clock injection missed runs cancellation authority schema and multi-schedule firing.
+packages/agent/src/domains/scheduler/types.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 schedule and schedule_run record types.
+packages/agent/src/engine/durability/resources/scheduler_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S12	Slice 12 built-in schedule and schedule_run resource schemas.

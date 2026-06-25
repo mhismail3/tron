@@ -714,8 +714,15 @@ does not add fixed iOS product panels.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
-does not run autonomous goals, plan task decomposition, schedule reminders,
-launch subagents, create notification inboxes, or add native Work/question UI.
+does not run autonomous goals, plan task decomposition, launch subagents,
+create notification inboxes, or add native Work/question UI.
+`domains/scheduler` owns the accepted Slice 12 backend foundation for durable
+schedule and schedule-run records. It records UTC-instant trigger policy,
+timezone labels, missed-run policy, cancellation evidence, run retention,
+resource leases, trace/replay refs, and bounded inspection projections behind
+`capability::execute`; it does not start hidden cron loops, execute feature
+work directly, deliver push notifications, merge results into conversation
+state, or add native schedule UI.
 `domains/procedural` owns the accepted Slice 11A foundation for inert
 skill/rule/hook/procedure provenance inspection. It stores only
 `procedural_record` resource contracts and bounded/redacted list/inspect
@@ -890,10 +897,14 @@ schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
 `timeoutMs`, `maxOutputBytes`, `jobResourceId`, `state`, `cleanupAfterSeconds`,
-`goalResourceId`, `questionResourceId`, `toolSourceResourceId`, `objective`, `prompt`, `answerText`,
-`expectedQuestionVersionId`, `expiresAt`, `allowFreeForm`, `successCriteria`,
-`constraints`, `queueRefs`, `planRefs`, `evidenceRefs`, `kind`, `id`, catalog search filters,
-`idempotencyKey`, and `reason`.
+`goalResourceId`, `questionResourceId`, `scheduleResourceId`,
+`toolSourceResourceId`, `objective`, `prompt`, `answerText`,
+`expectedQuestionVersionId`, `expiresAt`, `title`, `scheduleKind`,
+`triggerType`, `startAt`, `createdAt`, `cancelledAt`, `evaluationAt`,
+`intervalSeconds`, `timezone`, `missedRunPolicy`, `maxCatchUpRuns`, `target`,
+`maxRunRecords`, `maxAgeDays`, `allowFreeForm`,
+`successCriteria`, `constraints`, `queueRefs`, `planRefs`, `evidenceRefs`,
+`kind`, `id`, catalog search filters, `idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
@@ -1042,8 +1053,25 @@ bounded provider-visible refs. Answering requires a stable idempotency key and
 `expectedQuestionVersionId`; stale, wrong-scope, expired, closed, malformed,
 empty, oversized, missing-reason, or untrusted-context calls fail closed.
 This foundation does not add an autonomous goal runner, planner, hidden prompt
-queue, scheduler/reminder, notification/APNs behavior, subagents, public
+queue, notification/APNs behavior, subagents, public
 `/engine` goal API expansion, settings fields, or native Work/question UI.
+The accepted Slice 12 foundation adds `domains/scheduler`, built-in `schedule`
+and `schedule_run` resource schemas, the `scheduler.lifecycle` stream, and
+provider-visible `schedule_create`, `schedule_list`, `schedule_inspect`,
+`schedule_cancel`, and `schedule_fire_due` operation values behind the same
+single `capability::execute` primitive. Schedule creation requires trusted
+current-session/workspace context, explicit `scheduler.write` authority,
+idempotency, an RFC3339 first fire instant, UTC-instant recurrence, a bounded
+timezone policy label, a `skip`/`fire_once`/`catch_up` missed-run policy, and
+an explicit non-wildcard target resource kind/action with bounded resource
+selectors. `schedule_fire_due` requires both `scheduler.fire` and
+`scheduler.write`, an explicit RFC3339 `evaluationAt`, acquires a resource
+lease before mutating a schedule, emits deterministic run records, updates
+`nextFireAt`, and preserves replay/trace evidence. Slice 12 records background
+results as durable evidence only; feature
+domains own execution, and hidden cron tables, autonomous planning, public
+`/engine` scheduler APIs, APNs/device notification delivery, fixed native
+schedule UI, and result merge remain deferred.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1161,7 +1189,7 @@ optional expected-version freshness and records cancellation provenance.
 Slice 10B still does not spawn child agents, launch workers or packages, start
 jobs or processes, execute tools, open network/browser/search/login scope,
 register catalog entries, promote trust, merge results into conversation state,
-schedule autonomous work, expand public `/engine` APIs, add settings/profile
+start autonomous work, expand public `/engine` APIs, add settings/profile
 migrations, or add fixed native iOS subagent UI.
 
 The accepted Slice 11A foundation adds the smallest procedural inspection
@@ -1448,7 +1476,7 @@ artifacts.
 
 ## Event System
 
-The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure. Domain lifecycle streams such as `jobs.lifecycle`, `approval.lifecycle`, `git.lifecycle`, and `goals.lifecycle` live in the engine stream substrate, not in the transport-visible session event enum.
+The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure. Domain lifecycle streams such as `jobs.lifecycle`, `approval.lifecycle`, `git.lifecycle`, `goals.lifecycle`, and `scheduler.lifecycle` live in the engine stream substrate, not in the transport-visible session event enum.
 
 The event enum is generated by the `define_events!` macro in `packages/agent/src/domains/session/event_store/types/macros.rs`, invoked from `packages/agent/src/domains/session/event_store/types/generated.rs`. Transport-visible event DTOs and stream factories live under `packages/agent/src/shared/protocol/events/`. Adding a new event means editing `generated.rs` and adding a payload type only when the event is true loop infrastructure. Product events, fixed capability events, rules/skills/hooks, prompt queue events, worktree/repo events, push-token events, and config mutation events are intentionally absent on this branch.
 
@@ -1759,9 +1787,10 @@ file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
 model-visible evidence read path is `capability::execute` with `trace_list`,
 `trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
-`catalog_inspect`, `catalog_conformance`, and `job_*` lifecycle operations;
-trace/log/replay/job reads require trusted current-session context, and catalog
-conformance plus mutating job operations require idempotency.
+`catalog_inspect`, `catalog_conformance`, `job_*` lifecycle operations, and
+`schedule_*` schedule/run operations; trace/log/replay/job/schedule reads
+require trusted current-session context, and catalog conformance plus mutating
+job/schedule operations require idempotency.
 Trace reads are backed by `trace_records`; effectful `execute` calls insert a
 running record before the effect runs and update that same record with status,
 duration, result/error hashes, authority, provider/model metadata, VCS revision

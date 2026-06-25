@@ -651,12 +651,22 @@ Old surface:
 
 Current state:
 
-- No cron domain and no scheduler product surface.
+- Accepted Slice 12 adds the scheduler backend foundation through
+  `domains/scheduler`, built-in `schedule` and `schedule_run` resource
+  schemas, `scheduler.lifecycle` stream evidence, and execute-only
+  `schedule_create`, `schedule_list`, `schedule_inspect`, `schedule_cancel`,
+  and `schedule_fire_due` operations.
+- The old `cron::*` public/domain surface and cron job/run tables remain
+  absent. Slice 12 does not add hidden polling loops, direct feature execution,
+  APNs/device notification delivery, public scheduler APIs, native fixed
+  schedule UI, autonomous planning, or result merge.
 
 Reintroduction constraint:
 
-- Scheduling should use explicit durable triggers, run records, authority
-  scopes, missed-run behavior, and user-visible cancellation.
+- Further scheduling work must continue through explicit durable trigger/run
+  records, non-wildcard authority scopes and resource selectors, missed-run
+  behavior, retention bounds, and user-visible cancellation. Feature packages
+  own what schedule runs do.
 
 ### 18. System Update and Diagnostics Product Surface
 

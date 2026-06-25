@@ -98,6 +98,14 @@ pub const SUBAGENT_TASK_SCHEMA_ID: &str = "tron.resource.subagent_task.v1";
 pub const PROCEDURAL_RECORD_KIND: &str = "procedural_record";
 /// Built-in inert procedural state record resource schema id.
 pub const PROCEDURAL_RECORD_SCHEMA_ID: &str = "tron.resource.procedural_record.v1";
+/// Built-in durable schedule resource kind.
+pub const SCHEDULE_KIND: &str = "schedule";
+/// Built-in durable schedule resource schema id.
+pub const SCHEDULE_SCHEMA_ID: &str = "tron.resource.schedule.v1";
+/// Built-in durable schedule run resource kind.
+pub const SCHEDULE_RUN_KIND: &str = "schedule_run";
+/// Built-in durable schedule run resource schema id.
+pub const SCHEDULE_RUN_SCHEMA_ID: &str = "tron.resource.schedule_run.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

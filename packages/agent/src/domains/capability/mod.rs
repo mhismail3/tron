@@ -21,6 +21,7 @@
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
 //! | `operations` | Direct primitive operation implementations |
+//! | `scheduler_contract` | Schedule-specific request schema fields |
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
@@ -43,6 +44,7 @@
 
 pub(crate) mod contract;
 mod operations;
+mod scheduler_contract;
 pub(crate) use operations::execute_value;
 
 use std::sync::Arc;
