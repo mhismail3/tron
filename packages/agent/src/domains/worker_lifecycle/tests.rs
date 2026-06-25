@@ -29,9 +29,9 @@ use super::resources::{
     reconcile_owned_launch_attempts_on_startup,
 };
 use super::{
-    APPLY_SCOPE, Deps, ENABLE_FUNCTION, INSTALL_FUNCTION, INSTALLATION_KIND, LAUNCH_FUNCTION,
-    PACKAGE_KIND, PACKAGE_SCHEMA_VERSION, PROPOSE_FUNCTION, PROPOSE_SCOPE,
-    SOURCE_KIND_LOCAL_FILESYSTEM, STOP_FUNCTION, WORKER,
+    APPLY_SCOPE, CONFORMANCE_KIND, Deps, ENABLE_FUNCTION, INSTALL_FUNCTION, INSTALLATION_KIND,
+    LAUNCH_FUNCTION, PACKAGE_KIND, PACKAGE_SCHEMA_VERSION, PROPOSAL_KIND, PROPOSE_FUNCTION,
+    PROPOSE_SCOPE, SOURCE_KIND_LOCAL_FILESYSTEM, STOP_FUNCTION, WORKER,
 };
 
 struct FakeLauncher {
@@ -969,5 +969,7 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
     drop(temp);
 }
 
+#[path = "inspection_test_support.rs"]
+mod inspection_test_support;
 #[path = "inspection_tests.rs"]
 mod inspection_tests;

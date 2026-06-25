@@ -1819,5 +1819,7 @@ packages/agent/src/domains/tool_sources/tool_sources_inspect_tests.rs	retain	too
 packages/agent/src/domains/tool_sources/tool_sources_validation_tests.rs	retain	tool_sources test owner	PCC-10/P2AER-S9A	Slice 9A split validation tests for activation-intent rejection and inert prohibition prose.
 packages/agent/src/engine/durability/resources/tool_source_definitions.rs	retain	engine resource owner	PCC-10/P2AER-S9A	Slice 9A resource definitions for tool_source_proposal and tool_source_conformance_report.
 packages/agent/src/domains/capability/operations/worker_packages.rs	retain	capability execute owner	PCC-10/P2AER-S9B	Slice 9B read-only execute adapter for worker package lifecycle inspection.
-packages/agent/src/domains/worker_lifecycle/inspection.rs	retain	worker_lifecycle owner	PCC-10/P2AER-S9B	Slice 9B bounded read-only projection for existing worker lifecycle resources.
+packages/agent/src/domains/worker_lifecycle/inspection/mod.rs	retain	worker_lifecycle owner	PCC-10/P2AER-S9B	Slice 9B bounded read-only inspection path for existing worker lifecycle resources.
+packages/agent/src/domains/worker_lifecycle/inspection/projection.rs	retain	worker_lifecycle owner	PCC-10/P2AER-S9B-FIX1	Slice 9B projection helper split below static file budgets.
+packages/agent/src/domains/worker_lifecycle/inspection_test_support.rs	retain	worker_lifecycle test owner	PCC-10/P2AER-S9B-FIX1	Slice 9B inspection test fixtures split below static file budgets.
 packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	retain	worker_lifecycle test owner	PCC-10/P2AER-S9B	Slice 9B split regression tests for worker lifecycle inspection authority, scope, kind/schema, bounds, and redaction.

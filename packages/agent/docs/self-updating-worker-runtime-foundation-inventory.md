@@ -49,8 +49,9 @@ returns the package and installation records to `enabled`.
 The lifecycle domain is intentionally split by primitive owner:
 `authority.rs` owns trusted-apply checks, `manifest.rs` owns package schema and
 root validation, `launcher.rs` owns local process isolation and conformance,
-`resources.rs` owns generic resource/event evidence, `inspection.rs` owns
-read-only bounded/redacted lifecycle projections, and `handlers.rs` owns state
+`resources.rs` owns generic resource/event evidence, `inspection/mod.rs` owns
+read-only inspection authorization and filtering, `inspection/projection.rs`
+owns bounded/redacted lifecycle projections, and `handlers.rs` owns state
 transitions. The root `mod.rs` is wiring and constants only.
 
 ## Resource Kinds

@@ -1,3 +1,4 @@
+use super::inspection_test_support::*;
 use super::*;
 
 #[tokio::test]
@@ -235,6 +236,35 @@ async fn worker_package_inspect_denies_wrong_session_missing_grants_and_wildcard
     .to_string();
     assert!(wildcard.contains("wildcard"), "{wildcard}");
 
+    let selector_wildcard_grant = derived_worker_package_read_grant(
+        &deps.engine_host,
+        "selector-wildcard",
+        &["worker.lifecycle.read", "resource.read"],
+        &[PACKAGE_KIND],
+        &["*", "kind:worker_package"],
+        "none",
+    )
+    .await;
+    let selector_wildcard_invocation = worker_package_read_invocation(
+        "selector-wildcard",
+        payload.clone(),
+        selector_wildcard_grant,
+        "expected-worker-session",
+        "workspace-worker-auth",
+    );
+    let selector_wildcard = inspect_worker_package_value(
+        &deps.engine_host,
+        &selector_wildcard_invocation,
+        &selector_wildcard_invocation.payload,
+    )
+    .await
+    .expect_err("selector wildcard grant denied")
+    .to_string();
+    assert!(
+        selector_wildcard.contains("wildcard"),
+        "{selector_wildcard}"
+    );
+
     let read_grant = derived_worker_package_read_grant(
         &deps.engine_host,
         "wrong-session",
@@ -263,6 +293,215 @@ async fn worker_package_inspect_denies_wrong_session_missing_grants_and_wildcard
         wrong_session.contains("outside the current session/workspace"),
         "{wrong_session}"
     );
+}
+
+#[tokio::test]
+async fn worker_package_list_excludes_and_inspect_denies_archived_resources() {
+    let (_temp, deps, _package) = test_deps().await;
+    let session_id = "worker-archived-session";
+    let workspace_id = "workspace-worker-archived";
+    let read_grant = derived_worker_package_read_grant(
+        &deps.engine_host,
+        "archived",
+        &["worker.lifecycle.read", "resource.read"],
+        &[PROPOSAL_KIND, CONFORMANCE_KIND],
+        &[
+            "kind:worker_package_proposal",
+            "kind:worker_package_conformance_report",
+        ],
+        "none",
+    )
+    .await;
+
+    create_worker_lifecycle_resource(
+        &deps.engine_host,
+        PROPOSAL_KIND,
+        "worker_package_proposal:local.echo:1.0.0:active",
+        EngineResourceScope::Session(session_id.to_owned()),
+        proposal_payload("active proposal", "proposed"),
+        "proposed",
+    )
+    .await;
+    create_worker_lifecycle_resource(
+        &deps.engine_host,
+        PROPOSAL_KIND,
+        "worker_package_proposal:local.echo:1.0.0:archived",
+        EngineResourceScope::Session(session_id.to_owned()),
+        proposal_payload("archived proposal", "archived"),
+        "archived",
+    )
+    .await;
+    create_worker_lifecycle_resource(
+        &deps.engine_host,
+        CONFORMANCE_KIND,
+        "worker_package_conformance_report:local.echo:1.0.0:active",
+        EngineResourceScope::Session(session_id.to_owned()),
+        conformance_payload("passed"),
+        "passed",
+    )
+    .await;
+    create_worker_lifecycle_resource(
+        &deps.engine_host,
+        CONFORMANCE_KIND,
+        "worker_package_conformance_report:local.echo:1.0.0:archived",
+        EngineResourceScope::Session(session_id.to_owned()),
+        conformance_payload("archived"),
+        "archived",
+    )
+    .await;
+
+    let proposal_list_invocation = worker_package_read_invocation(
+        "archived-proposal-list",
+        json!({
+            "operation": "worker_package_list",
+            "workerPackageKind": "worker_package_proposal"
+        }),
+        read_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let listed_proposals = list_worker_packages_value(
+        &deps.engine_host,
+        &proposal_list_invocation,
+        &proposal_list_invocation.payload,
+    )
+    .await
+    .expect("list proposals");
+    let proposal_records = listed_proposals["records"].as_array().unwrap();
+    assert_eq!(proposal_records.len(), 1);
+    assert_eq!(
+        proposal_records[0]["resourceId"],
+        "worker_package_proposal:local.echo:1.0.0:active"
+    );
+
+    let conformance_list_invocation = worker_package_read_invocation(
+        "archived-conformance-list",
+        json!({
+            "operation": "worker_package_list",
+            "workerPackageKind": "worker_package_conformance_report"
+        }),
+        read_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let listed_conformance = list_worker_packages_value(
+        &deps.engine_host,
+        &conformance_list_invocation,
+        &conformance_list_invocation.payload,
+    )
+    .await
+    .expect("list conformance reports");
+    let conformance_records = listed_conformance["records"].as_array().unwrap();
+    assert_eq!(conformance_records.len(), 1);
+    assert_eq!(
+        conformance_records[0]["resourceId"],
+        "worker_package_conformance_report:local.echo:1.0.0:active"
+    );
+
+    let archived_lifecycle_invocation = worker_package_read_invocation(
+        "archived-lifecycle-list",
+        json!({
+            "operation": "worker_package_list",
+            "workerPackageKind": "worker_package_proposal",
+            "lifecycle": "archived"
+        }),
+        read_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let archived_lifecycle = list_worker_packages_value(
+        &deps.engine_host,
+        &archived_lifecycle_invocation,
+        &archived_lifecycle_invocation.payload,
+    )
+    .await
+    .expect_err("archived lifecycle filter denied")
+    .to_string();
+    assert!(
+        archived_lifecycle.contains("archived"),
+        "{archived_lifecycle}"
+    );
+
+    for resource_id in [
+        "worker_package_proposal:local.echo:1.0.0:archived",
+        "worker_package_conformance_report:local.echo:1.0.0:archived",
+    ] {
+        let invocation = worker_package_read_invocation(
+            &format!("archived-inspect-{resource_id}").replace(':', "-"),
+            json!({
+                "operation": "worker_package_inspect",
+                "workerPackageResourceId": resource_id
+            }),
+            read_grant.clone(),
+            session_id,
+            workspace_id,
+        );
+        let denied =
+            inspect_worker_package_value(&deps.engine_host, &invocation, &invocation.payload)
+                .await
+                .expect_err("archived inspect denied")
+                .to_string();
+        assert!(denied.contains("archived"), "{denied}");
+    }
+}
+
+#[tokio::test]
+async fn worker_package_inspect_redacts_installation_authority_grant_id() {
+    let (_temp, deps, _package) = test_deps().await;
+    let session_id = "worker-installation-redaction-session";
+    let workspace_id = "workspace-worker-installation-redaction";
+    let read_grant = derived_worker_package_read_grant(
+        &deps.engine_host,
+        "installation-redaction",
+        &["worker.lifecycle.read", "resource.read"],
+        &[INSTALLATION_KIND],
+        &["kind:worker_package_installation"],
+        "none",
+    )
+    .await;
+    create_worker_lifecycle_resource(
+        &deps.engine_host,
+        INSTALLATION_KIND,
+        "worker_package_installation:local.echo:1.0.0",
+        EngineResourceScope::Session(session_id.to_owned()),
+        json!({
+            "packageId": "local.echo",
+            "packageVersion": "1.0.0",
+            "packageDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "workerId": "local_echo",
+            "packageResourceId": "worker_package:local.echo:1.0.0",
+            "status": "installed",
+            "authorityGrantId": "grant-secret-installation-lifecycle",
+            "rollbackRef": {"resourceId": "worker_package:local.echo:0.9.0"}
+        }),
+        "installed",
+    )
+    .await;
+
+    let invocation = worker_package_read_invocation(
+        "installation-redaction",
+        json!({
+            "operation": "worker_package_inspect",
+            "workerPackageResourceId": "worker_package_installation:local.echo:1.0.0"
+        }),
+        read_grant,
+        session_id,
+        workspace_id,
+    );
+    let inspected =
+        inspect_worker_package_value(&deps.engine_host, &invocation, &invocation.payload)
+            .await
+            .expect("inspect installation");
+    assert_eq!(
+        inspected["resource"]["installation"]["lifecycleGrantRedacted"],
+        json!(true)
+    );
+    let serialized = serde_json::to_string(&inspected).expect("serialize projection");
+    assert!(
+        !serialized.contains("grant-secret-installation-lifecycle"),
+        "{serialized}"
+    );
+    assert!(!serialized.contains("authorityGrantId"), "{serialized}");
 }
 
 #[tokio::test]
@@ -373,144 +612,4 @@ async fn worker_package_inspect_revalidates_stored_kind_and_schema() {
         schema_mismatch.contains("tron.resource.worker_package.v1"),
         "{schema_mismatch}"
     );
-}
-
-async fn derived_worker_package_read_grant(
-    handle: &crate::engine::EngineHostHandle,
-    suffix: &str,
-    scopes: &[&str],
-    resource_kinds: &[&str],
-    selectors: &[&str],
-    network_policy: &str,
-) -> AuthorityGrantId {
-    let grant = handle
-        .derive_authority_grant(DeriveGrant {
-            grant_id: Some(AuthorityGrantId::new(format!("worker-package-read-{suffix}")).unwrap()),
-            parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
-            subject_actor_id: None,
-            subject_worker_id: None,
-            subject_invocation_id: None,
-            allowed_capabilities: vec!["capability::execute".to_owned()],
-            allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
-            allowed_authority_scopes: scopes.iter().map(|scope| (*scope).to_owned()).collect(),
-            allowed_resource_kinds: resource_kinds
-                .iter()
-                .map(|kind| (*kind).to_owned())
-                .collect(),
-            resource_selectors: selectors
-                .iter()
-                .map(|selector| (*selector).to_owned())
-                .collect(),
-            file_roots: vec!["/tmp".to_owned()],
-            network_policy: network_policy.to_owned(),
-            max_risk: RiskLevel::Low,
-            budget: json!({"class": "worker_package_read_test"}),
-            expires_at: None,
-            can_delegate: false,
-            provenance: json!({"source": "worker_lifecycle_inspection_test"}),
-            trace_id: TraceId::new(format!("trace-worker-package-read-{suffix}")).unwrap(),
-        })
-        .await
-        .expect("derive worker package read grant");
-    grant.grant_id
-}
-
-fn worker_package_read_invocation(
-    key: &str,
-    payload: Value,
-    grant_id: AuthorityGrantId,
-    session_id: &str,
-    workspace_id: &str,
-) -> Invocation {
-    let mut context = CausalContext::new(
-        ActorId::new(format!("agent:{session_id}")).unwrap(),
-        ActorKind::Agent,
-        grant_id,
-        TraceId::new(format!("trace-worker-package-{key}")).unwrap(),
-    )
-    .with_session_id(session_id.to_owned())
-    .with_workspace_id(workspace_id.to_owned());
-    for scope in ["worker.lifecycle.read", "resource.read"] {
-        context = context.with_scope(scope);
-    }
-    Invocation {
-        id: InvocationId::new(format!("invocation-worker-package-{key}")).unwrap(),
-        function_id: FunctionId::new("capability::execute").unwrap(),
-        delivery_mode: DeliveryMode::Sync,
-        payload,
-        causal_context: context,
-    }
-}
-
-async fn create_worker_package_resource(
-    handle: &crate::engine::EngineHostHandle,
-    resource_id: &str,
-    scope: EngineResourceScope,
-    payload: Value,
-    lifecycle: &str,
-) {
-    handle
-        .create_resource(CreateResource {
-            resource_id: Some(resource_id.to_owned()),
-            kind: PACKAGE_KIND.to_owned(),
-            schema_id: None,
-            scope,
-            owner_worker_id: WorkerId::new(WORKER).unwrap(),
-            owner_actor_id: ActorId::new("agent:worker-package-test").unwrap(),
-            lifecycle: Some(lifecycle.to_owned()),
-            policy: json!({"owner": WORKER}),
-            initial_payload: Some(payload),
-            locations: Vec::new(),
-            trace_id: TraceId::new(format!("trace-{resource_id}").replace(':', "-")).unwrap(),
-            invocation_id: None,
-        })
-        .await
-        .expect("create worker package resource");
-}
-
-fn package_payload_for_inspection(package: &Path) -> Value {
-    json!({
-        "schemaVersion": PACKAGE_SCHEMA_VERSION,
-        "packageId": "local.echo",
-        "packageVersion": "1.0.0",
-        "packageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "provenance": {
-            "source": "inspection-test",
-            "sourcePath": package.display().to_string(),
-            "nested": {"credential": "token-grant-secret"}
-        },
-        "source": {
-            "kind": SOURCE_KIND_LOCAL_FILESYSTEM,
-            "path": package.display().to_string(),
-            "privatePath": "/private/worker/root"
-        },
-        "workerId": "local_echo",
-        "namespaceClaims": ["local_echo", "local_echo.extra"],
-        "launchCommand": [package.join("worker.sh").display().to_string(), "--serve"],
-        "workingDirectory": package.display().to_string(),
-        "envAllowlist": ["TRON_WORKER_TOKEN_JSON", "SECRET_ENV"],
-        "expectedFunctions": ["local_echo::run", "local_echo::extra"],
-        "expectedTriggers": ["local_echo.trigger"],
-        "requestedGrants": {
-            "authorityScopes": ["local_echo.run"],
-            "resourceKinds": ["artifact"],
-            "fileRoots": [package.display().to_string()],
-            "networkPolicy": "loopback",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 1}
-        },
-        "conformancePolicy": {"timeoutMs": 50},
-        "rollbackPolicy": {"onFailure": "stop_worker"},
-        "manifest": {"raw": "redacted by projection"},
-        "sourceRoot": package.display().to_string(),
-        "status": "installed",
-        "failure": {
-            "message": "failed with token-grant-secret at /private/worker/root",
-            "details": {"env": {"SECRET_ENV": "secret-env-value"}}
-        },
-        "workerToken": {"secret": "token-grant-secret"},
-        "env": {"SECRET_ENV": "secret-env-value"},
-        "endpoint": "ws://127.0.0.1:17345/engine/workers",
-        "tokenGrantId": "token-grant-secret"
-    })
 }

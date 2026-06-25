@@ -1142,5 +1142,7 @@ packages/agent/src/domains/tool_sources/validation.rs	rust	implementation	rust:t
 packages/agent/src/domains/tool_sources/tests.rs	rust	test-support	rust:tool-sources	validates authority denial, idempotency, scope isolation, secret/path/schema bounds, reports, and non-goals
 packages/agent/src/engine/durability/resources/tool_source_definitions.rs	rust	contract	rust:engine	resources define durable tool_source_proposal and tool_source_conformance_report schemas; no domain logic dependency
 packages/agent/src/domains/capability/operations/worker_packages.rs	rust	adapter	rust:capability	execute primitive may call worker_lifecycle read-only inspection methods; no lifecycle mutation routing
-packages/agent/src/domains/worker_lifecycle/inspection.rs	rust	implementation	rust:worker-lifecycle	owns bounded read-only projections for worker lifecycle resources; depends on engine host facade only
+packages/agent/src/domains/worker_lifecycle/inspection/mod.rs	rust	implementation	rust:worker-lifecycle	owns bounded read-only inspection authorization and filtering for worker lifecycle resources; depends on engine host facade only
+packages/agent/src/domains/worker_lifecycle/inspection/projection.rs	rust	implementation	rust:worker-lifecycle	owns bounded read-only projection redaction helpers for worker lifecycle resources
+packages/agent/src/domains/worker_lifecycle/inspection_test_support.rs	rust	test-support	rust:worker-lifecycle	owns shared inspection test fixtures for worker lifecycle resource projections
 packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	rust	test-support	rust:worker-lifecycle	test-only authority, scope, kind/schema, bounds, and leakage regressions; production code must not depend on it

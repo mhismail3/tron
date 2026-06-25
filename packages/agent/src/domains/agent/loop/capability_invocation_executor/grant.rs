@@ -63,6 +63,11 @@ pub(super) async fn derive_capability_runtime_grant(
             "web.read".to_owned(),
             "web.write".to_owned(),
         ]);
+    } else if matches!(operation, "worker_package_list" | "worker_package_inspect") {
+        allowed_authority_scopes.extend([
+            "worker.lifecycle.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
     }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
@@ -82,6 +87,14 @@ pub(super) async fn derive_capability_runtime_grant(
         if web_fetch_uses_robots_policy {
             allowed_resource_kinds.push("web_robots_policy".to_owned());
         }
+    } else if operation == "worker_package_list" {
+        if let Some(kind) = worker_package_list_kind(effective_args) {
+            allowed_resource_kinds.push(kind.to_owned());
+        }
+    } else if operation == "worker_package_inspect"
+        && let Some(kind) = worker_package_inspect_kind(effective_args)
+    {
+        allowed_resource_kinds.push(kind.to_owned());
     }
     let resource_selectors = allowed_resource_kinds
         .iter()
@@ -191,6 +204,40 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
         .get(field)
         .and_then(Value::as_str)
         .is_some_and(|item| !item.trim().is_empty())
+}
+
+fn worker_package_list_kind(args: &Value) -> Option<&'static str> {
+    match args
+        .get("workerPackageKind")
+        .and_then(Value::as_str)
+        .unwrap_or("worker_package")
+    {
+        "worker_package" => Some("worker_package"),
+        "worker_package_installation" => Some("worker_package_installation"),
+        "worker_package_proposal" => Some("worker_package_proposal"),
+        "worker_package_conformance_report" => Some("worker_package_conformance_report"),
+        "worker_launch_attempt" => Some("worker_launch_attempt"),
+        _ => None,
+    }
+}
+
+fn worker_package_inspect_kind(args: &Value) -> Option<&'static str> {
+    let resource_id = args
+        .get("workerPackageResourceId")
+        .and_then(Value::as_str)?;
+    if resource_id.starts_with("worker_package_installation:") {
+        Some("worker_package_installation")
+    } else if resource_id.starts_with("worker_package_proposal:") {
+        Some("worker_package_proposal")
+    } else if resource_id.starts_with("worker_package_conformance_report:") {
+        Some("worker_package_conformance_report")
+    } else if resource_id.starts_with("worker_launch_attempt:") {
+        Some("worker_launch_attempt")
+    } else if resource_id.starts_with("worker_package:") {
+        Some("worker_package")
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

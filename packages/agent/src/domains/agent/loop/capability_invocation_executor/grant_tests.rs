@@ -146,6 +146,147 @@ async fn web_fetch_runtime_grant_includes_robots_policy_authority_when_linked() 
     }
 }
 
+#[tokio::test]
+async fn worker_package_list_runtime_grant_authorizes_only_selected_read_kind() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "worker_package_list",
+        "workerPackageKind": "worker_package_proposal",
+        "idempotencyKey": "worker-package-list-grant-proposal"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_worker_package_runtime_grant_is_read_only_for_kind(&grant, "worker_package_proposal");
+    assert_eq!(
+        grant
+            .allowed_resource_kinds
+            .iter()
+            .filter(|kind| kind.starts_with("worker_"))
+            .collect::<Vec<_>>(),
+        vec![&"worker_package_proposal".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn worker_package_inspect_runtime_grant_authorizes_only_resource_id_kind() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "worker_package_inspect",
+        "workerPackageResourceId": "worker_package_conformance_report:local.echo:1.0.0:run-1",
+        "idempotencyKey": "worker-package-inspect-grant-conformance"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_worker_package_runtime_grant_is_read_only_for_kind(
+        &grant,
+        "worker_package_conformance_report",
+    );
+    assert_eq!(
+        grant
+            .allowed_resource_kinds
+            .iter()
+            .filter(|kind| kind.starts_with("worker_"))
+            .collect::<Vec<_>>(),
+        vec![&"worker_package_conformance_report".to_owned()]
+    );
+}
+
+fn assert_worker_package_runtime_grant_is_read_only_for_kind(
+    grant: &crate::engine::EngineGrant,
+    expected_kind: &str,
+) {
+    assert_eq!(grant.network_policy, "none");
+    for scope in ["worker.lifecycle.read", "resource.read"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "worker package read grant should include {scope}"
+        );
+    }
+    for forbidden_scope in [
+        "worker.lifecycle.propose",
+        "worker.lifecycle.write",
+        "resource.write",
+        "catalog.write",
+        "mcp.write",
+        "tool.execute",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "worker package read grant must not include {forbidden_scope}"
+        );
+    }
+    assert!(
+        grant
+            .allowed_resource_kinds
+            .contains(&expected_kind.to_owned()),
+        "worker package read grant should include kind {expected_kind}"
+    );
+    assert!(
+        grant
+            .resource_selectors
+            .contains(&format!("kind:{expected_kind}")),
+        "worker package read grant should include selector kind:{expected_kind}"
+    );
+    for forbidden_kind in [
+        "mcp_server",
+        "tool_source",
+        "tool_catalog",
+        "worker_package_catalog",
+    ] {
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&forbidden_kind.to_owned()),
+            "worker package read grant must not include kind {forbidden_kind}"
+        );
+        assert!(
+            !grant
+                .resource_selectors
+                .contains(&format!("kind:{forbidden_kind}")),
+            "worker package read grant must not include selector kind:{forbidden_kind}"
+        );
+    }
+    for forbidden_capability in [
+        "worker_lifecycle::propose_package_change",
+        "worker_lifecycle::install_package",
+        "worker_lifecycle::enable_package",
+        "worker_lifecycle::disable_package",
+        "worker_lifecycle::launch_worker",
+        "worker_lifecycle::stop_worker",
+        "worker_lifecycle::retire_package",
+        "mcp::start_server",
+        "mcp::restart_server",
+        "tool::execute",
+        "catalog::register",
+    ] {
+        assert!(
+            !grant
+                .allowed_capabilities
+                .contains(&forbidden_capability.to_owned()),
+            "worker package read grant must not include capability {forbidden_capability}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec![
+            "capability::execute".to_owned(),
+            "state::get".to_owned(),
+            "state::list".to_owned(),
+            "state::set".to_owned(),
+        ]
+    );
+}
+
 async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostHandle, Invocation) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
     engine_host

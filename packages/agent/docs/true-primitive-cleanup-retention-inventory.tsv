@@ -1774,5 +1774,7 @@ packages/agent/src/domains/tool_sources/tool_sources_inspect_tests.rs	test	test_
 packages/agent/src/domains/tool_sources/tool_sources_validation_tests.rs	test	test_harness	TPC-10/P2AER-S9A	split Slice 9A activation-intent validation regression coverage
 packages/agent/src/engine/durability/resources/tool_source_definitions.rs	primitive	engine	TPC-10/P2AER-S9A	built-in tool-source proposal and conformance report resource schemas
 packages/agent/src/domains/capability/operations/worker_packages.rs	implementation	capability_execute	TPC-10/P2AER-S9B	read-only provider execute adapter for worker package lifecycle inspection
-packages/agent/src/domains/worker_lifecycle/inspection.rs	implementation	worker_lifecycle	TPC-10/P2AER-S9B	bounded read-only worker lifecycle projection with explicit authority and redaction
+packages/agent/src/domains/worker_lifecycle/inspection/mod.rs	implementation	worker_lifecycle	TPC-10/P2AER-S9B	bounded read-only worker lifecycle inspection path with explicit authority archived-resource denial and redaction
+packages/agent/src/domains/worker_lifecycle/inspection/projection.rs	implementation	worker_lifecycle	TPC-10/P2AER-S9B-FIX1	bounded worker lifecycle projection helper split below static file budgets
+packages/agent/src/domains/worker_lifecycle/inspection_test_support.rs	test	worker_lifecycle	TPC-10/P2AER-S9B-FIX1	shared worker lifecycle inspection test fixtures split below static file budgets
 packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	test	test_harness	TPC-10/P2AER-S9B	split Slice 9B worker lifecycle inspection regression coverage
