@@ -27,7 +27,6 @@ pub(super) struct RegistrationRecordInput<'a> {
     pub(super) scope: &'a EngineResourceScope,
     pub(super) environment: &'a str,
     pub(super) token_hash: &'a str,
-    pub(super) token_preview: &'a str,
     pub(super) push_opt_in: bool,
     pub(super) push_enabled: bool,
     pub(super) event_families: Vec<String>,
@@ -50,7 +49,6 @@ pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
         "apns": {
             "environment": input.environment,
             "tokenHash": input.token_hash,
-            "tokenPreview": input.token_preview,
             "tokenStorage": "hash_only_until_live_apns_transport",
             "liveApnsEnabled": false,
             "registeredAt": input.updated_at
@@ -424,19 +422,6 @@ pub(super) fn device_resource_id(
         "{DEVICE_REGISTRATION_KIND}:{}",
         hex::encode(hasher.finalize())
     )
-}
-
-pub(super) fn token_preview(token: &str) -> String {
-    let head = token.chars().take(6).collect::<String>();
-    let tail = token
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect::<String>();
-    format!("{head}...{tail}")
 }
 
 pub(super) fn assert_no_raw_token(payload: &Value, raw_token: &str) -> Result<(), CapabilityError> {

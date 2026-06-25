@@ -1,17 +1,19 @@
 use serde_json::{Value, json};
 
-use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
+use super::contract::{
+    DEVICE_LIFECYCLE_TOPIC, READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE,
+};
 use super::service::{
     inspect_device_value, list_devices_value, register_device_value, unregister_device_value,
 };
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, TraceId,
+    InvocationId, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
 };
 use crate::shared::server::test_support::make_test_context;
 
-const APNS_TOKEN: &str = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+const APNS_TOKEN: &str = "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0fedcba9876543210";
 
 #[tokio::test]
 async fn register_records_hash_only_token_and_redacted_projection() {
@@ -22,6 +24,7 @@ async fn register_records_hash_only_token_and_redacted_projection() {
     assert_eq!(registered["apnsEnvironment"], json!("development"));
     assert_eq!(registered["apnsTokenRedacted"], json!(true));
     assert_eq!(registered["liveApnsEnabled"], json!(false));
+    assert_no_token_fragments("register response", &registered, APNS_TOKEN);
 
     let inspection = fixture
         .deps
@@ -36,12 +39,23 @@ async fn register_records_hash_only_token_and_redacted_projection() {
     assert_eq!(payload["apns"]["environment"], json!("development"));
     assert_eq!(payload["apns"]["liveApnsEnabled"], json!(false));
     assert_ne!(payload["apns"]["tokenHash"], json!(APNS_TOKEN));
-    assert!(
-        !serde_json::to_string(&payload)
-            .unwrap()
-            .contains(APNS_TOKEN)
-    );
+    assert!(payload["apns"].get("tokenPreview").is_none());
+    assert_no_token_fragments("stored device resource", &inspection, APNS_TOKEN);
     let token_hash = payload["apns"]["tokenHash"].as_str().unwrap().to_owned();
+
+    let listed = fixture
+        .list("token-redaction-list", json!({"limit": 10}))
+        .await;
+    assert_no_token_fragments("device list projection", &listed, APNS_TOKEN);
+    let list_fingerprint = &listed["devices"][0]["apns"]["tokenFingerprint"];
+    assert_eq!(list_fingerprint["redacted"], json!(true));
+    assert_eq!(list_fingerprint["rawPreviewReturned"], json!(false));
+    assert!(list_fingerprint.get("preview").is_none());
+    assert_no_token_fragments(
+        "device list token fingerprint",
+        list_fingerprint,
+        APNS_TOKEN,
+    );
 
     let inspected = fixture.inspect("inspect-key", resource_id).await;
     let projection = serde_json::to_string(&inspected).unwrap();
@@ -49,9 +63,26 @@ async fn register_records_hash_only_token_and_redacted_projection() {
     assert!(projection.contains("tokenFingerprint"));
     assert!(!projection.contains(APNS_TOKEN));
     assert!(!projection.contains(&token_hash));
+    assert_no_token_fragments("device inspect projection", &inspected, APNS_TOKEN);
+    let inspect_fingerprint = &inspected["device"]["payload"]["apns"]["tokenFingerprint"];
+    assert_eq!(inspect_fingerprint["redacted"], json!(true));
+    assert_eq!(inspect_fingerprint["rawPreviewReturned"], json!(false));
+    assert!(inspect_fingerprint.get("preview").is_none());
+    assert_no_token_fragments(
+        "device inspect token fingerprint",
+        inspect_fingerprint,
+        APNS_TOKEN,
+    );
     assert_eq!(
         inspected["device"]["projection"]["fullTokenHashReturned"],
         json!(false)
+    );
+
+    let lifecycle_events = fixture.device_lifecycle_events().await;
+    assert_no_token_fragments(
+        "device lifecycle stream events",
+        &lifecycle_events,
+        APNS_TOKEN,
     );
 }
 
@@ -311,6 +342,29 @@ impl Fixture {
             .to_string()
     }
 
+    async fn device_lifecycle_events(&self) -> Value {
+        let subscription_id = format!("device-lifecycle-{}", self.session_id);
+        self.deps
+            .engine_host
+            .subscribe_stream(
+                subscription_id.clone(),
+                DEVICE_LIFECYCLE_TOPIC.to_owned(),
+                StreamCursor(0),
+                VisibilityScope::System,
+                None,
+                None,
+            )
+            .await
+            .expect("subscribe device lifecycle stream");
+        let page = self
+            .deps
+            .engine_host
+            .poll_stream(&subscription_id, None, 20, &StreamActorScope::admin())
+            .await
+            .expect("poll device lifecycle stream");
+        json!(page.events)
+    }
+
     fn write_invocation(&self, key: &str, payload: Value, actor_kind: ActorKind) -> Invocation {
         self.write_invocation_with_grant(
             key,
@@ -446,4 +500,50 @@ fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Valu
         .expect("current payload")
         .payload
         .clone()
+}
+
+fn assert_no_token_fragments<T: serde::Serialize>(label: &str, value: &T, token: &str) {
+    let serialized =
+        serde_json::to_string(value).unwrap_or_else(|error| panic!("serialize {label}: {error}"));
+    for (fragment_label, fragment) in raw_token_fragments(token) {
+        assert!(
+            !serialized.contains(&fragment),
+            "{label} leaked raw APNs token {fragment_label} fragment `{fragment}`: {serialized}"
+        );
+    }
+}
+
+fn raw_token_fragments(token: &str) -> Vec<(&'static str, String)> {
+    let middle = token.chars().skip(16).take(16).collect::<String>();
+    vec![
+        ("full", token.to_owned()),
+        ("prefix", token.chars().take(8).collect()),
+        (
+            "suffix",
+            token
+                .chars()
+                .rev()
+                .take(8)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect(),
+        ),
+        ("substring", middle),
+        (
+            "legacy_preview",
+            format!(
+                "{}...{}",
+                token.chars().take(6).collect::<String>(),
+                token
+                    .chars()
+                    .rev()
+                    .take(4)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect::<String>()
+            ),
+        ),
+    ]
 }

@@ -2360,9 +2360,9 @@ autonomous planning, or result merge.
 
 ### Slice 13: Notifications, APNs, Device Broker, And Inbox
 
-Implementation status: accepted backend foundation. Slice 13 now adds
-server-owned `domains/device` and `domains/notifications`, durable
-`device_registration`, `notification`, and `notification_delivery` resource
+Implementation status: review-candidate backend foundation pending acceptance.
+Slice 13 now adds server-owned `domains/device` and `domains/notifications`,
+durable `device_registration`, `notification`, and `notification_delivery` resource
 schemas, lifecycle stream evidence, and execute-only operation values through
 the existing `capability::execute` primitive. It deliberately does not add live
 APNs sends, APNs entitlements, native iOS inbox/deep links, public
@@ -2371,8 +2371,11 @@ notification APIs, or client-local inbox state.
 Objective: restore notification delivery only after server-owned device and
 notification resources exist.
 
-User-facing outcome: users can register devices, receive push notifications,
-open an inbox, mark read, inspect delivery evidence, and control badges.
+User-facing outcome: the server can durably register device metadata, create
+and read notification inbox resources through execute operations, mark records
+read, inspect delivery evidence, and compute badge counts for later UI/APNs
+slices. Users do not yet receive live push notifications or open a native inbox
+in this slice.
 
 True primitives: device resource, notification resource, delivery event,
 per-device token custody, approval/user-attention policy, and APNs transport

@@ -1888,7 +1888,7 @@ Scope implemented:
   notification delivery, no public scheduler API expansion, no native fixed iOS
   UI, no autonomous planning, and no result merge into conversation state.
 
-### Accepted Slice 13: Notifications, APNs, Device Broker, And Inbox
+### Slice 13 Review Candidate: Notifications, APNs, Device Broker, And Inbox
 
 Implementation branch:
 `codex/phase-2-slice-13-notifications-apns-device-broker-inbox`.

@@ -27,7 +27,6 @@ pub(crate) async fn register_device_value(
     let environment = parse_apns_environment(&required_string(payload, "apnsEnvironment")?)?;
     let apns_token = validate_apns_token(&required_string(payload, "apnsToken")?)?;
     let token_hash = sha256_hex(apns_token.as_bytes());
-    let token_preview = token_preview(&apns_token);
     let label = optional_string(payload, "label")?
         .map(|value| bounded_text("label", &value, LABEL_MAX_BYTES))
         .transpose()?;
@@ -82,7 +81,6 @@ pub(crate) async fn register_device_value(
             scope: &scope,
             environment: &environment,
             token_hash: &token_hash,
-            token_preview: &token_preview,
             push_opt_in,
             push_enabled,
             event_families,
@@ -151,7 +149,6 @@ pub(crate) async fn register_device_value(
         scope: &scope,
         environment: &environment,
         token_hash: &token_hash,
-        token_preview: &token_preview,
         push_opt_in,
         push_enabled,
         event_families,

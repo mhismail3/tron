@@ -1072,7 +1072,7 @@ results as durable evidence only; feature
 domains own execution, and hidden cron tables, autonomous planning, public
 `/engine` scheduler APIs, APNs/device notification delivery, fixed native
 schedule UI, and result merge remain deferred.
-The accepted Slice 13 foundation adds `domains/device` and
+The Slice 13 review-candidate foundation adds `domains/device` and
 `domains/notifications` as server-owned resource foundations behind the same
 single `capability::execute` primitive. `domains/device` owns durable
 `device_registration` records, explicit APNs environment handling, hash-only

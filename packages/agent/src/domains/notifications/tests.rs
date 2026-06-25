@@ -181,8 +181,33 @@ async fn push_requested_records_failure_evidence_without_live_apns() {
     assert_eq!(delivery["apnsEnvironment"], json!("production"));
     assert_eq!(delivery["push"]["liveApnsEnabled"], json!(false));
     assert_eq!(delivery["push"]["liveApnsAttempted"], json!(false));
-    let projected = serde_json::to_string(delivery).unwrap();
-    assert!(!projected.contains(APNS_TOKEN));
+    assert_eq!(
+        delivery["push"]["tokenFingerprint"]["redacted"],
+        json!(true)
+    );
+    assert!(
+        delivery["push"]["tokenFingerprint"]
+            .get("preview")
+            .is_none()
+    );
+    assert_no_token_fragments("notification send delivery response", delivery, APNS_TOKEN);
+    assert_no_token_fragments(
+        "notification send provider response",
+        &transport_sent,
+        APNS_TOKEN,
+    );
+
+    let inspected_transport = transport
+        .inspect(
+            "push-transport-inspect",
+            transport_sent["notificationResourceId"].as_str().unwrap(),
+        )
+        .await;
+    assert_no_token_fragments(
+        "notification inspect delivery evidence",
+        &inspected_transport,
+        APNS_TOKEN,
+    );
 }
 
 #[tokio::test]
@@ -637,4 +662,50 @@ fn invocation(
         payload,
         causal_context: context,
     }
+}
+
+fn assert_no_token_fragments<T: serde::Serialize>(label: &str, value: &T, token: &str) {
+    let serialized =
+        serde_json::to_string(value).unwrap_or_else(|error| panic!("serialize {label}: {error}"));
+    for (fragment_label, fragment) in raw_token_fragments(token) {
+        assert!(
+            !serialized.contains(&fragment),
+            "{label} leaked raw APNs token {fragment_label} fragment `{fragment}`: {serialized}"
+        );
+    }
+}
+
+fn raw_token_fragments(token: &str) -> Vec<(&'static str, String)> {
+    let middle = token.chars().skip(16).take(16).collect::<String>();
+    vec![
+        ("full", token.to_owned()),
+        ("prefix", token.chars().take(8).collect()),
+        (
+            "suffix",
+            token
+                .chars()
+                .rev()
+                .take(8)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect(),
+        ),
+        ("substring", middle),
+        (
+            "legacy_preview",
+            format!(
+                "{}...{}",
+                token.chars().take(6).collect::<String>(),
+                token
+                    .chars()
+                    .rev()
+                    .take(4)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect::<String>()
+            ),
+        ),
+    ]
 }

@@ -94,11 +94,7 @@ fn projected_apns(value: Option<&Value>) -> Value {
                 .and_then(Value::as_str)
                 .map(|text| projected_text(&text.chars().take(12).collect::<String>(), 12))
                 .unwrap_or(Value::Null),
-            "preview": apns
-                .get("tokenPreview")
-                .and_then(Value::as_str)
-                .map(|text| projected_text(text, 32))
-                .unwrap_or(Value::Null)
+            "rawPreviewReturned": false
         },
         "tokenStorage": apns
             .get("tokenStorage")

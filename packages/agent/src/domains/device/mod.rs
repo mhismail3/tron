@@ -2,9 +2,9 @@
 //!
 //! Slice 13 restores the backend device substrate without restoring iOS APNs
 //! entitlements, permission prompts, or a live APNs transport. This domain owns
-//! durable `device_registration` resources, redacted APNs token fingerprints,
-//! explicit APNs environment policy, opt-in notification preferences, and
-//! lifecycle stream evidence. The paired-device request broker in
+//! durable `device_registration` resources, hash-only APNs token custody
+//! evidence, explicit APNs environment policy, opt-in notification preferences,
+//! and lifecycle stream evidence. The paired-device request broker in
 //! `platform::device_broker` remains a local request/response substrate; it
 //! does not own APNs token custody or notification delivery policy.
 //!
@@ -22,9 +22,10 @@
 //! # INVARIANT: device tokens are never provider-visible
 //!
 //! Device registration accepts APNs token material only in trusted system/admin
-//! calls. Stored resources retain hash-only custody evidence; projections and
-//! lifecycle events never return raw tokens or full token hashes. Push remains
-//! opt-in and live APNs transport is disabled by default in this foundation.
+//! calls. Stored resources retain only full SHA-256 hash custody evidence;
+//! projections and lifecycle events never return raw tokens, raw-token
+//! prefixes/suffixes/previews, or full token hashes. Push remains opt-in and
+//! live APNs transport is disabled by default in this foundation.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
