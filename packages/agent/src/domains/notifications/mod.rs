@@ -16,7 +16,7 @@
 //! | `projection` | Bounded redacted inbox and delivery projections |
 //! | `service` | Timestamp-injected send/list/inspect/mark-read/mark-all-read behavior |
 //! | `validation` | Request parsing, event-family, text, and retention bounds |
-//! | `tests` | Inbox, badge, delivery evidence, authority, and scope regressions |
+//! | `tests` | Module-local inbox, badge, delivery evidence, authority, scope, and fixture regressions |
 //!
 //! # INVARIANT: no fake local inbox
 //!
