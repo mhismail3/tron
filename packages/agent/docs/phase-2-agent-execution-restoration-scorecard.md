@@ -2419,30 +2419,40 @@ policy tighter than the current 90-day/500-record defaults.
 ### Slice 14: Media, Voice Notes, Imports, Repository Trees, And System Updates
 
 Implementation status: Accepted Slice 14A media artifact and voice-note
-resource foundation is current baseline. Slice 14 remains split because media,
-imports, repository trees, and system updates are separate families.
+resource foundation is current baseline. Slice 14B import/session-resource
+graph foundation is an implementation candidate pending review. Slice 14
+remains split because media, imports, repository trees, and system updates are
+separate families.
 
 Objective: restore lower-priority product surfaces only after the core
 agent-execution patterns are proven.
 
 User-facing outcome: Slice 14A gives the backend a durable place to hold
-voice/media artifact metadata and blob refs. Import previews, session
-tree/history views, repository divergence, update diagnostics, and native
-media UX remain later work.
+voice/media artifact metadata and blob refs. Slice 14B candidate gives the
+backend a durable place to hold generic session/resource import lineage
+metadata without exposing raw import payloads or repository trees. Import
+previews, session tree/history views, repository divergence, update
+diagnostics, and native media UX remain later work.
 
 True primitives: artifact resources, storage refs, replay, settings parity,
 approval, and package-specific events.
 
 Modular boundaries: media package owns storage refs, bounded media metadata,
 retention, redacted projections, lifecycle evidence, and local transcription
-metadata. Import/history package owns graph operations; update package owns
-signed update checks and never production deployment.
+metadata. Import/history package owns generic graph lineage operations,
+bounded import provenance metadata, redacted projections, and lifecycle
+evidence; repository trees, import execution, and native tree rendering remain
+outside the candidate scope. Update package owns signed update checks and never
+production deployment.
 
 Files/areas accepted for Slice 14A: `domains/media`, built-in
 `media_artifact` resource definition, capability execute adapters, runtime
 grant narrowing, provider schema/instruction text, README, and static
-inventories. Future Slice 14 sub-slices own import/update domains and iOS
-native surfaces only where generic UI is insufficient.
+inventories. Slice 14B candidate adds `domains/import_history`, built-in
+`import_history_record` resource definitions, execute adapters, runtime grant
+narrowing, provider schema/instruction text, README, and static inventories.
+Future Slice 14 sub-slices still own repository/update domains and iOS native
+surfaces only where generic UI is insufficient.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,
@@ -2453,16 +2463,24 @@ Acceptance criteria for Slice 14A: media resources store blob refs only, reject
 raw bytes/base64, enforce MIME allow-list and size bounds, retain source and
 evidence refs, record lifecycle/trace/replay refs, keep provider projections
 redacted, require exact resource authority, and remain scoped to the current
-session/workspace. Broader Slice 14 acceptance still requires
+session/workspace. Slice 14B candidate must store bounded lineage refs only,
+reject raw import payloads/repository trees/unsafe paths, require exact
+`import_history_record` authority/selectors plus trusted current-session or
+workspace scope, record lifecycle/trace/replay refs, keep provider
+projections/redaction bounded, and use deterministic injected timestamps with
+no import-history DRC finding. Broader Slice 14 acceptance still requires
 storage/migration/retention policy, settings parity, event schemas, dependency
 review, iOS parity decision, and no deploy automation.
 
 Focused tests: Slice 14A covers media bounds, MIME validation, redaction,
 retention, resource schema, lifecycle evidence, authority/scope isolation,
-idempotency/replay refs, and no raw-audio/provider projection leaks. Later
-Slice 14 sub-slices cover import preview/execute, tree lineage, update
-signature/provenance, settings parity, migration rollback, and iOS decoder
-tests.
+idempotency/replay refs, and no raw-audio/provider projection leaks. Slice 14B
+candidate covers import-history resource schema, authority/scope isolation,
+bounded graph lineage projection, lifecycle evidence, idempotency fingerprint
+redaction, deterministic timestamp handling, and no raw import/repository/path
+leaks. Later Slice 14 sub-slices cover import preview/execute, repository
+trees, update signature/provenance, settings parity, migration rollback, and
+iOS decoder tests.
 
 iOS validation: not run for Slice 14A because no Swift source, native media
 surface, microphone/camera permission, or capture flow changed. Simulator and

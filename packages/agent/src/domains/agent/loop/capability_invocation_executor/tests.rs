@@ -18,6 +18,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
 
+#[path = "grant_import_history_tests.rs"]
+mod grant_import_history_tests;
 #[path = "grant_notification_device_tests.rs"]
 mod grant_notification_device_tests;
 #[path = "grant_tests.rs"]

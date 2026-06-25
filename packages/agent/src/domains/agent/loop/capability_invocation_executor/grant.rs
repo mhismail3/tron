@@ -77,6 +77,16 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if matches!(operation, "import_history_list" | "import_history_inspect") {
+        allowed_authority_scopes
+            .extend(["import_history.read".to_owned(), "resource.read".to_owned()]);
+    } else if operation == "import_history_record" {
+        allowed_authority_scopes.extend([
+            "import_history.read".to_owned(),
+            "import_history.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(operation, "worker_package_list" | "worker_package_inspect") {
         allowed_authority_scopes.extend([
             "worker.lifecycle.read".to_owned(),
@@ -141,6 +151,11 @@ pub(super) async fn derive_capability_runtime_grant(
         "media_create" | "media_list" | "media_inspect" | "media_archive"
     ) {
         allowed_resource_kinds.push("media_artifact".to_owned());
+    } else if matches!(
+        operation,
+        "import_history_record" | "import_history_list" | "import_history_inspect"
+    ) {
+        allowed_resource_kinds.push("import_history_record".to_owned());
     } else if operation == "worker_package_list" {
         if let Some(kind) = worker_package_list_kind(effective_args) {
             allowed_resource_kinds.push(kind.to_owned());
@@ -193,6 +208,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if matches!(operation, "media_inspect" | "media_archive")
         && let Some(resource_id) = effective_args
             .get("mediaResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "import_history_inspect"
+        && let Some(resource_id) = effective_args
+            .get("importHistoryResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

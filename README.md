@@ -997,6 +997,9 @@ Current primitive operations:
 | `media_list` | List scoped `media_artifact` resources as bounded/redacted metadata projections with blob refs and transcription summaries only. |
 | `media_inspect` | Inspect one scoped `media_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, lifecycle evidence, storage refs, and local transcription metadata without raw audio. |
 | `media_archive` | Archive one scoped `media_artifact` with expected-version freshness, reason, lifecycle stream evidence, and fingerprinted idempotency evidence; blob deletion/pruning remains a later retention worker concern. |
+| `import_history_record` | Record one scoped `import_history_record` resource for generic session/resource lineage only, with bounded parent/child/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, repository trees, or unsafe paths. |
+| `import_history_list` | List scoped `import_history_record` resources as bounded/redacted generic graph summaries with lineage counts and metadata only. |
+| `import_history_inspect` | Inspect one scoped `import_history_record` after stored kind/schema/scope revalidation, returning bounded/redacted generic graph lineage metadata, refs, and lifecycle evidence without raw import payloads, repository trees, or raw authority ids. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1113,6 +1116,16 @@ foundation may record bounded metadata about existing local transcription
 output, but it does not add server transcription models, native capture UI,
 microphone/camera permission changes, public media APIs, or provider-visible
 raw audio.
+The Slice 14B implementation candidate adds `domains/import_history` as a
+narrow server-owned import/session-resource graph foundation behind the same
+single `capability::execute` primitive. Import-history records are durable
+`import_history_record` resources that store bounded subject, parent, child,
+source, and evidence refs; bounded lineage metadata; retention policy;
+trace/replay refs; lifecycle evidence; and fingerprinted idempotency evidence.
+They do not store raw import payloads, repository trees, unsafe filesystem
+paths, or provider-visible raw graph payloads. Render hints remain
+`generic_graph` only; native tree UI, import preview/execute behavior,
+repository visualization, and update diagnostics remain later slices.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1330,11 +1343,14 @@ in-flight transcription when leaving chat, and the server reports explicit
 disabled/loading/ready/failed model state. Slice 14A adds backend-only
 `media_artifact` resource custody for blob refs and bounded metadata; native
 voice-note UI, capture flows, and server-side transcription orchestration are
-still absent. Product/tool domains such as
+still absent. Slice 14B adds a backend-only `import_history_record` lineage
+foundation for generic session/resource graphs; native import/session tree UI,
+repository visualization, and import execution are still absent. Product/tool
+domains such as
 `process`, `program`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
-`worker`, `voice_notes`, and import surfaces are not registered by
-default on this branch.
+`worker`, and `voice_notes` are not registered by default on this branch; the
+only import surface is the bounded `import_history_*` execute foundation.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,

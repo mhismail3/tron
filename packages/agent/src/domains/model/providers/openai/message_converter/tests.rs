@@ -488,6 +488,11 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("expectedMediaVersionId"));
     assert!(result.contains("blob refs and bounded metadata only"));
     assert!(result.contains("provider-visible raw audio disabled"));
+    assert!(result.contains("import_history_record"));
+    assert!(result.contains("import_history_list"));
+    assert!(result.contains("import_history_inspect"));
+    assert!(result.contains("bounded generic graph lineage refs only"));
+    assert!(result.contains("render hints fixed to `generic_graph`"));
     assert!(result.contains("device_register"));
     assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));

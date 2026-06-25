@@ -1839,3 +1839,14 @@ packages/agent/src/domains/media/service.rs	implementation	media	TPC-10/P2AER-S1
 packages/agent/src/domains/media/tests.rs	test	test_harness	TPC-10/P2AER-S14A	focused Slice 14A media bounds MIME redaction retention resource authority scope lifecycle and idempotency coverage
 packages/agent/src/domains/media/validation.rs	implementation	media	TPC-10/P2AER-S14A	media MIME size raw payload refs transcription and retention validation helpers
 packages/agent/src/engine/durability/resources/media_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14A	built-in media_artifact resource schema
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_import_history_tests.rs	test	test_harness	TPC-10/P2AER-S14B	focused Slice 14B import-history runtime grant regression coverage
+packages/agent/src/domains/capability/import_history_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14B	import-history request schema helper split out of the broad capability contract file
+packages/agent/src/domains/capability/operations/import_history.rs	implementation	capability_execute	TPC-10/P2AER-S14B	provider execute adapter for redacted durable import_history_record record list and inspect operations
+packages/agent/src/domains/import_history/authority.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
+packages/agent/src/domains/import_history/contract.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/import_history/mod.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history domain docs and registration boundary for backend-only generic graph lineage foundation
+packages/agent/src/domains/import_history/projection.rs	implementation	import_history	TPC-10/P2AER-S14B	bounded redacted import-history list and inspect projection owner
+packages/agent/src/domains/import_history/service.rs	implementation	import_history	TPC-10/P2AER-S14B	durable import-history record list and inspect operation owner
+packages/agent/src/domains/import_history/tests.rs	test	test_harness	TPC-10/P2AER-S14B	focused Slice 14B import-history bounds redaction retention resource authority scope lifecycle and idempotency coverage
+packages/agent/src/domains/import_history/validation.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history raw-payload tree path refs idempotency and retention validation helpers
+packages/agent/src/engine/durability/resources/import_history_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14B	built-in import_history_record resource schema

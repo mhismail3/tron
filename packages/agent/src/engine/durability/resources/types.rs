@@ -122,6 +122,10 @@ pub const NOTIFICATION_DELIVERY_SCHEMA_ID: &str = "tron.resource.notification_de
 pub const MEDIA_ARTIFACT_KIND: &str = "media_artifact";
 /// Built-in durable media/voice-note artifact resource schema id.
 pub const MEDIA_ARTIFACT_SCHEMA_ID: &str = "tron.resource.media_artifact.v1";
+/// Built-in import/session-resource graph lineage resource kind.
+pub const IMPORT_HISTORY_RECORD_KIND: &str = "import_history_record";
+/// Built-in import/session-resource graph lineage resource schema id.
+pub const IMPORT_HISTORY_RECORD_SCHEMA_ID: &str = "tron.resource.import_history_record.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

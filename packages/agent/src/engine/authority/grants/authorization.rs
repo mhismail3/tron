@@ -167,6 +167,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "questionResourceId",
         "answerResourceId",
         "mediaResourceId",
+        "importHistoryResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -216,6 +217,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("media_create" | "media_archive") => {
             push_unique(&mut scopes, "media.read");
             push_unique(&mut scopes, "media.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("import_history_list" | "import_history_inspect") => {
+            push_unique(&mut scopes, "import_history.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("import_history_record") => {
+            push_unique(&mut scopes, "import_history.read");
+            push_unique(&mut scopes, "import_history.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
@@ -296,6 +307,9 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         }
         Some("media_create" | "media_list" | "media_inspect" | "media_archive") => {
             vec!["media_artifact"]
+        }
+        Some("import_history_record" | "import_history_list" | "import_history_inspect") => {
+            vec!["import_history_record"]
         }
         Some("web_robots_check") => vec!["web_robots_policy"],
         Some("worker_package_list") => {
@@ -378,6 +392,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("web_fetch") => push_unique(&mut kinds, "web_source"),
         Some("web_robots_check") => push_unique(&mut kinds, "web_robots_policy"),
         Some("media_create") => push_unique(&mut kinds, "media_artifact"),
+        Some("import_history_record") => push_unique(&mut kinds, "import_history_record"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }

@@ -2018,6 +2018,52 @@ Focused validation:
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
 | iOS/media capture validation | not run | No Swift source, microphone/camera permission, native voice-note UI, capture flow, or physical-device media path changed in Slice 14A. |
 
+### Slice 14B Implementation Candidate: Import And Session/Resource Graph Foundation
+
+Candidate branch:
+`codex/phase-2-slice-14b-import-session-resource-graph-foundation`.
+
+Baseline HEAD:
+`495881c1e4f30604640cf91761515ac9f3a97279`
+
+Implementation candidate status: implementation thread
+`019effd9-089b-7f41-a035-3ec11620f1ae` is preparing the Slice 14B backend-only
+import/session-resource graph foundation on a focused branch for independent
+review. This section must remain pending-review wording until an adversarial
+review thread returns exact verdict `slice accepted`.
+
+Scope implemented on the candidate branch:
+
+- Adds `domains/import_history` as the server owner for durable
+  `import_history_record` resources containing bounded generic
+  session/resource lineage refs, retention metadata, trace/replay refs,
+  lifecycle evidence, and fingerprinted idempotency evidence only.
+- Adds the built-in `import_history_record` resource definition with append-only
+  versions, active lifecycle state, generic-graph-only rendering policy, and
+  explicit import-history/resource capability requirements.
+- Adds execute-only operation values `import_history_record`,
+  `import_history_list`, and `import_history_inspect` behind the existing
+  single `capability::execute` primitive.
+- Requires trusted current-session/workspace context, exact non-wildcard
+  `import_history_record` resource selectors, `import_history.read` /
+  `import_history.write` plus resource scopes, idempotency for writes, and
+  `networkPolicy: none`.
+- Keeps Slice 14B narrow: no raw import payloads, no repository trees, no
+  import preview/execute behavior, no repository visualization, no update
+  diagnostics, and no native iOS session/import/tree UI.
+
+Focused validation so far:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | pending rerun | Branch wiring is in place and the command is part of implementation closeout validation. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate checks after the import-history domain, execute adapters, grants, and resource definitions were added; only unrelated existing provider/resource dead-code warnings remain. |
+| `cargo test --manifest-path packages/agent/Cargo.toml import_history -- --nocapture` | in progress during implementation | Focused import-history domain regressions now pass; the broader command continues through static suites and is being used to surface remaining inventory/doc gaps before independent review. |
+| `cargo test --manifest-path packages/agent/Cargo.toml grant_import_history -- --nocapture` | exit 0 | Focused runtime grant regressions passed for read-only and write import-history grant derivation. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::contract -- --nocapture` | pending rerun | Capability schema guidance was updated for the new execute operations and will be rerun in closeout validation. |
+| `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance -- --nocapture` | pending rerun | Provider instruction guidance now names import-history operations and raw import/repository tree rejection boundaries; focused rerun remains part of closeout validation. |
+| `cargo test --manifest-path packages/agent/Cargo.toml resource_kernel_builtin_definitions_keep_core_kinds_and_relations -- --nocapture` | pending rerun | Resource kernel coverage will verify `import_history_record` registration during closeout validation. |
+
 ## Validation Log
 
 | Command | Result | Evidence |

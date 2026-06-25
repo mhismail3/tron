@@ -793,6 +793,29 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "idempotency fingerprint evidence",
         ],
     );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "import_history",
+        "P2AER-INV-030",
+        "BPRC-FEATURE-16",
+        "import_repo_tree",
+        concat!(
+            "Slice 14: Media, Voice",
+            " Notes, Imports, Repository Trees, And System Updates"
+        ),
+        "pending_review",
+        &[
+            "Implementation candidate Slice 14B adds backend-only `domains/import_history`",
+            "import_history_record",
+            "generic graph first; native tree only with proof",
+            "Raw import payloads, repository trees, unsafe paths",
+        ],
+        &[
+            "Slice 14B Implementation Candidate: Import And Session/Resource Graph Foundation",
+            "`domains/import_history`",
+            "`import_history_record`",
+        ],
+    );
     let notification_family_row = phase_two_inventory_tsv
         .lines()
         .find(|line| line.starts_with("P2AER-INV-027\t"))

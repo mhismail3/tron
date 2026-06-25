@@ -17,6 +17,9 @@
 //! Media operations are resource-backed metadata operations: they create,
 //! list, inspect, and archive `media_artifact` records that point at blob refs
 //! while rejecting raw media bytes and keeping provider projections redacted.
+//! Import-history operations are resource-backed lineage operations: they
+//! record, list, and inspect bounded `import_history_record` graph metadata
+//! without storing raw import payloads, repository trees, or native UI state.
 //!
 //! ## Submodules
 //!
@@ -46,6 +49,7 @@
 //! is not changed by the read.
 
 pub(crate) mod contract;
+mod import_history_contract;
 mod media_contract;
 mod operations;
 mod scheduler_contract;

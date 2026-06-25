@@ -18,6 +18,7 @@
 mod definitions;
 mod git_definitions;
 mod goal_definitions;
+mod import_history_definitions;
 mod job_definitions;
 mod media_definitions;
 mod memory_definitions;
