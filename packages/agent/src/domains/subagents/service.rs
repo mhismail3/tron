@@ -12,6 +12,7 @@ use crate::engine::{
 };
 use crate::shared::server::errors::CapabilityError;
 
+use super::projection::{inspected_task, task_summary};
 use super::validation::*;
 use super::{Deps, READ_SCOPE, SCHEMA_VERSION, SUBAGENT_TASK_TOPIC, WORKER, WRITE_SCOPE};
 
@@ -281,7 +282,7 @@ pub(crate) async fn list_subagent_tasks_value(
         ensure_subagent_task(&inspection, "subagent_task_list")?;
         ensure_scope(&inspection, &scope, "subagent_task_list")?;
         let (version, payload) = current_payload(&inspection, "subagent_task_list")?;
-        if !include_archived && payload.get("state").and_then(Value::as_str) == Some("archived") {
+        if !include_archived && inspection.resource.lifecycle == "archived" {
             continue;
         }
         tasks.push(task_summary(&inspection.resource, version, payload));
@@ -432,39 +433,6 @@ fn allows_explicit_selector(values: &[String]) -> bool {
     values
         .iter()
         .any(|selector| selector == &format!("kind:{SUBAGENT_TASK_KIND}"))
-}
-
-fn task_summary(
-    resource: &EngineResource,
-    version: &EngineResourceVersion,
-    payload: &Value,
-) -> Value {
-    json!({
-        "taskId": payload.get("taskId").cloned().unwrap_or(Value::Null),
-        "state": payload.get("state").cloned().unwrap_or(Value::Null),
-        "objectiveSummary": payload.get("objectiveSummary").cloned().unwrap_or(Value::Null),
-        "promptSummary": payload.get("promptSummary").cloned().unwrap_or(Value::Null),
-        "parent": payload.get("parent").cloned().unwrap_or(Value::Null),
-        "createdAt": payload.get("createdAt").cloned().unwrap_or(Value::Null),
-        "updatedAt": payload.get("updatedAt").cloned().unwrap_or(Value::Null),
-        "refs": payload.get("refs").cloned().unwrap_or_else(|| json!({})),
-        "resourceRefs": [version_ref(resource, version, "subagent_task")]
-    })
-}
-
-fn inspected_task(
-    resource: &EngineResource,
-    version: &EngineResourceVersion,
-    payload: &Value,
-) -> Value {
-    json!({
-        "resourceId": resource.resource_id,
-        "kind": resource.kind,
-        "lifecycle": resource.lifecycle,
-        "versionId": version.version_id,
-        "payload": payload,
-        "resourceRefs": [version_ref(resource, version, "inspected")]
-    })
 }
 
 fn ensure_scope(

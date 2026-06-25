@@ -512,6 +512,8 @@ mod tests {
         assert!(operations.contains("web_source_archive"));
         assert!(operations.contains("tool_source_list"));
         assert!(operations.contains("tool_source_inspect"));
+        assert!(operations.contains("subagent_task_list"));
+        assert!(operations.contains("subagent_task_inspect"));
         assert!(operations.contains("worker_package_list"));
         assert!(operations.contains("worker_package_inspect"));
         assert!(
@@ -530,6 +532,13 @@ mod tests {
             "job_network",
             "tool_source_propose",
             "tool_source_execute",
+            "subagent_task_create",
+            "subagent_task_update",
+            "subagent_task_cancel",
+            "subagent_task_result",
+            "subagent_task_status",
+            "spawn_subagent",
+            "subagent_spawn",
             "worker_package_install",
             "worker_package_enable",
             "worker_package_launch",
@@ -548,7 +557,6 @@ mod tests {
         assert!(!operations.contains("planner"));
         assert!(!operations.contains("reminder"));
         assert!(!operations.contains("notification"));
-        assert!(!operations.contains("subagent"));
         assert!(schema["properties"].get("branchName").is_some());
         assert!(schema["properties"].get("maxBranches").is_some());
         assert!(schema["properties"].get("maxBranchBytes").is_some());
@@ -571,6 +579,7 @@ mod tests {
         assert!(schema["properties"].get("webSourceResourceId").is_some());
         assert!(schema["properties"].get("webSourceVersionId").is_some());
         assert!(schema["properties"].get("toolSourceResourceId").is_some());
+        assert!(schema["properties"].get("subagentTaskResourceId").is_some());
         assert!(
             schema["properties"]
                 .get("webRobotsPolicyResourceId")

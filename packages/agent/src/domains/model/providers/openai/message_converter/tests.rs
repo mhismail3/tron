@@ -470,7 +470,6 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(!result.contains("git_reset"));
     assert!(!result.contains("git_checkout"));
     assert!(!result.contains("git_branch_delete"));
-    assert!(!result.contains("subagent"));
     assert!(!result.contains("reminder"));
     assert!(!result.contains("notification"));
     assert!(!result.contains("planner"));
@@ -483,6 +482,9 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("web_source_archive"));
     assert!(result.contains("expectedWebSourceVersionId"));
+    assert!(result.contains("subagent_task_list"));
+    assert!(result.contains("subagent_task_inspect"));
+    assert!(result.contains("bounded/redacted inert subagent task lifecycle evidence only"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
     for non_goal in [
@@ -495,6 +497,13 @@ fn clarification_includes_capability_execution_guidance() {
         "job_fetch",
         "job_http",
         "job_network",
+        "subagent_task_create",
+        "subagent_task_update",
+        "subagent_task_cancel",
+        "subagent_task_result",
+        "subagent_task_status",
+        "spawn_subagent",
+        "subagent_spawn",
     ] {
         assert!(
             !result.contains(non_goal),

@@ -340,7 +340,8 @@ Agent access is read-only through `subagent_task_list` and
 `subagent_task_inspect` under `capability::execute`; those reads require
 trusted current-session context, `subagents.read`, `resource.read`, explicit
 resource-kind grants, matching `kind:subagent_task` selectors, stored
-kind/schema revalidation, scope isolation, and no network. Actual child-agent
+kind/schema revalidation, allowlisted bounded/redacted projection independent
+of stored payload trust, scope isolation, and no network. Actual child-agent
 spawn, worker/package launch, job/process start, tool execution, scheduling,
 cancellation of real workers, result merge into conversation state, public
 `/engine` expansion, and native fixed iOS subagent UI remain deferred to later

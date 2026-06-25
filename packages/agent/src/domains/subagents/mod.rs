@@ -4,13 +4,14 @@
 //! callers can create and update `subagent_task` resources as bounded lifecycle
 //! evidence, while model-visible access remains read-only through
 //! `capability::execute` operation values `subagent_task_list` and
-//! `subagent_task_inspect`. Inspect revalidates stored resource kind/schema
-//! before projecting payloads.
+//! `subagent_task_inspect`. List/inspect revalidate stored resource
+//! kind/schema before returning allowlisted, bounded, redacted projections.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `projection` | Allowlisted, bounded, redacted read projections for list/inspect |
 //! | `service` | Internal lifecycle writes plus read-only list/inspect projection |
 //! | `validation` | Bounded payload readers and redaction/non-goal guards |
 //! | `tests` | Authority, scoping, idempotency, schema, and non-goal guards |
@@ -27,6 +28,7 @@
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+mod projection;
 pub(crate) mod service;
 mod validation;
 

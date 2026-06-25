@@ -1825,6 +1825,7 @@ packages/agent/src/domains/worker_lifecycle/inspection_test_support.rs	retain	wo
 packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	retain	worker_lifecycle test owner	PCC-10/P2AER-S9B	Slice 9B split regression tests for worker lifecycle inspection authority, scope, kind/schema, bounds, and redaction.
 packages/agent/src/domains/capability/operations/subagents.rs	retain	capability execute owner	PCC-10/P2AER-S10A	Slice 10A read-only execute adapter for inert subagent task lifecycle inspection.
 packages/agent/src/domains/subagents/mod.rs	retain	subagents owner	PCC-10/P2AER-S10A	Slice 10A inert subagent task lifecycle domain docs and registration boundary.
+packages/agent/src/domains/subagents/projection.rs	retain	subagents owner	PCC-10/P2AER-S10A-FIX1	Slice 10A fix allowlisted bounded redacted read projection owner.
 packages/agent/src/domains/subagents/service.rs	retain	subagents owner	PCC-10/P2AER-S10A	Slice 10A trusted internal lifecycle record service plus read-only scoped projections.
 packages/agent/src/domains/subagents/tests.rs	retain	subagents test owner	PCC-10/P2AER-S10A	Slice 10A regression tests for authority, idempotency, scope, schema, bounds, and non-goal guards.
 packages/agent/src/domains/subagents/validation.rs	retain	subagents owner	PCC-10/P2AER-S10A	Slice 10A bounded summary/ref/placeholder validation and secret/execution-field rejection.

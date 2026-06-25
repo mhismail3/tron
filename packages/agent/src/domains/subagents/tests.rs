@@ -1,13 +1,15 @@
 use serde_json::{Value, json};
 
+use super::projection::PROJECTION_STRING_BYTES;
 use super::service::{
     create_task_value, inspect_subagent_task_value, list_subagent_tasks_value, update_task_value,
 };
+use super::validation::{MAX_REF_ITEMS, MAX_SUMMARY_BYTES};
 use super::{CREATE_TASK_FUNCTION, Deps, READ_SCOPE, UPDATE_TASK_FUNCTION, WRITE_SCOPE};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant, FunctionId,
-    Invocation, InvocationId, RiskLevel, SUBAGENT_TASK_KIND, SUBAGENT_TASK_SCHEMA_ID, TraceId,
-    WorkerId, builtin_resource_type_definitions,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
+    EngineResourceScope, FunctionId, Invocation, InvocationId, RiskLevel, SUBAGENT_TASK_KIND,
+    SUBAGENT_TASK_SCHEMA_ID, TraceId, WorkerId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -215,6 +217,198 @@ async fn inspect_revalidates_stored_kind_and_schema_not_id_prefix() {
         .inspect_error("schema-mismatch-inspect", resource_id)
         .await;
     assert!(error.contains("expected subagent_task"), "{error}");
+}
+
+#[tokio::test]
+async fn read_projections_omit_redact_and_bound_untrusted_stored_payloads() {
+    let fixture = Fixture::new("projection").await;
+    let resource_id = "subagent_task:unsafe-projection";
+    let evidence_refs = (0..(MAX_REF_ITEMS + 5))
+        .map(|index| {
+            json!({
+                "kind": "fixture",
+                "id": format!("evidence-{index}-{}", "x".repeat(PROJECTION_STRING_BYTES + 20)),
+                "resourceId": format!("evidence:projection-{index}"),
+                "token": "Bearer leaked-evidence-token",
+                "url": "https://secret.example/evidence",
+                "unexpectedNested": {"command": "run hidden helper"}
+            })
+        })
+        .collect::<Vec<_>>();
+
+    fixture
+        .deps
+        .engine_host
+        .create_resource(CreateResource {
+            resource_id: Some(resource_id.to_owned()),
+            kind: SUBAGENT_TASK_KIND.to_owned(),
+            schema_id: Some(SUBAGENT_TASK_SCHEMA_ID.to_owned()),
+            scope: EngineResourceScope::Session(fixture.session_id.clone()),
+            owner_worker_id: WorkerId::new("subagents").unwrap(),
+            owner_actor_id: ActorId::new("system:subagents-test").unwrap(),
+            lifecycle: Some("running".to_owned()),
+            policy: json!({"read": ["subagents.read", "resource.read"]}),
+            initial_payload: Some(json!({
+                "schemaVersion": "tron.subagent_task.v1",
+                "state": "running",
+                "taskId": "task-unsafe",
+                "parent": {
+                    "sessionId": fixture.session_id.clone(),
+                    "workspaceId": "workspace-subagents",
+                    "traceId": "trace-projection",
+                    "parentInvocationId": "invocation-projection",
+                    "actorId": "agent:projection",
+                    "actorKind": "Agent",
+                    "command": "run leaked command",
+                    "token": "Bearer leaked-parent-token"
+                },
+                "scope": {"kind": "session", "value": fixture.session_id.clone()},
+                "objectiveSummary": "x".repeat(MAX_SUMMARY_BYTES + 64),
+                "promptSummary": "See https://secret.example/raw-prompt",
+                "createdAt": "2026-06-24T00:00:00Z",
+                "updatedAt": "2026-06-24T00:00:01Z",
+                "refs": {
+                    "trace": [{
+                        "traceId": "trace-projection",
+                        "url": "https://secret.example/trace",
+                        "token": "Bearer leaked-trace-token"
+                    }],
+                    "replay": [{"invocationId": "invocation-projection"}],
+                    "evidence": evidence_refs,
+                    "outputs": [{
+                        "resourceId": "output:safe",
+                        "versionId": "version-safe",
+                        "command": "run output leak"
+                    }]
+                },
+                "result": {
+                    "summary": "r".repeat(PROJECTION_STRING_BYTES + 32),
+                    "resourceRefs": [{
+                        "resourceId": "result:safe",
+                        "versionId": "version-result",
+                        "token": "Bearer result-token"
+                    }],
+                    "token": "Bearer leaked-result-token",
+                    "command": "run hidden result"
+                },
+                "error": {
+                    "message": "failed at https://secret.example/error",
+                    "code": "E_SAFE",
+                    "password": "password=leaked"
+                },
+                "authority": {
+                    "grantId": "grant-secret-123",
+                    "requiredScopes": ["subagents.read", "resource.read"],
+                    "resourceKind": "subagent_task",
+                    "token": "Bearer leaked-authority-token"
+                },
+                "activation": {
+                    "performed": false,
+                    "subagentStarted": false,
+                    "workerStarted": false,
+                    "jobStarted": false,
+                    "catalogRegistration": false,
+                    "toolExecution": false,
+                    "resultMerged": false,
+                    "process": {"pid": 1234}
+                },
+                "network": {
+                    "performed": false,
+                    "requiredPolicy": "none",
+                    "url": "https://secret.example/network"
+                },
+                "redaction": {"policy": "summary-only"},
+                "limits": {
+                    "maxSummaryBytes": MAX_SUMMARY_BYTES,
+                    "maxRefItems": MAX_REF_ITEMS,
+                    "maxPlaceholderBytes": 8192,
+                    "maxTotalPayloadBytes": 64000
+                },
+                "idempotency": {"key": "idempotency-secret-value"},
+                "revision": 7,
+                "rawPrompt": "raw prompt must never project",
+                "unexpectedRoot": {"secret": "Bearer leaked-root-token"}
+            })),
+            locations: Vec::new(),
+            trace_id: TraceId::new("trace-projection-create").unwrap(),
+            invocation_id: None,
+        })
+        .await
+        .expect("create unsafe same-kind resource");
+
+    let inspected = fixture.inspect("projection-inspect", resource_id).await;
+    let listed = fixture.list("projection-list").await;
+    let payload = &inspected["task"]["payload"];
+    assert_eq!(payload["state"], json!("running"));
+    assert_eq!(payload["promptSummary"]["redacted"], json!(true));
+    assert_eq!(
+        payload["objectiveSummary"].as_str().unwrap().len(),
+        MAX_SUMMARY_BYTES
+    );
+    assert_eq!(
+        payload["refs"]["evidence"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        MAX_REF_ITEMS
+    );
+    assert_eq!(payload["refs"]["evidence"]["truncated"], json!(true));
+    assert_eq!(
+        payload["result"]["summary"].as_str().unwrap().len(),
+        PROJECTION_STRING_BYTES
+    );
+    assert_eq!(payload["result"]["redacted"], json!(true));
+    assert_eq!(payload["error"]["message"]["redacted"], json!(true));
+    assert_eq!(payload["authority"]["grantIdRedacted"], json!(true));
+    assert_eq!(payload["idempotency"]["keyRedacted"], json!(true));
+    assert!(payload.as_object().unwrap().get("rawPrompt").is_none());
+    assert!(payload.as_object().unwrap().get("unexpectedRoot").is_none());
+    assert!(payload["parent"].get("command").is_none());
+    assert!(payload["refs"]["trace"]["items"][0].get("url").is_none());
+    assert!(
+        payload["result"]["resourceRefs"]["items"][0]
+            .get("token")
+            .is_none()
+    );
+
+    let listed_task = &listed["tasks"][0];
+    assert_eq!(listed_task["promptSummary"]["redacted"], json!(true));
+    assert_eq!(
+        listed_task["objectiveSummary"].as_str().unwrap().len(),
+        MAX_SUMMARY_BYTES
+    );
+    assert_eq!(
+        listed_task["refs"]["evidence"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        MAX_REF_ITEMS
+    );
+    assert_eq!(listed_task["refs"]["evidence"]["truncated"], json!(true));
+
+    let inspected_json = serde_json::to_string(&inspected).expect("serialize inspect");
+    let listed_json = serde_json::to_string(&listed).expect("serialize list");
+    for forbidden in [
+        "Bearer leaked",
+        "https://secret.example",
+        "raw prompt must never project",
+        "rawPrompt",
+        "unexpectedRoot",
+        "run hidden",
+        "run leaked command",
+        "idempotency-secret-value",
+        "grant-secret-123",
+        "password=leaked",
+    ] {
+        assert!(
+            !inspected_json.contains(forbidden),
+            "inspect leaked forbidden material {forbidden}: {inspected_json}"
+        );
+        assert!(
+            !listed_json.contains(forbidden),
+            "list leaked forbidden material {forbidden}: {listed_json}"
+        );
+    }
 }
 
 #[tokio::test]

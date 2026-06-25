@@ -1132,7 +1132,8 @@ read-only through `subagent_task_list` and `subagent_task_inspect` under
 `capability::execute`; those operations require trusted current-session
 context, `subagents.read`, `resource.read`, explicit `subagent_task` resource
 authority plus a matching `kind:subagent_task` selector, stored kind/schema
-revalidation, scope isolation, and `networkPolicy: none`. Slice 10A does not
+revalidation, allowlisted bounded/redacted projection, scope isolation, and
+`networkPolicy: none`. Slice 10A does not
 spawn child agents, launch workers, start jobs or processes, execute tools,
 open network/browser/search/login scope, register catalog entries, promote
 trust, merge results into conversation state, schedule work, expand public
@@ -1362,9 +1363,11 @@ catalog/resource truth and writes only append-oriented `catalog_discovery_report
 evidence. Tool-source inspection reads scoped `tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
 writes are provenance evidence and explicitly do not activate external tools.
-Subagent task inspection reads scoped `subagent_task` resources only; internal
-task lifecycle writes are provenance evidence and explicitly do not start child
-agents, launch workers, start jobs, run tools, schedule work, or merge results.
+Subagent task inspection reads scoped `subagent_task` resources only and
+projects allowlisted, bounded, redacted lifecycle fields instead of raw stored
+payloads; internal task lifecycle writes are provenance evidence and explicitly
+do not start child agents, launch workers, start jobs, run tools, schedule
+work, or merge results.
 Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,

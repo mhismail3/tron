@@ -42,7 +42,7 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 622 |
+| implementation | 623 |
 | support | 385 |
 | test | 535 |
 | docs | 131 |
@@ -87,7 +87,7 @@ The TSV covers tracked and newly introduced files under:
 | `settings` | 16 |
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
-| `subagents` | 3 |
+| `subagents` | 4 |
 | `test_harness` | 533 |
 | `transcription` | 11 |
 | `transport` | 25 |

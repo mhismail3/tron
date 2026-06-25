@@ -183,8 +183,9 @@ Completed Phase 2 restoration slices at this baseline:
   read-only `subagent_task_list`/`subagent_task_inspect` evidence through
   `capability::execute`, with explicit `subagents.read`/`resource.read`
   authority, `kind:subagent_task` selectors, stored kind/schema revalidation,
-  scope isolation, bounded/redacted summaries/placeholders, and no child-agent,
-  worker, job, process, network, scheduling, or result-merge behavior.
+  scope isolation, allowlisted bounded/redacted read projections, and no
+  child-agent, worker, job, process, network, scheduling, or result-merge
+  behavior.
 
 Current next action:
 Independently review the Slice 10A implementation candidate before any mainline

@@ -1631,7 +1631,13 @@ Slice 10A implementation candidate evidence:
   non-bootstrap read grants, explicit `subagents.read` and `resource.read`,
   explicit `subagent_task` resource-kind authority, matching
   `kind:subagent_task` selectors, stored kind/schema revalidation, scope
-  isolation, and `networkPolicy: none`.
+  isolation, allowlisted bounded/redacted projection independent of stored
+  payload trust, and `networkPolicy: none`.
+- Focused review-fix branch
+  `codex/phase-2-slice-10a-subagent-task-lifecycle-foundation-fix1` hardens
+  list/inspect projections with `domains/subagents/projection.rs` and aligns
+  OpenAI provider guidance with only the read-only `subagent_task_list` and
+  `subagent_task_inspect` operations.
 - Slice 10A does not spawn child agents, launch workers/packages, start jobs or
   processes, execute tools, register catalog entries, perform network/browser/
   search/login work, schedule work, cancel real workers, merge results into
@@ -1639,10 +1645,11 @@ Slice 10A implementation candidate evidence:
   schemas, add migrations, or add fixed native iOS subagent UI.
 - Focused validation passed `cargo fmt --manifest-path packages/agent/Cargo.toml
   --all -- --check` and `cargo test --manifest-path packages/agent/Cargo.toml
-  subagent -- --nocapture` with 9 focused tests covering creation/update,
+  subagent -- --nocapture` with 10 focused tests covering creation/update,
   authority denial, idempotency, scope isolation, selector denial, stored
-  kind/schema mismatch rejection, bounded/redacted validation, resource
-  definition fields, and static no-launch/no-registration/no-network guards.
+  kind/schema mismatch rejection, malformed stored-payload projection
+  redaction/bounding, bounded/redacted validation, resource definition fields,
+  and static no-launch/no-registration/no-network guards.
 - Final implementation validation also passed `cargo check --manifest-path
   packages/agent/Cargo.toml`, `scripts/personal-info-guard.sh`, `git diff
   --check`, `git ls-files -ci --exclude-standard`, and the relevant HRA, SACB,

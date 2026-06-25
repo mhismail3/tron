@@ -2,7 +2,7 @@
 
 Status: **completed**
 Scorecard row: `TMB-1`
-Last verified: 2026-06-23 (P2AER-S5A jobs process lifecycle inventory refresh)
+Last verified: 2026-06-25 (P2AER-S10A-FIX1 subagent task projection inventory refresh)
 Machine-readable inventory: `packages/agent/docs/true-modularity-boundary-inventory.tsv`
 
 This inventory classifies every tracked Rust and Swift source file in the current TMB boundary scope. The TSV remains the source of truth for static coverage; this Markdown file records the dependency rules and approved composition-root exceptions preserved after campaign closeout.
@@ -40,15 +40,15 @@ through `packages/agent/src/transport/runtime/setup.rs`. Individual
 
 | Class | Files |
 |---|---:|
-| `adapter` | 137 |
+| `adapter` | 138 |
 | `composition-root` | 11 |
 | `contract` | 104 |
-| `facade` | 95 |
+| `facade` | 96 |
 | `generated-wire-dto` | 25 |
-| `implementation` | 584 |
+| `implementation` | 588 |
 | `test-support` | 124 |
 
-Total tracked source rows: **1080**.
+Total tracked source rows: **1086**.
 
 ## Verification
 
