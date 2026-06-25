@@ -6,7 +6,7 @@
 //! evidence, memory contract custody, durable media/voice-note resource
 //! custody, durable import/session-resource graph lineage records, durable
 //! content-free repository tree snapshot records, durable import preview
-//! records, durable system update
+//! records, durable program execution metadata records, durable system update
 //! diagnostic metadata records, durable non-interactive jobs,
 //! read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
@@ -29,6 +29,7 @@
 //! | `import_history` | Durable import/session-resource graph lineage records |
 //! | `repository_tree` | Durable content-free repository tree snapshot records |
 //! | `import_preview` | Durable content-free import preview records |
+//! | `program_execution` | Durable content-free program execution metadata records |
 //! | `update_diagnostics` | Durable system update diagnostics metadata records |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
@@ -89,7 +90,12 @@
 //! preview restoration is content-free ref and metadata custody only: it links
 //! import-history and repository-tree refs with bounded normalized relative path
 //! metadata and preview fingerprints without raw import payloads, file contents,
-//! repository contents, import execution, visualization, or git mutation. Update
+//! repository contents, import execution, visualization, or git mutation.
+//! Program execution restoration is content-free metadata custody only: it
+//! stores runtime/language ids, I/O refs or fingerprints, resource-limit policy,
+//! trace/replay refs, and lifecycle evidence without raw code, command strings,
+//! raw stdin/stdout/stderr, subprocesses, runtime installs, file writes, network
+//! behavior, result merge, or native UI. Update
 //! diagnostics restoration is metadata-only signed-release and provenance
 //! custody: it does not perform live update checks, execute
 //! installers, restart processes, register packages/catalog entries, expose
@@ -133,6 +139,7 @@ pub mod message;
 pub mod model;
 pub mod notifications;
 pub mod procedural;
+pub mod program_execution;
 pub mod registration;
 pub mod repository_tree;
 pub mod scheduler;

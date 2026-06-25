@@ -504,6 +504,12 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("link import-history and repository-tree refs"));
     assert!(result.contains("raw import payloads, preview payloads, file contents"));
     assert!(result.contains("previewFingerprint"));
+    assert!(result.contains("program_execution_record"));
+    assert!(result.contains("program_execution_list"));
+    assert!(result.contains("program_execution_inspect"));
+    assert!(result.contains("runtime/language identifiers"));
+    assert!(result.contains("raw code, stdin/stdout/stderr"));
+    assert!(result.contains("programFingerprint"));
     assert!(result.contains("device_register"));
     assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));

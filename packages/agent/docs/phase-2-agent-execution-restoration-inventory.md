@@ -260,10 +260,13 @@ start/status/list/log/cancel provider operations through the existing
 `networkPolicy: none`, owned process-group timeout/cancel/shutdown cleanup,
 cancel-request-before-terminal finalization with stale-version retry, retention
 archiving, and focused resource/authority/bounded-output tests. `P2AER-INV-006` stays
-planned for a later program-execution slice; Slice 5A did not restore language
-runtimes, PTY sessions, web/network research, git/source-control, subagents,
-scheduling, notifications, or native iOS process panels. Queue-backed internal
-job dispatch also remains deferred pending an explicit queued-grant design.
+split from Slice 5A: Slice 15A is an implementation candidate for backend-only
+`program_execution_record` metadata custody, but it does not restore language
+runtimes, raw code or I/O storage, shell commands, PTY sessions, subprocess/job
+launch, package installation, web/network research, git/source-control,
+subagents, scheduling, notifications, or native iOS process panels.
+Queue-backed internal job dispatch also remains deferred pending an explicit
+queued-grant design.
 
 `P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
 evidence, accepted Slice 6B index-only stage/unstage, accepted Slice 6C

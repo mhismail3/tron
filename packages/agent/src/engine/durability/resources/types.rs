@@ -130,6 +130,10 @@ pub const IMPORT_HISTORY_RECORD_SCHEMA_ID: &str = "tron.resource.import_history_
 pub const IMPORT_PREVIEW_KIND: &str = "import_preview";
 /// Built-in content-free import preview resource schema id.
 pub const IMPORT_PREVIEW_SCHEMA_ID: &str = "tron.resource.import_preview.v1";
+/// Built-in content-free program execution record resource kind.
+pub const PROGRAM_EXECUTION_KIND: &str = "program_execution_record";
+/// Built-in content-free program execution record resource schema id.
+pub const PROGRAM_EXECUTION_SCHEMA_ID: &str = "tron.resource.program_execution_record.v1";
 /// Built-in content-free repository tree snapshot resource kind.
 pub const REPOSITORY_TREE_SNAPSHOT_KIND: &str = "repository_tree_snapshot";
 /// Built-in content-free repository tree snapshot resource schema id.

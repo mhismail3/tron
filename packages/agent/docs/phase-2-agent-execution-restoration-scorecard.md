@@ -738,6 +738,15 @@ Old evidence paths: `BPRC-FEATURE-03`, `BPRC-FEATURE-15`,
 Acceptance criteria: bounded output, cancellation, timeout, dead-letter or
 terminal state, replayable logs, no-network or declared-network policy,
 deterministic I/O envelope for program execution, and explicit retention.
+Slice 15A is an implementation candidate for the metadata-only half of this
+row: it adds `domains/program_execution`, durable `program_execution_record`
+resources, execute-only record/list/inspect operations, exact resource
+authority/selectors, bounded/redacted projections, deterministic injected
+timestamps, and validation that rejects raw code, raw stdin/stdout/stderr,
+command strings, shell snippets, package-manager directives, unsafe paths, and
+provider-visible raw payloads. Runtime execution, subprocess/job launch,
+interpreter isolation, package installation, file writes, live network behavior,
+notebook/PTY UX, and result merge remain future decisions.
 
 Focused tests: queue lifecycle, cancellation, stream replay, log retention,
 lease expiry, shutdown, process sandbox, interpreter isolation, CSD inventory.
@@ -2477,6 +2486,13 @@ narrowing, provider schema/instruction text, README, and static inventories for
 content-free preview metadata only. Future Slice 14 sub-slices still own actual
 import execution/application, live update execution domains, and iOS native
 surfaces only where generic UI is insufficient.
+Slice 15A implementation candidate begins the separate program-execution row by
+adding `domains/program_execution`, the built-in `program_execution_record`
+resource definition, execute adapters, runtime grant narrowing, provider
+schema/instruction text, README, and static inventories for metadata-only
+program execution records. It deliberately excludes runtime execution,
+subprocess/job launch, package installation, file writes, live network behavior,
+notebook/PTY surfaces, result merge, and native UI.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,

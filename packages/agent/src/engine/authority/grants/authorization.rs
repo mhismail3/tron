@@ -170,6 +170,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "importHistoryResourceId",
         "repositoryTreeResourceId",
         "importPreviewResourceId",
+        "programExecutionResourceId",
         "updateDiagnosticResourceId",
     ]
     .into_iter()
@@ -250,6 +251,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("import_preview_record") => {
             push_unique(&mut scopes, "import_preview.read");
             push_unique(&mut scopes, "import_preview.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("program_execution_list" | "program_execution_inspect") => {
+            push_unique(&mut scopes, "program_execution.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("program_execution_record") => {
+            push_unique(&mut scopes, "program_execution.read");
+            push_unique(&mut scopes, "program_execution.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
@@ -351,6 +362,11 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             vec!["import_preview"]
         }
         Some(
+            "program_execution_record" | "program_execution_list" | "program_execution_inspect",
+        ) => {
+            vec!["program_execution_record"]
+        }
+        Some(
             "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect",
         ) => {
             vec!["update_diagnostic_record"]
@@ -439,6 +455,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("import_history_record") => push_unique(&mut kinds, "import_history_record"),
         Some("repository_tree_snapshot") => push_unique(&mut kinds, "repository_tree_snapshot"),
         Some("import_preview_record") => push_unique(&mut kinds, "import_preview"),
+        Some("program_execution_record") => push_unique(&mut kinds, "program_execution_record"),
         Some("update_diagnostic_record") => push_unique(&mut kinds, "update_diagnostic_record"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
@@ -658,6 +675,41 @@ mod tests {
             .to_string();
         assert!(
             error.contains("does not allow resource import_preview:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn program_execution_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "program_execution.read",
+                "resource.read",
+            ],
+            &["program_execution_record"],
+            &[
+                "kind:program_execution_record",
+                "resource:program_execution_record:first",
+            ],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "program_execution_inspect",
+            "programExecutionResourceId": "program_execution_record:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first resource allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "program_execution_inspect",
+            "programExecutionResourceId": "program_execution_record:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind resource must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource program_execution_record:second"),
             "{error}"
         );
     }
