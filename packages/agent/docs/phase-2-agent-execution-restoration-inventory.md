@@ -97,7 +97,7 @@ bounded projections; feature domains still own what scheduled work does, and
 hidden cron loops, APNs/device notification delivery, public scheduler APIs,
 native fixed schedule UI, and result merge remain deferred.
 
-Slice 13 review candidate adds the server-owned notification/device foundation
+Accepted Slice 13 adds the server-owned notification/device foundation
 for BPRC-FEATURE-12: `domains/device`, `domains/notifications`, built-in
 `device_registration`, `notification`, and `notification_delivery` resources,
 `device.lifecycle` and `notifications.lifecycle` stream evidence, and

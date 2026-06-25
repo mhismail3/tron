@@ -2360,8 +2360,8 @@ autonomous planning, or result merge.
 
 ### Slice 13: Notifications, APNs, Device Broker, And Inbox
 
-Implementation status: review-candidate backend foundation pending acceptance.
-Slice 13 now adds server-owned `domains/device` and `domains/notifications`,
+Implementation status: Accepted Slice 13 backend foundation is current baseline.
+Accepted Slice 13 adds server-owned `domains/device` and `domains/notifications`,
 durable `device_registration`, `notification`, and `notification_delivery` resource
 schemas, lifecycle stream evidence, and execute-only operation values through
 the existing `capability::execute` primitive. It deliberately does not add live

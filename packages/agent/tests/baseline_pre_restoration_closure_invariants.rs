@@ -740,15 +740,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-12",
         "notifications_device",
         "Slice 13: Notifications, APNs, Device Broker, And Inbox",
-        "pending_review",
+        "current_baseline",
         &[
-            "Slice 13 review candidate adds server-owned `domains/device`",
+            "Accepted Slice 13 adds server-owned `domains/device`",
             "device_register",
             "device_registration",
             "raw APNs tokens never provider-visible",
         ],
         &[
-            "Slice 13 Review Candidate: Notifications, APNs, Device Broker, And Inbox",
+            "Accepted Slice 13: Notifications, APNs, Device Broker, And Inbox",
             "`device_registration`",
             "live APNs transport disabled",
         ],
@@ -760,15 +760,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-12",
         "notifications_device",
         "Slice 13: Notifications, APNs, Device Broker, And Inbox",
-        "pending_review",
+        "current_baseline",
         &[
-            "Slice 13 review candidate adds server-owned `domains/device` and `domains/notifications`",
+            "Accepted Slice 13 adds server-owned `domains/device` and `domains/notifications`",
             "notification_send",
             "notification_delivery",
             "no fake local inbox",
         ],
         &[
-            "Slice 13 Review Candidate: Notifications, APNs, Device Broker, And Inbox",
+            "Accepted Slice 13: Notifications, APNs, Device Broker, And Inbox",
             "`notification` and `notification_delivery`",
             "no fake local inbox",
         ],
@@ -780,8 +780,8 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     let notification_family_columns: Vec<_> = notification_family_row.split('\t').collect();
     assert_eq!(
         notification_family_columns.get(14).copied(),
-        Some("pending_review"),
-        "Slice 13 event-family foundation must remain pending review until acceptance: {notification_family_row}"
+        Some("current_baseline"),
+        "Slice 13 event-family foundation must be current baseline after acceptance: {notification_family_row}"
     );
     assert!(
         notification_family_row
@@ -789,16 +789,16 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "Slice 13 event-family row must keep automatic routing deferred: {notification_family_row}"
     );
     assert!(
-        phase_two_scorecard.contains("review-candidate backend foundation pending acceptance")
+        phase_two_scorecard.contains("Accepted Slice 13 backend foundation is current baseline")
             && phase_two_scorecard.contains(
                 "Users do not yet receive live push notifications or open a native inbox"
             ),
-        "Slice 13 scorecard must describe the pending-review backend foundation without live APNs/native inbox behavior"
+        "Slice 13 scorecard must describe the accepted backend foundation without live APNs/native inbox behavior"
     );
     assert!(
         !phase_two_scorecard.contains("receive push notifications,")
             && !phase_two_scorecard.contains("open an inbox,"),
-        "Slice 13 scorecard must not claim live push/native inbox user behavior before acceptance"
+        "Slice 13 scorecard must not claim live push/native inbox user behavior after backend-only acceptance"
     );
     for forbidden in [
         "autostart",

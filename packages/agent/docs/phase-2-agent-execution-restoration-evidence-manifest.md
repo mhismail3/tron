@@ -1888,10 +1888,30 @@ Scope implemented:
   notification delivery, no public scheduler API expansion, no native fixed iOS
   UI, no autonomous planning, and no result merge into conversation state.
 
-### Slice 13 Review Candidate: Notifications, APNs, Device Broker, And Inbox
+### Accepted Slice 13: Notifications, APNs, Device Broker, And Inbox
 
-Implementation branch:
-`codex/phase-2-slice-13-notifications-apns-device-broker-inbox`.
+Accepted branch:
+`codex/phase-2-slice-13-notifications-apns-device-broker-inbox-fix5`.
+
+Baseline HEAD:
+`ffb83eb28f5172e4d6ff83ae094f1876f3251e74`
+
+Accepted status: current baseline after discovery worker
+`019efec3-9be4-7961-a73a-8b7bbfadc85f`, implementation worker
+`019efec8-4361-7673-a1aa-3bd5a07cf045`, review worker
+`019eff0f-4720-73c1-a116-861f0c173f87`, focused fix workers
+`019eff15-cba9-7131-b9a3-7630a0f01429`,
+`019eff2a-a552-73d0-bd03-0e661c4b37c9`,
+`019eff3f-9ccb-74f3-bb01-68e666ee777f`,
+`019eff50-2696-7bd0-b46c-ff7f7b0e48af`, and
+`019eff60-829b-7e70-9e6c-776a05ef2657`, plus accepting re-review worker
+`019eff66-5f54-7b02-83a5-83cda0fe6f45`. Accepted commits are
+`0b4896da73e8c026e6efbbd8ffd2cc25d444dc5e`,
+`e5eedd8058c0ccd14842520b8e314c3c0433bf7a`,
+`47ff7c214b3dcc058eeaf7be5d2c2c7fbeeeb102`,
+`e84723a86880bc461e5238ac54ddd3c69d491e5e`,
+`7197d05732ab27e878b589609cedd9cd731b998e`, and
+`1c09fa2f0a4ed849cd13dfc9e1d8694af0ecad44`.
 
 Scope implemented:
 
@@ -1932,7 +1952,7 @@ Focused validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::contract -- --nocapture` | exit 0 | 3 provider schema tests passed after adding notification/device operation values and schemas. |
 | `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | 1 message-converter guidance test passed with the new execute operation families included. |
 | `cargo test --manifest-path packages/agent/Cargo.toml clarification_forbids_probe_calls_when_user_supplies_exact_payload -- --nocapture` | exit 0 | 1 provider-behavior guard passed, preserving the no-probe-call policy for exact execute payloads. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test ios_affordance_restoration_map_invariants --test security_authority_capability_boundaries_invariants --test hierarchical_rearchitecture_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test documentation_evidence_scorecard_integrity_invariants --test concurrency_scheduling_discipline_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | exit 0 | BPRC, IARM, SACB, HRA, TMB, TPC, PCC, DESI, CSD, public-protocol, performance-resource, and SUWRF static gates passed with the narrow Slice 13 review-candidate carve-outs still pending review. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test ios_affordance_restoration_map_invariants --test security_authority_capability_boundaries_invariants --test hierarchical_rearchitecture_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test documentation_evidence_scorecard_integrity_invariants --test concurrency_scheduling_discipline_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | exit 0 | BPRC, IARM, SACB, HRA, TMB, TPC, PCC, DESI, CSD, public-protocol, performance-resource, and SUWRF static gates passed with the narrow accepted Slice 13 carve-outs. Closeout re-ran the static gates after acceptance wording, inventory status, and tracker updates. |
 | `scripts/personal-info-guard.sh` | exit 0 | No personal-info literals were introduced. |
 | `git diff --check` | exit 0 | Closeout docs and static assertion diffs contain no whitespace errors. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No ignored files are staged or tracked by the closeout. |
