@@ -2201,6 +2201,54 @@ visualization, no import preview/execute behavior, no native iOS tree UI, no
 git mutation workflows, no public `/engine` expansion, and no deployment
 automation.
 
+## Slice 14E Import Preview Resource Foundation Implementation Candidate
+
+Implementation thread:
+current Codex implementation thread.
+
+Implementation branch:
+`codex/phase-2-slice-14e-import-preview-resource-foundation`.
+
+Baseline HEAD:
+`f1e5ee33031049669817acf2e50951d3b27eb90c`
+
+Review-candidate scope:
+
+- Adds `domains/import_preview` as the server owner for durable
+  `import_preview` resources containing content-free import preview metadata
+  only: import-history refs, repository-tree refs, optional repository/root/head
+  refs, preview fingerprints, bounded normalized relative path metadata,
+  aggregate change counts, bounded summaries, source/evidence refs, retention
+  metadata, trace/replay refs, lifecycle evidence, and fingerprinted
+  idempotency evidence.
+- Adds the built-in `import_preview` resource definition with append-only
+  versions, active lifecycle state, metadata-only materialization, and explicit
+  import-preview/resource capability requirements.
+- Adds execute-only operation values `import_preview_record`,
+  `import_preview_list`, and `import_preview_inspect` behind the existing single
+  `capability::execute` primitive.
+- Requires trusted current-session/workspace context, exact non-wildcard
+  `import_preview` resource selectors, `import_preview.read` /
+  `import_preview.write` plus resource scopes, idempotency for writes, and
+  `networkPolicy: none`.
+- Keeps Slice 14E narrow: no actual import execution/application, no file
+  writes, no raw import payloads, no raw preview payloads, no raw file contents,
+  no blob bytes, no raw repository contents, no absolute paths, no unsafe paths,
+  no repository visualization, no native iOS import/tree UI, and no git mutation
+  workflows.
+
+Implementation validation captured so far:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml import_preview --lib -- --nocapture` | exit 0 | Focused import-preview domain, projection, idempotency, validation, authorization scanner, and runtime-grant tests passed. |
+
+Deferred scope remains unchanged: actual import execution/application, native
+import/tree UI, repository visualization, file writes, git mutation workflows,
+public `/engine` expansion, result merge, autonomous planning, repo-managed
+skills, and deployment automation remain deferred.
+
 ## Validation Log
 
 | Command | Result | Evidence |

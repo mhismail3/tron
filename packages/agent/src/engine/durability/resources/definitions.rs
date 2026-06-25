@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use super::git_definitions::git_resource_type_definitions;
 use super::goal_definitions::goal_question_resource_type_definitions;
 use super::import_history_definitions::import_history_resource_type_definitions;
+use super::import_preview_definitions::import_preview_resource_type_definitions;
 use super::job_definitions::job_resource_type_definitions;
 use super::media_definitions::media_resource_type_definitions;
 use super::memory_definitions::memory_resource_type_definitions;
@@ -660,6 +661,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(import_history_resource_type_definitions());
+    definitions.extend(import_preview_resource_type_definitions());
     definitions.extend(repository_tree_resource_type_definitions());
     definitions.extend(update_diagnostics_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());

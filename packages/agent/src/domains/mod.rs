@@ -5,7 +5,8 @@
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
 //! evidence, memory contract custody, durable media/voice-note resource
 //! custody, durable import/session-resource graph lineage records, durable
-//! content-free repository tree snapshot records, durable system update
+//! content-free repository tree snapshot records, durable import preview
+//! records, durable system update
 //! diagnostic metadata records, durable non-interactive jobs,
 //! read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
@@ -27,6 +28,7 @@
 //! | `media` | Durable media/voice-note resources with blob refs and redacted projections |
 //! | `import_history` | Durable import/session-resource graph lineage records |
 //! | `repository_tree` | Durable content-free repository tree snapshot records |
+//! | `import_preview` | Durable content-free import preview records |
 //! | `update_diagnostics` | Durable system update diagnostics metadata records |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
@@ -83,7 +85,11 @@
 //! insufficient. Repository tree restoration is content-free snapshot metadata
 //! only: it stores repository/root refs, tree object refs, bounded relative path
 //! metadata, counts, and evidence refs without raw file contents, blob bytes,
-//! absolute paths, repository visualization, or git mutation workflows. Update
+//! absolute paths, repository visualization, or git mutation workflows. Import
+//! preview restoration is content-free ref and metadata custody only: it links
+//! import-history and repository-tree refs with bounded normalized relative path
+//! metadata and preview fingerprints without raw import payloads, file contents,
+//! repository contents, import execution, visualization, or git mutation. Update
 //! diagnostics restoration is metadata-only signed-release and provenance
 //! custody: it does not perform live update checks, execute
 //! installers, restart processes, register packages/catalog entries, expose
@@ -118,6 +124,7 @@ pub mod filesystem;
 pub mod git;
 pub mod goals;
 pub mod import_history;
+pub mod import_preview;
 pub mod jobs;
 pub mod logs;
 pub mod media;

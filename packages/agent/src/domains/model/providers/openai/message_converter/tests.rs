@@ -498,6 +498,12 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("repository_tree_inspect"));
     assert!(result.contains("content-free repository/root refs"));
     assert!(result.contains("raw file contents, blob bytes, absolute paths"));
+    assert!(result.contains("import_preview_record"));
+    assert!(result.contains("import_preview_list"));
+    assert!(result.contains("import_preview_inspect"));
+    assert!(result.contains("link import-history and repository-tree refs"));
+    assert!(result.contains("raw import payloads, preview payloads, file contents"));
+    assert!(result.contains("previewFingerprint"));
     assert!(result.contains("device_register"));
     assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));

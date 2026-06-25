@@ -2466,9 +2466,12 @@ narrowing, provider schema/instruction text, README, and static inventories.
 Slice 14D accepts `domains/repository_tree`, built-in
 `repository_tree_snapshot` resource definition, execute adapters, runtime
 grant narrowing, provider schema/instruction text, README, and static
-inventories. Future Slice 14 sub-slices still own repository
-import-preview/update execution domains and iOS native surfaces only where
-generic UI is insufficient.
+inventories. Slice 14E review candidate adds `domains/import_preview`, built-in
+`import_preview` resource definition, execute adapters, runtime grant
+narrowing, provider schema/instruction text, README, and static inventories for
+content-free preview metadata only. Future Slice 14 sub-slices still own actual
+import execution/application, live update execution domains, and iOS native
+surfaces only where generic UI is insufficient.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,
@@ -2496,7 +2499,16 @@ current-session/workspace scope, lifecycle and trace/replay evidence,
 redacted projections, fingerprinted idempotency evidence, deterministic
 injected timestamps with no repository-tree DRC finding, and no raw file
 contents, blob bytes, absolute paths, repository visualization, import
-preview/execute, native tree UI, or git mutation workflows.
+preview/execute, native tree UI, or git mutation workflows. Slice 14E review
+candidate requires content-free `import_preview` metadata only, exact
+`import_preview` authority/selectors including `importPreviewResourceId`
+scanner coverage, trusted current-session/workspace scope, lifecycle and
+trace/replay evidence, redacted projections, fingerprinted idempotency
+evidence, deterministic injected timestamps with no import-preview or
+repository/import DRC finding, and no raw import payloads, raw preview payloads,
+raw file contents, blob bytes, raw repository contents, absolute paths, unsafe
+paths, import execution, repository visualization, native import/tree UI, or git
+mutation workflows.
 Broader Slice 14
 acceptance still requires storage/migration/retention policy, settings parity,
 event schemas, dependency review, iOS parity decision, and no deploy
@@ -2515,8 +2527,13 @@ and no raw update/package/endpoint/command leakage. Slice 14D accepted
 tests cover repository-tree resource schema, authority/scope isolation,
 bounded content-free path metadata projections, path normalization/rejection,
 lifecycle evidence, idempotency fingerprint redaction, deterministic timestamp
-handling, and no raw content/path/authority leakage. Later Slice 14 sub-slices
-cover import preview/execute, live update execution, settings
+handling, and no raw content/path/authority leakage. Slice 14E review-candidate
+tests cover import-preview resource schema, authority/scope isolation,
+provider-visible bounded/redacted linked refs, path normalization/rejection,
+resource selector enforcement, lifecycle evidence, idempotency fingerprint
+redaction, deterministic timestamp handling, and no raw payload/content/path
+leakage. Later Slice 14 sub-slices cover import execution, live update
+execution, settings
 parity, migration rollback, and iOS decoder tests.
 
 iOS validation: not run for Slice 14A because no Swift source, native media

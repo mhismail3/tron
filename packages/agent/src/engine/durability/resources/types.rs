@@ -126,6 +126,10 @@ pub const MEDIA_ARTIFACT_SCHEMA_ID: &str = "tron.resource.media_artifact.v1";
 pub const IMPORT_HISTORY_RECORD_KIND: &str = "import_history_record";
 /// Built-in import/session-resource graph lineage resource schema id.
 pub const IMPORT_HISTORY_RECORD_SCHEMA_ID: &str = "tron.resource.import_history_record.v1";
+/// Built-in content-free import preview resource kind.
+pub const IMPORT_PREVIEW_KIND: &str = "import_preview";
+/// Built-in content-free import preview resource schema id.
+pub const IMPORT_PREVIEW_SCHEMA_ID: &str = "tron.resource.import_preview.v1";
 /// Built-in content-free repository tree snapshot resource kind.
 pub const REPOSITORY_TREE_SNAPSHOT_KIND: &str = "repository_tree_snapshot";
 /// Built-in content-free repository tree snapshot resource schema id.

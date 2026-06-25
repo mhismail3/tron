@@ -24,6 +24,11 @@
 //! snapshot, list, and inspect content-free `repository_tree_snapshot` records
 //! with bounded relative path metadata, refs, and counts, without raw file
 //! contents, blob bytes, absolute paths, visualization, or git mutation.
+//! Import-preview operations are resource-backed metadata operations: they
+//! record, list, and inspect content-free `import_preview` records linking
+//! import-history and repository-tree refs with bounded path metadata and
+//! fingerprints, without raw import payloads, file contents, import execution,
+//! visualization, or git mutation.
 //! Update-diagnostics operations are resource-backed metadata operations: they
 //! record, list, and inspect bounded `update_diagnostic_record` signed-release
 //! and provenance facts without live update checks, package bytes, install or
@@ -58,6 +63,7 @@
 
 pub(crate) mod contract;
 mod import_history_contract;
+mod import_preview_contract;
 mod media_contract;
 mod operations;
 mod repository_tree_contract;

@@ -1872,3 +1872,14 @@ packages/agent/src/domains/repository_tree/service.rs	implementation	repository_
 packages/agent/src/domains/repository_tree/tests.rs	test	test_harness	TPC-10/P2AER-S14D	focused Slice 14D repository-tree bounds redaction retention resource authority scope lifecycle path and idempotency coverage
 packages/agent/src/domains/repository_tree/validation.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree raw-content unsafe-path refs idempotency count and retention validation helpers
 packages/agent/src/engine/durability/resources/repository_tree_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14D	built-in repository_tree_snapshot resource schema
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_import_preview_tests.rs	test	test_harness	TPC-10/P2AER-S14E	focused Slice 14E review-candidate import-preview runtime grant regression coverage
+packages/agent/src/domains/capability/import_preview_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14E	import-preview request schema helper split out of the broad capability contract file
+packages/agent/src/domains/capability/operations/import_preview.rs	implementation	capability_execute	TPC-10/P2AER-S14E	provider execute adapter for redacted durable import_preview record list and inspect operations
+packages/agent/src/domains/import_preview/authority.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
+packages/agent/src/domains/import_preview/contract.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/import_preview/mod.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview domain docs and registration boundary for backend-only content-free preview foundation
+packages/agent/src/domains/import_preview/projection.rs	implementation	import_preview	TPC-10/P2AER-S14E	bounded redacted import-preview list and inspect projection owner
+packages/agent/src/domains/import_preview/service.rs	implementation	import_preview	TPC-10/P2AER-S14E	durable import-preview record list and inspect operation owner
+packages/agent/src/domains/import_preview/tests.rs	test	test_harness	TPC-10/P2AER-S14E	focused Slice 14E import-preview bounds redaction retention resource authority scope lifecycle path and idempotency coverage
+packages/agent/src/domains/import_preview/validation.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview raw-payload unsafe-path refs idempotency count and retention validation helpers
+packages/agent/src/engine/durability/resources/import_preview_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14E	built-in import_preview resource schema
