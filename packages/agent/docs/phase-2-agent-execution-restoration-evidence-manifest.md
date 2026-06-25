@@ -1772,6 +1772,61 @@ Slice 10B accepted evidence:
   catalog registration, trust promotion, and native fixed subagent UI remain
   deferred.
 
+## Slice 11A Implementation Candidate: Procedural State Provenance And Inspection Foundation
+
+- Branch
+  `codex/phase-2-slice-11a-procedural-state-provenance-foundation` in worktree
+  `/Users/<USER>/.codex/worktrees/e852/tron` starts from
+  `origin/main@85579a78da54113321cb32de9eb90dd8cd330aef`.
+- Adds a built-in `procedural_record` resource schema for inert skill, rule,
+  hook, and procedure provenance/eval/status metadata. The schema is resource
+  custody only; it declares read/write authority and redaction/materialization
+  policy but does not register triggers, activation, prompt context, learned
+  behavior, tool execution, worker/package/job/process launch, or scheduler
+  behavior.
+- Adds read-only `procedural_state_list` and `procedural_state_inspect`
+  operation values behind the existing `capability::execute` primitive.
+  Operations require trusted current-session/workspace context, exact agent
+  actor/session binding or system actor, `procedural.read`, `resource.read`,
+  explicit non-wildcard `procedural_record` resource-kind authority, exact
+  `kind:procedural_record` and `proceduralKind:*` selectors, and
+  `networkPolicy: none`.
+- Projection revalidates stored resource kind, schema id, payload
+  `schemaVersion`, payload `proceduralKind`, current-version availability,
+  scope, lifecycle/status, and bounded selector values before emitting evidence.
+  It returns allowlisted summaries/details with truncation metadata and redacts
+  secrets, env values, grant ids, unsafe paths, endpoints, raw manifests/logs,
+  raw nested failures/provenance blobs, and private implementation details.
+- Runtime grant derivation and pre-handler authorization were extended only for
+  the two read-only procedural state operations. Provider guidance names only
+  those read operations and explicitly excludes create/update/delete/activate,
+  trigger firing, package install, execution, self-modification, autonomous
+  behavior, and prompt injection.
+- Regression tests cover list/inspect success and denial for missing grants,
+  wildcard/broad authority, wrong session/workspace/scope, missing workspace,
+  bad actor, wrong stored kind/schema/version, stale/archived/unsupported
+  states, malformed payloads, bounded/truncated output, and redaction of
+  secret/grant/env/path/raw metadata. Additional tests prove
+  `packages/agent/skills/` and skill-copy/bootstrap prompt wiring remain
+  absent.
+- Validation completed before commit: `cargo fmt --manifest-path
+  packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path
+  packages/agent/Cargo.toml`, focused procedural tests, runtime-grant and
+  provider-guidance tests, SACB, HRA, TMB, TPC, PCC, BPRC, SSARR, DESI,
+  public-protocol, performance-resource, and CSD static gates all passed.
+  `scripts/personal-info-guard.sh`, `git diff --check`,
+  `git diff --cached --check`, and `git ls-files -ci --exclude-standard` were
+  clean. DRC was run for regression context and still fails only on the known
+  non-procedural UTC allow-list gap in goals, web, and tool-source tests; the
+  failure list contains no procedural files.
+- Deferred scope: actual skill/rule/hook/procedure activation, trigger
+  registration/firing, prompt inclusion, learned behavior, autonomous
+  execution, scheduler work, tool execution, worker/package/job/process/network
+  launch, MCP lifecycle, package install/catalog registration, trust promotion,
+  public `/engine` APIs, settings/profile migrations, browser/search/crawl/
+  login scope, native fixed procedural UI, result merge into conversation
+  state, disable/edit/delete behavior, and acceptance/current-baseline wording.
+
 ## Validation Log
 
 | Command | Result | Evidence |

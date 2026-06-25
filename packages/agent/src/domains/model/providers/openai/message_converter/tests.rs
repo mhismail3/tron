@@ -490,6 +490,10 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("subagent_task_list"));
     assert!(result.contains("subagent_task_inspect"));
     assert!(result.contains("bounded-placeholder subagent lifecycle records"));
+    assert!(result.contains("procedural_state_list"));
+    assert!(result.contains("procedural_state_inspect"));
+    assert!(result.contains("skill/rule/hook/procedure provenance evidence"));
+    assert!(result.contains("without activation, trigger firing, prompt injection"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
     for non_goal in [
@@ -510,6 +514,19 @@ fn clarification_includes_capability_execution_guidance() {
         "subagent_delegate",
         "spawn_subagent",
         "subagent_spawn",
+        "procedural_state_create",
+        "procedural_state_update",
+        "procedural_state_activate",
+        "skill_activate",
+        "rule_apply",
+        "hook_fire",
+        "procedure_execute",
+        "prompt_inject",
+        "learn_behavior",
+        "self_modify",
+        "autonomous_execute",
+        "trigger_register",
+        "package_install",
     ] {
         assert!(
             !result.contains(non_goal),

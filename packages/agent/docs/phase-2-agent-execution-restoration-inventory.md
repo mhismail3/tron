@@ -347,3 +347,22 @@ worker/package launch, job/process start, tool execution, scheduling, result
 merge into conversation state, public `/engine` expansion, settings/profile
 migrations, actual spawn/status/result/cancel workers and iOS chips/sheets, and
 native fixed iOS subagent UI remain deferred to later Slice 10 work.
+
+`P2AER-INV-017` has a Slice 11A implementation candidate: Procedural State
+Provenance And Inspection Foundation. The candidate adds inert
+`procedural_record` resources for skill/rule/hook/procedure provenance, eval,
+status, refs, and activation-proof metadata plus read-only
+`procedural_state_list` and `procedural_state_inspect` operation values behind
+the existing `capability::execute` primitive. The candidate requires trusted
+current-session/workspace context, `procedural.read`, `resource.read`, explicit
+non-wildcard `procedural_record` resource-kind authority, exact
+`kind:procedural_record` and `proceduralKind:*` selectors, stored
+kind/schema/version/status revalidation, scope isolation, bounded/truncated
+output, and redaction of secrets, env values, grant ids, unsafe paths, raw
+manifests/logs, and private nested metadata. It does not restore repo-managed
+skills, skill-copy/bootstrap prompt wiring, activation, trigger firing, learned
+behavior, autonomous execution, scheduler work, tool execution, worker/package/
+job/process/network launch, MCP lifecycle, package install/catalog
+registration, trust promotion, public `/engine` expansion, settings/profile
+migrations, browser/search/crawl/login scope, native fixed UI, or result merge
+into conversation state.

@@ -13,7 +13,6 @@
 //! domain while leaving `process_run` as the short synchronous primitive.
 //! `replay_manifest` is the only read-only operation that bypasses trace-record
 //! creation; tracing that read would mutate the manifest it returns.
-//!
 //! The operation gate is intentionally stricter than the provider schema:
 //! `execute` accepts only trusted agent/system runtime contexts, rejects
 //! bootstrap authority grants, requires a derived least-privilege grant for
@@ -41,6 +40,7 @@ mod goals;
 mod jobs;
 mod logs;
 mod memory;
+mod procedural;
 mod process;
 mod replay;
 mod state;
@@ -66,6 +66,7 @@ use goals::{
 use jobs::{job_cancel, job_list, job_log, job_start, job_status};
 use logs::log_recent;
 use memory::{memory_inspect, memory_list, memory_status};
+use procedural::{procedural_state_inspect, procedural_state_list};
 use process::process_run;
 use replay::replay_manifest;
 use state::{state_get, state_list, state_set};
@@ -252,13 +253,22 @@ fn validate_execute_context(
             | "subagent_task_inspect"
             | "worker_package_list"
             | "worker_package_inspect"
+            | "procedural_state_list"
+            | "procedural_state_inspect"
     ) {
         require_current_session(invocation, operation)?;
     }
     match operation {
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
-        "trace_list" | "trace_get" | "log_recent" | "replay_manifest" | "memory_status"
-        | "memory_list" | "memory_inspect" => require_current_session(invocation, operation),
+        "trace_list"
+        | "trace_get"
+        | "log_recent"
+        | "replay_manifest"
+        | "memory_status"
+        | "memory_list"
+        | "memory_inspect"
+        | "procedural_state_list"
+        | "procedural_state_inspect" => require_current_session(invocation, operation),
         "catalog_conformance"
         | "filesystem_write"
         | "filesystem_edit"
@@ -376,6 +386,8 @@ async fn execute_operation(
         "memory_status" => memory_status(invocation, deps).await?,
         "memory_list" => memory_list(invocation, deps).await?,
         "memory_inspect" => memory_inspect(invocation, deps).await?,
+        "procedural_state_list" => procedural_state_list(invocation, deps).await?,
+        "procedural_state_inspect" => procedural_state_inspect(invocation, deps).await?,
         "tool_source_list" => tool_source_list(invocation, deps).await?,
         "tool_source_inspect" => tool_source_inspect(invocation, deps).await?,
         "subagent_launch" => subagent_launch(invocation, deps).await?,
@@ -394,7 +406,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

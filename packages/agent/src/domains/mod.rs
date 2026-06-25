@@ -6,7 +6,8 @@
 //! evidence, memory contract custody, durable non-interactive jobs, read-only
 //! Git/worktree observation, goal/question lifecycle records, direct web source
 //! fetch provenance, inert external tool-source proposal provenance, inert
-//! subagent task lifecycle records, and the single model-facing
+//! subagent task lifecycle records, inert procedural state provenance records,
+//! and the single model-facing
 //! `capability::execute` primitive, plus the narrow iOS workspace-browser
 //! filesystem domain. Product/tool domains are otherwise intentionally not
 //! declared on this branch.
@@ -25,6 +26,7 @@
 //! | `web` | Direct web fetch source provenance resources |
 //! | `tool_sources` | Inert external tool-source proposal and preflight evidence |
 //! | `subagents` | Inert subagent task lifecycle evidence |
+//! | `procedural` | Inert skill/rule/hook/procedure provenance inspection evidence |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
@@ -67,8 +69,11 @@
 //! lifecycle domain is the post-baseline package/launch substrate for
 //! self-updating workers; it is not a restored product tool domain. The git
 //! domain is restored only for read-only status/diff evidence; source-control
-//! mutations remain absent. New domain behavior must add a contract, deps
-//! narrowing, handler binding, tests, and README/domain-doc updates together.
+//! mutations remain absent. The procedural domain is resource-backed custody
+//! and inspection evidence only; activation, trigger firing, prompt injection,
+//! learned behavior, and autonomous execution remain absent. New domain
+//! behavior must add a contract, deps narrowing, handler binding, tests, and
+//! README/domain-doc updates together.
 //!
 //! ## Test Ownership
 //!
@@ -91,6 +96,7 @@ pub mod logs;
 pub mod memory;
 pub mod message;
 pub mod model;
+pub mod procedural;
 pub mod registration;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;

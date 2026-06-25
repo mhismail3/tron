@@ -37,7 +37,9 @@ extraction evidence, and accepted Slice 8D web source archive lifecycle
 evidence, accepted Slice 8E web robots policy evidence, accepted Slice 8F web
 fetch robots evidence linkage, accepted Slice 9A tool-source proposal
 provenance evidence, and accepted Slice 9B worker-package lifecycle inspection
-evidence, and Slice 10B subagent worker launch foundation evidence.
+evidence, and Slice 10B subagent worker launch foundation evidence. Slice 11A
+procedural state provenance and inspection work is recorded below as an
+implementation candidate pending independent review.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -193,6 +195,15 @@ Completed Phase 2 restoration slices at this baseline:
   one-running-task-per-scope concurrency, idempotency/freshness, bounded
   evidence, trace/replay refs, and no worker/job/process/tool/network/package
   launch or result merge.
+- Slice 11A implementation candidate: inert `procedural_record`
+  skill/rule/hook/procedure resource contracts plus read-only
+  `procedural_state_list` and `procedural_state_inspect` evidence through
+  `capability::execute`, with explicit `procedural.read`/`resource.read`
+  authority, `kind:procedural_record` and `proceduralKind:*` selectors, stored
+  kind/schema/version/status revalidation, bounded/redacted projections, and no
+  activation, trigger firing, prompt injection, learned behavior, autonomous
+  execution, scheduler work, tool execution, worker/package/job/process/network
+  launch, result merge, repo-managed skills, or bootstrap skill-copy wiring.
 
 Current next action:
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
@@ -200,13 +211,14 @@ Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
 inspection, Slice 10A subagent task lifecycle, and Slice 10B subagent worker
-launch foundation are accepted. Continue fresh discovery for the next Phase 2
-slice from `origin/main`. Search providers, browser
+launch foundation are accepted. Slice 11A procedural state provenance and
+inspection is an implementation candidate awaiting independent review. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package
 install/launch/registration/execution, real subagent worker/process execution,
-subagent result merge, scheduling, fetch/pull/push, PR handoff,
+subagent result merge, procedural activation/triggers/prompt injection/learned
+behavior, scheduling, fetch/pull/push, PR handoff,
 production deployment behavior, and native SourceChanges UI remain deferred
 until separately scoped and reviewed.
 
@@ -2241,20 +2253,31 @@ approval, and default UI placement.
 ### Slice 11: Skills, Rules, Hooks, And Procedural Memory
 
 Objective: restore adaptive behavior as resource-backed, evaluated, and
-auditable procedural state.
+auditable procedural state. Slice 11A starts with read-only custody and
+inspection only.
 
 User-facing outcome: users can inspect active procedures, rules, hooks, skills,
 eval status, provenance, and disable/edit/delete them.
 
+Slice 11A user-facing outcome: providers can list/inspect bounded redacted
+skill/rule/hook/procedure provenance, eval, status, and refs for current
+session/workspace resources through `capability::execute`; no active procedure
+execution, disable/edit/delete, trigger firing, or prompt inclusion is restored.
+
 True primitives: memory contract, resource kernel, eval resources, trigger
 substrate, approvals, and context inclusion trace.
 
-Modular boundaries: procedural package owns skill/rule/hook records and
-activation policy. It does not recreate `packages/agent/skills/` or bootstrap
-prompt injection.
+Modular boundaries: procedural package owns skill/rule/hook/procedure records
+and future activation policy. Slice 11A owns only inert `procedural_record`
+resource schemas plus bounded projections. It does not recreate
+`packages/agent/skills/`, skill-copy wiring, or bootstrap prompt injection.
 
 Likely files/areas: memory resources, trigger runtime, future
 `domains/procedural`, context assembly, iOS memory/procedure audit.
+
+Slice 11A files/areas: `domains/procedural`, `capability::execute` operation
+adapters/schema guidance, engine resource definitions, provider message
+converter guidance, Phase 2 docs, README, and static inventories.
 
 Old evidence paths: `BPRC-FEATURE-10`, `IARM-SURFACE-021`,
 `IARM-SURFACE-034`, feature index section 10.
@@ -2263,7 +2286,11 @@ Acceptance criteria: every active procedure has provenance, lineage, evals,
 scope, trigger, prompt-inclusion reason, rollback, and disable behavior.
 
 Focused tests: activation/deactivation, trigger policy, eval pass/fail,
-context inclusion, deletion, SSARR no repo-managed skills guard.
+context inclusion, deletion, SSARR no repo-managed skills guard. Slice 11A
+focused tests instead prove list/inspect success and denial cases, projection
+redaction/bounds, provider-visible read-only schema, runtime/pre-handler grants,
+and absence of repo-managed skills, skill-copy wiring, activation, trigger,
+install, execution, autonomous, and prompt-injection surfaces.
 
 iOS validation: memory/procedure audit screenshots if native surfaces return.
 

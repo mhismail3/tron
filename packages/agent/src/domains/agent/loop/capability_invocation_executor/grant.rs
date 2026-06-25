@@ -70,6 +70,11 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "procedural_state_list" | "procedural_state_inspect"
+    ) {
+        allowed_authority_scopes.extend(["procedural.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
         "subagent_status" | "subagent_result" | "subagent_task_list" | "subagent_task_inspect"
     ) {
         allowed_authority_scopes.extend(["subagents.read".to_owned(), "resource.read".to_owned()]);
@@ -117,11 +122,24 @@ pub(super) async fn derive_capability_runtime_grant(
             | "subagent_task_inspect"
     ) {
         allowed_resource_kinds.push("subagent_task".to_owned());
+    } else if matches!(
+        operation,
+        "procedural_state_list" | "procedural_state_inspect"
+    ) && procedural_kind(effective_args).is_some()
+    {
+        allowed_resource_kinds.push("procedural_record".to_owned());
     }
-    let resource_selectors = allowed_resource_kinds
+    let mut resource_selectors = allowed_resource_kinds
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect::<Vec<_>>();
+    if matches!(
+        operation,
+        "procedural_state_list" | "procedural_state_inspect"
+    ) && let Some(kind) = procedural_kind(effective_args)
+    {
+        resource_selectors.push(format!("proceduralKind:{kind}"));
+    }
     let idempotency_material = json!({
         "version": 1,
         "sessionId": session_id,
@@ -226,6 +244,16 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
         .get(field)
         .and_then(Value::as_str)
         .is_some_and(|item| !item.trim().is_empty())
+}
+
+fn procedural_kind(args: &Value) -> Option<&'static str> {
+    match args.get("proceduralKind").and_then(Value::as_str) {
+        Some("skill") => Some("skill"),
+        Some("rule") => Some("rule"),
+        Some("hook") => Some("hook"),
+        Some("procedure") => Some("procedure"),
+        _ => None,
+    }
 }
 
 fn worker_package_list_kind(args: &Value) -> Option<&'static str> {

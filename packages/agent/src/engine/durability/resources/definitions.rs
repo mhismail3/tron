@@ -7,6 +7,7 @@ use super::git_definitions::git_resource_type_definitions;
 use super::goal_definitions::goal_question_resource_type_definitions;
 use super::job_definitions::job_resource_type_definitions;
 use super::memory_definitions::memory_resource_type_definitions;
+use super::procedural_definitions::procedural_resource_type_definitions;
 use super::subagent_definitions::subagent_resource_type_definitions;
 use super::tool_source_definitions::tool_source_resource_type_definitions;
 use super::types::{
@@ -653,6 +654,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
+    definitions.extend(procedural_resource_type_definitions());
     definitions.extend(web_resource_type_definitions());
     definitions.extend(tool_source_resource_type_definitions());
     definitions.extend(subagent_resource_type_definitions());

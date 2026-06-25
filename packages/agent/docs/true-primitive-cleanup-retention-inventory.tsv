@@ -1787,3 +1787,10 @@ packages/agent/src/domains/subagents/service.rs	implementation	subagents	TPC-10/
 packages/agent/src/domains/subagents/tests.rs	test	test_harness	TPC-10/P2AER-S10A	focused Slice 10A subagent lifecycle authority scope schema bounds and non-goal regression coverage
 packages/agent/src/domains/subagents/validation.rs	implementation	subagents	TPC-10/P2AER-S10A	bounded summary ref placeholder validation and secret execution-field rejection
 packages/agent/src/engine/durability/resources/subagent_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S10A	built-in subagent_task resource kind and schema definition
+packages/agent/src/domains/capability/operations/procedural.rs	implementation	capability_execute	TPC-10/P2AER-S11A	read-only provider execute adapter for inert procedural state provenance inspection
+packages/agent/src/domains/procedural/mod.rs	implementation	procedural	TPC-10/P2AER-S11A	inert procedural state provenance domain docs and boundary
+packages/agent/src/domains/procedural/projection.rs	implementation	procedural	TPC-10/P2AER-S11A	bounded redacted procedural list/inspect projection owner
+packages/agent/src/domains/procedural/service.rs	implementation	procedural	TPC-10/P2AER-S11A	scoped read-only procedural state list/inspect owner
+packages/agent/src/domains/procedural/static_tests.rs	test	test_harness	TPC-10/P2AER-S11A	static Slice 11A procedural resource schema provider non-goal and repo-managed skill absence proof
+packages/agent/src/domains/procedural/tests.rs	test	test_harness	TPC-10/P2AER-S11A	focused Slice 11A procedural authority scope schema lifecycle bounds redaction and non-goal regression coverage
+packages/agent/src/engine/durability/resources/procedural_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S11A	built-in procedural_record resource kind and schema definition

@@ -716,6 +716,12 @@ goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
 does not run autonomous goals, plan task decomposition, schedule reminders,
 launch subagents, create notification inboxes, or add native Work/question UI.
+`domains/procedural` owns the Slice 11A implementation candidate for inert
+skill/rule/hook/procedure provenance inspection. It stores only
+`procedural_record` resource contracts and bounded/redacted list/inspect
+projections behind `capability::execute`; it does not activate skills, fire
+triggers, inject prompt context, learn behavior, run tools, launch workers/jobs/
+processes, or merge results into conversation state.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -970,6 +976,8 @@ Current primitive operations:
 | `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, process metadata, or network scope. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
+| `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
+| `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -988,7 +996,7 @@ provider-visible execute surface; file access goes through the hardened
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, `web`, `tool_sources`, `subagents`, and model-provider modules. The
+`worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
@@ -1155,6 +1163,24 @@ jobs or processes, execute tools, open network/browser/search/login scope,
 register catalog entries, promote trust, merge results into conversation state,
 schedule autonomous work, expand public `/engine` APIs, add settings/profile
 migrations, or add fixed native iOS subagent UI.
+
+The Slice 11A implementation candidate adds the smallest procedural inspection
+foundation: a built-in `procedural_record` resource schema for skills, rules,
+hooks, and procedures plus read-only `procedural_state_list` and
+`procedural_state_inspect` operation values behind the existing
+`capability::execute` primitive. These operations require trusted
+current-session/workspace context, explicit non-wildcard `procedural.read` and
+`resource.read` authority, explicit `procedural_record` resource-kind grants,
+matching `kind:procedural_record` and `proceduralKind:*` selectors, and
+`networkPolicy: none`. They revalidate stored resource kind/schema/version,
+scope, lifecycle/status, and procedural kind before projection, and they return
+bounded/redacted provenance, eval, status, refs, and activation-proof evidence.
+Slice 11A does not restore repo-managed skills, trigger activation, bootstrap
+prompt injection, learned behavior, autonomous execution, scheduler work, tool
+execution, worker/package/job/process/network launch, MCP lifecycle, package
+install/catalog registration, trust promotion, public `/engine` APIs,
+settings/profile migrations, browser/search/crawl/login scope, native fixed UI,
+or result merge into conversation state.
 
 The accepted Slice 9B foundation adds read-only worker package lifecycle
 inspection under the same `capability::execute` primitive. `worker_package_list` and
@@ -1770,7 +1796,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, and `subagent_task` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 
