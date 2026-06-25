@@ -5,8 +5,10 @@
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
 //! evidence, memory contract custody, durable non-interactive jobs, read-only
 //! Git/worktree observation, goal/question lifecycle records, direct web source
-//! fetch provenance, inert external tool-source proposal provenance, and the single model-facing `capability::execute`
-//! primitive, plus the narrow iOS workspace-browser filesystem domain. Product/tool domains are otherwise intentionally not
+//! fetch provenance, inert external tool-source proposal provenance, inert
+//! subagent task lifecycle records, and the single model-facing
+//! `capability::execute` primitive, plus the narrow iOS workspace-browser
+//! filesystem domain. Product/tool domains are otherwise intentionally not
 //! declared on this branch.
 //!
 //! ## Submodules
@@ -22,6 +24,7 @@
 //! | `goals` | Goal and user-question lifecycle records |
 //! | `web` | Direct web fetch source provenance resources |
 //! | `tool_sources` | Inert external tool-source proposal and preflight evidence |
+//! | `subagents` | Inert subagent task lifecycle evidence |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
@@ -92,6 +95,7 @@ pub mod registration;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;
+pub mod subagents;
 pub mod system;
 pub mod tool_sources;
 pub mod transcription;

@@ -699,6 +699,23 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "`web_source`",
         ],
     );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "subagents",
+        "P2AER-INV-009",
+        "BPRC-FEATURE-07",
+        "subagents",
+        "Slice 10: Subagents And Delegation",
+        "pending_review",
+        &[
+            "Slice 10A implementation candidate adds inert",
+            "actual spawn/status/result/cancel workers and iOS chips/sheets remain deferred",
+        ],
+        &[
+            "Slice 10A implementation candidate evidence",
+            "`subagent_task`",
+        ],
+    );
     for forbidden in [
         "autostart",
         "browser",
@@ -723,7 +740,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "scheduler",
         "self_extension",
         "skills",
-        "subagents",
         "tree",
         "voice_notes",
         "worktree",

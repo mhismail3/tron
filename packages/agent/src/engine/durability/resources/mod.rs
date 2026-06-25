@@ -10,9 +10,9 @@
 //! Ownership is split by concern: `types` holds public substrate structs,
 //! `definitions` registers built-in resource kinds, `validation` enforces the
 //! generic resource contract, `versions` owns payload hashing/current-version
-//! helpers, `git_definitions` and `memory_definitions` own domain contract
-//! resource schemas, `ui_surface` validates the runtime UI surface payload, and
-//! `store` contains the in-memory and SQLite persistence implementations.
+//! helpers, domain definition modules own contract resource schemas,
+//! `ui_surface` validates the runtime UI surface payload, and `store` contains
+//! the in-memory and SQLite persistence implementations.
 
 mod definitions;
 mod git_definitions;
@@ -20,6 +20,7 @@ mod goal_definitions;
 mod job_definitions;
 mod memory_definitions;
 mod store;
+mod subagent_definitions;
 mod tool_source_definitions;
 mod types;
 mod ui_surface;

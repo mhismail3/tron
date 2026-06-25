@@ -962,6 +962,8 @@ Current primitive operations:
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
 | `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
+| `subagent_task_list` | List scoped inert `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no child agent, worker, job, process, network, or result-merge side effects. |
+| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, worker launch data, process metadata, or network scope. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
@@ -982,7 +984,7 @@ provider-visible execute surface; file access goes through the hardened
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, `web`, `tool_sources`, and model-provider modules. The
+`worker_lifecycle`, `web`, `tool_sources`, `subagents`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
@@ -1118,6 +1120,23 @@ not start or restart MCP servers, install packages, register catalog tools,
 execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
 iOS fixed UI.
+
+The Slice 10A implementation candidate adds the `subagents` domain as an inert
+task lifecycle/provenance boundary. Trusted internal system/admin callers can
+create and update `subagent_task` resources only with derived non-bootstrap
+`subagents.write` and `resource.write` authority, explicit non-wildcard
+`subagent_task` resource grants, idempotency, bounded objective/prompt
+summaries, parent session/workspace/trace refs, evidence/output refs,
+summary-only redaction, and `networkPolicy: none`. Agent-visible access is
+read-only through `subagent_task_list` and `subagent_task_inspect` under
+`capability::execute`; those operations require trusted current-session
+context, `subagents.read`, `resource.read`, explicit `subagent_task` resource
+authority plus a matching `kind:subagent_task` selector, stored kind/schema
+revalidation, scope isolation, and `networkPolicy: none`. Slice 10A does not
+spawn child agents, launch workers, start jobs or processes, execute tools,
+open network/browser/search/login scope, register catalog entries, promote
+trust, merge results into conversation state, schedule work, expand public
+`/engine` APIs, or add fixed native iOS subagent UI.
 
 The accepted Slice 9B foundation adds read-only worker package lifecycle
 inspection under the same `capability::execute` primitive. `worker_package_list` and
@@ -1343,6 +1362,9 @@ catalog/resource truth and writes only append-oriented `catalog_discovery_report
 evidence. Tool-source inspection reads scoped `tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
 writes are provenance evidence and explicitly do not activate external tools.
+Subagent task inspection reads scoped `subagent_task` resources only; internal
+task lifecycle writes are provenance evidence and explicitly do not start child
+agents, launch workers, start jobs, run tools, schedule work, or merge results.
 Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,
@@ -1727,7 +1749,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal` and `tool_source_conformance_report` records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, and `subagent_task` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

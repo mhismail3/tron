@@ -179,20 +179,29 @@ Completed Phase 2 restoration slices at this baseline:
   `worker.lifecycle.read`/`resource.read` authority, non-wildcard worker
   selectors, stored kind/schema revalidation, bounded/redacted lifecycle
   evidence, and no package mutation or execution behavior.
+- Slice 10A candidate: inert `subagent_task` lifecycle/provenance records and
+  read-only `subagent_task_list`/`subagent_task_inspect` evidence through
+  `capability::execute`, with explicit `subagents.read`/`resource.read`
+  authority, `kind:subagent_task` selectors, stored kind/schema revalidation,
+  scope isolation, bounded/redacted summaries/placeholders, and no child-agent,
+  worker, job, process, network, scheduling, or result-merge behavior.
 
 Current next action:
-Start fresh discovery for the next Phase 2 slice after accepted Slice 9B.
+Independently review the Slice 10A implementation candidate before any mainline
+acceptance or follow-on Slice 10 worker-launch work.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
-inspection are accepted. Search providers, browser
+inspection are accepted. Slice 10A is implementation-candidate evidence only
+until independent review accepts it. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package
-install/launch/registration/execution, fetch/pull/push, PR handoff, production
-deployment behavior, and native SourceChanges UI remain deferred until
-separately scoped and reviewed.
+install/launch/registration/execution, subagent worker launch, real subagent
+cancellation, result merge, scheduling, fetch/pull/push, PR handoff,
+production deployment behavior, and native SourceChanges UI remain deferred
+until separately scoped and reviewed.
 
 ## Scope
 
@@ -2184,6 +2193,14 @@ whether agent-authored packages can self-propose.
 ### Slice 10: Subagents And Delegation
 
 Objective: restore parallel agent work as durable jobs/workers with causality.
+
+Slice 10A candidate scope: establish only the inert task lifecycle foundation:
+`subagent_task` resources, trusted internal create/update service functions,
+and read-only `subagent_task_list`/`subagent_task_inspect` execute operations.
+It deliberately excludes actual child-agent spawn, worker/package launch,
+job/process start, tool execution, scheduling, real cancellation, result merge,
+native fixed UI, settings/profile changes, migrations, and public `/engine`
+expansion.
 
 User-facing outcome: users can see child tasks, status, logs, cancellation,
 results, and parent integration decisions.

@@ -328,3 +328,20 @@ token grant details, direct authority-grant ids, grant-like nested metadata,
 and local paths. It does not propose, install, enable, disable, launch, stop,
 retire, register, execute, promote trust, expand public `/engine`, or add
 native fixed package UI.
+
+`P2AER-INV-009` is pending review for Slice 10A: Subagent Task Lifecycle
+Foundation. The implementation candidate adds a `subagents` domain and one
+`subagent_task` resource kind for inert lifecycle/provenance records only.
+Trusted internal system/admin writes can create/update bounded task records
+with parent session/workspace/trace refs, objective/prompt summaries,
+evidence/output refs, result/error placeholders, idempotency, explicit
+non-wildcard `subagent_task` resource authority, and `networkPolicy: none`.
+Agent access is read-only through `subagent_task_list` and
+`subagent_task_inspect` under `capability::execute`; those reads require
+trusted current-session context, `subagents.read`, `resource.read`, explicit
+resource-kind grants, matching `kind:subagent_task` selectors, stored
+kind/schema revalidation, scope isolation, and no network. Actual child-agent
+spawn, worker/package launch, job/process start, tool execution, scheduling,
+cancellation of real workers, result merge into conversation state, public
+`/engine` expansion, and native fixed iOS subagent UI remain deferred to later
+Slice 10 work.

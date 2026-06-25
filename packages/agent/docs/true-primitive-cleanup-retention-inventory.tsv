@@ -1778,3 +1778,9 @@ packages/agent/src/domains/worker_lifecycle/inspection/mod.rs	implementation	wor
 packages/agent/src/domains/worker_lifecycle/inspection/projection.rs	implementation	worker_lifecycle	TPC-10/P2AER-S9B-FIX1	bounded worker lifecycle projection helper split below static file budgets
 packages/agent/src/domains/worker_lifecycle/inspection_test_support.rs	test	worker_lifecycle	TPC-10/P2AER-S9B-FIX1	shared worker lifecycle inspection test fixtures split below static file budgets
 packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	test	test_harness	TPC-10/P2AER-S9B	split Slice 9B worker lifecycle inspection regression coverage
+packages/agent/src/domains/capability/operations/subagents.rs	implementation	capability_execute	TPC-10/P2AER-S10A	read-only provider execute adapter for inert subagent task lifecycle inspection
+packages/agent/src/domains/subagents/mod.rs	implementation	subagents	TPC-10/P2AER-S10A	inert subagent task lifecycle domain docs and worker registration boundary
+packages/agent/src/domains/subagents/service.rs	implementation	subagents	TPC-10/P2AER-S10A	trusted internal lifecycle record service and read-only scoped projections
+packages/agent/src/domains/subagents/tests.rs	test	test_harness	TPC-10/P2AER-S10A	focused Slice 10A subagent lifecycle authority scope schema bounds and non-goal regression coverage
+packages/agent/src/domains/subagents/validation.rs	implementation	subagents	TPC-10/P2AER-S10A	bounded summary ref placeholder validation and secret execution-field rejection
+packages/agent/src/engine/durability/resources/subagent_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S10A	built-in subagent_task resource kind and schema definition

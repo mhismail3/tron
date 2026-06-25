@@ -90,6 +90,10 @@ pub const TOOL_SOURCE_CONFORMANCE_REPORT_KIND: &str = "tool_source_conformance_r
 /// Built-in external tool-source conformance/preflight report resource schema id.
 pub const TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID: &str =
     "tron.resource.tool_source_conformance_report.v1";
+/// Built-in inert subagent task lifecycle resource kind.
+pub const SUBAGENT_TASK_KIND: &str = "subagent_task";
+/// Built-in inert subagent task lifecycle resource schema id.
+pub const SUBAGENT_TASK_SCHEMA_ID: &str = "tron.resource.subagent_task.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

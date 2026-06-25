@@ -55,6 +55,7 @@ fn replay_critical_entropy_is_allow_listed() {
                 "packages/agent/src/domains/session/lifecycle/",
                 "packages/agent/src/domains/session/query/",
                 "packages/agent/src/domains/settings/",
+                "packages/agent/src/domains/subagents/",
                 "packages/agent/src/domains/system/",
                 "packages/agent/src/engine/",
                 "packages/agent/src/platform/",

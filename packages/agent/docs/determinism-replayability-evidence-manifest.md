@@ -104,6 +104,10 @@ Proof:
   commit resource records a UTC `createdAt` audit timestamp, while replay and
   idempotency stay anchored to expected HEAD, expected index tree, invocation,
   resource, and stream refs.
+- P2AER Slice 10A refreshed the allow-list for `domains/subagents`: subagent
+  task `createdAt`/`updatedAt` timestamps are resource lifecycle audit metadata,
+  while replay and idempotency stay anchored to trace, invocation, resource,
+  and stream refs.
 
 Open rows after DRC-2: DRC-4, DRC-5, DRC-6, DRC-7, DRC-8, DRC-9, and DRC-10.
 DRC-5/DRC-6 must keep replay builders out of the entropy allow-list and prove
