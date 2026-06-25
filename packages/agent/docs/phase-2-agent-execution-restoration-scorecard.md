@@ -2421,6 +2421,7 @@ policy tighter than the current 90-day/500-record defaults.
 Implementation status: Accepted Slice 14A media artifact and voice-note
 resource foundation and accepted Slice 14B import/session-resource graph
 foundation are current baseline. Accepted Slice 14C update diagnostics is also
+current baseline. Accepted Slice 14D repository-tree snapshot metadata is also
 current baseline. Slice 14 remains split because media, imports, repository
 trees, and system updates are separate families.
 
@@ -2435,6 +2436,8 @@ previews, session tree/history views, repository divergence, update
 installer/restart flows, deploy automation, live production update checks,
 native update panels, and native media UX remain later work. Slice 14C only
 adds backend metadata custody for signed-release/update diagnostic evidence.
+Slice 14D only adds backend metadata custody for content-free repository-tree
+snapshot evidence.
 
 True primitives: artifact resources, storage refs, replay, settings parity,
 approval, and package-specific events.
@@ -2443,8 +2446,10 @@ Modular boundaries: media package owns storage refs, bounded media metadata,
 retention, redacted projections, lifecycle evidence, and local transcription
 metadata. Import/history package owns generic graph lineage operations,
 bounded import provenance metadata, redacted projections, and lifecycle
-evidence; repository trees, import execution, and native tree rendering remain
-outside the accepted scope. Update package owns signed update checks and never
+evidence. Repository-tree package owns content-free repository/root/head/tree
+refs, bounded relative path metadata, redacted projections, and lifecycle
+evidence; import execution and native tree rendering remain outside the
+accepted scope. Update package owns signed update checks and never
 production deployment; accepted Slice 14C records bounded metadata only
 and performs no live check, installation, restart, catalog registration, or
 deployment.
@@ -2458,8 +2463,12 @@ narrowing, provider schema/instruction text, README, and static inventories.
 Slice 14C accepts `domains/update_diagnostics`, built-in
 `update_diagnostic_record` resource definition, execute adapters, runtime grant
 narrowing, provider schema/instruction text, README, and static inventories.
-Future Slice 14 sub-slices still own repository import-preview/update execution
-domains and iOS native surfaces only where generic UI is insufficient.
+Slice 14D accepts `domains/repository_tree`, built-in
+`repository_tree_snapshot` resource definition, execute adapters, runtime
+grant narrowing, provider schema/instruction text, README, and static
+inventories. Future Slice 14 sub-slices still own repository
+import-preview/update execution domains and iOS native surfaces only where
+generic UI is insufficient.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,
@@ -2481,7 +2490,7 @@ authority/selectors, trusted current-session/workspace scope, lifecycle and
 trace/replay evidence, redacted projections, fingerprinted idempotency
 evidence, deterministic injected timestamps with no update-diagnostics DRC
 finding, and no raw update/package/endpoint/command leakage. Broader Slice 14
-review-candidate Slice 14D requires content-free `repository_tree_snapshot`
+accepted Slice 14D requires content-free `repository_tree_snapshot`
 metadata only, exact `repository_tree_snapshot` authority/selectors, trusted
 current-session/workspace scope, lifecycle and trace/replay evidence,
 redacted projections, fingerprinted idempotency evidence, deterministic
@@ -2502,7 +2511,7 @@ redaction, deterministic timestamp handling, and no raw import/repository/path
 leaks. Slice 14C tests cover update-diagnostic resource schema,
 authority/scope isolation, bounded signed-release projections, lifecycle
 evidence, idempotency fingerprint redaction, deterministic timestamp handling,
-and no raw update/package/endpoint/command leakage. Slice 14D review-candidate
+and no raw update/package/endpoint/command leakage. Slice 14D accepted
 tests cover repository-tree resource schema, authority/scope isolation,
 bounded content-free path metadata projections, path normalization/rejection,
 lifecycle evidence, idempotency fingerprint redaction, deterministic timestamp

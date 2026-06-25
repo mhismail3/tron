@@ -2138,18 +2138,29 @@ Acceptance validation:
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` | exit 0 | No personal-info literals, whitespace errors, ignored tracked files, or repo-managed first-party skills were present. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; accepting re-review found no update/system DRC findings. |
 
-## Slice 14D Review Candidate: Repository Tree Snapshot Resource Foundation
+### Accepted Slice 14D: Repository Tree Snapshot Resource Foundation
 
-Implementation thread: active Codex thread from orchestration
-`019efe16-09d7-73d3-9708-6c6ba5bc6493`.
+Discovery thread `019f006a-2579-7442-8a19-1c79600c4348` selected Slice 14D
+with exact final status `implementation may start` from baseline
+`origin/main@da1955d73c5a6244805afbde54d9adc7a1760f11`. Implementation
+thread `019f006c-e7c9-7321-95f4-fcc020bc8526` completed with exact final
+status `implementation complete` at
+`9e99348ddcc5fb23c8f72cc040c738d98f126658`. Independent review thread
+`019f0087-33a4-7773-9fb3-6d300df2a336` returned exact verdict
+`changes required` for missing HRA current-ownership-map coverage of
+`grant_repository_tree_tests.rs`. Focused fix thread
+`019f008d-1de7-72c1-911e-92e455af41a8` completed with exact final status
+`fix ready for review` at `80e95921943fd6a26bc9186210b0a27d24aa415c`.
+Independent re-review thread `019f0093-165f-7302-ab9b-23c01ef6adaa`
+returned exact verdict `slice accepted`.
 
-Review-candidate branch:
+Accepted branch:
 `codex/phase-2-slice-14d-repository-tree-snapshot-foundation`.
 
 Baseline HEAD:
 `da1955d73c5a6244805afbde54d9adc7a1760f11`
 
-Review-candidate scope:
+Accepted scope:
 
 - Adds `domains/repository_tree` as the server owner for durable
   `repository_tree_snapshot` resources containing content-free repository/root
@@ -2171,7 +2182,7 @@ Review-candidate scope:
   import preview/execute behavior, no native iOS tree UI, and no git mutation
   workflows.
 
-Review-candidate validation so far:
+Accepted validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -2179,6 +2190,16 @@ Review-candidate validation so far:
 | `cargo test --manifest-path packages/agent/Cargo.toml repository_tree --lib -- --nocapture` | exit 0 | Focused repository-tree domain, projection, idempotency, validation, authorization, and runtime-grant tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml repository_tree_resource_id_is_selector_enforced --lib -- --nocapture` | exit 0 | Regression proved `repositoryTreeResourceId` is extracted by the generic engine authorization scanner and a grant scoped to one `repository_tree_snapshot` denies another same-kind resource. |
 | `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | exit 0 | Provider prompt guidance includes repository-tree operations and metadata-only/raw-content rejection language. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants --quiet` | exit 0 | HRA passed after Fix 1 added the Slice 14D current ownership-map rows matching the HRA file-inventory rows. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, focused repository-tree/grant tests, and HRA | exit 0 | Accepting re-review verified branch/head/ancestry, repository-tree behavior, selector coverage, and HRA inventory coverage at `80e95921943fd6a26bc9186210b0a27d24aa415c`. |
+| BPRC, IARM, SACB, HRA, TMB, TPC/PCC, DESI, CSD, public-protocol, performance-resource, PMBD, DSEMD, personal-info guard, `git diff --check`, ignored-file check, and no-managed-skills check | exit 0 | Static inventories, provider/protocol/storage/performance surfaces, hygiene, and no repo-managed first-party skills matched accepted Slice 14D scope. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; accepting re-review found no repository-tree/import DRC findings. |
+
+Deferred scope remains unchanged: no raw file contents, no blob bytes, no
+absolute paths, no unbounded repository tree dumps, no repository
+visualization, no import preview/execute behavior, no native iOS tree UI, no
+git mutation workflows, no public `/engine` expansion, and no deployment
+automation.
 
 ## Validation Log
 
