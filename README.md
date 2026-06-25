@@ -1072,6 +1072,25 @@ results as durable evidence only; feature
 domains own execution, and hidden cron tables, autonomous planning, public
 `/engine` scheduler APIs, APNs/device notification delivery, fixed native
 schedule UI, and result merge remain deferred.
+The accepted Slice 13 foundation adds `domains/device` and
+`domains/notifications` as server-owned resource foundations behind the same
+single `capability::execute` primitive. `domains/device` owns durable
+`device_registration` records, explicit APNs environment handling, hash-only
+token custody, opt-in push policy, 90-day/500-record retention defaults,
+redacted list/inspect projections, and `device.lifecycle` stream evidence.
+Trusted system/admin calls can use `device_register` and `device_unregister`;
+provider-visible reads use `device_list` and `device_inspect`. Raw APNs tokens
+and full token hashes are never returned.
+`domains/notifications` owns durable `notification` inbox/read-state records,
+`notification_delivery` evidence, unread-count badge semantics, trace/replay
+refs, retention defaults, and `notifications.lifecycle` stream evidence.
+Provider-visible access is limited to `notification_send`,
+`notification_list`, `notification_inspect`, `notification_mark_read`, and
+`notification_mark_all_read`, with explicit non-wildcard resource grants.
+Push-requested sends record inbox-only, no-device, policy-disabled,
+family-opt-out, or transport-disabled delivery evidence; live APNs transport,
+APNs entitlements, public notification APIs, native iOS inbox/deep links,
+hidden background loops, and fake client-local inboxes remain deferred.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1290,8 +1309,8 @@ disabled/loading/ready/failed model state, and no media or voice notes are
 stored. Product/tool domains such as
 `process`, `program`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
-`worker`, `notifications`, `voice_notes`, and media/import surfaces are
-not registered by default on this branch.
+`worker`, `voice_notes`, and media/import surfaces are not registered by
+default on this branch.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,
@@ -1455,7 +1474,10 @@ Late cancel requests do not overwrite already-completed jobs. Goal/question
 records are generic `goal`, `user_question`, and `goal_answer` resources with
 lifecycle events on `goals.lifecycle`; answer handoff uses the execute
 idempotency ledger and resource expected-version checks so replaying the same
-answer key returns the same evidence without double-answering. The replay snapshot includes resolved
+answer key returns the same evidence without double-answering. Slice 13 device
+and notification state uses engine resource versions plus `device.lifecycle`
+and `notifications.lifecycle` stream rows; it does not add transport-visible
+notification session-event variants. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the
@@ -1787,10 +1809,12 @@ file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
 model-visible evidence read path is `capability::execute` with `trace_list`,
 `trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
-`catalog_inspect`, `catalog_conformance`, `job_*` lifecycle operations, and
-`schedule_*` schedule/run operations; trace/log/replay/job/schedule reads
-require trusted current-session context, and catalog conformance plus mutating
-job/schedule operations require idempotency.
+`catalog_inspect`, `catalog_conformance`, `job_*` lifecycle operations,
+`schedule_*` schedule/run operations, `device_*` registration projections, and
+`notification_*` inbox/read/delivery-evidence operations; trace/log/replay/job/
+schedule/device/notification reads require trusted current-session context, and
+catalog conformance plus mutating job/schedule/notification operations require
+idempotency.
 Trace reads are backed by `trace_records`; effectful `execute` calls insert a
 running record before the effect runs and update that same record with status,
 duration, result/error hashes, authority, provider/model metadata, VCS revision
@@ -1826,7 +1850,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

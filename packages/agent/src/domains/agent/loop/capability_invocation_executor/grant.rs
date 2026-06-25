@@ -30,6 +30,11 @@ pub(super) async fn derive_capability_runtime_grant(
         .get("operation")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let notification_push_requested = operation == "notification_send"
+        && effective_args
+            .get("pushRequested")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
     let web_fetch_uses_robots_policy = operation == "web_fetch"
         && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
         && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
@@ -85,6 +90,24 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if matches!(operation, "device_list" | "device_inspect") {
+        allowed_authority_scopes.extend(["device.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(operation, "notification_list" | "notification_inspect") {
+        allowed_authority_scopes
+            .extend(["notifications.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "notification_send" | "notification_mark_read" | "notification_mark_all_read"
+    ) {
+        allowed_authority_scopes.extend([
+            "notifications.read".to_owned(),
+            "notifications.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+        if notification_push_requested {
+            allowed_authority_scopes.push("device.read".to_owned());
+        }
     }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
@@ -128,6 +151,26 @@ pub(super) async fn derive_capability_runtime_grant(
     ) && procedural_kind(effective_args).is_some()
     {
         allowed_resource_kinds.push("procedural_record".to_owned());
+    } else if matches!(operation, "device_list" | "device_inspect") {
+        allowed_resource_kinds.push("device_registration".to_owned());
+    } else if operation == "notification_list" {
+        allowed_resource_kinds.push("notification".to_owned());
+    } else if operation == "notification_inspect" {
+        allowed_resource_kinds.extend([
+            "notification".to_owned(),
+            "notification_delivery".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "notification_send" | "notification_mark_read" | "notification_mark_all_read"
+    ) {
+        allowed_resource_kinds.extend([
+            "notification".to_owned(),
+            "notification_delivery".to_owned(),
+        ]);
+        if notification_push_requested {
+            allowed_resource_kinds.push("device_registration".to_owned());
+        }
     }
     let mut resource_selectors = allowed_resource_kinds
         .iter()

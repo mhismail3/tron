@@ -3,6 +3,9 @@
 //! Implements a request/response pattern over engine streams. Server publishes
 //! a `device.request` event scoped to the session, the client handles it
 //! locally, and sends the result back via the `device::respond` capability.
+//! This broker is not the APNs token owner, notification inbox owner, badge
+//! policy owner, or push transport. Slice 13 device registration and inbox
+//! delivery evidence live under `domains::device` and `domains::notifications`.
 
 use std::collections::HashMap;
 use std::time::Duration;

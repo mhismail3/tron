@@ -106,6 +106,18 @@ pub const SCHEDULE_SCHEMA_ID: &str = "tron.resource.schedule.v1";
 pub const SCHEDULE_RUN_KIND: &str = "schedule_run";
 /// Built-in durable schedule run resource schema id.
 pub const SCHEDULE_RUN_SCHEMA_ID: &str = "tron.resource.schedule_run.v1";
+/// Built-in APNs-capable device registration resource kind.
+pub const DEVICE_REGISTRATION_KIND: &str = "device_registration";
+/// Built-in APNs-capable device registration resource schema id.
+pub const DEVICE_REGISTRATION_SCHEMA_ID: &str = "tron.resource.device_registration.v1";
+/// Built-in server-owned notification inbox resource kind.
+pub const NOTIFICATION_KIND: &str = "notification";
+/// Built-in server-owned notification inbox resource schema id.
+pub const NOTIFICATION_SCHEMA_ID: &str = "tron.resource.notification.v1";
+/// Built-in notification delivery evidence resource kind.
+pub const NOTIFICATION_DELIVERY_KIND: &str = "notification_delivery";
+/// Built-in notification delivery evidence resource schema id.
+pub const NOTIFICATION_DELIVERY_SCHEMA_ID: &str = "tron.resource.notification_delivery.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

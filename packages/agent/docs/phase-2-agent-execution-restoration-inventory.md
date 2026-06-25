@@ -97,6 +97,24 @@ bounded projections; feature domains still own what scheduled work does, and
 hidden cron loops, APNs/device notification delivery, public scheduler APIs,
 native fixed schedule UI, and result merge remain deferred.
 
+Accepted Slice 13 adds the server-owned notification/device foundation for
+BPRC-FEATURE-12: `domains/device`, `domains/notifications`, built-in
+`device_registration`, `notification`, and `notification_delivery` resources,
+`device.lifecycle` and `notifications.lifecycle` stream evidence, and
+execute-only `device_register`, `device_unregister`, `device_list`,
+`device_inspect`, `notification_send`, `notification_list`,
+`notification_inspect`, `notification_mark_read`, and
+`notification_mark_all_read` operations. Device registration requires trusted
+internal system/admin authority, explicit APNs environment, hash-only token
+custody, opt-in push policy, non-wildcard `device_registration` grants, and
+redacted projections; raw APNs tokens are never provider-visible.
+Notification operations own durable inbox/read state, unread-count badge
+semantics, retention defaults, trace/replay refs, and delivery evidence for
+inbox-only, no-device, policy-disabled, family-opt-out, or transport-disabled
+paths. Live APNs transport, APNs entitlements, native iOS inbox/deep links,
+public `/engine` notification APIs, hidden background loops, and fake
+client-local inbox state remain deferred.
+
 It also maps every BPRC backlog row:
 
 - `BPRC-FEATURE-01`: capability discovery, routing, and intent execution.

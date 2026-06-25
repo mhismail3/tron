@@ -972,7 +972,7 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
 }
 
 #[test]
-fn notification_inbox_apns_runtime_planes_remain_absent_after_slice_six_defer() {
+fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_foundation() {
     let forbidden_paths = [
         "packages/ios-app/Sources/Views/Notifications",
         "packages/ios-app/Sources/UI/Notifications",
@@ -995,15 +995,13 @@ fn notification_inbox_apns_runtime_planes_remain_absent_after_slice_six_defer() 
         "packages/ios-app/Tests/Services/NotificationStoreTests.swift",
         "packages/ios-app/Tests/Views/NotificationInboxFilterTests.swift",
         "packages/ios-app/Tests/Views/NotificationSheetPresentationTests.swift",
-        "packages/agent/src/domains/notifications",
-        "packages/agent/src/domains/device",
         "packages/agent/src/platform/apns",
         "packages/agent/src/platform/device_broker",
     ];
     for relative_path in forbidden_paths {
         assert!(
             !repo_path(relative_path).exists(),
-            "Slice 6 deferred runtime plane should stay absent: {relative_path}"
+            "Slice 13 still defers native/APNs-client runtime plane: {relative_path}"
         );
     }
 
@@ -1013,7 +1011,7 @@ fn notification_inbox_apns_runtime_planes_remain_absent_after_slice_six_defer() 
     ] {
         assert!(
             !read_repo_file(entitlement).contains("aps-environment"),
-            "{entitlement} must not restore APNs entitlement while Slice 6 is deferred"
+            "{entitlement} must not restore APNs entitlement while Slice 13 keeps live APNs deferred"
         );
     }
 
@@ -1072,7 +1070,7 @@ fn notification_inbox_apns_runtime_planes_remain_absent_after_slice_six_defer() 
         for token in forbidden_tokens {
             assert!(
                 !source.contains(token),
-                "Slice 6 defer guard found forbidden notification/APNs token `{token}` in {}",
+                "Slice 13 client/APNs guard found forbidden notification/APNs token `{token}` in {}",
                 path.display()
             );
         }

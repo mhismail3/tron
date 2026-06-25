@@ -1173,3 +1173,20 @@ packages/agent/src/domains/scheduler/support.rs	rust	implementation	agent:schedu
 packages/agent/src/domains/scheduler/tests.rs	rust	test-support	agent:scheduler	test-only scheduler clock injection missed-run cancellation authority schema and multi-schedule firing regressions; production code must not depend on it
 packages/agent/src/domains/scheduler/types.rs	rust	implementation	agent:scheduler	owner-private schedule and schedule_run record types
 packages/agent/src/engine/durability/resources/scheduler_definitions.rs	rust	implementation	rust:engine	owner-private schedule and schedule_run resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/context.rs	rust	implementation	rust:capability	owner-private execute context validation helper; callers enter through capability::execute
+packages/agent/src/domains/capability/operations/device.rs	rust	adapter	rust:capability	execute primitive may call device list/inspect service methods; provider writes remain trusted internal only
+packages/agent/src/domains/capability/operations/notifications.rs	rust	adapter	rust:capability	execute primitive may call notification send/list/inspect/read-state service methods with explicit grants
+packages/agent/src/domains/device/contract.rs	rust	contract	agent:device	device worker id stream and authority constants; shared only inside device/capability registration boundaries
+packages/agent/src/domains/device/mod.rs	rust	facade	agent:device	domain root owns device registration docs and worker registration; behavior stays in owner modules
+packages/agent/src/domains/device/projection.rs	rust	implementation	agent:device	owner-private redacted device list/inspect projection helpers; callers enter through authorized service methods
+packages/agent/src/domains/device/service.rs	rust	implementation	agent:device	owner-private durable device register unregister list and inspect service using engine resources streams and scoped authority
+packages/agent/src/domains/device/support.rs	rust	implementation	agent:device	owner-private device record authority redaction refs hashing and lifecycle helper boundary
+packages/agent/src/domains/device/validation.rs	rust	implementation	agent:device	owner-private APNs environment token bounds and retention validation helpers
+packages/agent/src/domains/notifications/authority.rs	rust	implementation	agent:notifications	owner-private notification authority guards and push device-read gating helpers
+packages/agent/src/domains/notifications/contract.rs	rust	contract	agent:notifications	notification worker id stream and authority constants; shared only inside notification/capability registration boundaries
+packages/agent/src/domains/notifications/delivery.rs	rust	implementation	agent:notifications	owner-private delivery evidence service with live APNs disabled; callers enter through notification service
+packages/agent/src/domains/notifications/mod.rs	rust	facade	agent:notifications	domain root owns notification inbox docs and worker registration; behavior stays in owner modules
+packages/agent/src/domains/notifications/projection.rs	rust	implementation	agent:notifications	owner-private bounded notification inbox read-state badge and delivery projection helpers
+packages/agent/src/domains/notifications/service.rs	rust	implementation	agent:notifications	owner-private durable notification send list inspect mark-read and mark-all-read service using engine resources streams and scoped authority
+packages/agent/src/domains/notifications/validation.rs	rust	implementation	agent:notifications	owner-private notification payload family severity refs resource id and retention validation helpers
+packages/agent/src/engine/durability/resources/notification_definitions.rs	rust	implementation	rust:engine	owner-private device_registration notification and notification_delivery resource definition module; callers use engine resource facade

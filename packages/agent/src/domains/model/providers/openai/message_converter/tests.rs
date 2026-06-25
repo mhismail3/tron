@@ -471,7 +471,6 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(!result.contains("git_checkout"));
     assert!(!result.contains("git_branch_delete"));
     assert!(!result.contains("reminder"));
-    assert!(!result.contains("notification"));
     assert!(!result.contains("planner"));
     assert!(!result.contains("file_read"));
     assert!(!result.contains("file_write"));
@@ -482,6 +481,17 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("web_source_archive"));
     assert!(result.contains("expectedWebSourceVersionId"));
+    assert!(result.contains("device_register"));
+    assert!(result.contains("device_unregister"));
+    assert!(result.contains("device_list"));
+    assert!(result.contains("device_inspect"));
+    assert!(result.contains("notification_send"));
+    assert!(result.contains("notification_list"));
+    assert!(result.contains("notification_inspect"));
+    assert!(result.contains("notification_mark_read"));
+    assert!(result.contains("notification_mark_all_read"));
+    assert!(result.contains("live APNs transport disabled"));
+    assert!(result.contains("hash-only APNs token custody"));
     assert!(result.contains("subagent_launch"));
     assert!(result.contains("subagent_status"));
     assert!(result.contains("subagent_result"));
@@ -514,6 +524,15 @@ fn clarification_includes_capability_execution_guidance() {
         "subagent_delegate",
         "spawn_subagent",
         "subagent_spawn",
+        concat!("notifications", "::send"),
+        concat!("notifications", "::list"),
+        concat!("notifications", "::mark_read"),
+        concat!("notifications", "::mark_all_read"),
+        concat!("device", "::register"),
+        concat!("device", "::unregister"),
+        concat!("apns", "_send"),
+        concat!("apns", "_deliver"),
+        "local_inbox",
         "procedural_state_create",
         "procedural_state_update",
         "procedural_state_activate",

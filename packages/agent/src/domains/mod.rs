@@ -19,6 +19,7 @@
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `approval` | Approval request/decision evidence and reusable freshness checks |
 //! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
+//! | `device` | Server-owned device registration and redacted APNs token custody |
 //! | `memory` | Memory contract resources, prompt traces, and migration envelopes |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
@@ -28,6 +29,7 @@
 //! | `subagents` | Inert subagent task lifecycle evidence |
 //! | `procedural` | Inert skill/rule/hook/procedure provenance inspection evidence |
 //! | `scheduler` | Durable schedules, missed-run policy, cancellation, and run records |
+//! | `notifications` | Durable notification inbox, read state, badges, and delivery evidence |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
@@ -72,9 +74,12 @@
 //! domain is restored only for read-only status/diff evidence; source-control
 //! mutations remain absent. The procedural domain is resource-backed custody
 //! and inspection evidence only; activation, trigger firing, prompt injection,
-//! learned behavior, and autonomous execution remain absent. New domain
-//! behavior must add a contract, deps narrowing, handler binding, tests, and
-//! README/domain-doc updates together.
+//! learned behavior, and autonomous execution remain absent. Device and
+//! notification domains are server-owned foundations only: raw APNs tokens are
+//! not provider-visible, live APNs transport and native iOS inbox affordances
+//! remain absent, and the old notification product surface is not restored. New
+//! domain behavior must add a contract, deps narrowing, handler binding, tests,
+//! and README/domain-doc updates together.
 //!
 //! ## Test Ownership
 //!
@@ -89,6 +94,7 @@ pub mod auth;
 pub mod blob;
 pub mod capability;
 pub mod catalog_discovery;
+pub mod device;
 pub mod filesystem;
 pub mod git;
 pub mod goals;
@@ -97,6 +103,7 @@ pub mod logs;
 pub mod memory;
 pub mod message;
 pub mod model;
+pub mod notifications;
 pub mod procedural;
 pub mod registration;
 pub mod scheduler;

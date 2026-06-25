@@ -1851,3 +1851,23 @@ packages/agent/src/domains/scheduler/support.rs	retain	scheduler owner	PCC-10/P2
 packages/agent/src/domains/scheduler/tests.rs	retain	scheduler test owner	PCC-10/P2AER-S12	Slice 12 scheduler regression tests for clock injection missed runs cancellation authority schema and multi-schedule firing.
 packages/agent/src/domains/scheduler/types.rs	retain	scheduler owner	PCC-10/P2AER-S12	Slice 12 schedule and schedule_run record types.
 packages/agent/src/engine/durability/resources/scheduler_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S12	Slice 12 built-in schedule and schedule_run resource schemas.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_notification_device_tests.rs	retain	phase2 agent	PCC-10/P2AER-S13	Notification/device runtime grant regression tests retained for Slice 13 least-privilege authority coverage.
+packages/agent/src/domains/capability/operations/context.rs	retain	capability execute owner	PCC-10/P2AER-S13	Shared execute context validation retained after operation routing split.
+packages/agent/src/domains/capability/operations/device.rs	retain	capability execute owner	PCC-10/P2AER-S13	Device execute adapter retained for redacted durable registration projections.
+packages/agent/src/domains/capability/operations/notifications.rs	retain	capability execute owner	PCC-10/P2AER-S13	Notification execute adapter retained for durable inbox read state and delivery evidence.
+packages/agent/src/domains/device/contract.rs	retain	device owner	PCC-10/P2AER-S13	Device worker contract constants retained for explicit authority and stream ownership.
+packages/agent/src/domains/device/mod.rs	retain	device owner	PCC-10/P2AER-S13	Device domain facade and docs retained for server-owned APNs token custody foundation.
+packages/agent/src/domains/device/projection.rs	retain	device owner	PCC-10/P2AER-S13	Redacted device list and inspect projection retained.
+packages/agent/src/domains/device/service.rs	retain	device owner	PCC-10/P2AER-S13	Durable device register unregister list and inspect operation owner retained.
+packages/agent/src/domains/device/support.rs	retain	device owner	PCC-10/P2AER-S13	Device record authority redaction refs and lifecycle helpers retained.
+packages/agent/src/domains/device/tests.rs	retain	device test owner	PCC-10/P2AER-S13	Device registration token redaction authority environment and scope tests retained.
+packages/agent/src/domains/device/validation.rs	retain	device owner	PCC-10/P2AER-S13	Device payload APNs environment token and retention validation retained.
+packages/agent/src/domains/notifications/authority.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification authority and push device-read gating retained.
+packages/agent/src/domains/notifications/contract.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification worker contract constants retained for authority and stream ownership.
+packages/agent/src/domains/notifications/delivery.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification delivery evidence policy retained with live APNs disabled.
+packages/agent/src/domains/notifications/mod.rs	retain	notifications owner	PCC-10/P2AER-S13	Notifications domain facade and docs retained for server-owned inbox foundation.
+packages/agent/src/domains/notifications/projection.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification inbox read-state badge and delivery projections retained.
+packages/agent/src/domains/notifications/service.rs	retain	notifications owner	PCC-10/P2AER-S13	Durable notification send list inspect read-state operation owner retained.
+packages/agent/src/domains/notifications/tests.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification inbox badge delivery authority and scope tests retained.
+packages/agent/src/domains/notifications/validation.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification payload family severity refs and retention validation retained.
+packages/agent/src/engine/durability/resources/notification_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S13	Device registration notification and notification delivery resource schemas retained.

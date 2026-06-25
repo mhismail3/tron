@@ -11,19 +11,22 @@ use chrono::Utc;
 use serde_json::{Value, json};
 
 use super::Deps;
-use crate::engine::{ActorKind, Invocation, is_bootstrap_authority_grant_id};
+use crate::engine::Invocation;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::errors::CapabilityError;
 use tracing::{info, warn};
 
 mod catalog;
+mod context;
+mod device;
 mod filesystem;
 mod git;
 mod goals;
 mod jobs;
 mod logs;
 mod memory;
+mod notifications;
 mod procedural;
 mod process;
 mod replay;
@@ -36,6 +39,8 @@ mod web;
 mod worker_packages;
 
 use catalog::{catalog_conformance, catalog_inspect, catalog_search};
+use context::validate_execute_context;
+use device::{device_inspect, device_list, device_register, device_unregister};
 use filesystem::{
     filesystem_apply_patch, filesystem_diff, filesystem_edit, filesystem_find, filesystem_glob,
     filesystem_list, filesystem_read, filesystem_search_text, filesystem_write,
@@ -51,12 +56,15 @@ use goals::{
 use jobs::{job_cancel, job_list, job_log, job_start, job_status};
 use logs::log_recent;
 use memory::{memory_inspect, memory_list, memory_status};
+use notifications::{
+    notification_inspect, notification_list, notification_mark_all_read, notification_mark_read,
+    notification_send,
+};
 use procedural::{procedural_state_inspect, procedural_state_list};
 use process::process_run;
 use replay::replay_manifest;
 use scheduler::{
-    is_scheduler_operation, requires_scheduler_idempotency, schedule_cancel, schedule_create,
-    schedule_fire_due, schedule_inspect, schedule_list,
+    schedule_cancel, schedule_create, schedule_fire_due, schedule_inspect, schedule_list,
 };
 use state::{state_get, state_list, state_set};
 use subagents::{
@@ -182,155 +190,6 @@ pub(crate) async fn execute_value(
     }
 }
 
-fn validate_execute_context(
-    invocation: &Invocation,
-    operation: &str,
-) -> Result<(), CapabilityError> {
-    match invocation.causal_context.actor_kind {
-        ActorKind::Agent => {
-            let session_id = invocation
-                .causal_context
-                .session_id
-                .as_deref()
-                .ok_or_else(|| invalid("capability::execute agent context requires session id"))?;
-            let expected_actor = format!("agent:{session_id}");
-            if invocation.causal_context.actor_id.as_str() != expected_actor {
-                return Err(invalid(
-                    "capability::execute agent actor must match the current session",
-                ));
-            }
-        }
-        ActorKind::System => {}
-        _ => {
-            return Err(invalid(
-                "capability::execute requires a trusted agent or system runtime context",
-            ));
-        }
-    }
-    if is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id) {
-        return Err(invalid(
-            "capability::execute requires a derived least-privilege authority grant",
-        ));
-    }
-    if matches!(
-        operation,
-        "job_start"
-            | "job_status"
-            | "job_list"
-            | "job_log"
-            | "job_cancel"
-            | "goal_create"
-            | "goal_list"
-            | "goal_inspect"
-            | "goal_cancel"
-            | "question_create"
-            | "question_list"
-            | "question_inspect"
-            | "question_answer"
-            | "web_fetch"
-            | "web_robots_check"
-            | "web_source_list"
-            | "web_source_inspect"
-            | "web_source_archive"
-            | "tool_source_list"
-            | "tool_source_inspect"
-            | "subagent_launch"
-            | "subagent_status"
-            | "subagent_result"
-            | "subagent_cancel"
-            | "subagent_task_list"
-            | "subagent_task_inspect"
-            | "worker_package_list"
-            | "worker_package_inspect"
-            | "procedural_state_list"
-            | "procedural_state_inspect"
-    ) {
-        require_current_session(invocation, operation)?;
-    }
-    if is_scheduler_operation(operation) {
-        require_current_session(invocation, operation)?;
-    }
-    match operation {
-        "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
-        "trace_list"
-        | "trace_get"
-        | "log_recent"
-        | "replay_manifest"
-        | "memory_status"
-        | "memory_list"
-        | "memory_inspect"
-        | "procedural_state_list"
-        | "procedural_state_inspect" => require_current_session(invocation, operation),
-        "catalog_conformance"
-        | "filesystem_write"
-        | "filesystem_edit"
-        | "filesystem_apply_patch"
-        | "git_stage"
-        | "git_unstage"
-        | "git_commit"
-        | "git_branch_start"
-        | "job_start"
-        | "job_cancel"
-        | "goal_create"
-        | "goal_cancel"
-        | "question_create"
-        | "question_answer"
-        | "web_fetch"
-        | "web_robots_check"
-        | "web_source_archive"
-        | "subagent_launch"
-        | "subagent_cancel" => require_idempotency_key(invocation, operation),
-        _ if requires_scheduler_idempotency(operation) => {
-            require_idempotency_key(invocation, operation)
-        }
-        _ => Ok(()),
-    }
-}
-
-fn validate_state_scope(invocation: &Invocation) -> Result<(), CapabilityError> {
-    match optional_str(&invocation.payload, "scope")?.unwrap_or("session") {
-        "session" => require_current_session(invocation, "state operation"),
-        "workspace" => {
-            if invocation.causal_context.workspace_id.is_none() {
-                return Err(invalid(
-                    "workspace state requires trusted workspace context",
-                ));
-            }
-            Ok(())
-        }
-        "system" => Err(invalid(
-            "capability::execute cannot read or write system-scoped state",
-        )),
-        other => Err(invalid(format!("unsupported execute state scope {other}"))),
-    }
-}
-
-fn require_current_session(
-    invocation: &Invocation,
-    operation: &str,
-) -> Result<(), CapabilityError> {
-    if invocation.causal_context.session_id.is_none() {
-        return Err(invalid(format!(
-            "{operation} requires trusted current session context"
-        )));
-    }
-    Ok(())
-}
-
-fn require_idempotency_key(
-    invocation: &Invocation,
-    operation: &str,
-) -> Result<(), CapabilityError> {
-    if invocation.causal_context.idempotency_key.is_none()
-        && optional_str(&invocation.payload, "idempotencyKey")?.is_none()
-    {
-        return Err(invalid(format!(
-            "{operation} writes durable evidence and requires an idempotencyKey"
-        )));
-    }
-    Ok(())
-}
-
 async fn execute_operation(
     operation: &str,
     invocation: &Invocation,
@@ -381,6 +240,15 @@ async fn execute_operation(
         "memory_status" => memory_status(invocation, deps).await?,
         "memory_list" => memory_list(invocation, deps).await?,
         "memory_inspect" => memory_inspect(invocation, deps).await?,
+        "device_register" => device_register(invocation, deps).await?,
+        "device_unregister" => device_unregister(invocation, deps).await?,
+        "device_list" => device_list(invocation, deps).await?,
+        "device_inspect" => device_inspect(invocation, deps).await?,
+        "notification_send" => notification_send(invocation, deps).await?,
+        "notification_list" => notification_list(invocation, deps).await?,
+        "notification_inspect" => notification_inspect(invocation, deps).await?,
+        "notification_mark_read" => notification_mark_read(invocation, deps).await?,
+        "notification_mark_all_read" => notification_mark_all_read(invocation, deps).await?,
         "procedural_state_list" => procedural_state_list(invocation, deps).await?,
         "procedural_state_inspect" => procedural_state_inspect(invocation, deps).await?,
         "schedule_create" => schedule_create(invocation, deps).await?,
@@ -406,7 +274,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

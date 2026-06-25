@@ -1806,3 +1806,23 @@ packages/agent/src/domains/scheduler/support.rs	implementation	scheduler	TPC-10/
 packages/agent/src/domains/scheduler/tests.rs	test	test_harness	TPC-10/P2AER-S12	focused Slice 12 scheduler regression coverage
 packages/agent/src/domains/scheduler/types.rs	implementation	scheduler	TPC-10/P2AER-S12	schedule and schedule_run record types
 packages/agent/src/engine/durability/resources/scheduler_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S12	built-in schedule and schedule_run resource schemas
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_notification_device_tests.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification and device runtime grant regression coverage
+packages/agent/src/domains/capability/operations/context.rs	implementation	capability_execute	TPC-10/P2AER-S13	shared capability execute context validation helper retained after operation routing split
+packages/agent/src/domains/capability/operations/device.rs	implementation	capability_execute	TPC-10/P2AER-S13	provider execute adapter for redacted durable device registration projections
+packages/agent/src/domains/capability/operations/notifications.rs	implementation	capability_execute	TPC-10/P2AER-S13	provider execute adapter for durable notification inbox read state and delivery evidence
+packages/agent/src/domains/device/contract.rs	implementation	device	TPC-10/P2AER-S13	device worker contract constants retained for explicit authority and lifecycle stream ownership
+packages/agent/src/domains/device/mod.rs	implementation	device	TPC-10/P2AER-S13	device domain docs and registration boundary for server-owned APNs token custody foundation
+packages/agent/src/domains/device/projection.rs	implementation	device	TPC-10/P2AER-S13	bounded redacted device list and inspect projection owner
+packages/agent/src/domains/device/service.rs	implementation	device	TPC-10/P2AER-S13	durable device register unregister list and inspect operation owner
+packages/agent/src/domains/device/support.rs	implementation	device	TPC-10/P2AER-S13	device record construction authority redaction refs and lifecycle event helpers
+packages/agent/src/domains/device/tests.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 device registration token redaction authority environment and scope coverage
+packages/agent/src/domains/device/validation.rs	implementation	device	TPC-10/P2AER-S13	device payload bounds APNs environment token and retention validation helpers
+packages/agent/src/domains/notifications/authority.rs	implementation	notifications	TPC-10/P2AER-S13	notification authority guard owner for explicit resource kind selectors and push device-read gating
+packages/agent/src/domains/notifications/contract.rs	implementation	notifications	TPC-10/P2AER-S13	notification worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/notifications/delivery.rs	implementation	notifications	TPC-10/P2AER-S13	notification delivery evidence owner with live APNs disabled policy outcomes
+packages/agent/src/domains/notifications/mod.rs	implementation	notifications	TPC-10/P2AER-S13	notification domain docs and registration boundary for server-owned inbox foundation
+packages/agent/src/domains/notifications/projection.rs	implementation	notifications	TPC-10/P2AER-S13	bounded notification list inspect read state badge and delivery projection owner
+packages/agent/src/domains/notifications/service.rs	implementation	notifications	TPC-10/P2AER-S13	durable notification send list inspect mark-read and mark-all-read operation owner
+packages/agent/src/domains/notifications/tests.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification inbox read badge delivery evidence authority and scope coverage
+packages/agent/src/domains/notifications/validation.rs	implementation	notifications	TPC-10/P2AER-S13	notification payload bounds family severity refs and retention validation helpers
+packages/agent/src/engine/durability/resources/notification_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S13	built-in device_registration notification and notification_delivery resource schemas

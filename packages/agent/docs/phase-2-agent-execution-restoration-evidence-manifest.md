@@ -1888,23 +1888,57 @@ Scope implemented:
   notification delivery, no public scheduler API expansion, no native fixed iOS
   UI, no autonomous planning, and no result merge into conversation state.
 
+### Accepted Slice 13: Notifications, APNs, Device Broker, And Inbox
+
+Implementation branch:
+`codex/phase-2-slice-13-notifications-apns-device-broker-inbox`.
+
+Scope implemented:
+
+- Added `domains/device` as the server owner for durable
+  `device_registration` records, explicit APNs environment policy, hash-only
+  token custody, opt-in push policy, retention defaults, redacted projections,
+  and `device.lifecycle` stream evidence.
+- Added `domains/notifications` as the server owner for durable
+  `notification` and `notification_delivery` records: inbox/read-state data,
+  unread-count badge semantics, delivery evidence, source/replay refs,
+  retention defaults, and `notifications.lifecycle` stream evidence.
+- Added built-in resource definitions for `device_registration`,
+  `notification`, and `notification_delivery`.
+- Added execute-only operation values `device_register`, `device_unregister`,
+  `device_list`, `device_inspect`, `notification_send`, `notification_list`,
+  `notification_inspect`, `notification_mark_read`, and
+  `notification_mark_all_read` behind the existing single
+  `capability::execute` primitive.
+- Required trusted current-session/workspace context, explicit non-wildcard
+  resource-kind selectors, bounded selectors, derived non-bootstrap grants,
+  idempotency for writes, and push-requested sends gaining only
+  `device.read`/`device_registration` authority in addition to notification
+  resource authority.
+- Kept Slice 13 narrow: live APNs transport disabled, no APNs entitlement, no
+  native iOS inbox/deep link, no public notification API, no hidden background
+  loop, no fake local inbox, no package install/catalog registration, and no
+  production network side effect.
+
 Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Formatting passed after accepted Slice 12 docs and static assertion updates. |
-| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust crate checked after scheduler/resource/capability wiring; only pre-existing warning classes remained. |
-| `cargo test --manifest-path packages/agent/Cargo.toml scheduler::tests -- --nocapture` | exit 0 | 10 scheduler tests passed after the focused fix, including inspect redaction, bounded fire, bounded inspect runs, and no-context service rejection regressions. |
-| `cargo test --manifest-path packages/agent/Cargo.toml engine::durability::resources -- --nocapture` | exit 0 | 7 resource durability tests passed after bounded source-link lookup changes. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after the narrow accepted scheduler foundation allowance. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 CSD tests passed; no hidden timer loop or unmanaged scheduler path was introduced. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after adding scheduler authority/resource inventory rows. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test documentation_evidence_scorecard_integrity_invariants --test hierarchical_rearchitecture_invariants --test concurrency_scheduling_discipline_invariants --test security_authority_capability_boundaries_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test self_updating_worker_runtime_foundation_invariants --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | BPRC, DESI, HRA, CSD, SACB, TMB, TPC, PCC, public-protocol, performance-resource, SUWRF, and IARM gates passed after the accepted-current-baseline closeout wording and static assertions. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 101 | Scheduler `Utc::now()` violations were removed. Remaining DRC failure is the known non-scheduler allow-list gap in `domains/goals`, `domains/web`, and `domains/tool_sources/tool_sources_inspect_tests.rs`. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Formatting passed for the notification/device foundation. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust crate checked after notification/device/capability/resource wiring; only pre-existing provider/resource dead-code warning classes remained. |
+| `cargo test --manifest-path packages/agent/Cargo.toml device::tests -- --nocapture` | exit 0 | 5 device tests passed: register/unregister, APNs token redaction, explicit environment handling, opt-in defaults, authority denial, wildcard denial, list behavior, and scope isolation. |
+| `cargo test --manifest-path packages/agent/Cargo.toml notifications::tests -- --nocapture` | exit 0 | 4 notification tests passed: send/list/read/mark-all, badge semantics, retention defaults, trace/replay refs, no-device/policy-disabled/transport-disabled delivery evidence, token redaction, authority denial, push device-read gating, and scope isolation. |
+| `cargo test --manifest-path packages/agent/Cargo.toml grant_ -- --nocapture` | exit 0 | 26 grant tests passed, including least-privilege notification/device grants and push-requested device-read gating. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::contract -- --nocapture` | exit 0 | 3 provider schema tests passed after adding notification/device operation values and schemas. |
+| `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | 1 message-converter guidance test passed with the new execute operation families included. |
+| `cargo test --manifest-path packages/agent/Cargo.toml clarification_forbids_probe_calls_when_user_supplies_exact_payload -- --nocapture` | exit 0 | 1 provider-behavior guard passed, preserving the no-probe-call policy for exact execute payloads. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test ios_affordance_restoration_map_invariants --test security_authority_capability_boundaries_invariants --test hierarchical_rearchitecture_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test documentation_evidence_scorecard_integrity_invariants --test concurrency_scheduling_discipline_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | exit 0 | BPRC, IARM, SACB, HRA, TMB, TPC, PCC, DESI, CSD, public-protocol, performance-resource, and SUWRF static gates passed after the accepted narrow Slice 13 carve-outs. |
 | `scripts/personal-info-guard.sh` | exit 0 | No personal-info literals were introduced. |
 | `git diff --check` | exit 0 | Closeout docs and static assertion diffs contain no whitespace errors. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No ignored files are staged or tracked by the closeout. |
+| `git ls-files -oi --exclude-standard \| sed -n '1,120p'` | exit 0 | Ignored untracked audit showed only local build/system artifacts, including `.worktrees/.DS_Store` and `packages/agent/target/...`. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+| iOS/APNs validation | not run | No iOS source, entitlement, native inbox, deep-link, or live APNs transport was added in Slice 13; physical-device APNs validation remains deferred with live delivery. |
 
 ## Validation Log
 

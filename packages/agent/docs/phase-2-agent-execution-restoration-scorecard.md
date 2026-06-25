@@ -2360,6 +2360,14 @@ autonomous planning, or result merge.
 
 ### Slice 13: Notifications, APNs, Device Broker, And Inbox
 
+Implementation status: accepted backend foundation. Slice 13 now adds
+server-owned `domains/device` and `domains/notifications`, durable
+`device_registration`, `notification`, and `notification_delivery` resource
+schemas, lifecycle stream evidence, and execute-only operation values through
+the existing `capability::execute` primitive. It deliberately does not add live
+APNs sends, APNs entitlements, native iOS inbox/deep links, public
+notification APIs, or client-local inbox state.
+
 Objective: restore notification delivery only after server-owned device and
 notification resources exist.
 
@@ -2374,8 +2382,11 @@ Modular boundaries: notification/device package owns APNs registration,
 delivery, read state, token invalidation, retention, and privacy. iOS owns
 permission prompts and local presentation only.
 
-Likely files/areas: future `domains/device`, future `domains/notifications`,
-platform APNs, iOS app delegate/entitlements/inbox after backend proof.
+Files/areas implemented: `domains/device`, `domains/notifications`, built-in
+resource definitions, capability execute adapters, runtime grant narrowing,
+provider schema/instruction text, BPRC/IARM guards, README, and this Phase 2
+inventory. Platform APNs, iOS app delegate/entitlements/inbox, and physical
+push validation remain later slices after backend proof.
 
 Old evidence paths: `BPRC-FEATURE-12`, `IARM-SURFACE-019`,
 `IARM-SURFACE-033`, Phase 1 Slice 6 progress ledger.
@@ -2385,17 +2396,22 @@ environment is explicit; delivery/read state is durable; badge semantics are
 defined; source-control/process/job/subagent/approval/web/research/skills/rules
 memory notification families map to real events.
 
-Focused tests: device register/unregister, token redaction, delivery success
-and failure, read state, APNs environment, iOS permission/deep-link handling,
-physical-device validation for push.
+Focused tests: device register/unregister, token redaction, delivery failure
+evidence, read state, badge semantics, retention defaults, APNs environment,
+authority/resource checks, scope isolation, replay refs, provider schema
+behavior, runtime grant narrowing, and iOS/APNs absence guards.
 
-iOS validation: simulator for inbox UI plus physical device for APNs.
+iOS validation: not run for Slice 13 because no Swift source, APNs entitlement,
+permission prompt, native inbox UI, or live APNs transport was added. Physical
+device APNs validation is required only for a later live transport/native UI
+slice.
 
 Docs/static updates: README capabilities/settings/database, iOS architecture,
 privacy, entitlements, SACB inventory.
 
-User decisions: which events notify by default, badge policy, privacy/retention,
-and whether push is opt-in.
+User decisions: live APNs provider credentials, native inbox/deep-link UX,
+which events notify by default beyond the server foundation, and any retention
+policy tighter than the current 90-day/500-record defaults.
 
 ### Slice 14: Media, Voice Notes, Imports, Repository Trees, And System Updates
 

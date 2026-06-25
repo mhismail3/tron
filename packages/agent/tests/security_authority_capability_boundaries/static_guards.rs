@@ -313,8 +313,14 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
     }
 
     let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let operations_context =
+        read_repo_file("packages/agent/src/domains/capability/operations/context.rs");
+    let operation_guards = format!("{operations}\n{operations_context}");
+    assert!(
+        operations.contains("validate_execute_context(invocation, &operation)?"),
+        "capability execute dispatch root must call the context validator"
+    );
     for required in [
-        "validate_execute_context(invocation, &operation)?",
         "is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id)",
         "capability::execute requires a derived least-privilege authority grant",
         "capability::execute requires a trusted agent or system runtime context",
@@ -326,7 +332,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "=> require_idempotency_key(invocation, operation)",
     ] {
         assert!(
-            operations.contains(required),
+            operation_guards.contains(required),
             "capability execute operation guard missing required text: {required}"
         );
     }

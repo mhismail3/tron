@@ -10,9 +10,10 @@
 //! provenance, check one origin robots policy as evidence, inspect stored web
 //! sources for citations, archive stored web sources without deleting citation
 //! evidence, manage controlled subagent task launch/status/result/cancel
-//! records, and inspect bounded/redacted worker package lifecycle resources
-//! without package activation, and inspect inert procedural state provenance
-//! resources without procedural activation.
+//! records, inspect bounded/redacted worker package lifecycle resources without
+//! package activation, inspect inert procedural state provenance resources
+//! without procedural activation, and manage the Slice 13 server-owned
+//! notification inbox/device-registration foundation without live APNs delivery.
 
 use serde_json::{Map, Value, json};
 
@@ -40,7 +41,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         )
         .visibility(VisibilityScope::System)
         .domain_module("capability")
-        .request_schema(execute_request_schema())
+        .request_schema(execute_model_request_schema())
         .response_schema(primitive_result_schema())
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .build()?,
@@ -59,7 +60,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
                             "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, create/list/inspect/cancel/fire due durable schedules and schedule-run records, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, inspect inert external tool-source proposal provenance, record controlled subagent launch/status/result/cancel lifecycle evidence, inspect bounded/redacted worker package lifecycle records, inspect inert procedural state provenance records, inspect agent trace/log records, and inspect catalog discovery evidence. ",
-                    "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Scheduler operations create explicit durable records and never execute feature work directly; tool-source, worker-package, and procedural-state inspection operations are read-only and never install, activate, trigger, inject prompts, learn behavior, launch, register, or execute proposed external tools, packages, skills, rules, hooks, or procedures; subagent lifecycle operations record bounded placeholder worker/job evidence without starting workers, jobs, tools, network, packages, or result merges. ",
+                            "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Scheduler operations create explicit durable records and never execute feature work directly; notification operations create durable inbox/read/badge/delivery evidence with live APNs transport disabled, while device token registration is trusted internal-only and never returns raw APNs tokens or full token hashes. Tool-source, worker-package, and procedural-state inspection operations are read-only and never install, activate, trigger, inject prompts, learn behavior, launch, register, or execute proposed external tools, packages, skills, rules, hooks, or procedures; subagent lifecycle operations record bounded placeholder worker/job evidence without starting workers, jobs, tools, network, packages, or result merges. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -69,17 +70,13 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
     }
 }
 
-fn execute_request_schema() -> serde_json::Value {
-    execute_model_request_schema()
-}
-
 fn execute_model_request_schema() -> serde_json::Value {
     let mut properties = Map::new();
     properties.insert(
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, schedule_create, schedule_list, schedule_inspect, schedule_cancel, schedule_fire_due, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, device_register, device_unregister, device_list, device_inspect, notification_send, notification_list, notification_inspect, notification_mark_read, notification_mark_all_read, tool_source_list, tool_source_inspect, subagent_launch, subagent_status, subagent_result, subagent_cancel, subagent_task_list, subagent_task_inspect, worker_package_list, worker_package_inspect, procedural_state_list, procedural_state_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(
@@ -306,6 +303,104 @@ fn execute_model_request_schema() -> serde_json::Value {
     );
     insert_string(
         &mut properties,
+        "deviceRegistrationResourceId",
+        "Durable device_registration resource id for device_inspect, device_unregister, or push delivery evidence.",
+    );
+    insert_string(
+        &mut properties,
+        "expectedDeviceRegistrationVersionId",
+        "Expected current device_registration version id for device_unregister freshness.",
+    );
+    insert_string(
+        &mut properties,
+        "deviceId",
+        "Trusted caller device identifier for device_register.",
+    );
+    insert_string(
+        &mut properties,
+        "platform",
+        "Device platform for device_register; currently ios.",
+    );
+    insert_string(
+        &mut properties,
+        "apnsEnvironment",
+        "Explicit APNs environment for device_register: development or production.",
+    );
+    insert_string(
+        &mut properties,
+        "apnsToken",
+        "Trusted internal APNs token input for device_register; never returned by provider-visible projections.",
+    );
+    insert_string(
+        &mut properties,
+        "label",
+        "Optional bounded human label for device_register.",
+    );
+    properties.insert(
+        "pushOptIn".to_owned(),
+        json!({"type": "boolean", "description": "Explicit user opt-in flag for device_register; defaults false."}),
+    );
+    properties.insert(
+        "pushEnabled".to_owned(),
+        json!({"type": "boolean", "description": "Explicit push enable flag for device_register; requires pushOptIn true and live transport still stays disabled."}),
+    );
+    properties.insert(
+        "eventFamilies".to_owned(),
+        json!({"type": "array", "description": "Bounded notification event-family tokens for device registration policy."}),
+    );
+    insert_string(
+        &mut properties,
+        "notificationResourceId",
+        "Durable notification resource id for notification_inspect or notification_mark_read.",
+    );
+    insert_string(
+        &mut properties,
+        "expectedNotificationVersionId",
+        "Expected current notification version id for notification_mark_read freshness.",
+    );
+    insert_string(
+        &mut properties,
+        "notificationId",
+        "Optional caller-visible notification id for notification_send idempotent resource identity.",
+    );
+    insert_string(
+        &mut properties,
+        "family",
+        "Notification event family token for notification_send.",
+    );
+    insert_string(
+        &mut properties,
+        "severity",
+        "Notification severity for notification_send: info, warning, or action_required.",
+    );
+    insert_string(
+        &mut properties,
+        "title",
+        "Bounded title for notification_send.",
+    );
+    insert_string(
+        &mut properties,
+        "body",
+        "Bounded body for notification_send.",
+    );
+    properties.insert(
+        "pushRequested".to_owned(),
+        json!({"type": "boolean", "description": "Request push delivery evidence for notification_send; live APNs transport remains disabled."}),
+    );
+    properties.insert(
+        "includeRead".to_owned(),
+        json!({"type": "boolean", "description": "Include read notification records in notification_list."}),
+    );
+    properties.insert(
+        "includeUnregistered".to_owned(),
+        json!({"type": "boolean", "description": "Include unregistered device records in device_list."}),
+    );
+    properties.insert(
+        "sourceRefs".to_owned(),
+        json!({"type": "array", "description": "Bounded non-secret source refs for notification_send replay evidence."}),
+    );
+    insert_string(
+        &mut properties,
         "taskId",
         "Optional caller-visible subagent task id for subagent_launch.",
     );
@@ -398,6 +493,20 @@ fn execute_model_request_schema() -> serde_json::Value {
         json!({"type": "boolean", "description": "Include aggregate protected omission counts without protected ids."}),
     );
     insert_integer(&mut properties, "limit", 1, Some(500), None);
+    insert_integer(
+        &mut properties,
+        "maxAgeDays",
+        1,
+        Some(366),
+        Some("Retention bound in days for device registrations or notifications."),
+    );
+    insert_integer(
+        &mut properties,
+        "maxInboxRecords",
+        1,
+        Some(5_000),
+        Some("Retention bound for per-scope inbox records."),
+    );
     insert_integer(
         &mut properties,
         "maxPreviewBytes",
@@ -566,6 +675,15 @@ mod tests {
         assert!(operations.contains("web_source_list"));
         assert!(operations.contains("web_source_inspect"));
         assert!(operations.contains("web_source_archive"));
+        assert!(operations.contains("device_register"));
+        assert!(operations.contains("device_unregister"));
+        assert!(operations.contains("device_list"));
+        assert!(operations.contains("device_inspect"));
+        assert!(operations.contains("notification_send"));
+        assert!(operations.contains("notification_list"));
+        assert!(operations.contains("notification_inspect"));
+        assert!(operations.contains("notification_mark_read"));
+        assert!(operations.contains("notification_mark_all_read"));
         assert!(operations.contains("tool_source_list"));
         assert!(operations.contains("tool_source_inspect"));
         assert!(operations.contains("subagent_launch"));
@@ -606,6 +724,14 @@ mod tests {
             "worker_launch",
             "mcp_start",
             "mcp_register",
+            concat!("notifications", "::send"),
+            concat!("notifications", "::list"),
+            concat!("notifications", "::mark_read"),
+            concat!("notifications", "::mark_all_read"),
+            concat!("device", "::register"),
+            concat!("device", "::unregister"),
+            concat!("apns", "_send"),
+            concat!("apns", "_deliver"),
         ] {
             assert!(
                 !operations.contains(non_goal),
@@ -617,7 +743,7 @@ mod tests {
         assert!(!operations.contains("git_reset"));
         assert!(!operations.contains("planner"));
         assert!(!operations.contains("reminder"));
-        assert!(!operations.contains("notification"));
+        assert!(!operations.contains(concat!("Notification", "Client")));
         assert!(schema["properties"].get("branchName").is_some());
         assert!(schema["properties"].get("scheduleResourceId").is_some());
         assert!(schema["properties"].get("target").is_some());
@@ -643,6 +769,31 @@ mod tests {
         assert!(schema["properties"].get("webSourceVersionId").is_some());
         assert!(schema["properties"].get("toolSourceResourceId").is_some());
         assert!(schema["properties"].get("subagentTaskResourceId").is_some());
+        for property in [
+            "deviceRegistrationResourceId",
+            "expectedDeviceRegistrationVersionId",
+            "deviceId",
+            "apnsEnvironment",
+            "apnsToken",
+            "pushOptIn",
+            "pushEnabled",
+            "eventFamilies",
+            "notificationResourceId",
+            "expectedNotificationVersionId",
+            "notificationId",
+            "family",
+            "severity",
+            "title",
+            "body",
+            "pushRequested",
+            "includeRead",
+            "includeUnregistered",
+            "sourceRefs",
+            "maxAgeDays",
+            "maxInboxRecords",
+        ] {
+            assert!(schema["properties"].get(property).is_some());
+        }
         assert!(schema["properties"].get("objectiveSummary").is_some());
         assert!(schema["properties"].get("promptSummary").is_some());
         assert!(schema["properties"].get("modelPolicy").is_some());

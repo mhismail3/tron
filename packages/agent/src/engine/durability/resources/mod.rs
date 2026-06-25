@@ -20,6 +20,7 @@ mod git_definitions;
 mod goal_definitions;
 mod job_definitions;
 mod memory_definitions;
+mod notification_definitions;
 mod procedural_definitions;
 mod scheduler_definitions;
 mod store;
