@@ -1815,4 +1815,6 @@ packages/agent/src/domains/tool_sources/mod.rs	retain	tool_sources domain owner	
 packages/agent/src/domains/tool_sources/service.rs	retain	tool_sources domain owner	PCC-10/P2AER-S9A	Slice 9A internal proposal/report resource service plus read-only inspection projection.
 packages/agent/src/domains/tool_sources/validation.rs	retain	tool_sources validation owner	PCC-10/P2AER-S9A	Slice 9A bounded payload readers and rejection rules for inert proposal/report records.
 packages/agent/src/domains/tool_sources/tests.rs	retain	tool_sources test owner	PCC-10/P2AER-S9A	Slice 9A focused authority, validation, idempotency, scope, and non-goal regression tests.
+packages/agent/src/domains/tool_sources/tool_sources_inspect_tests.rs	retain	tool_sources test owner	PCC-10/P2AER-S9A	Slice 9A split inspection tests for stored kind/schema revalidation before bounded projection.
+packages/agent/src/domains/tool_sources/tool_sources_validation_tests.rs	retain	tool_sources test owner	PCC-10/P2AER-S9A	Slice 9A split validation tests for activation-intent rejection and inert prohibition prose.
 packages/agent/src/engine/durability/resources/tool_source_definitions.rs	retain	engine resource owner	PCC-10/P2AER-S9A	Slice 9A resource definitions for tool_source_proposal and tool_source_conformance_report.

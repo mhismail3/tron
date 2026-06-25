@@ -1770,4 +1770,6 @@ packages/agent/src/domains/tool_sources/mod.rs	implementation	domain_worker	TPC-
 packages/agent/src/domains/tool_sources/service.rs	implementation	engine	TPC-10/P2AER-S9A	internal proposal/report resource writes and bounded read-only inspection projection
 packages/agent/src/domains/tool_sources/validation.rs	implementation	engine	TPC-10/P2AER-S9A	bounded payload readers and rejection rules for tool-source proposal/report records
 packages/agent/src/domains/tool_sources/tests.rs	test	test_harness	TPC-10/P2AER-S9A	focused Slice 9A regression coverage
+packages/agent/src/domains/tool_sources/tool_sources_inspect_tests.rs	test	test_harness	TPC-10/P2AER-S9A	split Slice 9A inspection kind/schema regression coverage
+packages/agent/src/domains/tool_sources/tool_sources_validation_tests.rs	test	test_harness	TPC-10/P2AER-S9A	split Slice 9A activation-intent validation regression coverage
 packages/agent/src/engine/durability/resources/tool_source_definitions.rs	primitive	engine	TPC-10/P2AER-S9A	built-in tool-source proposal and conformance report resource schemas

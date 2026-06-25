@@ -980,7 +980,9 @@ provider-visible execute surface; file access goes through the hardened
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, `web`, `tool_sources`, and model-provider modules. The
+`worker_lifecycle`, `web`, and model-provider modules. The pending Slice 9A
+implementation candidate adds `tool_sources`, but it is not part of this
+accepted baseline before orchestration acceptance. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
