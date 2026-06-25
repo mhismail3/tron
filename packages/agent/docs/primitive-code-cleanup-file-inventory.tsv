@@ -1810,3 +1810,9 @@ packages/agent/src/engine/durability/resources/web_definitions.rs	retain	phase2 
 packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_tests.rs	retain	phase2 agent	P2AER-S8F	Capability invocation executor grant tests retained for pending-review robots-linked web_fetch runtime grant derivation and engine authorization regressions.
 packages/agent/src/domains/web/robots_link.rs	retain	phase2 web	P2AER-S8F	Web robots link service retained for pending-review fetch-side web_robots_policy evidence validation and bounded robotsPolicyRefs linkage.
 packages/agent/src/domains/web/web_fetch_robots_link_tests.rs	retain	phase2 web	P2AER-S8F	Web fetch robots link tests retained for pending-review allow/deny/stale/wrong-scope/target-mismatch and bounded-ref regressions.
+packages/agent/src/domains/capability/operations/tool_sources.rs	retain	capability execute owner	PCC-10/P2AER-S9A	Slice 9A read-only execute adapter for inert tool-source proposal inspection.
+packages/agent/src/domains/tool_sources/mod.rs	retain	tool_sources domain owner	PCC-10/P2AER-S9A	Slice 9A external tool-source proposal provenance domain boundary.
+packages/agent/src/domains/tool_sources/service.rs	retain	tool_sources domain owner	PCC-10/P2AER-S9A	Slice 9A internal proposal/report resource service plus read-only inspection projection.
+packages/agent/src/domains/tool_sources/validation.rs	retain	tool_sources validation owner	PCC-10/P2AER-S9A	Slice 9A bounded payload readers and rejection rules for inert proposal/report records.
+packages/agent/src/domains/tool_sources/tests.rs	retain	tool_sources test owner	PCC-10/P2AER-S9A	Slice 9A focused authority, validation, idempotency, scope, and non-goal regression tests.
+packages/agent/src/engine/durability/resources/tool_source_definitions.rs	retain	engine resource owner	PCC-10/P2AER-S9A	Slice 9A resource definitions for tool_source_proposal and tool_source_conformance_report.

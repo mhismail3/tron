@@ -81,6 +81,15 @@ pub const WEB_SOURCE_SCHEMA_ID: &str = "tron.resource.web_source.v1";
 pub const WEB_ROBOTS_POLICY_KIND: &str = "web_robots_policy";
 /// Built-in web robots policy evidence resource schema id.
 pub const WEB_ROBOTS_POLICY_SCHEMA_ID: &str = "tron.resource.web_robots_policy.v1";
+/// Built-in external tool-source proposal resource kind.
+pub const TOOL_SOURCE_PROPOSAL_KIND: &str = "tool_source_proposal";
+/// Built-in external tool-source proposal resource schema id.
+pub const TOOL_SOURCE_PROPOSAL_SCHEMA_ID: &str = "tron.resource.tool_source_proposal.v1";
+/// Built-in external tool-source conformance/preflight report resource kind.
+pub const TOOL_SOURCE_CONFORMANCE_REPORT_KIND: &str = "tool_source_conformance_report";
+/// Built-in external tool-source conformance/preflight report resource schema id.
+pub const TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID: &str =
+    "tron.resource.tool_source_conformance_report.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

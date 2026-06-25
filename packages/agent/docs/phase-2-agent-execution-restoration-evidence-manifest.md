@@ -1462,6 +1462,25 @@ Review and validation evidence:
   `git diff --check 419433985790f35f5ef514e9f508b4f8906d37a1..cb30347b29d7e11d8e0e4210068ee67e6cabd9f0`,
   and ignored-file scan.
 
+Slice 9A implementation evidence:
+
+- Adds `domains/tool_sources` as an inert proposal/provenance boundary with
+  internal trusted-only `tool_source_proposal` and
+  `tool_source_conformance_report` resource creation.
+- Adds read-only `capability::execute` operations `tool_source_list` and
+  `tool_source_inspect`; no provider-visible proposal, install, launch,
+  registration, MCP start, or tool execution operation is introduced.
+- Adds built-in resource definitions for `tool_source_proposal` and
+  `tool_source_conformance_report` with required source identity, provenance,
+  sandbox policy, declared metadata, authority, trace/replay/evidence refs,
+  idempotency, and revision fields.
+- Focused validation command
+  `cargo test --manifest-path packages/agent/Cargo.toml tool_sources -- --nocapture`
+  exited 0 with 9 passed tests, covering internal authority, agent/bootstrap/
+  wildcard denial, idempotency, session isolation, secret rejection, unsafe path
+  rejection, schema bounding, report creation, resource definitions, and static
+  non-goal guards.
+
 ## Validation Log
 
 | Command | Result | Evidence |

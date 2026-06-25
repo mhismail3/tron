@@ -53,8 +53,8 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, inspect agent trace/log records, and inspect catalog discovery evidence. ",
-                    "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
+                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, fetch one explicit URL as bounded source provenance, check one origin robots policy as bounded evidence, list/inspect stored web sources for citation fields, archive stored web sources without deleting citation evidence, inspect inert external tool-source proposal provenance, inspect agent trace/log records, and inspect catalog discovery evidence. ",
+                    "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. Tool-source operations are read-only and never install, launch, register, or execute proposed external tools. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -74,7 +74,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, tool_source_list, tool_source_inspect, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(
@@ -283,6 +283,11 @@ fn execute_model_request_schema() -> serde_json::Value {
         "webSourceVersionId",
         "Optional current web_source version id for stale citation guards.",
     );
+    insert_string(
+        &mut properties,
+        "toolSourceResourceId",
+        "Durable tool_source_proposal or tool_source_conformance_report resource id for tool_source_inspect.",
+    );
     insert_nullable_string(
         &mut properties,
         "webRobotsPolicyResourceId",
@@ -338,6 +343,13 @@ fn execute_model_request_schema() -> serde_json::Value {
         1,
         Some(20_000),
         Some("Maximum redacted snippet bytes for web_source_inspect."),
+    );
+    insert_integer(
+        &mut properties,
+        "maxSchemaBytes",
+        1,
+        Some(32_000),
+        Some("Maximum serialized schema preview bytes for tool_source_inspect."),
     );
     insert_integer(&mut properties, "timeoutMs", 1, Some(120_000), None);
     insert_integer(&mut properties, "maxOutputBytes", 1, Some(200_000), None);
@@ -474,6 +486,8 @@ mod tests {
         assert!(operations.contains("web_source_list"));
         assert!(operations.contains("web_source_inspect"));
         assert!(operations.contains("web_source_archive"));
+        assert!(operations.contains("tool_source_list"));
+        assert!(operations.contains("tool_source_inspect"));
         assert!(
             !operations.contains("file_read") && !operations.contains("file_write"),
             "legacy file operations must not be model-reachable"
@@ -488,6 +502,10 @@ mod tests {
             "job_fetch",
             "job_http",
             "job_network",
+            "tool_source_propose",
+            "tool_source_execute",
+            "mcp_start",
+            "mcp_register",
         ] {
             assert!(
                 !operations.contains(non_goal),
@@ -522,6 +540,7 @@ mod tests {
         assert!(schema["properties"].get("userAgent").is_some());
         assert!(schema["properties"].get("webSourceResourceId").is_some());
         assert!(schema["properties"].get("webSourceVersionId").is_some());
+        assert!(schema["properties"].get("toolSourceResourceId").is_some());
         assert!(
             schema["properties"]
                 .get("webRobotsPolicyResourceId")
@@ -542,6 +561,7 @@ mod tests {
         );
         assert!(schema["properties"].get("maxPreviewBytes").is_some());
         assert!(schema["properties"].get("maxSnippetBytes").is_some());
+        assert!(schema["properties"].get("maxSchemaBytes").is_some());
         assert!(schema["properties"].get("maxResponseBytes").is_some());
         assert!(schema["properties"].get("maxRobotsBytes").is_some());
         assert!(schema["properties"].get("maxRedirects").is_some());

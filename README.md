@@ -884,7 +884,7 @@ schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
 `timeoutMs`, `maxOutputBytes`, `jobResourceId`, `state`, `cleanupAfterSeconds`,
-`goalResourceId`, `questionResourceId`, `objective`, `prompt`, `answerText`,
+`goalResourceId`, `questionResourceId`, `toolSourceResourceId`, `objective`, `prompt`, `answerText`,
 `expectedQuestionVersionId`, `expiresAt`, `allowFreeForm`, `successCriteria`,
 `constraints`, `queueRefs`, `planRefs`, `evidenceRefs`, `kind`, `id`, catalog search filters,
 `idempotencyKey`, and `reason`.
@@ -960,6 +960,8 @@ Current primitive operations:
 | `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
 | `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
+| `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
+| `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -978,7 +980,7 @@ provider-visible execute surface; file access goes through the hardened
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, `web`, and model-provider modules. The
+`worker_lifecycle`, `web`, `tool_sources`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
@@ -1091,6 +1093,25 @@ traversal, search providers, browser automation, crawling, login/cookies,
 credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
 side channels, native iOS web UI, and public `/engine` web API expansion remain
 deferred.
+The accepted Slice 9A foundation adds the `tool_sources` domain as an inert
+external source-proposal and provenance boundary. Trusted internal system/admin
+callers can create resource-backed `tool_source_proposal` records and bounded
+`tool_source_conformance_report` evidence only with derived non-bootstrap
+`tool_sources.propose` and `resource.write` authority, explicit non-wildcard
+resource grants, `networkPolicy: none`, idempotency, source identity,
+provenance, sandbox policy, declared tool/schema metadata, expected
+worker/package linkage, trace/replay refs, and evidence refs. Proposal
+validation rejects inline secrets, credential-looking values, unsafe paths,
+unbounded schemas, wildcard sandbox authority, execution fields such as command
+or env, and activation/registration intent. Agent-visible access is read-only
+through `tool_source_list` and `tool_source_inspect` under
+`capability::execute`; those operations require current-session context,
+`tool_sources.read`, `resource.read`, explicit `kind:tool_source_*` selectors,
+and `networkPolicy: none`, and they return bounded/redacted resource evidence
+without network I/O. Slice 9A does not start or restart MCP servers, install
+packages, register catalog tools, execute proposed tools, promote trust,
+change worker lifecycle behavior, add browser/search/crawl/login scope, expand
+public `/engine` APIs, or add native iOS fixed UI.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
@@ -1293,7 +1314,10 @@ agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 reads bounded retained logs and `replay_manifest` reads the canonical replay
 snapshot through the same single tool. Catalog discovery reads current
 catalog/resource truth and writes only append-oriented `catalog_discovery_report`
-evidence. Approval requests and decisions are generic resources with lifecycle
+evidence. Tool-source inspection reads scoped `tool_source_proposal` and
+`tool_source_conformance_report` resources only; internal proposal/report
+writes are provenance evidence and explicitly do not activate external tools.
+Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,
 denied, expired, pending, missing, malformed, stale, or scope-mismatch check
@@ -1677,7 +1701,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal` and `tool_source_conformance_report` records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

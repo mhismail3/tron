@@ -20,6 +20,7 @@ mod goal_definitions;
 mod job_definitions;
 mod memory_definitions;
 mod store;
+mod tool_source_definitions;
 mod types;
 mod ui_surface;
 mod validation;
