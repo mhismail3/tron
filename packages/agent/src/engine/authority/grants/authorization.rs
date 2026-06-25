@@ -208,6 +208,10 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "web.read");
             push_unique(&mut scopes, "web.write");
         }
+        Some("worker_package_list" | "worker_package_inspect") => {
+            push_unique(&mut scopes, "worker.lifecycle.read");
+            push_unique(&mut scopes, "resource.read");
+        }
         _ => {}
     }
     scopes
@@ -264,7 +268,49 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             vec!["web_source"]
         }
         Some("web_robots_check") => vec!["web_robots_policy"],
+        Some("worker_package_list") => {
+            vec![worker_package_list_kind(invocation).unwrap_or("worker_package")]
+        }
+        Some("worker_package_inspect") => worker_package_inspect_kind(invocation)
+            .map(|kind| vec![kind])
+            .unwrap_or_default(),
         _ => Vec::new(),
+    }
+}
+
+fn worker_package_list_kind(invocation: &Invocation) -> Option<&'static str> {
+    match invocation
+        .payload
+        .get("workerPackageKind")
+        .and_then(Value::as_str)
+        .unwrap_or("worker_package")
+    {
+        "worker_package" => Some("worker_package"),
+        "worker_package_installation" => Some("worker_package_installation"),
+        "worker_package_proposal" => Some("worker_package_proposal"),
+        "worker_package_conformance_report" => Some("worker_package_conformance_report"),
+        "worker_launch_attempt" => Some("worker_launch_attempt"),
+        _ => None,
+    }
+}
+
+fn worker_package_inspect_kind(invocation: &Invocation) -> Option<&'static str> {
+    let resource_id = invocation
+        .payload
+        .get("workerPackageResourceId")
+        .and_then(Value::as_str)?;
+    if resource_id.starts_with("worker_package_installation:") {
+        Some("worker_package_installation")
+    } else if resource_id.starts_with("worker_package_proposal:") {
+        Some("worker_package_proposal")
+    } else if resource_id.starts_with("worker_package_conformance_report:") {
+        Some("worker_package_conformance_report")
+    } else if resource_id.starts_with("worker_launch_attempt:") {
+        Some("worker_launch_attempt")
+    } else if resource_id.starts_with("worker_package:") {
+        Some("worker_package")
+    } else {
+        None
     }
 }
 

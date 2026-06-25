@@ -157,17 +157,21 @@ Completed Phase 2 restoration slices at this baseline:
   authority, and no install/launch/registration/execution behavior.
 
 Current next action:
-Run fresh discovery for the next Phase 2 slice after accepted Slice 9A.
+Review Slice 9B implementation candidate for worker package lifecycle
+inspection before any acceptance wording or mainline closeout.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
-tool-source proposal provenance are accepted. Search providers, browser
+tool-source proposal provenance are accepted. Slice 9B is currently only an
+implementation candidate adding read-only `worker_package_list` and
+`worker_package_inspect` execute operation values for bounded/redacted existing
+worker lifecycle records under explicit read grants. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
-network-enabled jobs, autonomous goal execution, tool-source install/launch/
-registration/execution, fetch/pull/push, PR handoff, production deployment
-behavior, and native SourceChanges UI remain deferred until separately scoped
-and reviewed.
+network-enabled jobs, autonomous goal execution, tool-source or worker-package
+install/launch/registration/execution, fetch/pull/push, PR handoff, production
+deployment behavior, and native SourceChanges UI remain deferred until
+separately scoped and reviewed.
 
 ## Scope
 

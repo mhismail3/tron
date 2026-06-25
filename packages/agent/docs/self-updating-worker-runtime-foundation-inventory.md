@@ -49,8 +49,9 @@ returns the package and installation records to `enabled`.
 The lifecycle domain is intentionally split by primitive owner:
 `authority.rs` owns trusted-apply checks, `manifest.rs` owns package schema and
 root validation, `launcher.rs` owns local process isolation and conformance,
-`resources.rs` owns generic resource/event evidence, and `handlers.rs` owns
-state transitions. The root `mod.rs` is wiring and constants only.
+`resources.rs` owns generic resource/event evidence, `inspection.rs` owns
+read-only bounded/redacted lifecycle projections, and `handlers.rs` owns state
+transitions. The root `mod.rs` is wiring and constants only.
 
 ## Resource Kinds
 
@@ -64,6 +65,18 @@ SUWRF adds these generic resource kinds:
 
 These records are generic resources and lifecycle stream events, so iOS can
 observe them without fixed native product panels.
+
+## Read-Only Inspection
+
+Phase 2 Slice 9B implementation-candidate work adds provider-visible
+`worker_package_list` and `worker_package_inspect` operation values under the
+existing `capability::execute` primitive. These operations inspect only the
+five worker lifecycle resource kinds listed above, require trusted
+current-session context, exact read grants and selectors, and
+`networkPolicy: none`, and revalidate stored kind/schema before projection.
+They return bounded/redacted lifecycle evidence and do not expose raw
+manifests, scoped tokens, env values, endpoints, token grant details, or local
+paths.
 
 ## Current Boundary
 

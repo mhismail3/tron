@@ -7,14 +7,16 @@ use tempfile::TempDir;
 use tokio::sync::{Mutex, Notify};
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant, EffectClass,
-    FunctionDefinition, FunctionId, Invocation, InvocationId, RUNTIME_METADATA_WORKING_DIRECTORY,
-    RiskLevel, TraceId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeliveryMode, DeriveGrant,
+    EffectClass, EngineResourceScope, EngineResourceVersioningMode, FunctionDefinition, FunctionId,
+    Invocation, InvocationId, RUNTIME_METADATA_WORKING_DIRECTORY, RegisterResourceType, RiskLevel,
+    TraceId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
 };
 
 use super::handlers::{
     install_package, launch_worker, propose_package_change, set_package_enabled, stop_worker,
 };
+use super::inspection::{inspect_worker_package_value, list_worker_packages_value};
 use super::launcher::{
     WorkerLaunchReceipt, WorkerLaunchRequest, WorkerLauncher, WorkerStopReceipt,
 };
@@ -27,8 +29,9 @@ use super::resources::{
     reconcile_owned_launch_attempts_on_startup,
 };
 use super::{
-    APPLY_SCOPE, Deps, ENABLE_FUNCTION, INSTALL_FUNCTION, LAUNCH_FUNCTION, PACKAGE_SCHEMA_VERSION,
-    PROPOSE_FUNCTION, PROPOSE_SCOPE, SOURCE_KIND_LOCAL_FILESYSTEM, STOP_FUNCTION,
+    APPLY_SCOPE, Deps, ENABLE_FUNCTION, INSTALL_FUNCTION, INSTALLATION_KIND, LAUNCH_FUNCTION,
+    PACKAGE_KIND, PACKAGE_SCHEMA_VERSION, PROPOSE_FUNCTION, PROPOSE_SCOPE,
+    SOURCE_KIND_LOCAL_FILESYSTEM, STOP_FUNCTION, WORKER,
 };
 
 struct FakeLauncher {
@@ -965,3 +968,6 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
     );
     drop(temp);
 }
+
+#[path = "inspection_tests.rs"]
+mod inspection_tests;

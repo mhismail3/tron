@@ -314,3 +314,16 @@ Slice 9A explicitly does not start MCP servers, install packages, register
 catalog tools, execute proposed tools, promote trust, change worker lifecycle,
 add browser/search/crawl/login scope, expand public `/engine`, or add fixed
 iOS UI.
+
+`P2AER-INV-007` has a Slice 9B implementation candidate for Worker Package
+Lifecycle Inspection Foundation. It adds read-only `worker_package_list` and
+`worker_package_inspect` operation values behind the existing
+`capability::execute` primitive so model-visible execution can inspect bounded
+worker lifecycle evidence already stored in trusted resources. The candidate
+requires trusted current-session context, `worker.lifecycle.read`,
+`resource.read`, explicit non-wildcard resource-kind grants, matching
+`kind:worker_*` selectors, and `networkPolicy: none`; it revalidates stored
+kind/schema and redacts raw manifests, scoped tokens, env values, endpoints,
+token grant details, and local paths. It does not propose, install, enable,
+disable, launch, stop, retire, register, execute, promote trust, expand public
+`/engine`, or add native fixed package UI.

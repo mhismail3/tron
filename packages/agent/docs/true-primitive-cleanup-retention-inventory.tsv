@@ -1773,3 +1773,6 @@ packages/agent/src/domains/tool_sources/tests.rs	test	test_harness	TPC-10/P2AER-
 packages/agent/src/domains/tool_sources/tool_sources_inspect_tests.rs	test	test_harness	TPC-10/P2AER-S9A	split Slice 9A inspection kind/schema regression coverage
 packages/agent/src/domains/tool_sources/tool_sources_validation_tests.rs	test	test_harness	TPC-10/P2AER-S9A	split Slice 9A activation-intent validation regression coverage
 packages/agent/src/engine/durability/resources/tool_source_definitions.rs	primitive	engine	TPC-10/P2AER-S9A	built-in tool-source proposal and conformance report resource schemas
+packages/agent/src/domains/capability/operations/worker_packages.rs	implementation	capability_execute	TPC-10/P2AER-S9B	read-only provider execute adapter for worker package lifecycle inspection
+packages/agent/src/domains/worker_lifecycle/inspection.rs	implementation	worker_lifecycle	TPC-10/P2AER-S9B	bounded read-only worker lifecycle projection with explicit authority and redaction
+packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	test	test_harness	TPC-10/P2AER-S9B	split Slice 9B worker lifecycle inspection regression coverage

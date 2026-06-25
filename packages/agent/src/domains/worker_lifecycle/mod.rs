@@ -15,6 +15,7 @@
 //! |--------|---------|
 //! | `contract` | Canonical lifecycle capability contracts and schemas |
 //! | `handlers` | Operation binding and lifecycle command flow |
+//! | `inspection` | Read-only package lifecycle projections for `capability::execute` |
 //! | `manifest` | `tron.worker_package.v1` parsing and local package validation |
 //! | `launcher` | Process launcher, scoped token derivation, and conformance checks |
 //! | `resources` | Generic resource writes, links, stream events, and ids |
@@ -39,6 +40,7 @@ mod authority;
 mod contract;
 mod errors;
 mod handlers;
+pub(crate) mod inspection;
 mod launcher;
 mod manifest;
 mod params;

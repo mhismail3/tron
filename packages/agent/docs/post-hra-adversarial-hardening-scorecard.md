@@ -88,7 +88,7 @@ hard limit without review.
 |------|-------------|-------|---------------------|--------|
 | `packages/agent/src/domains/jobs/service.rs` | 988 | jobs owner | At the hard-limit edge; move new reconciliation, finalization, cleanup, or output-retention behavior into jobs service helper modules before adding behavior here. | watch |
 | `packages/agent/src/domains/jobs/tests.rs` | 986 | jobs test owner | At the hard-limit edge; move new lifecycle, output, timeout, reconciliation, or fail-closed regression batches into focused jobs test modules. | watch |
-| `packages/agent/src/domains/worker_lifecycle/tests.rs` | 967 | worker lifecycle test owner | At the hard-limit edge; move new manifest/package or launch/reconciliation regression batches into focused worker lifecycle test modules. | watch |
+| `packages/agent/src/domains/worker_lifecycle/tests.rs` | 973 | worker lifecycle test owner | At the hard-limit edge; keep common fixtures here and move new manifest/package, inspection, or launch/reconciliation regression batches into focused worker lifecycle test modules. | watch |
 | `packages/agent/src/domains/model/providers/factory.rs` | 878 | model providers owner | Watch provider selection/auth construction; split provider-specific builders before adding new provider branches. | watch |
 | `packages/agent/src/engine/catalog/registry/mod.rs` | 895 | engine catalog owner | At the hard-limit edge; new catalog mutation or query behavior must move into `catalog_changes`, `invocation`, or a new registry helper module first. | watch |
 | `packages/agent/src/engine/durability/ledger/mod.rs` | 862 | engine durability owner | Keep ledger contracts in root; move new SQLite/raw-row behavior into `sqlite_codec` or dedicated helpers. | watch |

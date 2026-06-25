@@ -89,6 +89,17 @@ are retained here because they shaped the final implementation.
   reconciliation cell before handling requests, and focused regression coverage
   pauses reconciliation at the old race window to prove current-process launches
   cannot be downgraded by stale startup ownership-loss reconciliation.
+- Phase 2 Slice 9B implementation candidate adds read-only lifecycle
+  inspection through the existing `capability::execute` primitive:
+  `worker_package_list` and `worker_package_inspect` inspect already-stored
+  `worker_package`, `worker_package_installation`,
+  `worker_package_proposal`, `worker_package_conformance_report`, and
+  `worker_launch_attempt` records under trusted current-session context,
+  `worker.lifecycle.read`, `resource.read`, exact resource-kind grants,
+  matching `kind:worker_*` selectors, and `networkPolicy: none`. Projections
+  revalidate stored kind/schema and redact raw manifests, scoped tokens, env
+  values, endpoints, token grant details, and local paths while leaving all
+  lifecycle mutation operations host-only.
 
 ## Command Evidence
 
@@ -97,6 +108,8 @@ Focused and predecessor commands run:
 ```bash
 cargo check --manifest-path packages/agent/Cargo.toml --all-targets
 cargo test --manifest-path packages/agent/Cargo.toml worker_lifecycle -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml worker_package -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --quiet

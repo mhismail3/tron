@@ -962,6 +962,8 @@ Current primitive operations:
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
 | `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
+| `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
+| `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1116,6 +1118,24 @@ not start or restart MCP servers, install packages, register catalog tools,
 execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native
 iOS fixed UI.
+
+Slice 9B adds a read-only worker package lifecycle inspection foundation under
+the same `capability::execute` primitive. `worker_package_list` and
+`worker_package_inspect` require trusted current-session context,
+`worker.lifecycle.read`, `resource.read`, explicit non-wildcard lifecycle
+resource-kind grants, matching `kind:worker_*` selectors, and
+`networkPolicy: none`. They inspect only `worker_package`,
+`worker_package_installation`, `worker_package_proposal`,
+`worker_package_conformance_report`, and `worker_launch_attempt` records,
+revalidating the stored resource kind and schema before projection rather than
+trusting id prefixes. The projection returns bounded/redacted identity,
+lifecycle state, provenance, source metadata, namespace claims, expected
+functions/triggers, requested grants, conformance and launch status, refs, and
+truncation metadata while omitting raw manifests, scoped worker tokens, env
+values, endpoints, token grant details, and local paths. It does not add package
+proposal, install, enable, disable, launch, stop, retire, MCP start/restart,
+catalog registration, proposed-tool execution, trust promotion, public
+`/engine` expansion, or fixed native source/package UI.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
@@ -1303,10 +1323,11 @@ returns package/installation state to `enabled` for immediate relaunch, while
 startup reconciliation runs before lifecycle requests and marks durable running
 launch attempts `unhealthy` if process ownership was lost. A failed launch,
 conformance mismatch, digest mismatch, or unowned stop is recorded or rejected
-fail-closed. The
-provider-visible model tool remains `execute`; package lifecycle operations are
-engine capabilities invoked through the authenticated `/engine` protocol by
-trusted host surfaces.
+fail-closed. The provider-visible model tool remains `execute`; lifecycle
+mutation operations are engine capabilities invoked through the authenticated
+`/engine` protocol by trusted host surfaces, while provider-visible
+`worker_package_list` and `worker_package_inspect` are read-only projections of
+already-stored lifecycle evidence.
 
 Engine substrate primitives provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
