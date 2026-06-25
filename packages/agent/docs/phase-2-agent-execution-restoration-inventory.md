@@ -259,12 +259,13 @@ start/status/list/log/cancel provider operations through the existing
 `capability::execute` primitive, direct scoped cleanup, fail-closed
 `networkPolicy: none`, owned process-group timeout/cancel/shutdown cleanup,
 cancel-request-before-terminal finalization with stale-version retry, retention
-archiving, and focused resource/authority/bounded-output tests. `P2AER-INV-006` stays
-split from Slice 5A: Slice 15A is an implementation candidate for backend-only
+archiving, and focused resource/authority/bounded-output tests. `P2AER-INV-006`
+stays split from Slice 5A: accepted Slice 15A adds backend-only
 `program_execution_record` metadata custody, but it does not restore language
-runtimes, raw code or I/O storage, shell commands, PTY sessions, subprocess/job
-launch, package installation, web/network research, git/source-control,
-subagents, scheduling, notifications, or native iOS process panels.
+runtimes, raw code or I/O storage, shell commands, PTY sessions,
+subprocess/job launch, package installation, web/network research,
+git/source-control, subagents, scheduling, notifications, or native iOS process
+panels.
 Queue-backed internal job dispatch also remains deferred pending an explicit
 queued-grant design.
 

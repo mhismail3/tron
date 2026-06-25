@@ -2486,9 +2486,9 @@ narrowing, provider schema/instruction text, README, and static inventories for
 content-free preview metadata only. Future Slice 14 sub-slices still own actual
 import execution/application, live update execution domains, and iOS native
 surfaces only where generic UI is insufficient.
-Slice 15A implementation candidate begins the separate program-execution row by
-adding `domains/program_execution`, the built-in `program_execution_record`
-resource definition, execute adapters, runtime grant narrowing, provider
+Accepted Slice 15A begins the separate program-execution row by adding
+`domains/program_execution`, the built-in `program_execution_record` resource
+definition, execute adapters, runtime grant narrowing, provider
 schema/instruction text, README, and static inventories for metadata-only
 program execution records. It deliberately excludes runtime execution,
 subprocess/job launch, package installation, file writes, live network behavior,

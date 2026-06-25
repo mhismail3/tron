@@ -1006,9 +1006,9 @@ Current primitive operations:
 | `import_preview_record` | Accepted Slice 14E operation that records one scoped `import_preview` resource for content-free import preview metadata only, linking import-history and repository-tree refs with bounded relative path metadata, counts, summaries, source/evidence refs, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, preview payloads, file contents, repository contents, import execution, visualization, or git mutation. |
 | `import_preview_list` | Accepted Slice 14E operation that lists scoped `import_preview` resources as bounded/redacted metadata projections with linked import-history/repository-tree refs, counts, summaries, and path previews only. |
 | `import_preview_inspect` | Accepted Slice 14E operation that inspects one scoped `import_preview` after stored kind/schema/scope revalidation, returning bounded/redacted preview metadata, refs, lifecycle evidence, and content-free proof without raw payloads, raw contents, unsafe paths, or raw authority ids. |
-| `program_execution_record` | Slice 15A implementation-candidate operation that records one scoped `program_execution_record` resource for content-free program execution metadata only, with runtime/language identifiers, resource-limit policy, I/O-envelope metadata, source/input/output refs or fingerprints, lifecycle evidence, trace/replay refs, fingerprinted idempotency evidence, and no raw code, raw stdin/stdout/stderr, command text, runtime execution, process launch, package install, file writes, or live network behavior. |
-| `program_execution_list` | Slice 15A implementation-candidate operation that lists scoped `program_execution_record` resources as bounded/redacted metadata projections with runtime/language identifiers, lifecycle state, fingerprints, and resource-limit summaries only. |
-| `program_execution_inspect` | Slice 15A implementation-candidate operation that inspects one scoped `program_execution_record` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, refs, lifecycle evidence, and explicit non-execution proof without raw code, raw I/O, command strings, unsafe paths, or raw authority ids. |
+| `program_execution_record` | Accepted Slice 15A operation that records one scoped `program_execution_record` resource for content-free program execution metadata only, with runtime/language identifiers, resource-limit policy, I/O-envelope metadata, source/input/output refs or fingerprints, lifecycle evidence, trace/replay refs, fingerprinted idempotency evidence, and no raw code, raw stdin/stdout/stderr, command text, runtime execution, process launch, package install, file writes, or live network behavior. |
+| `program_execution_list` | Accepted Slice 15A operation that lists scoped `program_execution_record` resources as bounded/redacted metadata projections with runtime/language identifiers, lifecycle state, fingerprints, and resource-limit summaries only. |
+| `program_execution_inspect` | Accepted Slice 15A operation that inspects one scoped `program_execution_record` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, refs, lifecycle evidence, and explicit non-execution proof without raw code, raw I/O, command strings, unsafe paths, or raw authority ids. |
 | `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
 | `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
@@ -1171,7 +1171,7 @@ blob bytes, repository contents, absolute paths, unsafe paths, import execution
 state, repository visualization state, git mutation state, or provider-visible
 raw preview payloads. Actual import execution/application, native import/tree
 UI, repository visualization, and git mutation workflows remain deferred.
-Slice 15A implementation candidate adds a backend-only
+Accepted Slice 15A adds a backend-only
 `domains/program_execution` foundation behind `capability::execute`. Program
 execution records are durable `program_execution_record` resources that store
 runtime/language identifiers, resource-limit policy, I/O-envelope metadata,
@@ -1418,7 +1418,7 @@ Slice 14E adds an accepted backend-only `import_preview` metadata
 foundation; actual import execution/application, native import/tree UI,
 repository visualization, file writes, and git mutation workflows remain
 absent.
-Slice 15A adds an implementation-candidate backend-only
+Slice 15A adds an accepted backend-only
 `program_execution_record` metadata foundation; embedded runtimes, shell
 execution, subprocess/job launch, package installation, live network behavior,
 file writes, notebook/PTY surfaces, and result merge remain absent.
