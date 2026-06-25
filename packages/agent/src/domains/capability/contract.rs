@@ -283,12 +283,12 @@ fn execute_model_request_schema() -> serde_json::Value {
         "webSourceVersionId",
         "Optional current web_source version id for stale citation guards.",
     );
-    insert_string(
+    insert_nullable_string(
         &mut properties,
         "webRobotsPolicyResourceId",
         "Optional current-session web_robots_policy resource id for web_fetch robots evidence validation before target network I/O.",
     );
-    insert_string(
+    insert_nullable_string(
         &mut properties,
         "expectedWebRobotsPolicyVersionId",
         "Expected current web_robots_policy version id paired with webRobotsPolicyResourceId for web_fetch freshness and compatibility.",
@@ -385,6 +385,13 @@ fn insert_string(properties: &mut Map<String, Value>, name: &str, description: &
     properties.insert(
         name.to_owned(),
         json!({"type": "string", "description": description}),
+    );
+}
+
+fn insert_nullable_string(properties: &mut Map<String, Value>, name: &str, description: &str) {
+    properties.insert(
+        name.to_owned(),
+        json!({"type": ["string", "null"], "description": description}),
     );
 }
 
@@ -520,10 +527,18 @@ mod tests {
                 .get("webRobotsPolicyResourceId")
                 .is_some()
         );
+        assert_eq!(
+            schema["properties"]["webRobotsPolicyResourceId"]["type"],
+            json!(["string", "null"])
+        );
         assert!(
             schema["properties"]
                 .get("expectedWebRobotsPolicyVersionId")
                 .is_some()
+        );
+        assert_eq!(
+            schema["properties"]["expectedWebRobotsPolicyVersionId"]["type"],
+            json!(["string", "null"])
         );
         assert!(schema["properties"].get("maxPreviewBytes").is_some());
         assert!(schema["properties"].get("maxSnippetBytes").is_some());

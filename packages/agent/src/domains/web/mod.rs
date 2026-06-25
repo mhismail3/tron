@@ -39,8 +39,10 @@
 //! Source list/inspect/archive operations are resource inspections or
 //! append-only resource lifecycle updates and must remain valid under
 //! `networkPolicy none`. `web_robots_check` fetches only one origin's
-//! `robots.txt`, records sitemap lines as metadata only, and must not become
-//! search, crawl, browser, or login behavior.
+//! `robots.txt`, keeps display URLs redacted, stores a non-displayed canonical
+//! target fingerprint for exact fetch linkage, records sitemap lines as
+//! metadata only, and must not become search, crawl, browser, or login
+//! behavior.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

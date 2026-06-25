@@ -26,7 +26,8 @@ mod request;
 use evidence::{
     bounded_utf8, existing_robots_check, origin_string, publish_robots_event,
     read_bounded_response, replay_refs, robots_resource_id, robots_result, robots_url_for,
-    sanitize_url_for_evidence, session_resource_scope, sha256_hex, target_path, trace_refs,
+    sanitize_url_for_evidence, session_resource_scope, sha256_hex, target_path,
+    target_url_fingerprint, trace_refs,
 };
 use parser::{decision_for_status, parse_robots};
 use request::RobotsRequest;
@@ -105,6 +106,10 @@ pub(crate) async fn web_robots_check_value(
         "state": "checked",
         "origin": origin_string(&target.url),
         "targetUrl": sanitize_url_for_evidence(&target.url),
+        "targetUrlFingerprint": {
+            "sha256": target_url_fingerprint(&target.url),
+            "hashScope": "canonical_target_url"
+        },
         "robotsUrl": sanitize_url_for_evidence(&robots_url),
         "finalRobotsUrl": sanitize_url_for_evidence(&final_robots_url),
         "fetchedAt": now.to_rfc3339(),

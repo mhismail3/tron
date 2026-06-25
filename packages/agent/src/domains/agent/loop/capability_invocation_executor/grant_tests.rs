@@ -55,6 +55,63 @@ async fn web_fetch_runtime_grant_stays_source_only_without_robots_evidence() {
 }
 
 #[tokio::test]
+async fn web_fetch_runtime_grant_stays_source_only_with_null_robots_fields() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "web_fetch",
+        "url": "https://example.com/source",
+        "webRobotsPolicyResourceId": null,
+        "expectedWebRobotsPolicyVersionId": null,
+        "idempotencyKey": "web-fetch-grant-null-robots"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_eq!(grant.network_policy, "declared");
+    assert!(
+        grant
+            .allowed_authority_scopes
+            .contains(&"web.write".to_owned())
+    );
+    assert!(
+        grant
+            .allowed_authority_scopes
+            .contains(&"resource.write".to_owned())
+    );
+    assert!(
+        !grant
+            .allowed_authority_scopes
+            .contains(&"web.read".to_owned()),
+        "null robots fields must not gain web.read authority"
+    );
+    assert!(
+        !grant
+            .allowed_authority_scopes
+            .contains(&"resource.read".to_owned()),
+        "null robots fields must not gain resource.read authority"
+    );
+    assert!(
+        grant
+            .allowed_resource_kinds
+            .contains(&"web_source".to_owned())
+    );
+    assert!(
+        !grant
+            .allowed_resource_kinds
+            .contains(&"web_robots_policy".to_owned()),
+        "null robots fields must not gain robots-policy resource authority"
+    );
+    assert!(
+        !grant
+            .resource_selectors
+            .contains(&"kind:web_robots_policy".to_owned())
+    );
+}
+
+#[tokio::test]
 async fn web_fetch_runtime_grant_includes_robots_policy_authority_when_linked() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "web_fetch",

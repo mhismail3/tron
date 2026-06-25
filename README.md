@@ -1075,19 +1075,22 @@ before HTTP client construction or network I/O, writes
 session-scoped `web_robots_policy` evidence with origin, robots URL,
 fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
 version, matched user-agent, allow/deny decision, relevant matched rule,
-sitemap refs as metadata only, authority refs, trace/replay refs, and
-idempotency/cache refs. The Slice 8F implementation candidate keeps robots
-evidence optional for compatibility, but when `web_fetch` receives
-`webRobotsPolicyResourceId` plus `expectedWebRobotsPolicyVersionId` it validates
-the current-session `web_robots_policy` resource, version, origin, target URL,
-and `allow` decision before target HTTP client construction. Robots-linked
-fetch grants add only the needed `web.read`, `resource.read`, and
-`kind:web_robots_policy` authority; source payloads, `web_source_list`, and
-`web_source_inspect` expose bounded `robotsPolicyRefs` without robots body or
-sitemap content. It fetches only `robots.txt`; sitemap traversal, search
-providers, browser automation, crawling, login/cookies, credential reuse,
-deletion/pruning/automatic TTL cleanup, shell/process network side channels,
-native iOS web UI, and public `/engine` web API expansion remain deferred.
+sitemap refs as metadata only, authority refs, trace/replay refs, redacted
+display URLs, an exact canonical target URL fingerprint, and idempotency/cache
+refs. The Slice 8F implementation candidate keeps robots evidence optional for
+compatibility, but when `web_fetch` receives `webRobotsPolicyResourceId` plus
+`expectedWebRobotsPolicyVersionId` it validates the current-session
+`web_robots_policy` resource, version, origin, sanitized display target URL,
+exact target fingerprint, and `allow` decision before target HTTP client
+construction. Robots-linked fetch grants add only the needed `web.read`,
+`resource.read`, and `kind:web_robots_policy` authority when both robots fields
+are non-empty strings; source payloads, `web_source_list`, and
+`web_source_inspect` expose bounded `robotsPolicyRefs` without robots body,
+target fingerprints, or sitemap content. It fetches only `robots.txt`; sitemap
+traversal, search providers, browser automation, crawling, login/cookies,
+credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
+side channels, native iOS web UI, and public `/engine` web API expansion remain
+deferred.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.

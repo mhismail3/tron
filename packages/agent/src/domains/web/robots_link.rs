@@ -177,6 +177,19 @@ pub(super) async fn validate_fetch_robots_policy(
             "web_fetch web_robots_policy targetUrl does not match requested URL",
         ));
     }
+    if required_payload_string(policy, "/targetUrlFingerprint/hashScope")? != "canonical_target_url"
+    {
+        return Err(invalid(
+            "web_fetch web_robots_policy targetUrl fingerprint scope mismatch",
+        ));
+    }
+    let target_url_fingerprint = required_payload_string(policy, "/targetUrlFingerprint/sha256")?;
+    let requested_target_fingerprint = target_url_fingerprint_for(requested_url);
+    if target_url_fingerprint != requested_target_fingerprint {
+        return Err(invalid(
+            "web_fetch web_robots_policy targetUrl fingerprint does not match requested URL",
+        ));
+    }
     Ok(RobotsPolicyEvidenceRef {
         resource_id: inspection.resource.resource_id.clone(),
         version_id: version.version_id.clone(),
@@ -363,6 +376,10 @@ fn sanitize_url_for_evidence(url: &Url) -> String {
         }
     }
     sanitized.to_string()
+}
+
+fn target_url_fingerprint_for(url: &Url) -> String {
+    crate::domains::web::fetch::sha256_hex(url.as_str().as_bytes())
 }
 
 fn validate_web_robots_policy_id(value: &str) -> Result<(), CapabilityError> {

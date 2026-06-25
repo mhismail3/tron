@@ -1,6 +1,51 @@
 use super::*;
 
 #[tokio::test]
+async fn web_fetch_with_null_robots_policy_fields_uses_plain_fetch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/plain"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Content-Type", "text/plain")
+                .set_body_string("plain fetch body"),
+        )
+        .mount(&server)
+        .await;
+
+    let ctx = make_test_context();
+    let fixture = WebFixture::new(&ctx, "web-fetch-null-robots", "declared").await;
+    let value = fixture
+        .invoke_ok(json!({
+            "operation": "web_fetch",
+            "url": format!("{}/plain", server.uri()),
+            "webRobotsPolicyResourceId": null,
+            "expectedWebRobotsPolicyVersionId": null,
+            "idempotencyKey": "web-fetch-null-robots"
+        }))
+        .await;
+    let web = &value["details"]["web"];
+    assert_eq!(web["operation"], json!("web_fetch"));
+    assert!(
+        web.get("robotsPolicyRefs")
+            .is_none_or(|refs| refs == &json!([]))
+    );
+
+    let resource_id = web["webSourceResourceId"].as_str().expect("source id");
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect source")
+        .expect("source");
+    assert_eq!(current_payload(&inspection)["robotsPolicyRefs"], json!([]));
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url.path(), "/plain");
+}
+
+#[tokio::test]
 async fn web_fetch_links_allow_robots_policy_and_source_reads_expose_bounded_refs() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -165,6 +210,85 @@ async fn web_fetch_rejects_non_allow_robots_policy_before_target_network_io() {
 
     let requests = server.received_requests().await.expect("recorded requests");
     assert_eq!(requests.len(), 1, "target fetch must not run after deny");
+    assert_eq!(requests[0].url.path(), "/robots.txt");
+}
+
+#[tokio::test]
+async fn web_fetch_rejects_sensitive_query_mismatch_before_target_network_io() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("User-agent: *\nAllow: /\n"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/allowed"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("must not fetch target"))
+        .mount(&server)
+        .await;
+
+    let ctx = make_test_context();
+    let robots = WebFixture::new_robots(&ctx, "web-fetch-robots-query", "declared").await;
+    let checked = robots
+        .invoke_ok(json!({
+            "operation": "web_robots_check",
+            "url": format!("{}/allowed?token=redacted-one", server.uri()),
+            "idempotencyKey": "web-fetch-robots-query-policy"
+        }))
+        .await;
+    let policy_id = checked["details"]["web"]["webRobotsPolicyResourceId"]
+        .as_str()
+        .expect("policy id")
+        .to_owned();
+    let policy_version_id = checked["details"]["web"]["webRobotsPolicyVersionId"]
+        .as_str()
+        .expect("policy version")
+        .to_owned();
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(&policy_id)
+        .await
+        .expect("inspect policy")
+        .expect("policy");
+    let policy_payload = current_payload(&inspection);
+    assert!(
+        !policy_payload["targetUrl"]
+            .as_str()
+            .expect("sanitized target")
+            .contains("redacted-one"),
+        "display target must stay sanitized"
+    );
+    assert!(
+        policy_payload["targetUrlFingerprint"]["sha256"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 64)
+    );
+    let payload_text = policy_payload.to_string();
+    assert!(!payload_text.contains("redacted-one"));
+    assert!(!payload_text.contains("redacted-two"));
+
+    let fetch =
+        WebFixture::new_with_web_and_robots(&ctx, "web-fetch-robots-query", "declared").await;
+    let error = fetch
+        .invoke_error(json!({
+            "operation": "web_fetch",
+            "url": format!("{}/allowed?token=redacted-two", server.uri()),
+            "webRobotsPolicyResourceId": policy_id,
+            "expectedWebRobotsPolicyVersionId": policy_version_id,
+            "idempotencyKey": "web-fetch-robots-query-source"
+        }))
+        .await;
+    assert!(
+        error.contains("targetUrl fingerprint does not match"),
+        "sensitive query mismatch must fail exact target validation, got: {error}"
+    );
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert_eq!(
+        requests.len(),
+        1,
+        "target fetch must not run after exact target mismatch"
+    );
     assert_eq!(requests[0].url.path(), "/robots.txt");
 }
 

@@ -92,6 +92,10 @@ pub(super) fn target_path(url: &Url) -> String {
     path
 }
 
+pub(super) fn target_url_fingerprint(url: &Url) -> String {
+    sha256_hex(url.as_str().as_bytes())
+}
+
 pub(super) fn origin_string(url: &Url) -> String {
     let host = url.host_str().unwrap_or_default();
     match url.port() {

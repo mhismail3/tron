@@ -22,6 +22,9 @@
 //! back to their package authority scopes and durable resource kinds before
 //! grant checks run, so the single provider primitive does not bypass package
 //! scope, resource-kind, or selector policy.
+//! INVARIANT: optional inner-operation resource links broaden grant checks only
+//! when their parser-significant fields are non-empty strings; explicit nulls
+//! and empty strings are treated as absent for grant-scope expansion.
 
 use std::collections::BTreeMap;
 use std::path::Path;

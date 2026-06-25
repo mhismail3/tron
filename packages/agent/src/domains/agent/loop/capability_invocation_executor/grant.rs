@@ -31,10 +31,8 @@ pub(super) async fn derive_capability_runtime_grant(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let web_fetch_uses_robots_policy = operation == "web_fetch"
-        && (effective_args.get("webRobotsPolicyResourceId").is_some()
-            || effective_args
-                .get("expectedWebRobotsPolicyVersionId")
-                .is_some());
+        && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
+        && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
     let mut allowed_capabilities = vec![
         target_function_id.as_str().to_owned(),
         "state::get".to_owned(),
@@ -186,6 +184,13 @@ pub(super) async fn derive_capability_runtime_grant(
             )
         })?;
     AuthorityGrantId::new(grant_id.to_owned()).map_err(|error| engine_error_to_failure(&error))
+}
+
+fn has_non_empty_string(value: &Value, field: &str) -> bool {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .is_some_and(|item| !item.trim().is_empty())
 }
 
 #[allow(clippy::too_many_arguments)]

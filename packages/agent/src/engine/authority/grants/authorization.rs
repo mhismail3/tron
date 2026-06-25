@@ -272,11 +272,13 @@ fn web_fetch_uses_robots_policy(invocation: &Invocation) -> bool {
     invocation
         .payload
         .get("webRobotsPolicyResourceId")
-        .is_some()
-        || invocation
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        && invocation
             .payload
             .get("expectedWebRobotsPolicyVersionId")
-            .is_some()
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
 }
 
 fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String> {

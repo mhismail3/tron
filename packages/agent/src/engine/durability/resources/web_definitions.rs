@@ -129,6 +129,7 @@ fn web_robots_policy_definition() -> RegisterResourceType {
                 "state": {"type": "string", "enum": ["checked"]},
                 "origin": {"type": "string"},
                 "targetUrl": {"type": "string"},
+                "targetUrlFingerprint": {"type": "object"},
                 "robotsUrl": {"type": "string"},
                 "finalRobotsUrl": {"type": "string"},
                 "fetchedAt": {"type": "string"},
