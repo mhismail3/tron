@@ -1039,7 +1039,8 @@ agent/system runtime context, current session, idempotency key, allowed
 declared`; grants with `networkPolicy: none` fail before any HTTP client is
 built. The operation accepts one explicit URL, rejects
 credentials, fragments, malformed or overlong URLs, unsupported schemes, and
-unsafe local/internal targets except deterministic HTTP loopback test targets.
+unsafe local/internal targets except deterministic HTTP loopback test targets
+for `web_fetch`.
 Fetches use `reqwest` with bounded timeout, redirects, captured response bytes,
 provider-visible text bytes, content-type handling, deterministic truncation
 metadata, captured-byte SHA-256 evidence, common secret redaction for previews
@@ -1066,7 +1067,9 @@ actor/grant identity, previous version id, trace/replay refs, and retention
 metadata while preserving source payload/provenance. The Slice 8E
 implementation candidate adds `web_robots_check` as a narrow declared-network
 operation that derives a single origin `robots.txt` URL from one requested URL,
-applies the existing URL/redirect/DNS safety policy before network I/O, writes
+requires HTTPS in production while preserving an explicit test-only HTTP
+loopback fixture flag, applies the existing URL/redirect/DNS safety policy
+before HTTP client construction or network I/O, writes
 session-scoped `web_robots_policy` evidence with origin, robots URL,
 fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
 version, matched user-agent, allow/deny decision, relevant matched rule,

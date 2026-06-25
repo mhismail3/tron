@@ -1948,7 +1948,7 @@ Candidate scope:
   context, stable `idempotencyKey`, `networkPolicy: declared`, `web.write`,
   `resource.write`, `kind:web_robots_policy`, and existing URL/redirect/DNS
   safety checks.
-- Add `domains/web/robots.rs` as the web-owned robots policy module with a
+- Add `domains/web/robots/mod.rs` as the web-owned robots policy module with a
   deterministic tolerant parser, matched user-agent selection, allow/deny
   decision, relevant matched rule, bounded body metadata, captured-byte
   SHA-256, parser id/version, authority refs, trace/replay refs, and

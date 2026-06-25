@@ -63,6 +63,8 @@ pub(crate) struct Deps {
     #[cfg(test)]
     pub(crate) dns_overrides:
         Option<std::sync::Arc<std::collections::HashMap<String, Vec<std::net::SocketAddr>>>>,
+    #[cfg(test)]
+    pub(crate) allow_test_http_loopback_for_robots: bool,
 }
 
 pub(crate) fn worker_module(

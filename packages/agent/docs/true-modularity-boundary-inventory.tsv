@@ -1121,7 +1121,10 @@ packages/agent/src/domains/web/archive.rs	rust	implementation	agent:web	owner-pr
 packages/agent/src/domains/web/extract.rs	rust	implementation	agent:web	owner-private deterministic HTML/XHTML readable-text extraction service; callers enter through the web fetch/source evidence path
 packages/agent/src/domains/web/fetch.rs	rust	implementation	agent:web	owner-private declared-network direct fetch service; callers enter through capability::execute adapters
 packages/agent/src/domains/web/network_policy.rs	rust	implementation	agent:web	owner-private Slice 8A candidate URL, redirect, and DNS-resolved address policy; callers enter through the fetch service
-packages/agent/src/domains/web/robots.rs	rust	implementation	agent:web	owner-private Slice 8E implementation candidate one-origin robots policy service; callers enter through capability::execute adapters
+packages/agent/src/domains/web/robots/mod.rs	rust	implementation	agent:web	owner-private Slice 8E implementation candidate one-origin robots policy service; callers enter through capability::execute adapters
+packages/agent/src/domains/web/robots/evidence.rs	rust	implementation	agent:web	owner-private robots policy evidence/cache/event helper boundary; callers enter through the robots service
+packages/agent/src/domains/web/robots/parser.rs	rust	implementation	agent:web	owner-private deterministic robots parser and decision helper boundary; callers enter through the robots service
+packages/agent/src/domains/web/robots/request.rs	rust	implementation	agent:web	owner-private robots request validation helper boundary; callers enter through the robots service
 packages/agent/src/domains/web/source.rs	rust	implementation	agent:web	owner-private read-only web_source citation list/inspect service; callers enter through capability::execute adapters and engine resource facades
 packages/agent/src/domains/web/tests.rs	rust	test-support	agent:web	test-only authority, URL validation, source evidence, and replay regression coverage; production code must not depend on it
 packages/agent/src/domains/web/web_archive_tests.rs	rust	test-support	agent:web	test-only archive lifecycle, CAS, authority, idempotency, filtering, inspect, and no-network regression coverage; production code must not depend on it

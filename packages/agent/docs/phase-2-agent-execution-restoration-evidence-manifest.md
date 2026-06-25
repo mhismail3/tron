@@ -1305,7 +1305,7 @@ Status:
 
 Candidate evidence:
 
-- Adds `packages/agent/src/domains/web/robots.rs` as the web-owned
+- Adds `packages/agent/src/domains/web/robots/mod.rs` as the web-owned
   execute-only robots policy check module.
 - Adds `web_robots_check` behind `capability::execute` and wires
   least-privilege grant derivation plus engine authorization for

@@ -589,6 +589,7 @@ impl<'a> WebFixture<'a> {
         let deps = super::Deps {
             engine_host: self.ctx.engine_host.clone(),
             dns_overrides: Some(Arc::new(dns_overrides)),
+            allow_test_http_loopback_for_robots: false,
         };
         let invocation = Invocation::new_sync(
             FunctionId::new("capability::execute").expect("function id"),
@@ -614,6 +615,7 @@ impl<'a> WebFixture<'a> {
         let deps = super::Deps {
             engine_host: self.ctx.engine_host.clone(),
             dns_overrides: Some(Arc::new(dns_overrides)),
+            allow_test_http_loopback_for_robots: true,
         };
         let invocation = Invocation::new_sync(
             FunctionId::new("capability::execute").expect("function id"),

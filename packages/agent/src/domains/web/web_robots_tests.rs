@@ -289,6 +289,41 @@ async fn web_robots_check_authority_failures_happen_before_network_io() {
 }
 
 #[tokio::test]
+async fn web_robots_check_production_mode_rejects_http_loopback_before_network_io() {
+    let (port, accepts) = loopback_accept_probe().await;
+    let ctx = make_test_context();
+    let fixture = WebFixture::new_robots(&ctx, "web-robots-http-loopback", "declared").await;
+    let payload = json!({
+        "operation": "web_robots_check",
+        "url": format!("http://127.0.0.1:{port}/private"),
+        "idempotencyKey": "web-robots-http-loopback"
+    });
+    let deps = Deps {
+        engine_host: ctx.engine_host.clone(),
+        dns_overrides: None,
+        allow_test_http_loopback_for_robots: false,
+    };
+    let invocation = Invocation::new_sync(
+        FunctionId::new("capability::execute").expect("function id"),
+        payload.clone(),
+        fixture.context("web-robots-http-loopback"),
+    );
+    let error = robots::web_robots_check_value(&deps, &invocation, &payload)
+        .await
+        .expect_err("production-mode robots check should reject http loopback")
+        .to_string();
+    assert!(
+        error.contains("https URLs"),
+        "production-mode robots check should reject http loopback by URL policy, got: {error}"
+    );
+    assert_eq!(
+        accepts.await.expect("accept probe"),
+        0,
+        "production-mode http loopback rejection must happen before network I/O"
+    );
+}
+
+#[tokio::test]
 async fn web_robots_check_rejects_unsafe_initial_redirect_and_dns_targets() {
     let ctx = make_test_context();
     let fixture = WebFixture::new_robots(&ctx, "web-robots-safety", "declared").await;
@@ -381,6 +416,7 @@ async fn web_robots_check_replays_idempotently_without_duplicate_resource() {
     let deps = Deps {
         engine_host: ctx.engine_host.clone(),
         dns_overrides: None,
+        allow_test_http_loopback_for_robots: true,
     };
     let invocation = Invocation::new_sync(
         FunctionId::new("capability::execute").expect("function id"),

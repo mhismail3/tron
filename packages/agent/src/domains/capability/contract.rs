@@ -80,7 +80,7 @@ fn execute_model_request_schema() -> serde_json::Value {
     insert_string(
         &mut properties,
         "url",
-        "Explicit URL for web_fetch or web_robots_check. HTTPS is required except local HTTP test loopback.",
+        "Explicit URL for web_fetch or web_robots_check. HTTPS is required for web_robots_check; web_fetch also permits local HTTP loopback in deterministic tests.",
     );
     insert_string(
         &mut properties,

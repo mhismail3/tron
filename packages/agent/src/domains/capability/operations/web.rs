@@ -15,6 +15,8 @@ pub(super) async fn web_fetch(
         engine_host: deps.engine_host.clone(),
         #[cfg(test)]
         dns_overrides: None,
+        #[cfg(test)]
+        allow_test_http_loopback_for_robots: false,
     };
     let value =
         crate::domains::web::fetch::web_fetch_value(&web_deps, invocation, &invocation.payload)
@@ -42,6 +44,8 @@ pub(super) async fn web_robots_check(
         engine_host: deps.engine_host.clone(),
         #[cfg(test)]
         dns_overrides: None,
+        #[cfg(test)]
+        allow_test_http_loopback_for_robots: true,
     };
     let value = crate::domains::web::robots::web_robots_check_value(
         &web_deps,
@@ -72,6 +76,8 @@ pub(super) async fn web_source_list(
         engine_host: deps.engine_host.clone(),
         #[cfg(test)]
         dns_overrides: None,
+        #[cfg(test)]
+        allow_test_http_loopback_for_robots: false,
     };
     let value = crate::domains::web::source::web_source_list_value(
         &web_deps,
@@ -98,6 +104,8 @@ pub(super) async fn web_source_inspect(
         engine_host: deps.engine_host.clone(),
         #[cfg(test)]
         dns_overrides: None,
+        #[cfg(test)]
+        allow_test_http_loopback_for_robots: false,
     };
     let value = crate::domains::web::source::web_source_inspect_value(
         &web_deps,
@@ -128,6 +136,8 @@ pub(super) async fn web_source_archive(
         engine_host: deps.engine_host.clone(),
         #[cfg(test)]
         dns_overrides: None,
+        #[cfg(test)]
+        allow_test_http_loopback_for_robots: false,
     };
     let value = crate::domains::web::archive::web_source_archive_value(
         &web_deps,
