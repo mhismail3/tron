@@ -1772,7 +1772,7 @@ Slice 10B accepted evidence:
   catalog registration, trust promotion, and native fixed subagent UI remain
   deferred.
 
-## Slice 11A Implementation Candidate: Procedural State Provenance And Inspection Foundation
+## Accepted Slice 11A: Procedural State Provenance And Inspection Foundation
 
 - Branch
   `codex/phase-2-slice-11a-procedural-state-provenance-foundation` in worktree
@@ -1784,6 +1784,13 @@ Slice 10B accepted evidence:
   `019efe48-be03-7cd1-8798-fad9ad24f0fb` by revalidating provider-visible
   `eval.status`, `eval.lastRunAt`, and payload `contentHash` before list or
   inspect projection.
+- Accepted status: current baseline after implementation thread
+  `019efe1d-353a-7310-a4b6-8bc5af2c940b`, review worker
+  `019efe48-be03-7cd1-8798-fad9ad24f0fb`, focused fix worker
+  `019efe4e-eb18-7c53-ad66-cb0db70c62de`, and accepting re-review worker
+  `019efe62-2db7-7a43-aee3-223307edfa43`. Accepted commits are
+  `621e1bf2b3e95af4ed44a133f789bdbd908c1d41` and
+  `4e56ef5b62dd873bacb21ba5b625df559bd71844`.
 - Adds a built-in `procedural_record` resource schema for inert skill, rule,
   hook, and procedure provenance/eval/status metadata. The schema is resource
   custody only; it declares read/write authority and redaction/materialization
@@ -1834,7 +1841,7 @@ Slice 10B accepted evidence:
   launch, MCP lifecycle, package install/catalog registration, trust promotion,
   public `/engine` APIs, settings/profile migrations, browser/search/crawl/
   login scope, native fixed procedural UI, result merge into conversation
-  state, disable/edit/delete behavior, and acceptance/current-baseline wording.
+  state and disable/edit/delete behavior.
 
 ## Validation Log
 

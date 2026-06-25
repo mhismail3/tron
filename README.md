@@ -716,7 +716,7 @@ goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
 does not run autonomous goals, plan task decomposition, schedule reminders,
 launch subagents, create notification inboxes, or add native Work/question UI.
-`domains/procedural` owns the Slice 11A implementation candidate for inert
+`domains/procedural` owns the accepted Slice 11A foundation for inert
 skill/rule/hook/procedure provenance inspection. It stores only
 `procedural_record` resource contracts and bounded/redacted list/inspect
 projections behind `capability::execute`; it does not activate skills, fire
@@ -1164,7 +1164,7 @@ register catalog entries, promote trust, merge results into conversation state,
 schedule autonomous work, expand public `/engine` APIs, add settings/profile
 migrations, or add fixed native iOS subagent UI.
 
-The Slice 11A implementation candidate adds the smallest procedural inspection
+The accepted Slice 11A foundation adds the smallest procedural inspection
 foundation: a built-in `procedural_record` resource schema for skills, rules,
 hooks, and procedures plus read-only `procedural_state_list` and
 `procedural_state_inspect` operation values behind the existing

@@ -36,10 +36,9 @@ citation/inspection evidence, accepted Slice 8C HTML/XHTML readable-text
 extraction evidence, and accepted Slice 8D web source archive lifecycle
 evidence, accepted Slice 8E web robots policy evidence, accepted Slice 8F web
 fetch robots evidence linkage, accepted Slice 9A tool-source proposal
-provenance evidence, and accepted Slice 9B worker-package lifecycle inspection
-evidence, and Slice 10B subagent worker launch foundation evidence. Slice 11A
-procedural state provenance and inspection work is recorded below as an
-implementation candidate pending independent review.
+provenance evidence, accepted Slice 9B worker-package lifecycle inspection
+evidence, accepted Slice 10B subagent worker launch foundation evidence, and
+accepted Slice 11A procedural state provenance and inspection evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -195,7 +194,7 @@ Completed Phase 2 restoration slices at this baseline:
   one-running-task-per-scope concurrency, idempotency/freshness, bounded
   evidence, trace/replay refs, and no worker/job/process/tool/network/package
   launch or result merge.
-- Slice 11A implementation candidate: inert `procedural_record`
+- Accepted Slice 11A: inert `procedural_record`
   skill/rule/hook/procedure resource contracts plus read-only
   `procedural_state_list` and `procedural_state_inspect` evidence through
   `capability::execute`, with explicit `procedural.read`/`resource.read`
@@ -212,7 +211,8 @@ robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
 inspection, Slice 10A subagent task lifecycle, and Slice 10B subagent worker
 launch foundation are accepted. Slice 11A procedural state provenance and
-inspection is an implementation candidate awaiting independent review. Search providers, browser
+inspection is accepted current baseline after independent review/fix/re-review.
+Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package
