@@ -1682,9 +1682,9 @@ Slice 10A accepted evidence:
   documents its audit-timestamp ownership without widening the deferred DRC
   cleanup scope.
 
-## Phase 2 Slice 10B Implementation Evidence: Subagent Worker Launch Foundation
+## Phase 2 Slice 10B Accepted Evidence: Subagent Worker Launch Foundation
 
-Slice 10B implementation evidence:
+Slice 10B accepted evidence:
 
 - Delegation source thread `019ef914-ed80-78f2-b253-229240d49444` and
   discovery thread `019efddb-9995-71f3-8e44-175d81b87adc` selected Subagent
@@ -1736,6 +1736,35 @@ Slice 10B implementation evidence:
 - The DRC invariant target was run and failed only on the known non-subagents
   UTC allow-list gap in `goals`, `web`, and `tool_sources`. The failure list
   did not include `domains/subagents`.
+- Implementation commit
+  `81421e7209f1b4316e3dd8a5f29415660b94f755` and HRA ownership-map fix
+  commit `cd7b5f6cde3e6521470e256d49aa9bfe65c94102` were accepted for
+  mainline integration after independent review.
+- Initial review thread `019efdf9-2a2a-7d73-a132-a0b8524e7645` in worktree
+  `/Users/<USER>/.codex/worktrees/76d3/tron` returned `changes required`
+  solely for missing HRA current-ownership-map rows for
+  `packages/agent/src/domains/subagents/execution.rs` and
+  `packages/agent/src/domains/subagents/execution_tests.rs`.
+- Focused fix thread `019efdfd-752c-7081-88b3-3b3e2fad1d26` in worktree
+  `/Users/<USER>/.codex/worktrees/6069/tron` added the two ownership-map rows
+  on branch `codex/phase-2-slice-10b-subagent-worker-launch-foundation-fix1`.
+  Its validation passed HRA invariants, TSV column-count check,
+  personal-info guard, diff checks, cached diff check, and ignored-file audit.
+- Accepting re-review thread `019efe06-d899-7ee2-83a4-695d9255e18e` verified
+  fixed branch
+  `codex/phase-2-slice-10b-subagent-worker-launch-foundation-fix1` at
+  `cd7b5f6cde3e6521470e256d49aa9bfe65c94102` descends from both the
+  implementation head and baseline. It found no findings and returned exact
+  verdict `slice accepted`.
+- Accepting re-review validation passed `cargo fmt --manifest-path
+  packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path
+  packages/agent/Cargo.toml`, HRA invariants, `cargo test --manifest-path
+  packages/agent/Cargo.toml subagent -- --nocapture` with 25 focused tests,
+  runtime grant, capability schema, OpenAI provider instruction tests, SACB,
+  CSD, HRA, TMB, TPC, PCC, BPRC, DESI, public-protocol, performance-resource,
+  personal-info guard, `git diff --check`, and ignored-file audit. DRC failed
+  only on the known non-subagents UTC allow-list gap in `goals`, `web`, and
+  `tool_sources`; no `subagents` path was listed.
 - Real child-agent execution, actual worker/package/job/process start, tool
   execution, scheduler/autonomy, cancellation signalling to workers, result
   merge into conversation state, model-profile policy, approval triggers,

@@ -186,7 +186,7 @@ Completed Phase 2 restoration slices at this baseline:
   scope isolation, allowlisted bounded/redacted read projections, and no
   child-agent, worker, job, process, network, scheduling, or result-merge
   behavior.
-- Slice 10B implementation: controlled `subagent_launch`,
+- Slice 10B accepted: controlled `subagent_launch`,
   `subagent_status`, `subagent_result`, and `subagent_cancel` lifecycle
   operations through `capability::execute`, preserving `subagent_task` as the
   parent causality anchor with explicit bounded placeholder model policy,
@@ -200,9 +200,8 @@ Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
 tool-source proposal provenance, and Slice 9B worker-package lifecycle
 inspection, Slice 10A subagent task lifecycle, and Slice 10B subagent worker
-launch foundation are implemented on this branch. Start independent review
-from this branch, then continue fresh discovery for the next Phase 2 slice from
-`origin/main` after acceptance. Search providers, browser
+launch foundation are accepted. Continue fresh discovery for the next Phase 2
+slice from `origin/main`. Search providers, browser
 automation, crawling beyond the narrow robots check, sitemap traversal,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, tool-source or worker-package

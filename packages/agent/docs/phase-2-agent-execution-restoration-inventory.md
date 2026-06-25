@@ -329,13 +329,13 @@ and local paths. It does not propose, install, enable, disable, launch, stop,
 retire, register, execute, promote trust, expand public `/engine`, or add
 native fixed package UI.
 
-`P2AER-INV-009` is current branch baseline after Slice 10B implementation:
+`P2AER-INV-009` is current baseline after accepted Slice 10B:
 Subagent Worker Launch Foundation. Accepted Slice 10A adds inert `subagents`
 domain coverage and one `subagent_task` resource kind for lifecycle/provenance
-records. Slice 10B keeps `subagent_task` as the parent causality anchor and adds
-provider-visible `subagent_launch`, `subagent_status`, `subagent_result`, and
-`subagent_cancel` lifecycle operations under the existing `capability::execute`
-primitive. Launch requires trusted current-session context,
+records. Accepted Slice 10B keeps `subagent_task` as the parent causality anchor
+and adds provider-visible `subagent_launch`, `subagent_status`,
+`subagent_result`, and `subagent_cancel` lifecycle operations under the existing
+`capability::execute` primitive. Launch requires trusted current-session context,
 `subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
 authority, exact `kind:subagent_task` selectors, idempotency, explicit
 `modelPolicy: bounded_placeholder_v1`, bounded objective/prompt summaries,
