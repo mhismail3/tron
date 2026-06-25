@@ -115,8 +115,8 @@ paths. Live APNs transport, APNs entitlements, native iOS inbox/deep links,
 public `/engine` notification APIs, hidden background loops, and fake
 client-local inbox state remain deferred.
 
-Slice 14A is an implementation candidate for BPRC-FEATURE-13 only:
-`domains/media`, the built-in `media_artifact` resource definition,
+Accepted Slice 14A covers BPRC-FEATURE-13 only: `domains/media`, the built-in
+`media_artifact` resource definition,
 `media.lifecycle` stream evidence, and execute-only `media_create`,
 `media_list`, `media_inspect`, and `media_archive` operations. Media resources
 store blob refs, bounded metadata, retention policy, source/evidence refs,

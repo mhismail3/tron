@@ -1960,15 +1960,25 @@ Focused validation:
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
 | iOS/APNs validation | not run | No iOS source, entitlement, native inbox, deep-link, or live APNs transport was added in Slice 13; physical-device APNs validation remains deferred with live delivery. |
 
-### Slice 14A Implementation Candidate: Media Artifact And Voice Note Resource Foundation
+### Accepted Slice 14A: Media Artifact And Voice Note Resource Foundation
 
 Candidate branch:
-`codex/phase-2-slice-14a-media-artifact-voice-note-foundation`.
+`codex/phase-2-slice-14a-media-artifact-voice-note-foundation-fix1`.
 
 Baseline HEAD:
 `d756f2ff3dc04c52693801166a99a34574f1fa8d`
 
-Review status: implementation candidate pending independent review.
+Accepted status: implementation thread Mencius
+`019eff78-a9f6-7333-9f5f-c33b34ddd8ed` completed
+`implementation complete` at implementation commit
+`aae9d8d0910338989da0914d9030b6da106411b6`; independent review
+Heisenberg `019effa7-3ba1-74b0-a27e-3cc6acb5b77a` returned
+`changes required`; focused fix Averroes
+`019effaa-4f98-7c73-a27e-6cb1eccfe5f6` completed
+`fix ready for review` at
+`0792a9ef35352f1a51ea65adb8605cceffa5bce3`; Codex re-review thread
+`019effb6-2963-7361-975e-3eb1d776dbb1` returned exact verdict
+`slice accepted`.
 
 Scope implemented:
 
@@ -1996,11 +2006,11 @@ Focused validation:
 | --- | --- | --- |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after the media contract split and TPC inventory summary update. |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate checked successfully; existing provider/resource dead-code warnings remain unrelated to Slice 14A. |
-| `cargo test --manifest-path packages/agent/Cargo.toml media::tests -- --nocapture` | exit 0 | 5 media tests passed, covering resource schema/lifecycle, deterministic timestamps, retention, list/inspect/archive, lifecycle stream evidence, MIME/size/raw payload rejection, redacted projections, authority selector and network-policy denial, scope isolation, and idempotency. |
+| `cargo test --manifest-path packages/agent/Cargo.toml media_ --lib -- --nocapture` | exit 0 | 6 focused media tests passed after the fix, covering resource schema/lifecycle, deterministic timestamps, retention, list/inspect/archive, lifecycle stream evidence, MIME/size/raw payload rejection, redacted projections, authority selector and network-policy denial, scope isolation, idempotency fingerprint evidence, and raw-key leak regression coverage. |
 | `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::contract::tests::execute_schema_exposes_primitive_operations_not_catalog_targets -- --nocapture` | exit 0 | Provider schema includes media operation values and fields while preserving the single `capability::execute` surface. |
 | `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | Provider instruction guidance names media operations and raw-audio/base64 rejection boundaries. |
 | `cargo test --manifest-path packages/agent/Cargo.toml resource_kernel_builtin_definitions_keep_core_kinds_and_relations -- --nocapture` | exit 0 | Resource kernel definition coverage passed with `media_artifact` registered alongside existing built-in resource kinds. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test ios_affordance_restoration_map_invariants --test security_authority_capability_boundaries_invariants --test hierarchical_rearchitecture_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test documentation_evidence_scorecard_integrity_invariants --test concurrency_scheduling_discipline_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | BPRC, IARM, SACB, HRA, TMB, TPC, PCC, DESI, CSD, public-protocol, performance-resource, and provider-model boundary gates passed after Slice 14A inventory and evidence updates. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants --test ios_affordance_restoration_map_invariants --test security_authority_capability_boundaries_invariants --test hierarchical_rearchitecture_invariants --test true_modularity_boundary_invariants --test true_primitive_cleanup_invariants --test primitive_code_cleanup_invariants --test documentation_evidence_scorecard_integrity_invariants --test concurrency_scheduling_discipline_invariants --test public_protocol_api_contract_discipline_invariants --test performance_resource_governance_invariants --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | BPRC, IARM, SACB, HRA, TMB, TPC, PCC, DESI, CSD, public-protocol, performance-resource, and provider-model boundary gates passed after Slice 14A acceptance wording, tracker, inventory, and invariant updates. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 101 | DRC failed only on the known non-media `goals`, `web`, and `tool_sources` direct `Utc::now()` allow-list gap; there were no media file findings, and media paths use injected operation timestamps. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full personal-info guard found no source leaks. |
 | `git diff --check` | exit 0 | Whitespace check passed. |

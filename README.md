@@ -1099,9 +1099,9 @@ Push-requested sends record inbox-only, no-device, policy-disabled,
 family-opt-out, or transport-disabled delivery evidence; live APNs transport,
 APNs entitlements, public notification APIs, native iOS inbox/deep links,
 hidden background loops, and fake client-local inboxes remain deferred.
-The Slice 14A implementation candidate adds `domains/media` as a narrow
-server-owned resource foundation for media artifacts and voice-note metadata
-behind the same single `capability::execute` primitive. Media records are
+Accepted Slice 14A adds `domains/media` as a narrow server-owned resource
+foundation for media artifacts and voice-note metadata behind the same single
+`capability::execute` primitive. Media records are
 durable `media_artifact` resources that store blob refs, bounded metadata,
 retention policy, source/evidence refs, local transcription result metadata,
 trace/replay refs, fingerprinted idempotency evidence, and lifecycle evidence.

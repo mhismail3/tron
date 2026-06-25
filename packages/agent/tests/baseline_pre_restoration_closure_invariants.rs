@@ -773,6 +773,26 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "no fake local inbox",
         ],
     );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "media",
+        "P2AER-INV-029",
+        "BPRC-FEATURE-13",
+        "media_transcription",
+        "Accepted Slice 14A media artifact and voice-note",
+        "current_baseline",
+        &[
+            "Accepted Slice 14A adds backend-only media_artifact resource custody",
+            "media_artifact",
+            "fingerprinted idempotency evidence",
+            "native voice-note UI, capture permissions, server transcription model changes",
+        ],
+        &[
+            "Accepted Slice 14A: Media Artifact And Voice Note Resource Foundation",
+            "`domains/media`",
+            "idempotency fingerprint evidence",
+        ],
+    );
     let notification_family_row = phase_two_inventory_tsv
         .lines()
         .find(|line| line.starts_with("P2AER-INV-027\t"))

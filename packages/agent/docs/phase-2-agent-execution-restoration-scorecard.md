@@ -2418,10 +2418,9 @@ policy tighter than the current 90-day/500-record defaults.
 
 ### Slice 14: Media, Voice Notes, Imports, Repository Trees, And System Updates
 
-Implementation status: Slice 14A media artifact and voice-note resource
-foundation is an implementation candidate pending review. Slice 14 remains
-split because media, imports, repository trees, and system updates are separate
-families.
+Implementation status: Accepted Slice 14A media artifact and voice-note
+resource foundation is current baseline. Slice 14 remains split because media,
+imports, repository trees, and system updates are separate families.
 
 Objective: restore lower-priority product surfaces only after the core
 agent-execution patterns are proven.
@@ -2439,7 +2438,7 @@ retention, redacted projections, lifecycle evidence, and local transcription
 metadata. Import/history package owns graph operations; update package owns
 signed update checks and never production deployment.
 
-Files/areas implemented for Slice 14A candidate: `domains/media`, built-in
+Files/areas accepted for Slice 14A: `domains/media`, built-in
 `media_artifact` resource definition, capability execute adapters, runtime
 grant narrowing, provider schema/instruction text, README, and static
 inventories. Future Slice 14 sub-slices own import/update domains and iOS
