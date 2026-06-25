@@ -18,6 +18,9 @@ use super::projection::{inspected_media, media_summary};
 use super::validation::*;
 use super::{Deps, MEDIA_ARTIFACT_KIND, MEDIA_ARTIFACT_SCHEMA_ID};
 
+const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.media.idempotency.v1";
+const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.media.idempotency.v1\0";
+
 pub(crate) async fn create_media_value_at(
     deps: &Deps,
     invocation: &Invocation,
@@ -299,10 +302,7 @@ pub(crate) async fn archive_media_value_at(
     record["archivedAt"] = json!(now);
     record["archive"] = json!({
         "reason": reason,
-        "idempotency": {
-            "key": idempotency_key,
-            "invocationId": invocation.id.as_str()
-        }
+        "idempotency": idempotency_evidence(invocation, &idempotency_key)
     });
     record["revision"] = json!(record["revision"].as_u64().unwrap_or(1).saturating_add(1));
     let version = deps
@@ -392,11 +392,7 @@ fn media_record(input: MediaRecordInput<'_>) -> Value {
         "traceRefs": trace_refs(input.invocation),
         "replayRefs": replay_refs(input.invocation),
         "authority": authority_record(input.invocation),
-        "idempotency": {
-            "key": input.idempotency_key,
-            "invocationId": input.invocation.id.as_str(),
-            "functionId": input.invocation.function_id.as_str()
-        },
+        "idempotency": idempotency_evidence(input.invocation, input.idempotency_key),
         "revision": input.revision
     });
     if let Some(title) = input.title {
@@ -561,6 +557,24 @@ fn media_resource_id(scope: &EngineResourceScope, media_id: &str, idempotency_ke
     hasher.update(b":");
     hasher.update(idempotency_key.as_bytes());
     format!("{MEDIA_ARTIFACT_KIND}:{}", hex::encode(hasher.finalize()))
+}
+
+fn idempotency_evidence(invocation: &Invocation, idempotency_key: &str) -> Value {
+    json!({
+        "fingerprint": idempotency_fingerprint(idempotency_key),
+        "fingerprintAlgorithm": IDEMPOTENCY_FINGERPRINT_ALGORITHM,
+        "keyRedacted": true,
+        "rawKeyStored": false,
+        "invocationId": invocation.id.as_str(),
+        "functionId": invocation.function_id.as_str()
+    })
+}
+
+fn idempotency_fingerprint(idempotency_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(IDEMPOTENCY_FINGERPRINT_DOMAIN);
+    hasher.update(idempotency_key.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 fn resource_policy() -> Value {

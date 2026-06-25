@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::service::{
@@ -14,6 +15,10 @@ use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-25T12:00:00Z";
 const RAW_AUDIO_SENTINEL: &str = "RAW_AUDIO_BASE64_SENTINEL_SHOULD_NOT_LEAK";
+const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.media.idempotency.v1";
+const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.media.idempotency.v1\0";
+const IDEMPOTENCY_LEAK_PREFIX: &str = "MEDIA_IDEMPOTENCY_LEAK_PREFIX";
+const IDEMPOTENCY_LEAK_SUFFIX: &str = "MEDIA_IDEMPOTENCY_LEAK_SUFFIX";
 
 struct Fixture {
     deps: Deps,
@@ -122,6 +127,24 @@ impl Fixture {
             .await
             .expect_err("inspect should fail")
             .to_string()
+    }
+
+    async fn raw_current_payload(&self, resource_id: &str) -> Value {
+        let inspection = self
+            .deps
+            .engine_host
+            .inspect_resource(resource_id)
+            .await
+            .expect("inspect media resource")
+            .expect("media resource");
+        let current = inspection.resource.current_version_id.as_deref();
+        inspection
+            .versions
+            .iter()
+            .find(|version| Some(version.version_id.as_str()) == current)
+            .expect("current media payload")
+            .payload
+            .clone()
     }
 
     async fn archive_at(
@@ -336,6 +359,37 @@ async fn media_validation_rejects_raw_audio_disallowed_mime_and_oversize() {
         )
         .await;
     assert!(oversize.contains("exceeds limit"), "{oversize}");
+
+    let credential_like_context = fixture
+        .create_error(
+            "authorization:media-idempotency-secret",
+            voice_note_payload(),
+        )
+        .await;
+    assert!(
+        credential_like_context.contains("credential-like material"),
+        "{credential_like_context}"
+    );
+
+    let too_long_key = "k".repeat(257);
+    let mut overlong_payload = fixture.write_invocation(
+        "payload-idempotency-overlong",
+        payload_with_idempotency_key(&too_long_key),
+    );
+    overlong_payload.causal_context.idempotency_key = None;
+    let overlong_payload_error = create_media_value_at(
+        &fixture.deps,
+        &overlong_payload,
+        &overlong_payload.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("overlong payload idempotency key should fail")
+    .to_string();
+    assert!(
+        overlong_payload_error.contains("bounded non-wildcard token"),
+        "{overlong_payload_error}"
+    );
 }
 
 #[tokio::test]
@@ -373,6 +427,106 @@ async fn media_redacted_projections_do_not_leak_raw_audio_or_full_payload() {
         inspected["media"]["payload"].get("idempotency").is_none(),
         "inspect projection must not return raw payload"
     );
+}
+
+#[tokio::test]
+async fn media_idempotency_evidence_is_fingerprinted_without_raw_key_leaks() {
+    let fixture = Fixture::new("media-idempotency-redaction").await;
+    let create_key = id_token_like_idempotency_key("CREATE");
+    let archive_key = id_token_like_idempotency_key("ARCHIVE");
+
+    let mut create_invocation = fixture.write_invocation(&create_key, voice_note_payload());
+    create_invocation.id =
+        InvocationId::new("invocation-media-idempotency-create").expect("invocation id");
+    create_invocation.causal_context.trace_id =
+        TraceId::new("trace-media-idempotency-create").expect("trace id");
+    let created = create_media_value_at(
+        &fixture.deps,
+        &create_invocation,
+        &create_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("create media with id-token-like idempotency key");
+    let resource_id = created["mediaResourceId"].as_str().unwrap();
+    let version_id = created["mediaVersionId"].as_str().unwrap();
+    let active_payload = fixture.raw_current_payload(resource_id).await;
+    assert_fingerprinted_idempotency(
+        "create payload idempotency",
+        &active_payload["idempotency"],
+        &create_key,
+    );
+
+    let listed = fixture.list("idempotency-list", json!({})).await;
+    let inspected = fixture.inspect("idempotency-inspect", resource_id).await;
+
+    let mut archive_invocation = fixture.write_invocation(
+        &archive_key,
+        json!({
+            "mediaResourceId": resource_id,
+            "expectedMediaVersionId": version_id,
+            "reason": "retention cleanup"
+        }),
+    );
+    archive_invocation.id =
+        InvocationId::new("invocation-media-idempotency-archive").expect("invocation id");
+    archive_invocation.causal_context.trace_id =
+        TraceId::new("trace-media-idempotency-archive").expect("trace id");
+    let archived = archive_media_value_at(
+        &fixture.deps,
+        &archive_invocation,
+        &archive_invocation.payload,
+        dt("2026-06-25T13:00:00Z"),
+    )
+    .await
+    .expect("archive media with id-token-like idempotency key");
+    let archived_payload = fixture.raw_current_payload(resource_id).await;
+    assert_fingerprinted_idempotency(
+        "archived payload create idempotency",
+        &archived_payload["idempotency"],
+        &create_key,
+    );
+    assert_fingerprinted_idempotency(
+        "archive payload idempotency",
+        &archived_payload["archive"]["idempotency"],
+        &archive_key,
+    );
+
+    let archived_list = fixture
+        .list(
+            "idempotency-list-archived",
+            json!({"includeArchived": true}),
+        )
+        .await;
+    let archived_inspected = fixture
+        .inspect("idempotency-inspect-archived", resource_id)
+        .await;
+    let stream_payloads = Value::Array(
+        fixture
+            .deps
+            .engine_host
+            .replay_snapshot(&fixture.session_id)
+            .await
+            .expect("snapshot")
+            .streams
+            .into_iter()
+            .map(|event| event.payload)
+            .collect(),
+    );
+
+    for (label, value) in [
+        ("create response", &created),
+        ("active raw resource payload", &active_payload),
+        ("list response", &listed),
+        ("inspect response", &inspected),
+        ("archive response", &archived),
+        ("archived raw resource payload", &archived_payload),
+        ("archived list response", &archived_list),
+        ("archived inspect response", &archived_inspected),
+        ("lifecycle stream payloads", &stream_payloads),
+    ] {
+        assert_no_idempotency_key_fragments(label, value, &[&create_key, &archive_key]);
+    }
 }
 
 #[tokio::test]
@@ -519,6 +673,18 @@ fn voice_note_payload() -> Value {
     })
 }
 
+fn payload_with_idempotency_key(key: &str) -> Value {
+    let mut payload = voice_note_payload();
+    payload["idempotencyKey"] = json!(key);
+    payload
+}
+
+fn id_token_like_idempotency_key(label: &str) -> String {
+    format!(
+        "eyJhbGciOiJSUzI1NiJ9.{IDEMPOTENCY_LEAK_PREFIX}_{label}_BODY.{IDEMPOTENCY_LEAK_SUFFIX}_{label}_TAIL"
+    )
+}
+
 async fn derive_grant(
     deps: &Deps,
     suffix: &str,
@@ -612,6 +778,54 @@ fn assert_no_raw_audio_fragments<T: serde::Serialize>(label: &str, value: &T) {
         assert!(
             !serialized.contains(forbidden),
             "{label} leaked forbidden media material `{forbidden}`: {serialized}"
+        );
+    }
+}
+
+fn assert_fingerprinted_idempotency(label: &str, value: &Value, key: &str) {
+    assert_eq!(
+        value["fingerprint"],
+        json!(expected_idempotency_fingerprint(key)),
+        "{label}"
+    );
+    assert_eq!(
+        value["fingerprintAlgorithm"],
+        json!(IDEMPOTENCY_FINGERPRINT_ALGORITHM),
+        "{label}"
+    );
+    assert_eq!(value["keyRedacted"], json!(true), "{label}");
+    assert_eq!(value["rawKeyStored"], json!(false), "{label}");
+    assert!(value.get("key").is_none(), "{label}");
+}
+
+fn expected_idempotency_fingerprint(key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(IDEMPOTENCY_FINGERPRINT_DOMAIN);
+    hasher.update(key.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn assert_no_idempotency_key_fragments<T: serde::Serialize>(label: &str, value: &T, keys: &[&str]) {
+    let serialized =
+        serde_json::to_string(value).unwrap_or_else(|error| panic!("serialize {label}: {error}"));
+    for key in keys {
+        assert!(
+            !serialized.contains(key),
+            "{label} leaked full idempotency key: {serialized}"
+        );
+    }
+    for forbidden in [
+        "eyJhbGciOiJSUzI1NiJ9",
+        IDEMPOTENCY_LEAK_PREFIX,
+        IDEMPOTENCY_LEAK_SUFFIX,
+        "CREATE_BODY",
+        "CREATE_TAIL",
+        "ARCHIVE_BODY",
+        "ARCHIVE_TAIL",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "{label} leaked idempotency key fragment `{forbidden}`: {serialized}"
         );
     }
 }

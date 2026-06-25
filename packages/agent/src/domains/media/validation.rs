@@ -12,6 +12,7 @@ pub(super) const TITLE_MAX_BYTES: usize = 160;
 pub(super) const SUMMARY_MAX_BYTES: usize = 2_000;
 pub(super) const TRANSCRIPT_MAX_BYTES: usize = 8_000;
 pub(super) const REASON_MAX_BYTES: usize = 1_000;
+pub(super) const IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
 pub(super) const DEFAULT_RETENTION_DAYS: u64 = 90;
 pub(super) const MAX_RETENTION_DAYS: u64 = 366;
 pub(super) const MAX_AUDIO_BYTES: u64 = 150 * 1024 * 1024;
@@ -199,11 +200,12 @@ pub(super) fn idempotency_key(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<String, CapabilityError> {
-    invocation
-        .causal_context
-        .idempotency_key
-        .clone()
-        .or_else(|| optional_string(payload, "idempotencyKey").ok().flatten())
+    if let Some(key) = invocation.causal_context.idempotency_key.as_deref() {
+        return bounded_token("idempotencyKey", key, IDEMPOTENCY_KEY_MAX_BYTES);
+    }
+    optional_string(payload, "idempotencyKey")?
+        .map(|key| bounded_token("idempotencyKey", &key, IDEMPOTENCY_KEY_MAX_BYTES))
+        .transpose()?
         .ok_or_else(|| invalid("media writes require an idempotencyKey"))
 }
 
@@ -273,6 +275,10 @@ fn reject_secret_like(field: &str, value: &str) -> Result<(), CapabilityError> {
         || lowered.contains("password=")
         || lowered.contains("secret=")
         || lowered.contains("authorization:")
+        || lowered.contains("api_key:")
+        || lowered.contains("apikey:")
+        || lowered.contains("password:")
+        || lowered.contains("secret:")
         || lowered.contains("\"token\"")
     {
         return Err(invalid(format!(

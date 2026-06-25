@@ -993,10 +993,10 @@ Current primitive operations:
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
-| `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, idempotency, and no raw media bytes in the resource payload. |
+| `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
 | `media_list` | List scoped `media_artifact` resources as bounded/redacted metadata projections with blob refs and transcription summaries only. |
 | `media_inspect` | Inspect one scoped `media_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, lifecycle evidence, storage refs, and local transcription metadata without raw audio. |
-| `media_archive` | Archive one scoped `media_artifact` with expected-version freshness, reason, lifecycle stream evidence, and idempotency; blob deletion/pruning remains a later retention worker concern. |
+| `media_archive` | Archive one scoped `media_artifact` with expected-version freshness, reason, lifecycle stream evidence, and fingerprinted idempotency evidence; blob deletion/pruning remains a later retention worker concern. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1104,10 +1104,11 @@ server-owned resource foundation for media artifacts and voice-note metadata
 behind the same single `capability::execute` primitive. Media records are
 durable `media_artifact` resources that store blob refs, bounded metadata,
 retention policy, source/evidence refs, local transcription result metadata,
-trace/replay refs, and lifecycle evidence. Accepted MIME types are allow-listed
-and upload sizes are bounded by media class; raw bytes/base64 payloads are
-rejected, resources store blob refs only, and provider-visible projections mark
-raw audio as not sent. Local composer transcription remains separate: this
+trace/replay refs, fingerprinted idempotency evidence, and lifecycle evidence.
+Accepted MIME types are allow-listed and upload sizes are bounded by media
+class; raw bytes/base64 payloads are rejected, resources store blob refs only,
+raw caller idempotency keys are not persisted, and provider-visible projections
+mark raw audio as not sent. Local composer transcription remains separate: this
 foundation may record bounded metadata about existing local transcription
 output, but it does not add server transcription models, native capture UI,
 microphone/camera permission changes, public media APIs, or provider-visible
