@@ -40,8 +40,14 @@ pub(super) async fn derive_capability_runtime_grant(
     allowed_capabilities.dedup();
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
     allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
-    if matches!(operation, "web_fetch" | "web_robots_check") {
+    if operation == "web_fetch" {
         allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
+    } else if operation == "web_robots_check" {
+        allowed_authority_scopes.extend([
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+            "web.write".to_owned(),
+        ]);
     } else if matches!(operation, "web_source_list" | "web_source_inspect") {
         allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
     } else if operation == "web_source_archive" {

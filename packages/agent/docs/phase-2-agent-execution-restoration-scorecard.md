@@ -1946,8 +1946,8 @@ Candidate scope:
   `capability::execute` primitive.
 - Fetch only one requested origin's `robots.txt` after trusted current-session
   context, stable `idempotencyKey`, `networkPolicy: declared`, `web.write`,
-  `resource.write`, `kind:web_robots_policy`, and existing URL/redirect/DNS
-  safety checks.
+  `resource.read`, `resource.write`, `kind:web_robots_policy`, and existing
+  URL/redirect/DNS safety checks.
 - Add `domains/web/robots/mod.rs` as the web-owned robots policy module with a
   deterministic tolerant parser, matched user-agent selection, allow/deny
   decision, relevant matched rule, bounded body metadata, captured-byte

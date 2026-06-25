@@ -33,6 +33,7 @@ use request::RobotsRequest;
 
 pub(crate) const WEB_ROBOTS_POLICY_SCHEMA_VERSION: &str = "tron.web_robots_policy.v1";
 const RESOURCE_WRITE_SCOPE: &str = "resource.write";
+const RESOURCE_READ_SCOPE: &str = "resource.read";
 const PARSER_ID: &str = "tron.web.robots";
 const PARSER_VERSION: &str = "1";
 
@@ -220,6 +221,11 @@ async fn inspect_robots_grant(
         (
             &grant.allowed_authority_scopes,
             WRITE_SCOPE,
+            "authority scope",
+        ),
+        (
+            &grant.allowed_authority_scopes,
+            RESOURCE_READ_SCOPE,
             "authority scope",
         ),
         (

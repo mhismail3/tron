@@ -1309,8 +1309,8 @@ Candidate evidence:
   execute-only robots policy check module.
 - Adds `web_robots_check` behind `capability::execute` and wires
   least-privilege grant derivation plus engine authorization for
-  `networkPolicy: declared`, `web.write`, `resource.write`, and
-  `web_robots_policy`.
+  `networkPolicy: declared`, `web.write`, `resource.read`,
+  `resource.write`, and `web_robots_policy`.
 - Adds built-in `web_robots_policy` resource definitions for bounded
   append-only robots evidence.
 - Reuses the existing web URL, redirect, and DNS-resolved socket safety policy

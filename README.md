@@ -1067,6 +1067,8 @@ actor/grant identity, previous version id, trace/replay refs, and retention
 metadata while preserving source payload/provenance. The Slice 8E
 implementation candidate adds `web_robots_check` as a narrow declared-network
 operation that derives a single origin `robots.txt` URL from one requested URL,
+requires `web.write`, `resource.read`, `resource.write`, and
+`kind:web_robots_policy` authority,
 requires HTTPS in production while preserving an explicit test-only HTTP
 loopback fixture flag, applies the existing URL/redirect/DNS safety policy
 before HTTP client construction or network I/O, writes

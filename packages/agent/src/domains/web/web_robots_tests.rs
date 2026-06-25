@@ -245,7 +245,12 @@ async fn web_robots_check_authority_failures_happen_before_network_io() {
         &ctx,
         "web-robots-no-kind",
         "declared",
-        &["capability.execute", "web.write", "resource.write"],
+        &[
+            "capability.execute",
+            "web.write",
+            "resource.read",
+            "resource.write",
+        ],
         &["agent_state", "web_source"],
         &["kind:agent_state", "kind:web_source"],
     )
@@ -259,11 +264,37 @@ async fn web_robots_check_authority_failures_happen_before_network_io() {
         .await;
     assert!(no_kind_error.contains("web_robots_policy"));
 
+    let no_resource_read = WebFixture::new_with_authority(
+        &ctx,
+        "web-robots-no-resource-read",
+        "declared",
+        &["capability.execute", "web.write", "resource.write"],
+        &["agent_state", "web_robots_policy"],
+        &["kind:agent_state", "kind:web_robots_policy"],
+    )
+    .await;
+    let no_resource_read_error = no_resource_read
+        .invoke_error(json!({
+            "operation": "web_robots_check",
+            "url": format!("{}/anything", server.uri()),
+            "idempotencyKey": "web-robots-no-resource-read"
+        }))
+        .await;
+    assert!(
+        no_resource_read_error.contains("resource.read"),
+        "missing resource.read should reject robots cache/evidence access before I/O, got: {no_resource_read_error}"
+    );
+
     let no_selector = WebFixture::new_with_authority(
         &ctx,
         "web-robots-no-selector",
         "declared",
-        &["capability.execute", "web.write", "resource.write"],
+        &[
+            "capability.execute",
+            "web.write",
+            "resource.read",
+            "resource.write",
+        ],
         &["agent_state", "web_robots_policy"],
         &["kind:agent_state"],
     )

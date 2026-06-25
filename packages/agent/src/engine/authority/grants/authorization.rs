@@ -185,7 +185,12 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("goal_list" | "goal_inspect" | "question_list" | "question_inspect") => {
             push_unique(&mut scopes, "goals.read");
         }
-        Some("web_fetch" | "web_robots_check") => {
+        Some("web_fetch") => {
+            push_unique(&mut scopes, "resource.write");
+            push_unique(&mut scopes, "web.write");
+        }
+        Some("web_robots_check") => {
+            push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
             push_unique(&mut scopes, "web.write");
         }
