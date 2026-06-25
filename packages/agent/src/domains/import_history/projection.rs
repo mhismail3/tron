@@ -236,12 +236,19 @@ fn insert_projected_string(
 }
 
 fn projected_text(text: &str, max_bytes: usize) -> Value {
-    let value = if text.len() > max_bytes {
-        text[..max_bytes].to_owned()
-    } else {
-        text.to_owned()
-    };
+    let value = truncate_utf8(text, max_bytes).to_owned();
     json!(value)
+}
+
+fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes.min(text.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 fn version_ref(resource: &EngineResource, version: &EngineResourceVersion, role: &str) -> Value {

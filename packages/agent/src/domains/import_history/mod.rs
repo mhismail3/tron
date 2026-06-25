@@ -6,7 +6,9 @@
 //! This domain owns `import_history_record` resources, bounded lineage
 //! metadata, parent/child/source refs, retention fields, trace/replay refs,
 //! redacted list/inspect projections, fingerprinted idempotency evidence, and
-//! lifecycle events. The stored shape is intentionally generic-graph-first:
+//! lifecycle events. Provider-visible projections stay byte-bounded while
+//! preserving UTF-8 character boundaries. The stored shape is intentionally
+//! generic-graph-first:
 //! render hints stay generic, raw repository trees and import payloads are not
 //! accepted, and native tree/session UI remains a later proof-driven slice.
 //!

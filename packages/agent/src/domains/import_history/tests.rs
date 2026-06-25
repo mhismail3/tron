@@ -353,6 +353,43 @@ async fn import_history_redacted_projections_do_not_leak_raw_payload_or_authorit
 }
 
 #[tokio::test]
+async fn import_history_projections_truncate_multibyte_utf8_without_panicking() {
+    let fixture = Fixture::new("import-history-utf8-truncation").await;
+    let expected_summary = "a".repeat(511);
+    let created = fixture
+        .record(
+            "utf8-truncation-record",
+            graph_payload_with_summary(
+                &fixture.session_id,
+                format!("{expected_summary}\u{00e9}tail"),
+            ),
+        )
+        .await;
+    let resource_id = created["importHistoryResourceId"].as_str().unwrap();
+
+    let listed = fixture
+        .list(
+            "utf8-truncation-list",
+            json!({"subjectKind": "session", "subjectId": &fixture.session_id}),
+        )
+        .await;
+    let listed_summary = listed["records"][0]["metadata"]["lineageSummary"]
+        .as_str()
+        .unwrap();
+    assert_eq!(listed_summary, expected_summary);
+    assert!(listed_summary.len() <= 512);
+
+    let inspected = fixture
+        .inspect("utf8-truncation-inspect", resource_id)
+        .await;
+    let inspected_summary = inspected["record"]["payload"]["metadata"]["lineageSummary"]
+        .as_str()
+        .unwrap();
+    assert_eq!(inspected_summary, expected_summary);
+    assert!(inspected_summary.len() <= 512);
+}
+
+#[tokio::test]
 async fn import_history_idempotency_evidence_is_fingerprinted_without_raw_key_leaks() {
     let fixture = Fixture::new("import-history-idempotency").await;
     let key = id_token_like_idempotency_key("RECORD");
@@ -546,6 +583,12 @@ fn graph_payload_for(session_id: &str) -> Value {
         "evidenceRefs": [{"kind": "trace", "id": "trace-import-source"}],
         "maxAgeDays": 45
     })
+}
+
+fn graph_payload_with_summary(session_id: &str, lineage_summary: String) -> Value {
+    let mut payload = graph_payload_for(session_id);
+    payload["lineageSummary"] = json!(lineage_summary);
+    payload
 }
 
 fn id_token_like_idempotency_key(label: &str) -> String {
