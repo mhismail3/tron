@@ -21,6 +21,7 @@ use super::types::{
     UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
 };
 use super::ui_surface::ui_surface_schema;
+use super::update_diagnostics_definitions::update_diagnostics_resource_type_definitions;
 use super::web_definitions::web_resource_type_definitions;
 use crate::engine::kernel::ids::WorkerId;
 
@@ -658,6 +659,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(import_history_resource_type_definitions());
+    definitions.extend(update_diagnostics_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions.extend(media_resource_type_definitions());
     definitions.extend(notification_resource_type_definitions());

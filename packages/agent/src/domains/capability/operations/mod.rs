@@ -37,6 +37,7 @@ mod state;
 mod subagents;
 mod tool_sources;
 mod trace;
+mod update_diagnostics;
 mod web;
 mod worker_packages;
 
@@ -77,6 +78,9 @@ use subagents::{
 };
 use tool_sources::{tool_source_inspect, tool_source_list};
 use trace::{complete_trace_record, started_trace_record, trace_get, trace_list};
+use update_diagnostics::{
+    update_diagnostic_inspect, update_diagnostic_list, update_diagnostic_record,
+};
 use web::{web_fetch, web_robots_check, web_source_archive, web_source_inspect, web_source_list};
 use worker_packages::{worker_package_inspect, worker_package_list};
 
@@ -253,6 +257,11 @@ async fn execute_operation(
         "import_history_record" => import_history_record(invocation, deps, operation_at).await?,
         "import_history_list" => import_history_list(invocation, deps).await?,
         "import_history_inspect" => import_history_inspect(invocation, deps).await?,
+        "update_diagnostic_record" => {
+            update_diagnostic_record(invocation, deps, operation_at).await?
+        }
+        "update_diagnostic_list" => update_diagnostic_list(invocation, deps).await?,
+        "update_diagnostic_inspect" => update_diagnostic_inspect(invocation, deps).await?,
         "device_register" => device_register(invocation, deps, operation_at).await?,
         "device_unregister" => device_unregister(invocation, deps, operation_at).await?,
         "device_list" => device_list(invocation, deps).await?,

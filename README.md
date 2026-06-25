@@ -1000,6 +1000,9 @@ Current primitive operations:
 | `import_history_record` | Record one scoped `import_history_record` resource for generic session/resource lineage only, with bounded parent/child/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, repository trees, or unsafe paths. |
 | `import_history_list` | List scoped `import_history_record` resources as bounded/redacted generic graph summaries with lineage counts and metadata only. |
 | `import_history_inspect` | Inspect one scoped `import_history_record` after stored kind/schema/scope revalidation, returning bounded/redacted generic graph lineage metadata, refs, and lifecycle evidence without raw import payloads, repository trees, or raw authority ids. |
+| `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
+| `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
+| `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1126,6 +1129,17 @@ They do not store raw import payloads, repository trees, unsafe filesystem
 paths, or provider-visible raw graph payloads. Render hints remain
 `generic_graph` only; native tree UI, import preview/execute behavior,
 repository visualization, and update diagnostics remain later slices.
+Slice 14C is a review-candidate backend foundation for `domains/update_diagnostics`
+behind the same single `capability::execute` primitive. Update diagnostic
+records are durable `update_diagnostic_record` resources that store bounded
+release identity, diagnostic status, signature status, signed-release
+provenance refs, source/evidence refs, retention policy, trace/replay refs,
+lifecycle evidence, and fingerprinted idempotency evidence. They do not store
+raw update payloads, package bytes, production endpoint details, installer
+commands, restart commands, deploy commands, or provider-visible raw update
+metadata. This foundation records metadata only: live production update checks,
+installer/restart/self-update flows, deploy automation, package/catalog
+registration, native iOS update panels, and public update APIs remain deferred.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1351,6 +1365,9 @@ domains such as
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, and `voice_notes` are not registered by default on this branch; the
 only import surface is the bounded `import_history_*` execute foundation.
+Slice 14C adds a review-candidate backend-only `update_diagnostic_record`
+metadata foundation; native update panels, live update checks, install/restart
+flows, and deploy automation are still absent.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,

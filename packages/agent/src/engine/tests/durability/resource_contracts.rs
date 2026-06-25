@@ -21,6 +21,7 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "schedule",
         "schedule_run",
         "media_artifact",
+        "update_diagnostic_record",
     ] {
         assert!(
             definitions

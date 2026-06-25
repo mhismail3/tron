@@ -2075,6 +2075,47 @@ Accepted validation:
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` and `test ! -e packages/agent/skills` | exit 0 | No ignored tracked files and no repo-managed first-party skills were present. |
 
+### Review Candidate Slice 14C: System Update Diagnostics Resource Foundation
+
+Candidate branch:
+`codex/phase-2-slice-14c-update-diagnostics-resource-foundation`.
+
+Baseline HEAD:
+`a019d083ea2af3dff7f7ce2ddefd7c42c9630c7f`
+
+Thread evidence: discovery thread `019f001b-bd16-77a0-a880-7da7df5e8afc`
+selected Slice 14C; implementation thread
+`019f0022-dae1-78c0-85a3-03d8f225cf47` is producing this review-candidate
+implementation. No acceptance is recorded in this section.
+
+Scope pending review:
+
+- Adds `domains/update_diagnostics` as the server owner for durable
+  `update_diagnostic_record` resources containing bounded release identity,
+  diagnostic status, signature status, signed-release provenance refs,
+  source/evidence refs, retention metadata, trace/replay refs, lifecycle
+  evidence, and fingerprinted idempotency evidence only.
+- Adds the built-in `update_diagnostic_record` resource definition with
+  append-only versions, active lifecycle state, metadata-only materialization,
+  and explicit update-diagnostics/resource capability requirements.
+- Adds execute-only operation values `update_diagnostic_record`,
+  `update_diagnostic_list`, and `update_diagnostic_inspect` behind the existing
+  single `capability::execute` primitive.
+- Requires trusted current-session/workspace context, exact non-wildcard
+  `update_diagnostic_record` resource selectors, `update_diagnostics.read` /
+  `update_diagnostics.write` plus resource scopes, idempotency for writes, and
+  `networkPolicy: none`.
+- Keeps Slice 14C narrow: no raw update payloads, no package bytes, no
+  production endpoint details, no installer or restart commands, no deploy
+  automation, no live production update checks, no package/catalog
+  registration, no public update APIs, and no native iOS update panel.
+
+Candidate validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml update_diagnostic --lib -- --nocapture` | exit 0 | Focused update-diagnostic domain, projection, idempotency, validation, and runtime-grant tests passed. |
+
 ## Validation Log
 
 | Command | Result | Evidence |

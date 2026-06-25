@@ -30,6 +30,7 @@ mod subagent_definitions;
 mod tool_source_definitions;
 mod types;
 mod ui_surface;
+mod update_diagnostics_definitions;
 mod validation;
 mod versions;
 mod web_definitions;

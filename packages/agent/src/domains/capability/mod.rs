@@ -20,6 +20,10 @@
 //! Import-history operations are resource-backed lineage operations: they
 //! record, list, and inspect bounded `import_history_record` graph metadata
 //! without storing raw import payloads, repository trees, or native UI state.
+//! Update-diagnostics operations are resource-backed metadata operations: they
+//! record, list, and inspect bounded `update_diagnostic_record` signed-release
+//! and provenance facts without live update checks, package bytes, install or
+//! restart execution, package/catalog registration, or deploy automation.
 //!
 //! ## Submodules
 //!
@@ -53,6 +57,7 @@ mod import_history_contract;
 mod media_contract;
 mod operations;
 mod scheduler_contract;
+mod update_diagnostics_contract;
 pub(crate) use operations::execute_value;
 
 use std::sync::Arc;

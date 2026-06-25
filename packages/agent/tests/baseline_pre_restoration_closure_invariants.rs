@@ -816,6 +816,26 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "`import_history_record`",
         ],
     );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "update_diagnostics",
+        "P2AER-INV-031",
+        "BPRC-FEATURE-18",
+        "system_update",
+        "Slice 14C update diagnostics",
+        "pending_review",
+        &[
+            "Slice 14C review candidate adds backend-only `domains/update_diagnostics`",
+            "update_diagnostic_record",
+            "Raw update payloads, package bytes, production endpoint details",
+            "live production update checks, package/catalog registration",
+        ],
+        &[
+            "Review Candidate Slice 14C: System Update Diagnostics Resource Foundation",
+            "`domains/update_diagnostics`",
+            "`update_diagnostic_record`",
+        ],
+    );
     let notification_family_row = phase_two_inventory_tsv
         .lines()
         .find(|line| line.starts_with("P2AER-INV-027\t"))

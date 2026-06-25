@@ -230,6 +230,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some("update_diagnostic_list" | "update_diagnostic_inspect") => {
+            push_unique(&mut scopes, "update_diagnostics.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("update_diagnostic_record") => {
+            push_unique(&mut scopes, "update_diagnostics.read");
+            push_unique(&mut scopes, "update_diagnostics.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("worker_package_list" | "worker_package_inspect") => {
             push_unique(&mut scopes, "worker.lifecycle.read");
             push_unique(&mut scopes, "resource.read");
@@ -310,6 +320,11 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         }
         Some("import_history_record" | "import_history_list" | "import_history_inspect") => {
             vec!["import_history_record"]
+        }
+        Some(
+            "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect",
+        ) => {
+            vec!["update_diagnostic_record"]
         }
         Some("web_robots_check") => vec!["web_robots_policy"],
         Some("worker_package_list") => {
@@ -393,6 +408,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("web_robots_check") => push_unique(&mut kinds, "web_robots_policy"),
         Some("media_create") => push_unique(&mut kinds, "media_artifact"),
         Some("import_history_record") => push_unique(&mut kinds, "import_history_record"),
+        Some("update_diagnostic_record") => push_unique(&mut kinds, "update_diagnostic_record"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }

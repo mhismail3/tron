@@ -24,6 +24,8 @@ mod grant_import_history_tests;
 mod grant_notification_device_tests;
 #[path = "grant_tests.rs"]
 mod grant_tests;
+#[path = "grant_update_diagnostics_tests.rs"]
+mod grant_update_diagnostics_tests;
 
 fn empty_surface() -> ResolvedPrimitiveSurface {
     ResolvedPrimitiveSurface {

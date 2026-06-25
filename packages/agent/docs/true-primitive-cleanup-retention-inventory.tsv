@@ -1850,3 +1850,14 @@ packages/agent/src/domains/import_history/service.rs	implementation	import_histo
 packages/agent/src/domains/import_history/tests.rs	test	test_harness	TPC-10/P2AER-S14B	focused Slice 14B import-history bounds redaction retention resource authority scope lifecycle and idempotency coverage
 packages/agent/src/domains/import_history/validation.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history raw-payload tree path refs idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/import_history_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14B	built-in import_history_record resource schema
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_update_diagnostics_tests.rs	test	test_harness	TPC-10/P2AER-S14C	focused Slice 14C update-diagnostics runtime grant regression coverage
+packages/agent/src/domains/capability/update_diagnostics_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14C	update-diagnostics request schema helper split out of the broad capability contract file
+packages/agent/src/domains/capability/operations/update_diagnostics.rs	implementation	capability_execute	TPC-10/P2AER-S14C	provider execute adapter for redacted durable update_diagnostic_record record list and inspect operations
+packages/agent/src/domains/update_diagnostics/authority.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
+packages/agent/src/domains/update_diagnostics/contract.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/update_diagnostics/mod.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics domain docs and registration boundary for backend-only signed-release metadata foundation
+packages/agent/src/domains/update_diagnostics/projection.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	bounded redacted update-diagnostics list and inspect projection owner
+packages/agent/src/domains/update_diagnostics/service.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	durable update-diagnostics record list and inspect operation owner
+packages/agent/src/domains/update_diagnostics/tests.rs	test	test_harness	TPC-10/P2AER-S14C	focused Slice 14C update-diagnostics bounds redaction retention resource authority scope lifecycle and idempotency coverage
+packages/agent/src/domains/update_diagnostics/validation.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics raw-payload package endpoint command refs idempotency and retention validation helpers
+packages/agent/src/engine/durability/resources/update_diagnostics_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14C	built-in update_diagnostic_record resource schema

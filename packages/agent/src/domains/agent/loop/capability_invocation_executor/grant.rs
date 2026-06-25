@@ -87,6 +87,21 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if matches!(
+        operation,
+        "update_diagnostic_list" | "update_diagnostic_inspect"
+    ) {
+        allowed_authority_scopes.extend([
+            "update_diagnostics.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if operation == "update_diagnostic_record" {
+        allowed_authority_scopes.extend([
+            "update_diagnostics.read".to_owned(),
+            "update_diagnostics.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(operation, "worker_package_list" | "worker_package_inspect") {
         allowed_authority_scopes.extend([
             "worker.lifecycle.read".to_owned(),
@@ -156,6 +171,11 @@ pub(super) async fn derive_capability_runtime_grant(
         "import_history_record" | "import_history_list" | "import_history_inspect"
     ) {
         allowed_resource_kinds.push("import_history_record".to_owned());
+    } else if matches!(
+        operation,
+        "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
+    ) {
+        allowed_resource_kinds.push("update_diagnostic_record".to_owned());
     } else if operation == "worker_package_list" {
         if let Some(kind) = worker_package_list_kind(effective_args) {
             allowed_resource_kinds.push(kind.to_owned());
@@ -216,6 +236,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "import_history_inspect"
         && let Some(resource_id) = effective_args
             .get("importHistoryResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "update_diagnostic_inspect"
+        && let Some(resource_id) = effective_args
+            .get("updateDiagnosticResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

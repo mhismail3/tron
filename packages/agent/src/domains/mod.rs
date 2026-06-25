@@ -5,7 +5,8 @@
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
 //! evidence, memory contract custody, durable media/voice-note resource
 //! custody, durable import/session-resource graph lineage records, durable
-//! non-interactive jobs, read-only Git/worktree observation,
+//! system update diagnostic metadata records, durable non-interactive jobs,
+//! read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
 //! records, inert procedural state provenance records, and the single model-facing
@@ -24,6 +25,7 @@
 //! | `memory` | Memory contract resources, prompt traces, and migration envelopes |
 //! | `media` | Durable media/voice-note resources with blob refs and redacted projections |
 //! | `import_history` | Durable import/session-resource graph lineage records |
+//! | `update_diagnostics` | Durable system update diagnostics metadata records |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -76,7 +78,11 @@
 //! model changes. Import/history restoration is resource-backed generic graph
 //! lineage only; raw repository trees, import payloads, and native session tree
 //! UI remain absent until a later slice proves generic rendering is
-//! insufficient. The worker lifecycle domain is the post-baseline package/launch substrate for
+//! insufficient. Update diagnostics restoration is metadata-only signed-release
+//! and provenance custody: it does not perform live update checks, execute
+//! installers, restart processes, register packages/catalog entries, expose
+//! production endpoints, or add native update panels. The worker lifecycle
+//! domain is the post-baseline package/launch substrate for
 //! self-updating workers; it is not a restored product tool domain. The git
 //! domain is restored only for read-only status/diff evidence; source-control
 //! mutations remain absent. The procedural domain is resource-backed custody
@@ -123,5 +129,6 @@ pub mod subagents;
 pub mod system;
 pub mod tool_sources;
 pub mod transcription;
+pub mod update_diagnostics;
 pub mod web;
 pub mod worker_lifecycle;

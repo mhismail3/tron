@@ -126,6 +126,10 @@ pub const MEDIA_ARTIFACT_SCHEMA_ID: &str = "tron.resource.media_artifact.v1";
 pub const IMPORT_HISTORY_RECORD_KIND: &str = "import_history_record";
 /// Built-in import/session-resource graph lineage resource schema id.
 pub const IMPORT_HISTORY_RECORD_SCHEMA_ID: &str = "tron.resource.import_history_record.v1";
+/// Built-in system update diagnostic metadata resource kind.
+pub const UPDATE_DIAGNOSTIC_RECORD_KIND: &str = "update_diagnostic_record";
+/// Built-in system update diagnostic metadata resource schema id.
+pub const UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID: &str = "tron.resource.update_diagnostic_record.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
