@@ -24,7 +24,13 @@ pub(crate) async fn create_proposal_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    ensure_internal_propose_authority(deps, invocation, "tool source proposal").await?;
+    ensure_internal_write_authority(
+        deps,
+        invocation,
+        "tool source proposal",
+        TOOL_SOURCE_PROPOSAL_KIND,
+    )
+    .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let source_kind = required_string(payload, "sourceKind")?;
     validate_source_kind(&source_kind)?;
@@ -145,7 +151,13 @@ pub(crate) async fn create_conformance_report_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    ensure_internal_propose_authority(deps, invocation, "tool source conformance report").await?;
+    ensure_internal_write_authority(
+        deps,
+        invocation,
+        "tool source conformance report",
+        TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
+    )
+    .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let proposal_id = required_string(payload, "toolSourceProposalResourceId")?;
     validate_resource_id_prefix(&proposal_id, TOOL_SOURCE_PROPOSAL_KIND)?;
@@ -263,7 +275,8 @@ pub(crate) async fn list_tool_sources_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    inspect_read_grant(deps, invocation, "tool_source_list").await?;
+    let grant = inspect_read_grant(deps, invocation, "tool_source_list").await?;
+    require_read_kind_selector(&grant, TOOL_SOURCE_PROPOSAL_KIND, "tool_source_list")?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
         .unwrap_or(LIST_LIMIT_DEFAULT)
@@ -316,13 +329,26 @@ pub(crate) async fn inspect_tool_source_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    inspect_read_grant(deps, invocation, "tool_source_inspect").await?;
+    let grant = inspect_read_grant(deps, invocation, "tool_source_inspect").await?;
     let resource_id = required_string(payload, "toolSourceResourceId")?;
-    if !resource_id.starts_with(&format!("{TOOL_SOURCE_PROPOSAL_KIND}:"))
-        && !resource_id.starts_with(&format!("{TOOL_SOURCE_CONFORMANCE_REPORT_KIND}:"))
-    {
+    let resource_kind = if resource_id.starts_with(&format!("{TOOL_SOURCE_PROPOSAL_KIND}:")) {
+        TOOL_SOURCE_PROPOSAL_KIND
+    } else if resource_id.starts_with(&format!("{TOOL_SOURCE_CONFORMANCE_REPORT_KIND}:")) {
+        TOOL_SOURCE_CONFORMANCE_REPORT_KIND
+    } else {
         return Err(invalid(
             "toolSourceResourceId has unsupported tool source resource kind",
+        ));
+    };
+    require_read_kind_selector(&grant, resource_kind, "tool_source_inspect")?;
+    if resource_kind == TOOL_SOURCE_CONFORMANCE_REPORT_KIND
+        && !allows_explicit_selector(
+            &grant.resource_selectors,
+            TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
+        )
+    {
+        return Err(invalid(
+            "tool_source_inspect requires an explicit kind:tool_source_conformance_report selector",
         ));
     }
     let max_schema_bytes = optional_u64(payload, "maxSchemaBytes")?
@@ -349,10 +375,11 @@ pub(crate) async fn inspect_tool_source_value(
     }))
 }
 
-async fn ensure_internal_propose_authority(
+async fn ensure_internal_write_authority(
     deps: &Deps,
     invocation: &Invocation,
     label: &str,
+    resource_kind: &str,
 ) -> Result<(), CapabilityError> {
     if !matches!(
         invocation.causal_context.actor_kind,
@@ -382,11 +409,7 @@ async fn ensure_internal_propose_authority(
         .ok_or_else(|| policy("unknown proposal authority grant"))?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, PROPOSE_SCOPE, label)?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, RESOURCE_WRITE_SCOPE, label)?;
-    require_explicit_grant_item(
-        &grant.allowed_resource_kinds,
-        TOOL_SOURCE_PROPOSAL_KIND,
-        label,
-    )?;
+    require_explicit_grant_item(&grant.allowed_resource_kinds, resource_kind, label)?;
     if grant.network_policy != "none" {
         return Err(policy(format!("{label} requires networkPolicy none")));
     }
@@ -410,25 +433,24 @@ async fn inspect_read_grant(
         RESOURCE_READ_SCOPE,
         operation,
     )?;
-    require_explicit_grant_item(
-        &grant.allowed_resource_kinds,
-        TOOL_SOURCE_PROPOSAL_KIND,
-        operation,
-    )?;
-    if !allows_explicit_selector(&grant.resource_selectors, TOOL_SOURCE_PROPOSAL_KIND)
-        && !allows_explicit_selector(
-            &grant.resource_selectors,
-            TOOL_SOURCE_CONFORMANCE_REPORT_KIND,
-        )
-    {
-        return Err(invalid(format!(
-            "{operation} requires an explicit kind:{TOOL_SOURCE_PROPOSAL_KIND} or kind:{TOOL_SOURCE_CONFORMANCE_REPORT_KIND} selector"
-        )));
-    }
     if grant.network_policy != "none" {
         return Err(invalid(format!("{operation} requires networkPolicy none")));
     }
     Ok(grant)
+}
+
+fn require_read_kind_selector(
+    grant: &EngineGrant,
+    resource_kind: &str,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    require_explicit_grant_item(&grant.allowed_resource_kinds, resource_kind, operation)?;
+    if !allows_explicit_selector(&grant.resource_selectors, resource_kind) {
+        return Err(invalid(format!(
+            "{operation} requires an explicit kind:{resource_kind} selector"
+        )));
+    }
+    Ok(())
 }
 
 fn proposal_summary(

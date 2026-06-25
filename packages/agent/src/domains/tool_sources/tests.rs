@@ -194,6 +194,41 @@ async fn proposal_validation_rejects_secrets_unsafe_paths_unbounded_schema_and_e
 }
 
 #[tokio::test]
+async fn proposal_validation_rejects_string_valued_activation_intent() {
+    let fixture = Fixture::new("proposal-string-intent").await;
+    let mut cases = Vec::new();
+    let mut payload = proposal_payload();
+    payload["sourceIdentity"]["note"] = json!("register this MCP server");
+    cases.push(("string-register", payload));
+    let mut payload = proposal_payload();
+    payload["sandboxPolicy"]["reviewNote"] = json!("install package after review");
+    cases.push(("string-install", payload));
+    let mut payload = proposal_payload();
+    payload["declaredTools"][0]["description"] = json!("execute this tool");
+    cases.push(("string-execute", payload));
+    let mut payload = proposal_payload();
+    payload["expectedLinkage"]["plan"] = json!("launch worker package");
+    cases.push(("string-launch", payload));
+    for (key, payload) in cases {
+        let error = fixture.create_proposal_error(key, payload).await;
+        assert!(error.contains("activation intent string"), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn proposal_validation_allows_inert_non_activation_prose() {
+    let fixture = Fixture::new("proposal-inert-prose").await;
+    let mut payload = proposal_payload();
+    payload["sourceIdentity"]["note"] = json!("registration is forbidden until a later slice");
+    payload["sandboxPolicy"]["reviewNote"] = json!("no catalog registration");
+    payload["declaredTools"][0]["description"] = json!("metadata only; do not execute tool");
+    payload["expectedLinkage"]["operatorNote"] = json!("without launch or install authority");
+
+    let result = fixture.create_proposal("inert-prose", payload).await;
+    assert_eq!(result["activation"]["performed"], json!(false));
+}
+
+#[tokio::test]
 async fn conformance_report_links_to_proposal_without_activation() {
     let fixture = Fixture::new("proposal-report").await;
     let proposal = fixture
@@ -234,6 +269,121 @@ async fn conformance_report_links_to_proposal_without_activation() {
     let payload = current_payload(&inspection);
     assert_eq!(payload["toolSourceProposalResourceId"], json!(proposal_id));
     assert_eq!(payload["status"], json!("passed"));
+}
+
+#[tokio::test]
+async fn conformance_report_creation_requires_report_resource_kind_authority() {
+    let fixture = Fixture::new("report-kind-authority").await;
+    let proposal = fixture
+        .create_proposal("report-kind-proposal", proposal_payload())
+        .await;
+    let proposal_id = proposal["toolSourceProposalResourceId"].as_str().unwrap();
+    let proposal_only_grant = fixture
+        .derive_grant(
+            "proposal-only-write",
+            &["tool_sources.propose", "resource.write"],
+            &["tool_source_proposal"],
+            &["kind:tool_source_proposal"],
+            "none",
+        )
+        .await;
+    let invocation = invocation(
+        REPORT_FUNCTION,
+        "proposal-only-report-denied",
+        json!({
+            "toolSourceProposalResourceId": proposal_id,
+            "status": "passed"
+        }),
+        proposal_only_grant,
+        ActorKind::System,
+        &["tool_sources.propose", "resource.write"],
+        Some(&fixture.session_id),
+    );
+
+    let error = create_conformance_report_value(&fixture.deps, &invocation, &invocation.payload)
+        .await
+        .expect_err("proposal-only grant cannot create report")
+        .to_string();
+    assert!(error.contains("tool_source_conformance_report"), "{error}");
+}
+
+#[tokio::test]
+async fn proposal_only_read_grant_cannot_inspect_conformance_reports() {
+    let fixture = Fixture::new("report-read-kind-authority").await;
+    let proposal = fixture
+        .create_proposal("read-kind-proposal", proposal_payload())
+        .await;
+    let proposal_id = proposal["toolSourceProposalResourceId"].as_str().unwrap();
+    let report = fixture
+        .create_report(
+            "read-kind-report",
+            json!({
+                "toolSourceProposalResourceId": proposal_id,
+                "status": "passed"
+            }),
+        )
+        .await;
+    let report_id = report["toolSourceConformanceReportResourceId"]
+        .as_str()
+        .unwrap();
+    let proposal_only_read_grant = fixture
+        .derive_grant(
+            "proposal-only-read",
+            &["tool_sources.read", "resource.read"],
+            &["tool_source_proposal"],
+            &["kind:tool_source_proposal"],
+            "none",
+        )
+        .await;
+    let list_invocation = invocation(
+        "capability::execute",
+        "proposal-only-list",
+        json!({"limit": 10}),
+        proposal_only_read_grant.clone(),
+        ActorKind::Agent,
+        &[READ_SCOPE, "resource.read"],
+        Some(&fixture.session_id),
+    );
+    let listed = list_tool_sources_value(&fixture.deps, &list_invocation, &list_invocation.payload)
+        .await
+        .expect("proposal-only grant can list proposals");
+    assert_eq!(listed["proposals"].as_array().unwrap().len(), 1);
+
+    let proposal_inspect_invocation = invocation(
+        "capability::execute",
+        "proposal-only-inspect-proposal",
+        json!({"toolSourceResourceId": proposal_id}),
+        proposal_only_read_grant.clone(),
+        ActorKind::Agent,
+        &[READ_SCOPE, "resource.read"],
+        Some(&fixture.session_id),
+    );
+    inspect_tool_source_value(
+        &fixture.deps,
+        &proposal_inspect_invocation,
+        &proposal_inspect_invocation.payload,
+    )
+    .await
+    .expect("proposal-only grant can inspect proposals");
+
+    let report_inspect_invocation = invocation(
+        "capability::execute",
+        "proposal-only-inspect-report",
+        json!({"toolSourceResourceId": report_id}),
+        proposal_only_read_grant,
+        ActorKind::Agent,
+        &[READ_SCOPE, "resource.read"],
+        Some(&fixture.session_id),
+    );
+    let error = inspect_tool_source_value(
+        &fixture.deps,
+        &report_inspect_invocation,
+        &report_inspect_invocation.payload,
+    )
+    .await
+    .expect_err("proposal-only grant cannot inspect reports")
+    .to_string();
+    assert!(error.contains("tool_source_conformance_report"), "{error}");
 }
 
 #[tokio::test]

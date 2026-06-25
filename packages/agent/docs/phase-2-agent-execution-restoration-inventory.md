@@ -297,16 +297,19 @@ only when both robots fields are non-empty strings. Search, browser, crawl,
 sitemap traversal, login/cookies, public `/engine`, native iOS, settings,
 migrations, cleanup/TTL, and network-job scope remain deferred.
 
-Slice 9A accepts External Tool Source Proposal And Provenance Foundation. It
-adds an inert `tool_sources` domain plus `tool_source_proposal` and
+Slice 9A is an implementation candidate pending review for External Tool Source
+Proposal And Provenance Foundation; it is not yet accepted as the current
+baseline. It adds an inert `tool_sources` domain plus `tool_source_proposal` and
 `tool_source_conformance_report` resource kinds so external source identity,
 provenance, sandbox intent, declared tool/schema metadata, expected
 worker/package linkage, trace/replay refs, lifecycle state, and bounded
 preflight evidence can be inspected before any activation. Proposal/report
 writes are internal-only and require trusted system/admin authority, derived
-non-bootstrap grants, explicit non-wildcard resource authority, idempotency, and
-`networkPolicy: none`. Agent access is read-only through `tool_source_list` and
-`tool_source_inspect` under the existing `capability::execute` primitive.
+non-bootstrap grants, explicit non-wildcard resource authority for the resource
+kind being written, idempotency, and `networkPolicy: none`. Agent access is
+read-only through `tool_source_list` and `tool_source_inspect` under the
+existing `capability::execute` primitive with explicit resource-kind authority
+and matching kind selectors for the inspected resource kind.
 Slice 9A explicitly does not start MCP servers, install packages, register
 catalog tools, execute proposed tools, promote trust, change worker lifecycle,
 add browser/search/crawl/login scope, expand public `/engine`, or add fixed

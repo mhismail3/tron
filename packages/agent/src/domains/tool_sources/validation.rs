@@ -238,16 +238,26 @@ pub(super) fn resource_scope(invocation: &Invocation) -> EngineResourceScope {
 
 fn validate_no_activation_intent(value: &Value) -> Result<(), CapabilityError> {
     walk_json(value, &mut Vec::new(), &mut |path, value| {
-        let Some(key) = path.last() else {
-            return Ok(());
-        };
-        let key_lower = key.to_ascii_lowercase();
-        if matches!(
-            key_lower.as_str(),
-            "activate" | "activation" | "register" | "registration" | "enabled" | "installed"
-        ) {
-            if !path.starts_with(&["activation".to_owned()])
-                && !matches!(value, Value::Bool(false) | Value::String(_))
+        if let Some(key) = path.last() {
+            let key_lower = key.to_ascii_lowercase();
+            let key_compact = key_lower.replace(['_', '-'], "");
+            if matches!(
+                key_compact.as_str(),
+                "activate"
+                    | "activation"
+                    | "register"
+                    | "registration"
+                    | "enable"
+                    | "enabled"
+                    | "install"
+                    | "installed"
+                    | "execute"
+                    | "execution"
+                    | "start"
+                    | "restart"
+                    | "launch"
+                    | "catalogregistration"
+            ) && !is_inert_activation_proof(path, value)
             {
                 return Err(invalid(format!(
                     "activation field {} is not allowed",
@@ -255,7 +265,119 @@ fn validate_no_activation_intent(value: &Value) -> Result<(), CapabilityError> {
                 )));
             }
         }
+        if let Value::String(text) = value {
+            if contains_activation_intent(text) {
+                return Err(invalid(format!(
+                    "activation intent string {} is not allowed",
+                    path.join(".")
+                )));
+            }
+        }
         Ok(())
+    })
+}
+
+fn is_inert_activation_proof(path: &[String], value: &Value) -> bool {
+    if path == ["authority", "activation"] {
+        return value.as_str() == Some("forbidden");
+    }
+    path.first().is_some_and(|key| key == "activation")
+        && matches!(value, Value::Bool(false) | Value::Object(_))
+}
+
+fn contains_activation_intent(text: &str) -> bool {
+    let tokens = activation_tokens(text);
+    let check_len = tokens.len().min(80);
+    for index in 0..check_len {
+        let token = tokens[index].as_str();
+        if token == "catalog"
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| next == "registration" || next == "register")
+            && !has_negated_context(&tokens, index)
+        {
+            return true;
+        }
+        if is_activation_verb(token)
+            && !has_negated_context(&tokens, index)
+            && has_activation_target(&tokens, index, check_len)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn activation_tokens(text: &str) -> Vec<String> {
+    text.to_ascii_lowercase()
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .take(96)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn is_activation_verb(token: &str) -> bool {
+    matches!(
+        token,
+        "activate"
+            | "activating"
+            | "register"
+            | "registering"
+            | "install"
+            | "installing"
+            | "enable"
+            | "enabling"
+            | "execute"
+            | "executing"
+            | "start"
+            | "starting"
+            | "restart"
+            | "restarting"
+            | "launch"
+            | "launching"
+    )
+}
+
+fn has_activation_target(tokens: &[String], index: usize, check_len: usize) -> bool {
+    let end = (index + 7).min(check_len);
+    tokens[index + 1..end]
+        .iter()
+        .filter(|token| !matches!(token.as_str(), "a" | "an" | "the" | "this" | "that" | "new"))
+        .any(|token| {
+            matches!(
+                token.as_str(),
+                "mcp"
+                    | "server"
+                    | "servers"
+                    | "package"
+                    | "packages"
+                    | "plugin"
+                    | "plugins"
+                    | "tool"
+                    | "tools"
+                    | "worker"
+                    | "workers"
+                    | "process"
+                    | "processes"
+                    | "command"
+                    | "commands"
+                    | "catalog"
+                    | "source"
+                    | "sources"
+                    | "extension"
+                    | "extensions"
+            )
+        })
+}
+
+fn has_negated_context(tokens: &[String], index: usize) -> bool {
+    let start = index.saturating_sub(4);
+    tokens[start..index].iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "no" | "not" | "never" | "without" | "forbid" | "forbidden" | "deny" | "denied"
+        )
     })
 }
 

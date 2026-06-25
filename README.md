@@ -1093,25 +1093,27 @@ traversal, search providers, browser automation, crawling, login/cookies,
 credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
 side channels, native iOS web UI, and public `/engine` web API expansion remain
 deferred.
-The accepted Slice 9A foundation adds the `tool_sources` domain as an inert
-external source-proposal and provenance boundary. Trusted internal system/admin
-callers can create resource-backed `tool_source_proposal` records and bounded
+The Slice 9A implementation candidate adds the `tool_sources` domain as an
+inert external source-proposal and provenance boundary pending review, not yet
+an accepted baseline. Trusted internal system/admin callers can create
+resource-backed `tool_source_proposal` records and bounded
 `tool_source_conformance_report` evidence only with derived non-bootstrap
 `tool_sources.propose` and `resource.write` authority, explicit non-wildcard
-resource grants, `networkPolicy: none`, idempotency, source identity,
-provenance, sandbox policy, declared tool/schema metadata, expected
-worker/package linkage, trace/replay refs, and evidence refs. Proposal
-validation rejects inline secrets, credential-looking values, unsafe paths,
-unbounded schemas, wildcard sandbox authority, execution fields such as command
-or env, and activation/registration intent. Agent-visible access is read-only
-through `tool_source_list` and `tool_source_inspect` under
+resource grants for the resource kind being written, `networkPolicy: none`,
+idempotency, source identity, provenance, sandbox policy, declared tool/schema
+metadata, expected worker/package linkage, trace/replay refs, and evidence
+refs. Proposal validation rejects inline secrets, credential-looking values,
+unsafe paths, unbounded schemas, wildcard sandbox authority, execution fields
+such as command or env, and activation/registration intent. Agent-visible access
+is read-only through `tool_source_list` and `tool_source_inspect` under
 `capability::execute`; those operations require current-session context,
-`tool_sources.read`, `resource.read`, explicit `kind:tool_source_*` selectors,
-and `networkPolicy: none`, and they return bounded/redacted resource evidence
-without network I/O. Slice 9A does not start or restart MCP servers, install
-packages, register catalog tools, execute proposed tools, promote trust,
-change worker lifecycle behavior, add browser/search/crawl/login scope, expand
-public `/engine` APIs, or add native iOS fixed UI.
+`tool_sources.read`, `resource.read`, explicit resource-kind grants plus
+matching `kind:tool_source_*` selectors, and `networkPolicy: none`, and they
+return bounded/redacted resource evidence without network I/O. Slice 9A does
+not start or restart MCP servers, install packages, register catalog tools,
+execute proposed tools, promote trust, change worker lifecycle behavior, add
+browser/search/crawl/login scope, expand public `/engine` APIs, or add native
+iOS fixed UI.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
