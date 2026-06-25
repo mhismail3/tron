@@ -1366,6 +1366,72 @@ Accepted validation recorded on branch and re-review:
 - `git diff --check 9a74084d9ce8b241d8fdf4a7865a683bd04e652c..21d3d24a7f757b43d3f51599fe35a14e7f0f3633`
 - `git ls-files -ci --exclude-standard`
 
+### Slice 8F Implementation Candidate Evidence: Web Fetch Robots Evidence Linkage Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage`.
+Baseline:
+`origin/main@419433985790f35f5ef514e9f508b4f8906d37a1`
+(`docs: accept phase 2 slice 8e`).
+Source handoff thread:
+`019ef914-ed80-78f2-b253-229240d49444`.
+Discovery thread:
+`019efc32-30b1-7811-9959-7e539ba8062f`.
+Implementation worktree:
+`/Users/<USER>/.codex/worktrees/07b9/tron`.
+Status:
+`implementation_candidate_pending_review`.
+
+Candidate evidence:
+
+- Adds `packages/agent/src/domains/web/robots_link.rs` as the fetch-side
+  validation boundary for optional robots-policy evidence refs.
+- Extends `web_fetch` under the existing `capability::execute` primitive with
+  optional paired inputs `webRobotsPolicyResourceId` and
+  `expectedWebRobotsPolicyVersionId`.
+- Validates referenced current-session `web_robots_policy` resources before
+  target HTTP client construction or target network I/O when the pair is
+  supplied.
+- Requires current kind/schema, current session scope, current expected
+  version, checked resource/payload state, matching origin, matching target URL,
+  and `policy.decision == "allow"`.
+- Persists only bounded `robotsPolicyRefs` into `web_source` payloads and
+  exposes those refs through `web_source_list` and `web_source_inspect` without
+  robots body previews, body evidence, or sitemap content.
+- Updates runtime grant derivation and central engine authorization so
+  robots-linked `web_fetch` gets `web.read`, `resource.read`, and
+  `kind:web_robots_policy` authority only when robots evidence fields are
+  present.
+- Preserves default non-robots `web_fetch` compatibility.
+
+Deferred scope remains explicit: no search providers, browser automation,
+crawling, sitemap traversal/fetching, login/cookies/session reuse, public
+`/engine` web APIs, native iOS source UI, settings/profile changes, database
+migrations, deletion/pruning/TTL cleanup, network jobs, or global robots
+requirement.
+
+Candidate validation evidence recorded before independent review:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  exited 0.
+- `cargo check --manifest-path packages/agent/Cargo.toml` exited 0 with
+  pre-existing dead-code warnings in provider and engine helper code.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::web -- --nocapture`
+  exited 0.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
+  exited 0.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`
+  exited 0.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::agent::r#loop::capability_invocation_executor -- --nocapture`
+  exited 0.
+- HRA, TMB, TPC, PCC, SACB, BPRC, IARM, DESI, and public-protocol invariant
+  suites exited 0.
+- `scripts/personal-info-guard.sh` exited 0.
+- `git diff --check` exited 0.
+- `git diff --cached --check` exited 0.
+- `git ls-files -ci --exclude-standard` exited 0 and reported no tracked
+  ignored files.
+
 ## Validation Log
 
 | Command | Result | Evidence |

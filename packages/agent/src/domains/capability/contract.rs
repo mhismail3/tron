@@ -285,6 +285,16 @@ fn execute_model_request_schema() -> serde_json::Value {
     );
     insert_string(
         &mut properties,
+        "webRobotsPolicyResourceId",
+        "Optional current-session web_robots_policy resource id for web_fetch robots evidence validation before target network I/O.",
+    );
+    insert_string(
+        &mut properties,
+        "expectedWebRobotsPolicyVersionId",
+        "Expected current web_robots_policy version id paired with webRobotsPolicyResourceId for web_fetch freshness and compatibility.",
+    );
+    insert_string(
+        &mut properties,
         "expectedWebSourceVersionId",
         "Expected current web_source version id for web_source_archive freshness.",
     );
@@ -505,6 +515,16 @@ mod tests {
         assert!(schema["properties"].get("userAgent").is_some());
         assert!(schema["properties"].get("webSourceResourceId").is_some());
         assert!(schema["properties"].get("webSourceVersionId").is_some());
+        assert!(
+            schema["properties"]
+                .get("webRobotsPolicyResourceId")
+                .is_some()
+        );
+        assert!(
+            schema["properties"]
+                .get("expectedWebRobotsPolicyVersionId")
+                .is_some()
+        );
         assert!(schema["properties"].get("maxPreviewBytes").is_some());
         assert!(schema["properties"].get("maxSnippetBytes").is_some());
         assert!(schema["properties"].get("maxResponseBytes").is_some());

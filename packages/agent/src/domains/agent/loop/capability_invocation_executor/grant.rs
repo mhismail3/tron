@@ -30,6 +30,11 @@ pub(super) async fn derive_capability_runtime_grant(
         .get("operation")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let web_fetch_uses_robots_policy = operation == "web_fetch"
+        && (effective_args.get("webRobotsPolicyResourceId").is_some()
+            || effective_args
+                .get("expectedWebRobotsPolicyVersionId")
+                .is_some());
     let mut allowed_capabilities = vec![
         target_function_id.as_str().to_owned(),
         "state::get".to_owned(),
@@ -42,6 +47,9 @@ pub(super) async fn derive_capability_runtime_grant(
     allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     if operation == "web_fetch" {
         allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
+        if web_fetch_uses_robots_policy {
+            allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
+        }
     } else if operation == "web_robots_check" {
         allowed_authority_scopes.extend([
             "resource.read".to_owned(),
@@ -73,6 +81,9 @@ pub(super) async fn derive_capability_runtime_grant(
         "web_fetch" | "web_source_list" | "web_source_inspect" | "web_source_archive"
     ) {
         allowed_resource_kinds.push("web_source".to_owned());
+        if web_fetch_uses_robots_policy {
+            allowed_resource_kinds.push("web_robots_policy".to_owned());
+        }
     }
     let resource_selectors = allowed_resource_kinds
         .iter()

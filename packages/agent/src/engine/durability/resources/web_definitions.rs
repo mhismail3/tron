@@ -67,6 +67,7 @@ fn web_source_definition() -> RegisterResourceType {
                 },
                 "redaction": {"type": "object"},
                 "redirects": {"type": "object"},
+                "robotsPolicyRefs": {"type": "array"},
                 "authority": {"type": "object"},
                 "traceRefs": {"type": "array"},
                 "replayRefs": {"type": "array"},

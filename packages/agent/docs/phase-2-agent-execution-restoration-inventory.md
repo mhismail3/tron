@@ -283,3 +283,14 @@ with only explicit test-only HTTP loopback fixtures, and keeps sitemap
 traversal, search providers, browser automation, crawling beyond the single
 robots fetch, login/cookies/session reuse, public `/engine` web APIs, native iOS
 source UI, deletion/pruning/TTL cleanup, and network-enabled jobs deferred.
+
+Slice 8F is an implementation candidate pending review. It keeps `web_fetch`
+compatible by default, adds optional paired robots evidence inputs
+`webRobotsPolicyResourceId` and `expectedWebRobotsPolicyVersionId`, validates a
+current-session `web_robots_policy` allow decision for the exact requested
+origin/target before target fetch HTTP client construction, records only
+bounded `robotsPolicyRefs` on resulting `web_source` payloads, exposes those
+bounded refs through source list/inspect, and conditionally derives the
+additional robots-policy read grants only when the pair is present. Search,
+browser, crawl, sitemap traversal, login/cookies, public `/engine`, native iOS,
+settings, migrations, cleanup/TTL, and network-job scope remain deferred.

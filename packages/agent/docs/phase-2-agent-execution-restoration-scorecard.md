@@ -75,6 +75,14 @@ loopback rejection, robots module hard-budget split, and `resource.read`
 authority enforcement for `web_robots_policy` cache/evidence reads. Final
 re-review returned `slice accepted` with no findings.
 
+Candidate note: Slice 8F implementation may start from accepted Slice 8E
+closeout baseline `origin/main@419433985790f35f5ef514e9f508b4f8906d37a1`
+(`docs: accept phase 2 slice 8e`). Implementation branch
+`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage` connects optional
+current-session allow `web_robots_policy` evidence to `web_fetch` source
+provenance. This is an implementation candidate pending independent review and
+must not be treated as accepted/current baseline from this branch.
+
 Completed Phase 2 restoration slices at this baseline:
 
 - Slice 0: planning artifacts and static entry gates;
@@ -112,7 +120,8 @@ Completed Phase 2 restoration slices at this baseline:
   fail-closed authority/URL/redirect/DNS checks before target network I/O.
 
 Current next action:
-Start fresh discovery for the next Slice 8 sub-slice after accepted Slice 8E.
+Review the Slice 8F implementation candidate for Web Fetch Robots Evidence
+Linkage Foundation. Slice 8F is pending review and not accepted on this branch.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
 robots policy evidence are accepted.
@@ -1998,6 +2007,58 @@ Accepted validation:
   `21d3d24a7f757b43d3f51599fe35a14e7f0f3633` addressed those findings, and
   final re-review thread `019efc26-2fca-7dc3-abf2-c8d1dbab81b5` returned
   `slice accepted`.
+
+#### Slice 8F Implementation Candidate: Web Fetch Robots Evidence Linkage Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage`.
+Baseline:
+`origin/main@419433985790f35f5ef514e9f508b4f8906d37a1`
+(`docs: accept phase 2 slice 8e`).
+Source handoff thread:
+`019ef914-ed80-78f2-b253-229240d49444`.
+Discovery thread:
+`019efc32-30b1-7811-9959-7e539ba8062f`.
+Status:
+`implementation_candidate_pending_review`.
+
+Candidate scope:
+
+- Keep provider-visible access behind the existing `capability::execute`
+  primitive and the existing `web_fetch` operation.
+- Add optional `web_fetch` inputs `webRobotsPolicyResourceId` and
+  `expectedWebRobotsPolicyVersionId`; both are required together and default
+  non-robots `web_fetch` behavior remains compatible.
+- When the pair is supplied, validate the current-session `web_robots_policy`
+  resource before target HTTP client construction or target network I/O.
+- Fail closed for missing, unreadable, wrong-kind/schema, wrong-session,
+  missing-current-version, stale expected version, malformed payload, origin or
+  target URL mismatch, non-`allow` decision, and insufficient robots-policy
+  grant authority.
+- Persist bounded `robotsPolicyRefs` on resulting `web_source` payloads and
+  expose those refs through `web_source_list` and `web_source_inspect` without
+  robots body previews, body evidence, or sitemap content.
+- Derive and authorize robots-linked fetch grants with `web.read`,
+  `resource.read`, `kind:web_robots_policy`, and existing source write grants
+  only when robots evidence fields are present.
+
+Candidate non-goals:
+
+- No `web_search`, browser automation, crawling, sitemap traversal/fetching,
+  login/cookies/session reuse, public `/engine` web API expansion, native iOS
+  source UI, settings/profile changes, database migrations, deletion/pruning/
+  TTL cleanup, network jobs, or global robots requirement.
+
+Candidate validation target:
+
+- Focused web tests cover allow-linked fetch success, deny/malformed/stale/
+  wrong-kind/wrong-session/wrong-version/non-current/target/origin mismatch
+  denial before target network I/O, default non-robots compatibility, and
+  bounded refs in source list/inspect.
+- Capability, runtime grant, engine authorization, and OpenAI converter tests
+  cover the optional execute schema/guidance and least-privilege grant shape.
+- HRA/TMB/TPC/PCC/SACB/BPRC/IARM/DESI/public-protocol static gates classify the
+  candidate implementation surfaces without accepting Slice 8F as baseline.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

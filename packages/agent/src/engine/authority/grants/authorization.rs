@@ -188,6 +188,10 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("web_fetch") => {
             push_unique(&mut scopes, "resource.write");
             push_unique(&mut scopes, "web.write");
+            if web_fetch_uses_robots_policy(invocation) {
+                push_unique(&mut scopes, "resource.read");
+                push_unique(&mut scopes, "web.read");
+            }
         }
         Some("web_robots_check") => {
             push_unique(&mut scopes, "resource.read");
@@ -249,12 +253,30 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         }
         Some("question_list" | "question_inspect") => vec!["user_question"],
         Some("question_answer") => vec!["user_question", "goal_answer"],
-        Some("web_fetch" | "web_source_list" | "web_source_inspect" | "web_source_archive") => {
+        Some("web_fetch") => {
+            if web_fetch_uses_robots_policy(invocation) {
+                vec!["web_source", "web_robots_policy"]
+            } else {
+                vec!["web_source"]
+            }
+        }
+        Some("web_source_list" | "web_source_inspect" | "web_source_archive") => {
             vec!["web_source"]
         }
         Some("web_robots_check") => vec!["web_robots_policy"],
         _ => Vec::new(),
     }
+}
+
+fn web_fetch_uses_robots_policy(invocation: &Invocation) -> bool {
+    invocation
+        .payload
+        .get("webRobotsPolicyResourceId")
+        .is_some()
+        || invocation
+            .payload
+            .get("expectedWebRobotsPolicyVersionId")
+            .is_some()
 }
 
 fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String> {

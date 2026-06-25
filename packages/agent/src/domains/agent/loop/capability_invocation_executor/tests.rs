@@ -18,6 +18,9 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
 
+#[path = "grant_tests.rs"]
+mod grant_tests;
+
 fn empty_surface() -> ResolvedPrimitiveSurface {
     ResolvedPrimitiveSurface {
         capabilities: Vec::new(),

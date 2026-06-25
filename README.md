@@ -955,7 +955,7 @@ Current primitive operations:
 | `question_list` | List scoped user questions with bounded summaries and explicit truncation metadata. |
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
-| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, producing redacted `web_source` resource/cache evidence with readable HTML/XHTML text extraction when applicable. |
+| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, optionally linking current-session allow `web_robots_policy` evidence by resource/version before target network I/O. |
 | `web_robots_check` | Check one origin `robots.txt` for one requested URL under declared network authority, producing bounded `web_robots_policy` evidence with no sitemap traversal, crawling, search, browser, or login scope. |
 | `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
 | `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
@@ -1076,11 +1076,18 @@ session-scoped `web_robots_policy` evidence with origin, robots URL,
 fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
 version, matched user-agent, allow/deny decision, relevant matched rule,
 sitemap refs as metadata only, authority refs, trace/replay refs, and
-idempotency/cache refs. It fetches only `robots.txt`; sitemap traversal,
-search providers, browser automation, crawling, login/cookies, credential
-reuse, deletion/pruning/automatic TTL cleanup, shell/process network side
-channels, native iOS web UI, and public `/engine` web API expansion remain
-deferred.
+idempotency/cache refs. The Slice 8F implementation candidate keeps robots
+evidence optional for compatibility, but when `web_fetch` receives
+`webRobotsPolicyResourceId` plus `expectedWebRobotsPolicyVersionId` it validates
+the current-session `web_robots_policy` resource, version, origin, target URL,
+and `allow` decision before target HTTP client construction. Robots-linked
+fetch grants add only the needed `web.read`, `resource.read`, and
+`kind:web_robots_policy` authority; source payloads, `web_source_list`, and
+`web_source_inspect` expose bounded `robotsPolicyRefs` without robots body or
+sitemap content. It fetches only `robots.txt`; sitemap traversal, search
+providers, browser automation, crawling, login/cookies, credential reuse,
+deletion/pruning/automatic TTL cleanup, shell/process network side channels,
+native iOS web UI, and public `/engine` web API expansion remain deferred.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.

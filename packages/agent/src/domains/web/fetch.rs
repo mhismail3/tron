@@ -22,6 +22,10 @@ use super::extract::extract_response_text;
 use super::network_policy::{
     SafeDnsResolver, validate_final_url, validate_redirect_target, validate_url,
 };
+use super::robots_link::{
+    RobotsPolicyEvidenceRequest, fetch_result_extra, inspect_fetch_grant, robots_policy_refs_value,
+    validate_fetch_robots_policy,
+};
 use super::{Deps, WEB_LIFECYCLE_TOPIC, WEB_SOURCE_SCHEMA_VERSION, WORKER, WRITE_SCOPE};
 
 const MAX_URL_BYTES: usize = 2_048;
@@ -40,9 +44,15 @@ pub(crate) async fn web_fetch_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let grant = inspect_fetch_grant(deps, invocation).await?;
     let request = FetchRequest::parse(payload)?;
+    let grant = inspect_fetch_grant(deps, invocation, request.robots_policy.as_ref()).await?;
     let parsed = validate_url(&request.url)?;
+    let robots_policy = match request.robots_policy.as_ref() {
+        Some(request) => {
+            Some(validate_fetch_robots_policy(deps, invocation, request, &parsed.url).await?)
+        }
+        None => None,
+    };
     if let Some(existing) = existing_fetch(deps, invocation, &request).await? {
         return Ok(existing);
     }
@@ -139,6 +149,7 @@ pub(crate) async fn web_fetch_value(
             "observedRedirects": redirect_count.load(Ordering::SeqCst),
             "finalUrlChanged": sanitize_url_for_evidence(&parsed.url) != sanitize_url_for_evidence(&final_url)
         },
+        "robotsPolicyRefs": robots_policy_refs_value(robots_policy.as_ref()),
         "authority": {
             "actorId": invocation.causal_context.actor_id.as_str(),
             "authorityGrantId": invocation.causal_context.authority_grant_id.as_str(),
@@ -185,7 +196,12 @@ pub(crate) async fn web_fetch_value(
         .await
         .map_err(engine_error)?;
     let cursor = publish_fetch_event(deps, invocation, &resource).await?;
-    Ok(fetch_result(&resource, cursor.0, false, None))
+    Ok(fetch_result(
+        &resource,
+        cursor.0,
+        false,
+        fetch_result_extra(robots_policy.as_ref()),
+    ))
 }
 
 struct FetchRequest {
@@ -195,6 +211,7 @@ struct FetchRequest {
     max_output_bytes: usize,
     max_redirects: usize,
     idempotency_key: String,
+    robots_policy: Option<RobotsPolicyEvidenceRequest>,
 }
 
 impl FetchRequest {
@@ -224,26 +241,9 @@ impl FetchRequest {
                 .clamp(0, MAX_REDIRECTS),
             idempotency_key: optional_string(payload, "idempotencyKey")?
                 .unwrap_or_else(|| "<context>".to_owned()),
+            robots_policy: RobotsPolicyEvidenceRequest::parse(payload)?,
         })
     }
-}
-
-async fn inspect_fetch_grant(
-    deps: &Deps,
-    invocation: &Invocation,
-) -> Result<crate::engine::EngineGrant, CapabilityError> {
-    let grant = deps
-        .engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-        .await
-        .map_err(|error| internal(format!("inspect web fetch authority grant: {error}")))?
-        .ok_or_else(|| invalid("web_fetch authority grant was not found"))?;
-    if grant.network_policy != "declared" {
-        return Err(invalid(
-            "web_fetch requires an authority grant with networkPolicy declared",
-        ));
-    }
-    Ok(grant)
 }
 
 struct BoundedBody {
@@ -378,14 +378,29 @@ fn source_resource_id(invocation: &Invocation, request: &FetchRequest) -> String
         .idempotency_key
         .as_deref()
         .unwrap_or(&request.idempotency_key);
-    let material = json!({
-        "version": 1,
-        "scope": {
-            "kind": resource_scope(invocation).kind(),
-            "value": resource_scope(invocation).value()
-        },
-        "idempotencyKey": key
-    });
+    let material = if let Some(robots_policy) = request.robots_policy.as_ref() {
+        json!({
+            "version": 1,
+            "scope": {
+                "kind": resource_scope(invocation).kind(),
+                "value": resource_scope(invocation).value()
+            },
+            "idempotencyKey": key,
+            "robotsPolicy": {
+                "resourceId": robots_policy.resource_id,
+                "expectedVersionId": robots_policy.expected_version_id
+            }
+        })
+    } else {
+        json!({
+            "version": 1,
+            "scope": {
+                "kind": resource_scope(invocation).kind(),
+                "value": resource_scope(invocation).value()
+            },
+            "idempotencyKey": key
+        })
+    };
     format!(
         "{WEB_SOURCE_KIND}:{}",
         sha256_hex(
@@ -413,7 +428,12 @@ async fn existing_fetch(
     if inspection.resource.kind != WEB_SOURCE_KIND {
         return Err(invalid("web_fetch idempotency resource kind mismatch"));
     }
-    Ok(Some(fetch_result(&inspection.resource, 0, true, None)))
+    let extra = current_payload(&inspection)
+        .and_then(|payload| payload.get("robotsPolicyRefs"))
+        .and_then(|refs| refs.as_array())
+        .filter(|refs| !refs.is_empty())
+        .map(|refs| json!({"robotsPolicyRefs": refs}));
+    Ok(Some(fetch_result(&inspection.resource, 0, true, extra)))
 }
 
 fn fetch_result(
@@ -516,6 +536,15 @@ fn resource_scope(invocation: &Invocation) -> EngineResourceScope {
                 .map(|workspace| EngineResourceScope::Workspace(workspace.clone()))
         })
         .unwrap_or(EngineResourceScope::System)
+}
+
+fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Option<&Value> {
+    let current = inspection.resource.current_version_id.as_ref()?;
+    inspection
+        .versions
+        .iter()
+        .find(|version| &version.version_id == current)
+        .map(|version| &version.payload)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

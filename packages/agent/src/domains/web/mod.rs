@@ -25,6 +25,7 @@
 //! | `fetch` | Direct bounded URL fetch and source provenance resource writes |
 //! | `network_policy` | URL, redirect-target, and DNS-resolved address safety checks |
 //! | `robots` | Execute-only robots.txt policy check and bounded evidence capture |
+//! | `robots_link` | Fetch-side robots-policy evidence validation and bounded refs |
 //! | `source` | Bounded citation summaries for active and exact archived web sources |
 //!
 //! # INVARIANT: web fetch is explicit and provenance-backed
@@ -48,6 +49,7 @@ mod extract;
 pub(crate) mod fetch;
 mod network_policy;
 pub(crate) mod robots;
+mod robots_link;
 pub(crate) mod source;
 
 pub(crate) const WORKER: &str = "web";

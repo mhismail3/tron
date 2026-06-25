@@ -9,6 +9,7 @@ use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use crate::engine::durability::resources::EngineResourceVersionState;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
     FunctionId, Invocation, ListResources, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
@@ -23,6 +24,8 @@ use crate::shared::server::test_support::make_test_context;
 mod archive_tests;
 #[path = "web_extraction_tests.rs"]
 mod extraction_tests;
+#[path = "web_fetch_robots_link_tests.rs"]
+mod fetch_robots_link_tests;
 #[path = "web_robots_tests.rs"]
 mod robots_tests;
 #[path = "web_source_tests.rs"]
@@ -500,6 +503,32 @@ impl<'a> WebFixture<'a> {
             ],
             &["agent_state", "web_robots_policy"],
             &["kind:agent_state", "kind:web_robots_policy"],
+        )
+        .await
+    }
+
+    async fn new_with_web_and_robots(
+        ctx: &'a ServerRuntimeContext,
+        session_id: &str,
+        network_policy: &str,
+    ) -> Self {
+        Self::new_with_authority(
+            ctx,
+            session_id,
+            network_policy,
+            &[
+                "capability.execute",
+                "web.read",
+                "web.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["agent_state", "web_source", "web_robots_policy"],
+            &[
+                "kind:agent_state",
+                "kind:web_source",
+                "kind:web_robots_policy",
+            ],
         )
         .await
     }

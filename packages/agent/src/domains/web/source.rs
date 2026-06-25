@@ -253,6 +253,7 @@ fn source_summary(
         "snippet": snippet.text,
         "traceRefs": source.get("traceRefs").cloned().unwrap_or_else(|| json!([])),
         "replayRefs": source.get("replayRefs").cloned().unwrap_or_else(|| json!([])),
+        "robotsPolicyRefs": source.get("robotsPolicyRefs").cloned().unwrap_or_else(|| json!([])),
         "archive": source.get("archive").cloned().unwrap_or(Value::Null),
         "resourceRefs": [resource_ref(resource, version, "source")]
     })
@@ -294,6 +295,7 @@ fn source_details(
         "redirects": source.get("redirects").cloned().unwrap_or(Value::Null),
         "traceRefs": source.get("traceRefs").cloned().unwrap_or_else(|| json!([])),
         "replayRefs": source.get("replayRefs").cloned().unwrap_or_else(|| json!([])),
+        "robotsPolicyRefs": source.get("robotsPolicyRefs").cloned().unwrap_or_else(|| json!([])),
         "archive": source.get("archive").cloned().unwrap_or(Value::Null),
         "resourceRefs": [resource_ref(resource, version, "source")],
         "cache": source.get("cache").cloned().unwrap_or(Value::Null)
