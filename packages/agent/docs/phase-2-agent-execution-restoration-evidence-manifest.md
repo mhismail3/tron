@@ -1366,10 +1366,11 @@ Accepted validation recorded on branch and re-review:
 - `git diff --check 9a74084d9ce8b241d8fdf4a7865a683bd04e652c..21d3d24a7f757b43d3f51599fe35a14e7f0f3633`
 - `git ls-files -ci --exclude-standard`
 
-### Slice 8F Implementation Candidate Evidence: Web Fetch Robots Evidence Linkage Foundation
+### Slice 8F Accepted Evidence: Web Fetch Robots Evidence Linkage Foundation
 
 Implementation branch:
-`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage`.
+`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage`; accepted fixed
+branch `codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage-fix1`.
 Baseline:
 `origin/main@419433985790f35f5ef514e9f508b4f8906d37a1`
 (`docs: accept phase 2 slice 8e`).
@@ -1377,12 +1378,23 @@ Source handoff thread:
 `019ef914-ed80-78f2-b253-229240d49444`.
 Discovery thread:
 `019efc32-30b1-7811-9959-7e539ba8062f`.
+Implementation thread:
+`019efc38-4532-7d02-97d2-67149b834f76`.
 Implementation worktree:
 `/Users/<USER>/.codex/worktrees/07b9/tron`.
+First review thread:
+`019efc5c-dead-76c0-8cb3-496dba956a06`.
+Focused fix thread:
+`019efc66-358e-7571-8508-6e691c663e49`.
+Accepting re-review thread:
+`019efc78-a769-76a0-97fe-e75601b0955a`.
 Status:
-`implementation_candidate_pending_review`.
+`accepted`.
+Accepted commits:
+`c01924ba634b64ec0bdb6033bd53dc304b5a94fc` and
+`cb30347b29d7e11d8e0e4210068ee67e6cabd9f0`.
 
-Candidate evidence:
+Accepted evidence:
 
 - Adds `packages/agent/src/domains/web/robots_link.rs` as the fetch-side
   validation boundary for optional robots-policy evidence refs.
@@ -1395,13 +1407,16 @@ Candidate evidence:
 - Requires current kind/schema, current session scope, current expected
   version, checked resource/payload state, matching origin, matching target URL,
   and `policy.decision == "allow"`.
+- Uses a non-displayed canonical target URL fingerprint to enforce exact target
+  identity when visible target URLs are sanitized, including sensitive query
+  parameter values.
 - Persists only bounded `robotsPolicyRefs` into `web_source` payloads and
   exposes those refs through `web_source_list` and `web_source_inspect` without
   robots body previews, body evidence, or sitemap content.
 - Updates runtime grant derivation and central engine authorization so
   robots-linked `web_fetch` gets `web.read`, `resource.read`, and
-  `kind:web_robots_policy` authority only when robots evidence fields are
-  present.
+  `kind:web_robots_policy` authority only when both robots evidence fields are
+  non-empty strings.
 - Preserves default non-robots `web_fetch` compatibility.
 
 Deferred scope remains explicit: no search providers, browser automation,
@@ -1410,7 +1425,7 @@ crawling, sitemap traversal/fetching, login/cookies/session reuse, public
 migrations, deletion/pruning/TTL cleanup, network jobs, or global robots
 requirement.
 
-Candidate validation evidence recorded before independent review:
+Review and validation evidence:
 
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
   exited 0.
@@ -1431,6 +1446,21 @@ Candidate validation evidence recorded before independent review:
 - `git diff --cached --check` exited 0.
 - `git ls-files -ci --exclude-standard` exited 0 and reported no tracked
   ignored files.
+- Initial independent review thread `019efc5c-dead-76c0-8cb3-496dba956a06`
+  returned `changes required`: sanitized target URL comparison could authorize
+  a different sensitive query value, and explicit JSON null robots fields could
+  broaden ordinary fetch grants.
+- Focused fix thread `019efc66-358e-7571-8508-6e691c663e49` committed
+  `cb30347b29d7e11d8e0e4210068ee67e6cabd9f0`, adding exact target fingerprint
+  validation, nullable optional schema handling, parser-aligned grant/authority
+  detection, and deterministic regressions for both findings.
+- Accepting re-review thread `019efc78-a769-76a0-97fe-e75601b0955a` returned
+  `slice accepted` with no findings. Re-review validation passed format,
+  `cargo check`, focused `domains::web`, capability invocation executor,
+  `domains::capability`, OpenAI message converter tests, HRA/TMB/TPC/PCC/SACB/
+  BPRC/IARM/DESI/public-protocol static gates, personal-info guard,
+  `git diff --check 419433985790f35f5ef514e9f508b4f8906d37a1..cb30347b29d7e11d8e0e4210068ee67e6cabd9f0`,
+  and ignored-file scan.
 
 ## Validation Log
 

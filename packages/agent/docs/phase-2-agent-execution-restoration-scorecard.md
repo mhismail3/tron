@@ -75,13 +75,18 @@ loopback rejection, robots module hard-budget split, and `resource.read`
 authority enforcement for `web_robots_policy` cache/evidence reads. Final
 re-review returned `slice accepted` with no findings.
 
-Candidate note: Slice 8F implementation may start from accepted Slice 8E
-closeout baseline `origin/main@419433985790f35f5ef514e9f508b4f8906d37a1`
-(`docs: accept phase 2 slice 8e`). Implementation branch
-`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage` connects optional
-current-session allow `web_robots_policy` evidence to `web_fetch` source
-provenance. This is an implementation candidate pending independent review and
-must not be treated as accepted/current baseline from this branch.
+Closeout note: Slice 8F is accepted after discovery thread
+`019efc32-30b1-7811-9959-7e539ba8062f`, implementation thread
+`019efc38-4532-7d02-97d2-67149b834f76`, first review thread
+`019efc5c-dead-76c0-8cb3-496dba956a06`, focused fix thread
+`019efc66-358e-7571-8508-6e691c663e49`, and accepting re-review thread
+`019efc78-a769-76a0-97fe-e75601b0955a`. Implementation commit
+`c01924ba634b64ec0bdb6033bd53dc304b5a94fc` connected optional current-session
+allow `web_robots_policy` evidence to `web_fetch` source provenance; fix commit
+`cb30347b29d7e11d8e0e4210068ee67e6cabd9f0` added exact target fingerprint
+validation for sanitized sensitive URLs and aligned explicit-null robots fields
+with ordinary fetch grant semantics. Final re-review returned `slice accepted`
+with no findings.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -118,13 +123,16 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 8E: declared-network `web_robots_check` for one origin `robots.txt`,
   bounded `web_robots_policy` evidence, sitemap refs as metadata only, and
   fail-closed authority/URL/redirect/DNS checks before target network I/O.
+- Slice 8F: optional `web_fetch` robots evidence linkage, exact current-session
+  allow policy validation before target network I/O, bounded
+  `robotsPolicyRefs` on source list/inspect, and ordinary fetch compatibility
+  without global robots requirements.
 
 Current next action:
-Review the Slice 8F implementation candidate for Web Fetch Robots Evidence
-Linkage Foundation. Slice 8F is pending review and not accepted on this branch.
+Run fresh discovery for the next Phase 2 slice after accepted Slice 8F.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
-robots policy evidence are accepted.
+robots policy evidence, and Slice 8F robots evidence linkage are accepted.
 Search providers, browser automation, crawling beyond the narrow robots check,
 sitemap traversal, login/cookies/session reuse, native source UI, public
 `/engine` web APIs, network-enabled jobs, autonomous goal execution,
@@ -2008,10 +2016,11 @@ Accepted validation:
   final re-review thread `019efc26-2fca-7dc3-abf2-c8d1dbab81b5` returned
   `slice accepted`.
 
-#### Slice 8F Implementation Candidate: Web Fetch Robots Evidence Linkage Foundation
+#### Slice 8F Accepted: Web Fetch Robots Evidence Linkage Foundation
 
 Implementation branch:
-`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage`.
+`codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage`; accepted fixed
+branch `codex/phase-2-slice-8f-web-fetch-robots-evidence-linkage-fix1`.
 Baseline:
 `origin/main@419433985790f35f5ef514e9f508b4f8906d37a1`
 (`docs: accept phase 2 slice 8e`).
@@ -2019,10 +2028,21 @@ Source handoff thread:
 `019ef914-ed80-78f2-b253-229240d49444`.
 Discovery thread:
 `019efc32-30b1-7811-9959-7e539ba8062f`.
+Implementation thread:
+`019efc38-4532-7d02-97d2-67149b834f76`.
+First review thread:
+`019efc5c-dead-76c0-8cb3-496dba956a06`.
+Focused fix thread:
+`019efc66-358e-7571-8508-6e691c663e49`.
+Accepting re-review thread:
+`019efc78-a769-76a0-97fe-e75601b0955a`.
 Status:
-`implementation_candidate_pending_review`.
+`accepted`.
+Accepted commits:
+`c01924ba634b64ec0bdb6033bd53dc304b5a94fc` and
+`cb30347b29d7e11d8e0e4210068ee67e6cabd9f0`.
 
-Candidate scope:
+Accepted scope:
 
 - Keep provider-visible access behind the existing `capability::execute`
   primitive and the existing `web_fetch` operation.
@@ -2035,30 +2055,39 @@ Candidate scope:
   missing-current-version, stale expected version, malformed payload, origin or
   target URL mismatch, non-`allow` decision, and insufficient robots-policy
   grant authority.
+- Validate exact target identity with a non-displayed canonical target
+  fingerprint while keeping provider-visible target URLs sanitized.
 - Persist bounded `robotsPolicyRefs` on resulting `web_source` payloads and
   expose those refs through `web_source_list` and `web_source_inspect` without
   robots body previews, body evidence, or sitemap content.
 - Derive and authorize robots-linked fetch grants with `web.read`,
   `resource.read`, `kind:web_robots_policy`, and existing source write grants
-  only when robots evidence fields are present.
+  only when both robots evidence fields are non-empty strings; explicit JSON
+  null fields preserve ordinary non-robots fetch semantics.
 
-Candidate non-goals:
+Accepted non-goals:
 
 - No `web_search`, browser automation, crawling, sitemap traversal/fetching,
   login/cookies/session reuse, public `/engine` web API expansion, native iOS
   source UI, settings/profile changes, database migrations, deletion/pruning/
   TTL cleanup, network jobs, or global robots requirement.
 
-Candidate validation target:
+Validation evidence:
 
 - Focused web tests cover allow-linked fetch success, deny/malformed/stale/
   wrong-kind/wrong-session/wrong-version/non-current/target/origin mismatch
-  denial before target network I/O, default non-robots compatibility, and
+  denial before target network I/O, sensitive-query exact-target fingerprint
+  mismatch, default non-robots compatibility, explicit null robots fields, and
   bounded refs in source list/inspect.
 - Capability, runtime grant, engine authorization, and OpenAI converter tests
   cover the optional execute schema/guidance and least-privilege grant shape.
 - HRA/TMB/TPC/PCC/SACB/BPRC/IARM/DESI/public-protocol static gates classify the
-  candidate implementation surfaces without accepting Slice 8F as baseline.
+  accepted implementation surfaces.
+- First review required exact target matching beyond sanitized URL comparison
+  and null-field grant hardening. Focused fix commit
+  `cb30347b29d7e11d8e0e4210068ee67e6cabd9f0` addressed both; accepting
+  re-review thread `019efc78-a769-76a0-97fe-e75601b0955a` returned no
+  findings.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

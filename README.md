@@ -1077,7 +1077,7 @@ fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
 version, matched user-agent, allow/deny decision, relevant matched rule,
 sitemap refs as metadata only, authority refs, trace/replay refs, redacted
 display URLs, an exact canonical target URL fingerprint, and idempotency/cache
-refs. The Slice 8F implementation candidate keeps robots evidence optional for
+refs. The accepted Slice 8F foundation keeps robots evidence optional for
 compatibility, but when `web_fetch` receives `webRobotsPolicyResourceId` plus
 `expectedWebRobotsPolicyVersionId` it validates the current-session
 `web_robots_policy` resource, version, origin, sanitized display target URL,
