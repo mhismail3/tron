@@ -139,7 +139,7 @@ trees, unsafe paths, import preview/execute, repository visualization, update
 diagnostics, and native iOS session/import/tree UI remain deferred to later
 slices.
 
-Slice 14C is a review-candidate foundation for `BPRC-FEATURE-18`. It adds
+Slice 14C is an accepted current-baseline foundation for `BPRC-FEATURE-18`. It adds
 backend-only `domains/update_diagnostics`, the built-in
 `update_diagnostic_record` resource definition, `update_diagnostics.lifecycle`
 stream evidence, and execute-only `update_diagnostic_record`,
@@ -151,7 +151,7 @@ evidence, redacted projections, and fingerprinted idempotency evidence. Raw
 update payloads, package bytes, production endpoint details, installer/restart
 commands, deploy automation, live production update checks, package/catalog
 registration, native iOS update panels, public update APIs, and self-update
-execution remain deferred pending independent review and acceptance.
+execution remain deferred for later slices.
 
 It also maps every BPRC backlog row:
 

@@ -823,15 +823,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-18",
         "system_update",
         "Slice 14C update diagnostics",
-        "pending_review",
+        "current_baseline",
         &[
-            "Slice 14C review candidate adds backend-only `domains/update_diagnostics`",
+            "Accepted Slice 14C adds backend-only `domains/update_diagnostics`",
             "update_diagnostic_record",
             "Raw update payloads, package bytes, production endpoint details",
             "live production update checks, package/catalog registration",
         ],
         &[
-            "Review Candidate Slice 14C: System Update Diagnostics Resource Foundation",
+            "Accepted Slice 14C: System Update Diagnostics Resource Foundation",
             "`domains/update_diagnostics`",
             "`update_diagnostic_record`",
         ],

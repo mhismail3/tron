@@ -1128,8 +1128,8 @@ trace/replay refs; lifecycle evidence; and fingerprinted idempotency evidence.
 They do not store raw import payloads, repository trees, unsafe filesystem
 paths, or provider-visible raw graph payloads. Render hints remain
 `generic_graph` only; native tree UI, import preview/execute behavior,
-repository visualization, and update diagnostics remain later slices.
-Slice 14C is a review-candidate backend foundation for `domains/update_diagnostics`
+repository visualization remain later slices.
+Accepted Slice 14C adds a backend foundation for `domains/update_diagnostics`
 behind the same single `capability::execute` primitive. Update diagnostic
 records are durable `update_diagnostic_record` resources that store bounded
 release identity, diagnostic status, signature status, signed-release
@@ -1365,7 +1365,7 @@ domains such as
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, and `voice_notes` are not registered by default on this branch; the
 only import surface is the bounded `import_history_*` execute foundation.
-Slice 14C adds a review-candidate backend-only `update_diagnostic_record`
+Slice 14C adds an accepted backend-only `update_diagnostic_record`
 metadata foundation; native update panels, live update checks, install/restart
 flows, and deploy automation are still absent.
 

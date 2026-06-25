@@ -2075,20 +2075,36 @@ Accepted validation:
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` and `test ! -e packages/agent/skills` | exit 0 | No ignored tracked files and no repo-managed first-party skills were present. |
 
-### Review Candidate Slice 14C: System Update Diagnostics Resource Foundation
+### Accepted Slice 14C: System Update Diagnostics Resource Foundation
 
-Candidate branch:
+Accepted branch:
 `codex/phase-2-slice-14c-update-diagnostics-resource-foundation`.
 
 Baseline HEAD:
 `a019d083ea2af3dff7f7ce2ddefd7c42c9630c7f`
 
+Accepted commits:
+
+- Implementation `9521cb13b241a9a0c0c759dbdcdae9b199e2eb28`
+  (`feat: add update diagnostics resource foundation`).
+- Selector-enforcement fix `63177bb4646fbec9cab9489b1fc8fc47ff2851c4`
+  (`fix: enforce update diagnostic resource selectors`).
+- SACB inventory fix `c3f434686b1eeed6a60e262c46c1498d8c4fd42c`
+  (`docs: cover update diagnostics grant test in sacb`).
+
 Thread evidence: discovery thread `019f001b-bd16-77a0-a880-7da7df5e8afc`
 selected Slice 14C; implementation thread
-`019f0022-dae1-78c0-85a3-03d8f225cf47` is producing this review-candidate
-implementation. No acceptance is recorded in this section.
+`019f0022-dae1-78c0-85a3-03d8f225cf47` completed the implementation; review
+thread `019f0044-6f18-7f51-ba1c-f66d009c1536` returned `changes required`;
+focused fix thread `019f0047-95af-7eb2-a1ba-1e715b35ef10` fixed
+`updateDiagnosticResourceId` engine-level selector enforcement; re-review
+thread `019f0051-7173-7aa1-bf76-88b9bcd57270` returned `changes required`
+for missing SACB inventory coverage; focused fix thread
+`019f0055-54d9-7990-a4a9-9b1ae9ab0b78` added the missing inventory row; and
+accepting re-review thread `019f005b-0dbc-7c53-89a9-a41a6c1dfda7` returned
+exact verdict `slice accepted`.
 
-Scope pending review:
+Accepted scope:
 
 - Adds `domains/update_diagnostics` as the server owner for durable
   `update_diagnostic_record` resources containing bounded release identity,
@@ -2110,11 +2126,17 @@ Scope pending review:
   automation, no live production update checks, no package/catalog
   registration, no public update APIs, and no native iOS update panel.
 
-Candidate validation:
+Acceptance validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
 | `cargo test --manifest-path packages/agent/Cargo.toml update_diagnostic --lib -- --nocapture` | exit 0 | Focused update-diagnostic domain, projection, idempotency, validation, and runtime-grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml update_diagnostic_resource_id_is_selector_enforced --lib -- --nocapture` | exit 0 | Regression proved `updateDiagnosticResourceId` is extracted by the generic engine authorization scanner and a grant scoped to one `update_diagnostic_record` denies another same-kind resource. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB inventory includes `grant_update_diagnostics_tests.rs` and passed after Fix 2. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` and `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Formatting and Rust check passed; existing provider dead-code warnings were unchanged. |
+| BPRC, DESI, IARM, HRA, TMB, TPC, PCC, CSD, public-protocol, performance-resource, and PMBD gates | exit 0 | Static inventories and provider/protocol surfaces matched accepted Slice 14C scope. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` | exit 0 | No personal-info literals, whitespace errors, ignored tracked files, or repo-managed first-party skills were present. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; accepting re-review found no update/system DRC findings. |
 
 ## Validation Log
 
