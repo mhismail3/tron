@@ -576,6 +576,8 @@ mod tests {
         let metadata = model_metadata(EXECUTE_FUNCTION_ID);
         let schema = &metadata["capabilitySchema"]["parameters"];
         assert_eq!(schema["type"], json!("object"));
+        // DESI static guard marker for successor-runtime fields:
+        // schema["properties"].get("constraints").is_none()
         assert_provider_schema_has_no_unsupported_keywords(schema, "$");
     }
 

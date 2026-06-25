@@ -13,6 +13,11 @@ use crate::engine::{
 };
 use crate::shared::server::test_support::make_test_context;
 
+#[path = "tool_sources_inspect_tests.rs"]
+mod inspect;
+#[path = "tool_sources_validation_tests.rs"]
+mod validation_tests;
+
 #[tokio::test]
 async fn internal_proposal_creation_records_bounded_inert_resource() {
     let fixture = Fixture::new("proposal-create").await;
@@ -216,19 +221,6 @@ async fn proposal_validation_rejects_string_valued_activation_intent() {
 }
 
 #[tokio::test]
-async fn proposal_validation_allows_inert_non_activation_prose() {
-    let fixture = Fixture::new("proposal-inert-prose").await;
-    let mut payload = proposal_payload();
-    payload["sourceIdentity"]["note"] = json!("registration is forbidden until a later slice");
-    payload["sandboxPolicy"]["reviewNote"] = json!("no catalog registration");
-    payload["declaredTools"][0]["description"] = json!("metadata only; do not execute tool");
-    payload["expectedLinkage"]["operatorNote"] = json!("without launch or install authority");
-
-    let result = fixture.create_proposal("inert-prose", payload).await;
-    assert_eq!(result["activation"]["performed"], json!(false));
-}
-
-#[tokio::test]
 async fn conformance_report_links_to_proposal_without_activation() {
     let fixture = Fixture::new("proposal-report").await;
     let proposal = fixture
@@ -269,6 +261,12 @@ async fn conformance_report_links_to_proposal_without_activation() {
     let payload = current_payload(&inspection);
     assert_eq!(payload["toolSourceProposalResourceId"], json!(proposal_id));
     assert_eq!(payload["status"], json!("passed"));
+
+    let inspected = fixture.inspect("report-inspect", report_id).await;
+    assert_eq!(
+        inspected["resource"]["kind"],
+        json!(TOOL_SOURCE_CONFORMANCE_REPORT_KIND)
+    );
 }
 
 #[tokio::test]

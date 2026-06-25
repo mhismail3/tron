@@ -1476,10 +1476,13 @@ Slice 9A implementation evidence:
   idempotency, and revision fields.
 - Focused validation command
   `cargo test --manifest-path packages/agent/Cargo.toml tool_sources -- --nocapture`
-  exited 0 with 9 passed tests, covering internal authority, agent/bootstrap/
-  wildcard denial, idempotency, session isolation, secret rejection, unsafe path
-  rejection, schema bounding, report creation, resource definitions, and static
-  non-goal guards.
+  exited 0 with 16 passed tests on the current Slice 9A candidate, covering
+  internal authority, agent/bootstrap/wildcard denial, idempotency, session
+  isolation, secret rejection, unsafe path rejection, schema bounding, passive
+  and noun activation-intent rejection, inert prohibition prose, report
+  creation and normal inspect, fail-closed stored kind/schema checks for
+  `tool_source_inspect`, resource definitions, and static non-goal guards. This
+  remains candidate validation pending review, not Slice 9A acceptance.
 
 ## Validation Log
 

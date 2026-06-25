@@ -362,6 +362,7 @@ pub(crate) async fn inspect_tool_source_value(
         .await
         .map_err(engine_error)?
         .ok_or_else(|| invalid(format!("missing tool source resource {resource_id}")))?;
+    ensure_tool_source_resource(&inspection, resource_kind, "tool_source_inspect")?;
     ensure_scope(&inspection, &scope, "tool_source_inspect")?;
     let (version, payload) = current_payload(&inspection, "tool_source_inspect")?;
     Ok(json!({
@@ -549,14 +550,29 @@ fn ensure_tool_source_proposal(
     inspection: &EngineResourceInspection,
     operation: &str,
 ) -> Result<(), CapabilityError> {
-    if inspection.resource.kind != TOOL_SOURCE_PROPOSAL_KIND {
-        return Err(invalid(format!(
-            "{operation} expected {TOOL_SOURCE_PROPOSAL_KIND}"
-        )));
+    ensure_tool_source_resource(inspection, TOOL_SOURCE_PROPOSAL_KIND, operation)
+}
+
+pub(super) fn ensure_tool_source_resource(
+    inspection: &EngineResourceInspection,
+    expected_kind: &str,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    let expected_schema = match expected_kind {
+        TOOL_SOURCE_PROPOSAL_KIND => TOOL_SOURCE_PROPOSAL_SCHEMA_ID,
+        TOOL_SOURCE_CONFORMANCE_REPORT_KIND => TOOL_SOURCE_CONFORMANCE_REPORT_SCHEMA_ID,
+        _ => {
+            return Err(invalid(format!(
+                "{operation} expected supported tool source resource kind"
+            )));
+        }
+    };
+    if inspection.resource.kind != expected_kind {
+        return Err(invalid(format!("{operation} expected {expected_kind}")));
     }
-    if inspection.resource.schema_id.as_str() != TOOL_SOURCE_PROPOSAL_SCHEMA_ID {
+    if inspection.resource.schema_id.as_str() != expected_schema {
         return Err(invalid(format!(
-            "{operation} expected schema {TOOL_SOURCE_PROPOSAL_SCHEMA_ID}"
+            "{operation} expected schema {expected_schema}"
         )));
     }
     Ok(())

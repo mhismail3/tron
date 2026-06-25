@@ -5,7 +5,8 @@
 //! `tool_source_proposal` and `tool_source_conformance_report` records after
 //! validation. Agent-visible access remains read-only through
 //! `capability::execute` operation values `tool_source_list` and
-//! `tool_source_inspect`.
+//! `tool_source_inspect`; inspect revalidates stored resource kind/schema
+//! before projecting payloads.
 //!
 //! ## Submodules
 //!
@@ -21,7 +22,9 @@
 //! tools, execute declared tools, crawl/login/search the web, or decide trust.
 //! Records preserve source identity, provenance, sandbox intent, schema/tool
 //! metadata, expected worker/package linkage, trace/replay refs, lifecycle
-//! state, and bounded evidence for later inspection.
+//! state, and bounded evidence for later inspection. Retained proposal strings
+//! may describe inert provenance or prohibitions, but not active, passive, or
+//! nominal install/enable/register/launch/execute intent.
 
 #![allow(dead_code)]
 

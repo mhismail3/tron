@@ -1104,12 +1104,14 @@ idempotency, source identity, provenance, sandbox policy, declared tool/schema
 metadata, expected worker/package linkage, trace/replay refs, and evidence
 refs. Proposal validation rejects inline secrets, credential-looking values,
 unsafe paths, unbounded schemas, wildcard sandbox authority, execution fields
-such as command or env, and activation/registration intent. Agent-visible access
+such as command or env, and active/passive/noun activation or registration
+intent while preserving explicit inert prohibition prose. Agent-visible access
 is read-only through `tool_source_list` and `tool_source_inspect` under
 `capability::execute`; those operations require current-session context,
 `tool_sources.read`, `resource.read`, explicit resource-kind grants plus
-matching `kind:tool_source_*` selectors, and `networkPolicy: none`, and they
-return bounded/redacted resource evidence without network I/O. Slice 9A does
+matching `kind:tool_source_*` selectors, stored kind/schema revalidation, and
+`networkPolicy: none`, and they return bounded/redacted resource evidence
+without network I/O. Slice 9A does
 not start or restart MCP servers, install packages, register catalog tools,
 execute proposed tools, promote trust, change worker lifecycle behavior, add
 browser/search/crawl/login scope, expand public `/engine` APIs, or add native

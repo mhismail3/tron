@@ -295,12 +295,21 @@ fn contains_activation_intent(text: &str) -> bool {
                 .get(index + 1)
                 .is_some_and(|next| next == "registration" || next == "register")
             && !has_negated_context(&tokens, index)
+            && !has_negated_context(&tokens, index + 1)
         {
             return true;
         }
         if is_activation_verb(token)
             && !has_negated_context(&tokens, index)
             && has_activation_target(&tokens, index, check_len)
+        {
+            return true;
+        }
+        if is_activation_state_or_nominal(token)
+            && !has_negated_context(&tokens, index)
+            && has_activation_target_around(&tokens, index, check_len)
+            && (is_activation_participle(token)
+                || has_passive_activation_cue(&tokens, index, check_len))
         {
             return true;
         }
@@ -339,6 +348,43 @@ fn is_activation_verb(token: &str) -> bool {
     )
 }
 
+fn is_activation_state_or_nominal(token: &str) -> bool {
+    matches!(
+        token,
+        "activation"
+            | "activated"
+            | "registration"
+            | "registered"
+            | "install"
+            | "installation"
+            | "installed"
+            | "enablement"
+            | "enabled"
+            | "execution"
+            | "executed"
+            | "start"
+            | "started"
+            | "restart"
+            | "restarted"
+            | "launch"
+            | "launched"
+    )
+}
+
+fn is_activation_participle(token: &str) -> bool {
+    matches!(
+        token,
+        "activated"
+            | "registered"
+            | "installed"
+            | "enabled"
+            | "executed"
+            | "started"
+            | "restarted"
+            | "launched"
+    )
+}
+
 fn has_activation_target(tokens: &[String], index: usize, check_len: usize) -> bool {
     let end = (index + 7).min(check_len);
     tokens[index + 1..end]
@@ -371,14 +417,126 @@ fn has_activation_target(tokens: &[String], index: usize, check_len: usize) -> b
         })
 }
 
-fn has_negated_context(tokens: &[String], index: usize) -> bool {
+fn has_activation_target_around(tokens: &[String], index: usize, check_len: usize) -> bool {
+    has_activation_target(tokens, index, check_len) || has_activation_target_before(tokens, index)
+}
+
+fn has_activation_target_before(tokens: &[String], index: usize) -> bool {
+    let start = index.saturating_sub(6);
+    tokens[start..index]
+        .iter()
+        .rev()
+        .filter(|token| {
+            !matches!(
+                token.as_str(),
+                "a" | "an" | "the" | "this" | "that" | "new" | "should" | "be"
+            )
+        })
+        .any(|token| {
+            matches!(
+                token.as_str(),
+                "mcp"
+                    | "server"
+                    | "servers"
+                    | "package"
+                    | "packages"
+                    | "plugin"
+                    | "plugins"
+                    | "tool"
+                    | "tools"
+                    | "worker"
+                    | "workers"
+                    | "process"
+                    | "processes"
+                    | "command"
+                    | "commands"
+                    | "catalog"
+                    | "source"
+                    | "sources"
+                    | "extension"
+                    | "extensions"
+            )
+        })
+}
+
+fn has_passive_activation_cue(tokens: &[String], index: usize, check_len: usize) -> bool {
     let start = index.saturating_sub(4);
-    tokens[start..index].iter().any(|token| {
+    let end = (index + 5).min(check_len);
+    tokens[start..end].iter().any(|token| {
         matches!(
             token.as_str(),
-            "no" | "not" | "never" | "without" | "forbid" | "forbidden" | "deny" | "denied"
+            "requested"
+                | "request"
+                | "requests"
+                | "required"
+                | "requires"
+                | "require"
+                | "should"
+                | "must"
+                | "will"
+                | "needs"
+                | "needed"
+                | "pending"
+                | "planned"
+                | "approved"
+                | "ready"
+                | "is"
+                | "are"
+                | "was"
+                | "were"
+                | "be"
+                | "been"
+                | "being"
         )
     })
+}
+
+fn has_negated_context(tokens: &[String], index: usize) -> bool {
+    let start = index.saturating_sub(4);
+    let before = tokens[start..index].iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "no" | "not"
+                | "never"
+                | "without"
+                | "forbid"
+                | "forbidden"
+                | "prohibit"
+                | "prohibited"
+                | "disallow"
+                | "disallowed"
+                | "deny"
+                | "denied"
+                | "reject"
+                | "rejected"
+                | "block"
+                | "blocked"
+        )
+    });
+    let after_end = (index + 5).min(tokens.len());
+    before
+        || tokens[index.saturating_add(1)..after_end]
+            .iter()
+            .any(|token| {
+                matches!(
+                    token.as_str(),
+                    "not"
+                        | "never"
+                        | "without"
+                        | "forbid"
+                        | "forbidden"
+                        | "prohibit"
+                        | "prohibited"
+                        | "disallow"
+                        | "disallowed"
+                        | "deny"
+                        | "denied"
+                        | "reject"
+                        | "rejected"
+                        | "block"
+                        | "blocked"
+                )
+            })
 }
 
 fn validate_sandbox_policy(value: &Value) -> Result<(), CapabilityError> {
