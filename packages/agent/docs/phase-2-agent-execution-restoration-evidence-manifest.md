@@ -2201,18 +2201,29 @@ visualization, no import preview/execute behavior, no native iOS tree UI, no
 git mutation workflows, no public `/engine` expansion, and no deployment
 automation.
 
-## Slice 14E Import Preview Resource Foundation Implementation Candidate
+### Accepted Slice 14E: Import Preview Resource Foundation
 
-Implementation thread:
-current Codex implementation thread.
+Discovery thread `019f009e-2ab7-7d10-83ca-1a73cc676b25` selected Slice 14E
+with exact final status `implementation may start` from baseline
+`origin/main@f1e5ee33031049669817acf2e50951d3b27eb90c`. Implementation
+thread `019f00a2-2724-7621-8935-8ec4696e1b50` completed with exact final
+status `implementation complete` at
+`a5129ba3a536b23d08a743c64b044135505584d6`. Independent review thread
+`019f00ba-9265-79f2-b90b-89b66b572a90` returned exact verdict
+`changes required` for unconstrained import-preview lineage refs and missing
+SACB coverage. Focused fix thread
+`019f00c1-7689-7a01-a08b-32a60f8667b6` completed with exact final status
+`fix ready for review` at `ee49469bd4cf1b0c506bfe3bc90f3547476d992c`.
+Independent re-review thread `019f00cb-82bd-7851-98c7-35b95cb4f2d4`
+returned exact verdict `slice accepted`.
 
-Implementation branch:
+Accepted branch:
 `codex/phase-2-slice-14e-import-preview-resource-foundation`.
 
 Baseline HEAD:
 `f1e5ee33031049669817acf2e50951d3b27eb90c`
 
-Review-candidate scope:
+Accepted scope:
 
 - Adds `domains/import_preview` as the server owner for durable
   `import_preview` resources containing content-free import preview metadata
@@ -2237,12 +2248,16 @@ Review-candidate scope:
   no repository visualization, no native iOS import/tree UI, and no git mutation
   workflows.
 
-Implementation validation captured so far:
+Accepted validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
 | `cargo test --manifest-path packages/agent/Cargo.toml import_preview --lib -- --nocapture` | exit 0 | Focused import-preview domain, projection, idempotency, validation, authorization scanner, and runtime-grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB passed after Fix 1 added the missing import-preview security-marker rows. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, focused import-preview tests, SACB, and adjacent resource/provider/static gates | exit 0 | Accepting re-review verified branch/head/ancestry, wrong-kind and wrong-prefix lineage ref rejection before persistence, no persisted resources on invalid refs, provider-visible bounded/redacted projections, selector coverage, and SACB inventory coverage at `ee49469bd4cf1b0c506bfe3bc90f3547476d992c`. |
+| HRA, TMB, TPC/PCC, DESI, PMBD, public-protocol, performance-resource, resource contract, personal-info guard, `git diff --check`, ignored-file check, and no-managed-skills check | exit 0 | Static inventories, provider/protocol/resource/performance surfaces, hygiene, and no repo-managed first-party skills matched accepted Slice 14E scope. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; accepting re-review found no import-preview/import-history/repository DRC findings. |
 
 Deferred scope remains unchanged: actual import execution/application, native
 import/tree UI, repository visualization, file writes, git mutation workflows,

@@ -2422,8 +2422,9 @@ Implementation status: Accepted Slice 14A media artifact and voice-note
 resource foundation and accepted Slice 14B import/session-resource graph
 foundation are current baseline. Accepted Slice 14C update diagnostics is also
 current baseline. Accepted Slice 14D repository-tree snapshot metadata is also
-current baseline. Slice 14 remains split because media, imports, repository
-trees, and system updates are separate families.
+current baseline. Accepted Slice 14E import-preview metadata is also current
+baseline. Slice 14 remains split because media, imports, repository trees, and
+system updates are separate families.
 
 Objective: restore lower-priority product surfaces only after the core
 agent-execution patterns are proven.
@@ -2437,7 +2438,8 @@ installer/restart flows, deploy automation, live production update checks,
 native update panels, and native media UX remain later work. Slice 14C only
 adds backend metadata custody for signed-release/update diagnostic evidence.
 Slice 14D only adds backend metadata custody for content-free repository-tree
-snapshot evidence.
+snapshot evidence. Slice 14E only adds backend metadata custody for
+content-free import-preview evidence.
 
 True primitives: artifact resources, storage refs, replay, settings parity,
 approval, and package-specific events.
@@ -2449,8 +2451,11 @@ bounded import provenance metadata, redacted projections, and lifecycle
 evidence. Repository-tree package owns content-free repository/root/head/tree
 refs, bounded relative path metadata, redacted projections, and lifecycle
 evidence; import execution and native tree rendering remain outside the
-accepted scope. Update package owns signed update checks and never
-production deployment; accepted Slice 14C records bounded metadata only
+accepted scope. Import-preview package owns content-free links between
+import-history and repository-tree refs, bounded preview metadata, redacted
+projections, and lifecycle evidence; actual import execution and application
+remain outside the accepted scope. Update package owns signed update checks and
+never production deployment; accepted Slice 14C records bounded metadata only
 and performs no live check, installation, restart, catalog registration, or
 deployment.
 
@@ -2466,7 +2471,7 @@ narrowing, provider schema/instruction text, README, and static inventories.
 Slice 14D accepts `domains/repository_tree`, built-in
 `repository_tree_snapshot` resource definition, execute adapters, runtime
 grant narrowing, provider schema/instruction text, README, and static
-inventories. Slice 14E review candidate adds `domains/import_preview`, built-in
+inventories. Slice 14E accepts `domains/import_preview`, built-in
 `import_preview` resource definition, execute adapters, runtime grant
 narrowing, provider schema/instruction text, README, and static inventories for
 content-free preview metadata only. Future Slice 14 sub-slices still own actual
@@ -2499,16 +2504,16 @@ current-session/workspace scope, lifecycle and trace/replay evidence,
 redacted projections, fingerprinted idempotency evidence, deterministic
 injected timestamps with no repository-tree DRC finding, and no raw file
 contents, blob bytes, absolute paths, repository visualization, import
-preview/execute, native tree UI, or git mutation workflows. Slice 14E review
-candidate requires content-free `import_preview` metadata only, exact
+preview/execute, native tree UI, or git mutation workflows. Accepted Slice 14E
+requires content-free `import_preview` metadata only, exact
 `import_preview` authority/selectors including `importPreviewResourceId`
-scanner coverage, trusted current-session/workspace scope, lifecycle and
-trace/replay evidence, redacted projections, fingerprinted idempotency
-evidence, deterministic injected timestamps with no import-preview or
-repository/import DRC finding, and no raw import payloads, raw preview payloads,
-raw file contents, blob bytes, raw repository contents, absolute paths, unsafe
-paths, import execution, repository visualization, native import/tree UI, or git
-mutation workflows.
+scanner coverage, constrained import-history and repository-tree lineage refs,
+trusted current-session/workspace scope, lifecycle and trace/replay evidence,
+redacted projections, fingerprinted idempotency evidence, deterministic
+injected timestamps with no import-preview or repository/import DRC finding,
+and no raw import payloads, raw preview payloads, raw file contents, blob bytes,
+raw repository contents, absolute paths, unsafe paths, import execution,
+repository visualization, native import/tree UI, or git mutation workflows.
 Broader Slice 14
 acceptance still requires storage/migration/retention policy, settings parity,
 event schemas, dependency review, iOS parity decision, and no deploy
@@ -2527,12 +2532,13 @@ and no raw update/package/endpoint/command leakage. Slice 14D accepted
 tests cover repository-tree resource schema, authority/scope isolation,
 bounded content-free path metadata projections, path normalization/rejection,
 lifecycle evidence, idempotency fingerprint redaction, deterministic timestamp
-handling, and no raw content/path/authority leakage. Slice 14E review-candidate
-tests cover import-preview resource schema, authority/scope isolation,
+handling, and no raw content/path/authority leakage. Slice 14E accepted tests
+cover import-preview resource schema, authority/scope isolation,
 provider-visible bounded/redacted linked refs, path normalization/rejection,
-resource selector enforcement, lifecycle evidence, idempotency fingerprint
-redaction, deterministic timestamp handling, and no raw payload/content/path
-leakage. Later Slice 14 sub-slices cover import execution, live update
+wrong-kind and wrong-prefix lineage ref rejection, resource selector
+enforcement, lifecycle evidence, idempotency fingerprint redaction,
+deterministic timestamp handling, and no raw payload/content/path leakage.
+Later Slice 14 sub-slices cover import execution, live update
 execution, settings
 parity, migration rollback, and iOS decoder tests.
 

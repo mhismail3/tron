@@ -1003,9 +1003,9 @@ Current primitive operations:
 | `repository_tree_snapshot` | Accepted Slice 14D operation that records one scoped `repository_tree_snapshot` resource for content-free repository tree metadata only, with repository/root/head refs, tree object refs, bounded normalized relative path metadata, aggregate counts, source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw file contents, blob bytes, absolute paths, unbounded tree dumps, repository visualization, or git mutation. |
 | `repository_tree_list` | Accepted Slice 14D operation that lists scoped `repository_tree_snapshot` resources as bounded/redacted metadata projections with counts and path previews only. |
 | `repository_tree_inspect` | Accepted Slice 14D operation that inspects one scoped `repository_tree_snapshot` after stored kind/schema/scope revalidation, returning bounded/redacted repository tree metadata, refs, lifecycle evidence, and content-free proof without raw repository contents, unsafe paths, or raw authority ids. |
-| `import_preview_record` | Slice 14E review-candidate operation that records one scoped `import_preview` resource for content-free import preview metadata only, linking import-history and repository-tree refs with bounded relative path metadata, counts, summaries, source/evidence refs, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, preview payloads, file contents, repository contents, import execution, visualization, or git mutation. |
-| `import_preview_list` | Slice 14E review-candidate operation that lists scoped `import_preview` resources as bounded/redacted metadata projections with linked import-history/repository-tree refs, counts, summaries, and path previews only. |
-| `import_preview_inspect` | Slice 14E review-candidate operation that inspects one scoped `import_preview` after stored kind/schema/scope revalidation, returning bounded/redacted preview metadata, refs, lifecycle evidence, and content-free proof without raw payloads, raw contents, unsafe paths, or raw authority ids. |
+| `import_preview_record` | Accepted Slice 14E operation that records one scoped `import_preview` resource for content-free import preview metadata only, linking import-history and repository-tree refs with bounded relative path metadata, counts, summaries, source/evidence refs, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw import payloads, preview payloads, file contents, repository contents, import execution, visualization, or git mutation. |
+| `import_preview_list` | Accepted Slice 14E operation that lists scoped `import_preview` resources as bounded/redacted metadata projections with linked import-history/repository-tree refs, counts, summaries, and path previews only. |
+| `import_preview_inspect` | Accepted Slice 14E operation that inspects one scoped `import_preview` after stored kind/schema/scope revalidation, returning bounded/redacted preview metadata, refs, lifecycle evidence, and content-free proof without raw payloads, raw contents, unsafe paths, or raw authority ids. |
 | `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
 | `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
@@ -1157,7 +1157,7 @@ unbounded repository tree dumps, raw import payloads, unsafe paths,
 repository visualization state, git mutation state, or provider-visible raw
 tree payloads. Native tree UI, import preview/execute behavior, repository
 visualization, and git mutation workflows remain deferred.
-Slice 14E is a review-candidate backend-only `domains/import_preview`
+Accepted Slice 14E adds a backend-only `domains/import_preview`
 foundation behind `capability::execute`. Import preview records are durable
 `import_preview` resources that link bounded `import_history_record` and
 `repository_tree_snapshot` refs with preview fingerprints, normalized relative
@@ -1400,7 +1400,7 @@ Slice 14D adds an accepted backend-only
 `repository_tree_snapshot` metadata foundation; raw file contents, blob bytes,
 absolute paths, repository visualization, import preview/execute, native tree
 UI, and git mutation workflows remain absent.
-Slice 14E adds a review-candidate backend-only `import_preview` metadata
+Slice 14E adds an accepted backend-only `import_preview` metadata
 foundation; actual import execution/application, native import/tree UI,
 repository visualization, file writes, and git mutation workflows remain
 absent.
