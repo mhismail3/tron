@@ -1823,6 +1823,9 @@ packages/agent/src/domains/notifications/delivery.rs	implementation	notification
 packages/agent/src/domains/notifications/mod.rs	implementation	notifications	TPC-10/P2AER-S13	notification domain docs and registration boundary for server-owned inbox foundation
 packages/agent/src/domains/notifications/projection.rs	implementation	notifications	TPC-10/P2AER-S13	bounded notification list inspect read state badge and delivery projection owner
 packages/agent/src/domains/notifications/service.rs	implementation	notifications	TPC-10/P2AER-S13	durable notification send list inspect mark-read and mark-all-read operation owner
-packages/agent/src/domains/notifications/tests.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification inbox read badge delivery evidence authority and scope coverage
+packages/agent/src/domains/notifications/tests/authority.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification authority denial push device-read and scope coverage
+packages/agent/src/domains/notifications/tests/inbox.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification inbox badge delivery evidence timestamp and token-redaction coverage
+packages/agent/src/domains/notifications/tests/mod.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification split test module root coverage
+packages/agent/src/domains/notifications/tests/support.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification deterministic fixture grant device and leak assertion support
 packages/agent/src/domains/notifications/validation.rs	implementation	notifications	TPC-10/P2AER-S13	notification payload bounds family severity refs and retention validation helpers
 packages/agent/src/engine/durability/resources/notification_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S13	built-in device_registration notification and notification_delivery resource schemas

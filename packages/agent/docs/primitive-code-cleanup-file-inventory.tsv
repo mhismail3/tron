@@ -1868,6 +1868,9 @@ packages/agent/src/domains/notifications/delivery.rs	retain	notifications owner	
 packages/agent/src/domains/notifications/mod.rs	retain	notifications owner	PCC-10/P2AER-S13	Notifications domain facade and docs retained for server-owned inbox foundation.
 packages/agent/src/domains/notifications/projection.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification inbox read-state badge and delivery projections retained.
 packages/agent/src/domains/notifications/service.rs	retain	notifications owner	PCC-10/P2AER-S13	Durable notification send list inspect read-state operation owner retained.
-packages/agent/src/domains/notifications/tests.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification inbox badge delivery authority and scope tests retained.
+packages/agent/src/domains/notifications/tests/authority.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification authority denial and scope isolation tests retained.
+packages/agent/src/domains/notifications/tests/inbox.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification inbox badge delivery timestamp and token-redaction tests retained.
+packages/agent/src/domains/notifications/tests/mod.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification split test module root retained.
+packages/agent/src/domains/notifications/tests/support.rs	retain	notifications test owner	PCC-10/P2AER-S13	Notification deterministic fixture grant device and token-leak assertion helpers retained.
 packages/agent/src/domains/notifications/validation.rs	retain	notifications owner	PCC-10/P2AER-S13	Notification payload family severity refs and retention validation retained.
 packages/agent/src/engine/durability/resources/notification_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S13	Device registration notification and notification delivery resource schemas retained.
