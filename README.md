@@ -980,9 +980,7 @@ provider-visible execute surface; file access goes through the hardened
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, `web`, and model-provider modules. The pending Slice 9A
-implementation candidate adds `tool_sources`, but it is not part of this
-accepted baseline before orchestration acceptance. The
+`worker_lifecycle`, `web`, `tool_sources`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
@@ -1095,9 +1093,9 @@ traversal, search providers, browser automation, crawling, login/cookies,
 credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
 side channels, native iOS web UI, and public `/engine` web API expansion remain
 deferred.
-The Slice 9A implementation candidate adds the `tool_sources` domain as an
-inert external source-proposal and provenance boundary pending review, not yet
-an accepted baseline. Trusted internal system/admin callers can create
+The accepted Slice 9A foundation adds the `tool_sources` domain as an inert
+external source-proposal and provenance boundary. Trusted internal system/admin
+callers can create
 resource-backed `tool_source_proposal` records and bounded
 `tool_source_conformance_report` evidence only with derived non-bootstrap
 `tool_sources.propose` and `resource.write` authority, explicit non-wildcard

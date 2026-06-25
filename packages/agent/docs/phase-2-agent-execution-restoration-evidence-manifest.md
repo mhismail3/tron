@@ -1464,25 +1464,106 @@ Review and validation evidence:
 
 Slice 9A implementation evidence:
 
+Accepted status: current baseline after independent review/fix loops and
+mainline integration. Final accepted branch head:
+`2c472ed7ded121e1e2210156d89526b70e28ad65`
+(`fix: complete tool source static inventories`).
+
+Threads and commits:
+
+- Discovery thread `019efc87-5b5f-7cd0-82c8-9491b6266377` selected Slice 9A
+  from baseline `6b3512a4280e0f1c43b3e7bfad813fe86f0ce8c4` with no docs
+  changes and verdict `implementation may start`.
+- Implementation thread `019efc8e-09dc-7b61-9b63-1a7df6fbe99a`, worktree
+  `/Users/<USER>/.codex/worktrees/0f97/tron`, committed
+  `2bd51fcf38d68720ee4ed25937b393b8450ecbe0`
+  (`feat: add tool source proposal provenance`).
+- Initial review thread `019efca9-05e9-7b43-8c88-3396f57dd791` returned
+  `changes required` for missing `tool_source_conformance_report`
+  resource-kind authority, string-valued activation/registration intent, and
+  premature docs acceptance wording. Stopped fix thread
+  `019efcb2-2ced-7ae0-8554-227d5b40fe0c` returned no actionable blocker and
+  was replaced.
+- Replacement fix thread `019efcb6-9530-7dc1-b515-789ab8e656a1`, worktree
+  `/Users/<USER>/.codex/worktrees/e30d/tron`, committed
+  `788b105980b59d73b5e0c05eb682c81b669827ad`
+  (`fix: tighten tool source report provenance guards`).
+- Re-review thread `019efcc2-007f-79c1-87f8-a9200369f79f` returned
+  `changes required` for inspect trusting resource id prefix over stored
+  kind/schema, passive/noun activation intent gaps, and stale evidence counts.
+- Focused fix thread `019efcca-8dcc-70c1-b401-4af360bbab38`, worktree
+  `/Users/<USER>/.codex/worktrees/44c9/tron`, committed
+  `8fcb3051dc0359e558ffac9dfe77f525709f1c92`
+  (`fix: harden tool source provenance checks`).
+- Re-review thread `019efce1-b995-70e1-95a2-2de9644d7e2e` returned
+  `changes required` for missing static inventory rows for the split inspect
+  and validation test files plus premature README baseline wording.
+- Focused fix thread `019efcea-c8e6-7a70-ae89-d96942d4aaa0`, worktree
+  `/Users/<USER>/.codex/worktrees/b8fd/tron`, committed
+  `2c472ed7ded121e1e2210156d89526b70e28ad65`
+  (`fix: complete tool source static inventories`).
+- Accepting re-review thread `019efcf5-050b-7320-b9ce-d4b248f4c61d`, worktree
+  `/Users/<USER>/.codex/worktrees/c2b1/tron`, returned `slice accepted` with
+  no findings.
+
+Accepted scope:
+
 - Adds `domains/tool_sources` as an inert proposal/provenance boundary with
   internal trusted-only `tool_source_proposal` and
   `tool_source_conformance_report` resource creation.
 - Adds read-only `capability::execute` operations `tool_source_list` and
   `tool_source_inspect`; no provider-visible proposal, install, launch,
-  registration, MCP start, or tool execution operation is introduced.
+  registration, MCP start/restart, catalog registration, trust promotion, or
+  tool execution operation is introduced.
 - Adds built-in resource definitions for `tool_source_proposal` and
   `tool_source_conformance_report` with required source identity, provenance,
   sandbox policy, declared metadata, authority, trace/replay/evidence refs,
   idempotency, and revision fields.
-- Focused validation command
+- Requires trusted internal system/admin authority, derived non-bootstrap
+  grants, explicit non-wildcard resource-kind grants, idempotency, and
+  `networkPolicy: none` before proposal/report creation.
+- Rejects inline secrets, credential-looking values, unsafe paths, unbounded
+  schemas, wildcard sandbox authority, command/env execution fields, and active,
+  passive, or noun-form activation/registration intent while preserving
+  explicit inert prohibition prose.
+- Revalidates stored resource kind/schema during inspect and conformance report
+  linkage rather than trusting resource id prefixes.
+- Covers split `tool_sources` test files in SACB, HRA file inventory, HRA
+  current ownership, TPC TSV/count summary, and PCC inventories.
+
+Deferred scope remains explicit: no MCP process start/restart/enable/disable,
+package install/update/uninstall, catalog registration, proposed-tool
+execution, provider-visible self-proposal, public `/engine` expansion,
+browser/search/crawl/login scope, network-enabled jobs, native iOS fixed UI, or
+grant broadening beyond existing `capability::execute`.
+
+Review and validation evidence:
+
+- Implementation validation passed `cargo fmt --manifest-path
+  packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path
+  packages/agent/Cargo.toml`, focused `cargo test --manifest-path
+  packages/agent/Cargo.toml tool_sources -- --nocapture` with 13 tests before
+  later regression additions, SACB/HRA/TMB/TPC/PCC/BPRC/IARM/DESI/SUWRF/
+  public-protocol/PPRC static gates, personal-info guard, diff whitespace
+  checks, and ignored-file audit.
+- Fix2 validation passed focused `tool_sources` tests plus relevant
+  static/docs gates after conformance-report authority and string activation
+  intent hardening.
+- Fix3 validation passed `cargo fmt`, `cargo check`, focused
+  `tool_sources` tests with 16 tests, SACB/HRA/TMB/TPC/PCC/BPRC/IARM/DESI/
+  SUWRF/public-protocol/PPRC gates, personal-info guard, diff checks, and
+  ignored-file audit.
+- Fix4 validation passed SACB/HRA/TPC/PCC and overlap TMB/BPRC/IARM/DESI/
+  SUWRF/public-protocol/performance-resource gates, personal-info guard,
+  diff whitespace checks, cached diff check, and ignored-file audit. Rust
+  format/tests were skipped for fix4 because it changed only docs/static
+  inventories.
+- Accepting re-review validation passed
   `cargo test --manifest-path packages/agent/Cargo.toml tool_sources -- --nocapture`
-  exited 0 with 16 passed tests on the current Slice 9A candidate, covering
-  internal authority, agent/bootstrap/wildcard denial, idempotency, session
-  isolation, secret rejection, unsafe path rejection, schema bounding, passive
-  and noun activation-intent rejection, inert prohibition prose, report
-  creation and normal inspect, fail-closed stored kind/schema checks for
-  `tool_source_inspect`, resource definitions, and static non-goal guards. This
-  remains candidate validation pending review, not Slice 9A acceptance.
+  with 16 tests, SACB/HRA/TPC/PCC, TMB/BPRC/IARM/DESI/SUWRF/public-protocol/
+  performance-resource governance gates, personal-info guard,
+  `git diff --check 6b3512a4280e0f1c43b3e7bfad813fe86f0ce8c4..HEAD`,
+  plain `git diff --check`, and ignored-file audit.
 
 ## Validation Log
 

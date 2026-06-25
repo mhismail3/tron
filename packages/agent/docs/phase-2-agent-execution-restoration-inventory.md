@@ -297,10 +297,10 @@ only when both robots fields are non-empty strings. Search, browser, crawl,
 sitemap traversal, login/cookies, public `/engine`, native iOS, settings,
 migrations, cleanup/TTL, and network-job scope remain deferred.
 
-Slice 9A is an implementation candidate pending review for External Tool Source
-Proposal And Provenance Foundation; it is not yet accepted as the current
-baseline. It adds an inert `tool_sources` domain plus `tool_source_proposal` and
-`tool_source_conformance_report` resource kinds so external source identity,
+`P2AER-INV-008` is current baseline after accepted Slice 9A: External Tool
+Source Proposal And Provenance Foundation. It adds an inert `tool_sources`
+domain plus `tool_source_proposal` and `tool_source_conformance_report`
+resource kinds so external source identity,
 provenance, sandbox intent, declared tool/schema metadata, expected
 worker/package linkage, trace/replay refs, lifecycle state, and bounded
 preflight evidence can be inspected before any activation. Proposal/report

@@ -23,9 +23,9 @@ Canonical plan file: this scorecard. The README names this file as the durable
 Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
-Current implementation baseline verified for Slice 8E closeout:
-`main@21d3d24a7f757b43d3f51599fe35a14e7f0f3633`
-(`fix: require robots policy resource read grant`) plus this Slice 8E closeout
+Current implementation baseline verified for Slice 9A closeout:
+`main@2c472ed7ded121e1e2210156d89526b70e28ad65`
+(`fix: complete tool source static inventories`) plus this Slice 9A closeout
 documentation commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
@@ -34,7 +34,9 @@ evidence, accepted Slice 7A goal/question lifecycle evidence, accepted Slice 8A
 web fetch/source provenance evidence, and accepted Slice 8B web source
 citation/inspection evidence, accepted Slice 8C HTML/XHTML readable-text
 extraction evidence, and accepted Slice 8D web source archive lifecycle
-evidence, and accepted Slice 8E web robots policy evidence.
+evidence, accepted Slice 8E web robots policy evidence, accepted Slice 8F web
+fetch robots evidence linkage, and accepted Slice 9A tool-source proposal
+provenance evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -88,6 +90,28 @@ validation for sanitized sensitive URLs and aligned explicit-null robots fields
 with ordinary fetch grant semantics. Final re-review returned `slice accepted`
 with no findings.
 
+Closeout note: Slice 9A is accepted after discovery thread
+`019efc87-5b5f-7cd0-82c8-9491b6266377`, implementation thread
+`019efc8e-09dc-7b61-9b63-1a7df6fbe99a`, initial review thread
+`019efca9-05e9-7b43-8c88-3396f57dd791`, replacement focused fix thread
+`019efcb6-9530-7dc1-b515-789ab8e656a1`, re-review thread
+`019efcc2-007f-79c1-87f8-a9200369f79f`, focused fix thread
+`019efcca-8dcc-70c1-b401-4af360bbab38`, re-review thread
+`019efce1-b995-70e1-95a2-2de9644d7e2e`, final focused fix thread
+`019efcea-c8e6-7a70-ae89-d96942d4aaa0`, and accepting re-review thread
+`019efcf5-050b-7320-b9ce-d4b248f4c61d`. Implementation commit
+`2bd51fcf38d68720ee4ed25937b393b8450ecbe0` added the inert
+`tool_sources` domain, trusted internal proposal/report resources, and
+read-only `tool_source_list`/`tool_source_inspect` execute operations. Fix
+commits `788b105980b59d73b5e0c05eb682c81b669827ad`,
+`8fcb3051dc0359e558ffac9dfe77f525709f1c92`, and
+`2c472ed7ded121e1e2210156d89526b70e28ad65` addressed conformance-report
+resource-kind authority, string-valued activation/registration intent,
+stored-kind/schema revalidation during inspect, passive/noun activation intent,
+stale evidence wording, split test-file static inventory coverage, and
+premature README accepted-baseline wording. Final re-review returned
+`slice accepted` with no findings.
+
 Completed Phase 2 restoration slices at this baseline:
 
 - Slice 0: planning artifacts and static entry gates;
@@ -127,17 +151,23 @@ Completed Phase 2 restoration slices at this baseline:
   allow policy validation before target network I/O, bounded
   `robotsPolicyRefs` on source list/inspect, and ordinary fetch compatibility
   without global robots requirements.
+- Slice 9A: inert external tool-source proposal/provenance records and
+  read-only source inspection through `capability::execute`, with trusted
+  internal-only writes, bounded/redacted evidence, explicit resource-kind
+  authority, and no install/launch/registration/execution behavior.
 
 Current next action:
-Run fresh discovery for the next Phase 2 slice after accepted Slice 8F.
+Run fresh discovery for the next Phase 2 slice after accepted Slice 9A.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, Slice 8D source archive lifecycle, and Slice 8E
-robots policy evidence, and Slice 8F robots evidence linkage are accepted.
-Search providers, browser automation, crawling beyond the narrow robots check,
-sitemap traversal, login/cookies/session reuse, native source UI, public
-`/engine` web APIs, network-enabled jobs, autonomous goal execution,
-fetch/pull/push, PR handoff, production deployment behavior, and native
-SourceChanges UI remain deferred until separately scoped and reviewed.
+robots policy evidence, Slice 8F robots evidence linkage, and Slice 9A
+tool-source proposal provenance are accepted. Search providers, browser
+automation, crawling beyond the narrow robots check, sitemap traversal,
+login/cookies/session reuse, native source UI, public `/engine` web APIs,
+network-enabled jobs, autonomous goal execution, tool-source install/launch/
+registration/execution, fetch/pull/push, PR handoff, production deployment
+behavior, and native SourceChanges UI remain deferred until separately scoped
+and reviewed.
 
 ## Scope
 
