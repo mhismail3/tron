@@ -168,6 +168,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "answerResourceId",
         "mediaResourceId",
         "importHistoryResourceId",
+        "updateDiagnosticResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -520,6 +521,126 @@ fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
 fn push_unique(kinds: &mut Vec<String>, kind: &str) {
     if !kinds.iter().any(|existing| existing == kind) {
         kinds.push(kind.to_owned());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::DateTime;
+    use serde_json::json;
+
+    use super::*;
+    use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, InvocationId, TraceId, WorkerId};
+    use crate::engine::kernel::types::{EffectClass, RiskLevel, VisibilityScope};
+    use crate::engine::{ActorKind, CausalContext, DeliveryMode};
+
+    #[test]
+    fn update_diagnostic_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "update_diagnostics.read",
+                "resource.read",
+            ],
+            &["update_diagnostic_record"],
+            &[
+                "kind:update_diagnostic_record",
+                "resource:update_diagnostic_record:first",
+            ],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "update_diagnostic_inspect",
+            "updateDiagnosticResourceId": "update_diagnostic_record:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first resource allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "update_diagnostic_inspect",
+            "updateDiagnosticResourceId": "update_diagnostic_record:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind resource must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource update_diagnostic_record:second"),
+            "{error}"
+        );
+    }
+
+    fn test_grant(
+        authority_scopes: &[&str],
+        resource_kinds: &[&str],
+        resource_selectors: &[&str],
+    ) -> EngineGrant {
+        let occurred_at = DateTime::parse_from_rfc3339("2026-06-25T12:00:00Z")
+            .expect("timestamp")
+            .with_timezone(&Utc);
+        EngineGrant {
+            grant_id: AuthorityGrantId::new("grant-update-diagnostic-selector").unwrap(),
+            parent_grant_id: None,
+            subject_actor_id: None,
+            subject_worker_id: None,
+            subject_invocation_id: None,
+            lifecycle: EngineGrantLifecycle::Active,
+            allowed_capabilities: vec!["capability::execute".to_owned()],
+            allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
+            allowed_authority_scopes: authority_scopes
+                .iter()
+                .map(|scope| (*scope).to_owned())
+                .collect(),
+            allowed_resource_kinds: resource_kinds
+                .iter()
+                .map(|kind| (*kind).to_owned())
+                .collect(),
+            resource_selectors: resource_selectors
+                .iter()
+                .map(|selector| (*selector).to_owned())
+                .collect(),
+            file_roots: vec!["/tmp".to_owned()],
+            network_policy: "none".to_owned(),
+            max_risk: RiskLevel::Low,
+            budget: json!({"remainingTokens": 1, "remainingProcessMs": 1}),
+            expires_at: None,
+            can_delegate: false,
+            provenance: json!({"source": "authorization_test"}),
+            trace_id: TraceId::new("trace-update-diagnostic-selector").unwrap(),
+            revision: 1,
+            created_at: occurred_at,
+            updated_at: occurred_at,
+        }
+    }
+
+    fn test_execute_function() -> FunctionDefinition {
+        FunctionDefinition::new(
+            FunctionId::new("capability::execute").unwrap(),
+            WorkerId::new("worker:capability").unwrap(),
+            "test capability execute",
+            VisibilityScope::System,
+            EffectClass::DelegatedInvocation,
+        )
+    }
+
+    fn test_invocation(payload: Value) -> Invocation {
+        let context = CausalContext::new(
+            ActorId::new("agent:update-diagnostic-selector").unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("grant-update-diagnostic-selector").unwrap(),
+            TraceId::new("trace-update-diagnostic-selector").unwrap(),
+        )
+        .with_scope("capability.execute")
+        .with_scope("update_diagnostics.read")
+        .with_scope("resource.read")
+        .with_session_id("session-update-diagnostic-selector")
+        .with_workspace_id("workspace-update-diagnostic-selector");
+        Invocation {
+            id: InvocationId::new("invocation-update-diagnostic-selector").unwrap(),
+            function_id: FunctionId::new("capability::execute").unwrap(),
+            delivery_mode: DeliveryMode::Sync,
+            payload,
+            causal_context: context,
+        }
     }
 }
 
