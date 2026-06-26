@@ -1,0 +1,373 @@
+use serde_json::{Map, Value, json};
+
+use crate::engine::{EngineResourceScope, Invocation};
+use crate::shared::server::errors::CapabilityError;
+
+pub(super) const LIST_LIMIT_DEFAULT: usize = 25;
+pub(super) const LIST_LIMIT_MAX: usize = 100;
+pub(super) const PROPOSAL_ID_MAX_BYTES: usize = 160;
+pub(super) const TOKEN_MAX_BYTES: usize = 256;
+pub(super) const TITLE_MAX_BYTES: usize = 160;
+pub(super) const SUMMARY_MAX_BYTES: usize = 2_000;
+pub(super) const IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
+pub(super) const MAX_REFS: usize = 25;
+
+const FORBIDDEN_FIELDS: &[&str] = &[
+    "code",
+    "sourceCode",
+    "prompt",
+    "messages",
+    "command",
+    "env",
+    "dependencyInstall",
+    "packageManager",
+    "fileContents",
+    "absolutePath",
+    "rawProposalBody",
+    "proposalBody",
+    "body",
+    "rootPath",
+    "workingDirectory",
+    "cwd",
+    "path",
+    "paths",
+];
+
+pub(super) fn reject_unsafe_payload(payload: &Value) -> Result<(), CapabilityError> {
+    reject_forbidden_fields(payload)?;
+    reject_unsafe_strings(payload)
+}
+
+pub(super) fn required_string(payload: &Value, field: &str) -> Result<String, CapabilityError> {
+    optional_string(payload, field)?.ok_or_else(|| invalid(format!("{field} is required")))
+}
+
+pub(super) fn optional_string(
+    payload: &Value,
+    field: &str,
+) -> Result<Option<String>, CapabilityError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.clone())),
+        Some(Value::String(_)) => Err(invalid(format!("{field} must not be empty"))),
+        Some(_) => Err(invalid(format!("{field} must be a string"))),
+    }
+}
+
+pub(super) fn optional_u64(payload: &Value, field: &str) -> Result<Option<u64>, CapabilityError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(value)) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| invalid(format!("{field} must be a positive integer"))),
+        Some(_) => Err(invalid(format!("{field} must be a positive integer"))),
+    }
+}
+
+pub(super) fn optional_bool(payload: &Value, field: &str) -> Result<Option<bool>, CapabilityError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => Err(invalid(format!("{field} must be a boolean"))),
+    }
+}
+
+pub(super) fn optional_array(
+    payload: &Value,
+    field: &str,
+) -> Result<Option<Vec<Value>>, CapabilityError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(items)) => Ok(Some(items.clone())),
+        Some(_) => Err(invalid(format!("{field} must be an array"))),
+    }
+}
+
+pub(super) fn bounded_text(
+    field: &str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<String, CapabilityError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(invalid(format!("{field} must not be empty")));
+    }
+    if trimmed.len() > max_bytes {
+        return Err(invalid(format!("{field} exceeds {max_bytes} bytes")));
+    }
+    reject_secret_like(field, trimmed)?;
+    reject_prompt_like(field, trimmed)?;
+    Ok(trimmed.to_owned())
+}
+
+pub(super) fn bounded_token(
+    field: &str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<String, CapabilityError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed == "*"
+        || trimmed.eq_ignore_ascii_case("all")
+        || trimmed.eq_ignore_ascii_case("any")
+        || trimmed.len() > max_bytes
+        || !trimmed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'-' | b'_' | b'.'))
+    {
+        return Err(invalid(format!(
+            "{field} must be a bounded non-wildcard token"
+        )));
+    }
+    reject_secret_like(field, trimmed)?;
+    reject_path_like(field, trimmed)?;
+    Ok(trimmed.to_owned())
+}
+
+pub(super) fn idempotency_key(
+    invocation: &Invocation,
+    payload: &Value,
+) -> Result<String, CapabilityError> {
+    if let Some(key) = invocation.causal_context.idempotency_key.as_deref() {
+        return bounded_token("idempotencyKey", key, IDEMPOTENCY_KEY_MAX_BYTES);
+    }
+    optional_string(payload, "idempotencyKey")?
+        .map(|key| bounded_token("idempotencyKey", &key, IDEMPOTENCY_KEY_MAX_BYTES))
+        .transpose()?
+        .ok_or_else(|| invalid("module_proposal_record requires an idempotencyKey"))
+}
+
+pub(super) fn resource_scope(
+    invocation: &Invocation,
+) -> Result<EngineResourceScope, CapabilityError> {
+    invocation
+        .causal_context
+        .session_id
+        .as_ref()
+        .map(|session| EngineResourceScope::Session(session.clone()))
+        .or_else(|| {
+            invocation
+                .causal_context
+                .workspace_id
+                .as_ref()
+                .map(|workspace| EngineResourceScope::Workspace(workspace.clone()))
+        })
+        .ok_or_else(|| invalid("module authoring requires trusted session or workspace scope"))
+}
+
+pub(super) fn lifecycle_state(payload: &Value) -> Result<String, CapabilityError> {
+    let state = optional_string(payload, "lifecycleState")?.unwrap_or_else(|| "draft".to_owned());
+    if matches!(
+        state.as_str(),
+        "draft" | "submitted" | "superseded" | "archived"
+    ) {
+        Ok(state)
+    } else {
+        Err(invalid(format!(
+            "unsupported module proposal lifecycle {state}"
+        )))
+    }
+}
+
+pub(super) fn validate_ref_array(
+    label: &str,
+    refs: &[Value],
+    max_items: usize,
+) -> Result<Vec<Value>, CapabilityError> {
+    if refs.len() > max_items {
+        return Err(invalid(format!(
+            "{label} may contain at most {max_items} items"
+        )));
+    }
+    refs.iter()
+        .map(|value| sanitize_ref_item(label, value))
+        .collect()
+}
+
+pub(super) fn validation_placeholder(payload: &Value) -> Result<Value, CapabilityError> {
+    let status = optional_string(payload, "validationStatus")?
+        .map(|value| bounded_token("validationStatus", &value, TOKEN_MAX_BYTES))
+        .transpose()?
+        .unwrap_or_else(|| "not_validated".to_owned());
+    Ok(json!({
+        "status": status,
+        "placeholder": true,
+        "checks": []
+    }))
+}
+
+fn sanitize_ref_item(label: &str, value: &Value) -> Result<Value, CapabilityError> {
+    let Value::Object(item) = value else {
+        return Err(invalid(format!("{label} must be an object")));
+    };
+    let kind = item
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{label} requires kind")))?;
+    let id = item
+        .get("id")
+        .or_else(|| item.get("resourceId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{label} requires id or resourceId")))?;
+    let mut sanitized = Map::new();
+    sanitized.insert(
+        "kind".to_owned(),
+        json!(bounded_token("ref.kind", kind, TOKEN_MAX_BYTES)?),
+    );
+    if item.get("resourceId").is_some() {
+        sanitized.insert(
+            "resourceId".to_owned(),
+            json!(bounded_token("ref.resourceId", id, TOKEN_MAX_BYTES)?),
+        );
+    } else {
+        sanitized.insert(
+            "id".to_owned(),
+            json!(bounded_token("ref.id", id, TOKEN_MAX_BYTES)?),
+        );
+    }
+    if let Some(role) = item.get("role").and_then(Value::as_str) {
+        sanitized.insert(
+            "role".to_owned(),
+            json!(bounded_token("ref.role", role, TOKEN_MAX_BYTES)?),
+        );
+    }
+    if let Some(version_id) = item.get("versionId").and_then(Value::as_str) {
+        sanitized.insert(
+            "versionId".to_owned(),
+            json!(bounded_token("ref.versionId", version_id, TOKEN_MAX_BYTES)?),
+        );
+    }
+    if item.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "kind" | "id" | "resourceId" | "role" | "versionId"
+        )
+    }) {
+        return Err(invalid(format!(
+            "{label} may contain only kind, id/resourceId, role, and versionId"
+        )));
+    }
+    Ok(Value::Object(sanitized))
+}
+
+fn reject_forbidden_fields(value: &Value) -> Result<(), CapabilityError> {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                if FORBIDDEN_FIELDS
+                    .iter()
+                    .any(|forbidden| forbidden.eq_ignore_ascii_case(key))
+                {
+                    return Err(invalid(format!(
+                        "{key} is not accepted; module proposals store bounded metadata and refs only"
+                    )));
+                }
+                reject_forbidden_fields(child)?;
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                reject_forbidden_fields(child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn reject_unsafe_strings(value: &Value) -> Result<(), CapabilityError> {
+    match value {
+        Value::String(text) => {
+            reject_secret_like("payload", text)?;
+            reject_prompt_like("payload", text)?;
+            reject_path_like("payload", text)
+        }
+        Value::Array(items) => {
+            for child in items {
+                reject_unsafe_strings(child)?;
+            }
+            Ok(())
+        }
+        Value::Object(object) => {
+            for child in object.values() {
+                reject_unsafe_strings(child)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn reject_path_like(field: &str, value: &str) -> Result<(), CapabilityError> {
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed == "/"
+        || trimmed.starts_with('/')
+        || trimmed.starts_with('~')
+        || trimmed.starts_with("./")
+        || trimmed.contains("..")
+        || trimmed.contains('\\')
+        || trimmed.contains("//")
+        || lower.contains("packages/agent/skills")
+        || lower.contains("/users/")
+    {
+        return Err(invalid(format!(
+            "{field} must not contain unsafe path-like material"
+        )));
+    }
+    Ok(())
+}
+
+fn reject_secret_like(field: &str, value: &str) -> Result<(), CapabilityError> {
+    let lowered = value.to_ascii_lowercase();
+    if lowered.contains("bearer ")
+        || lowered.starts_with("sk-")
+        || lowered.starts_with("ghp_")
+        || lowered.starts_with("xox")
+        || lowered.contains("api_key")
+        || lowered.contains("apikey")
+        || lowered.contains("password=")
+        || lowered.contains("secret=")
+        || lowered.contains("authorization:")
+        || lowered.contains("token:")
+        || lowered.contains("\"token\"")
+        || lowered.contains("grant-")
+        || lowered.contains("grant_")
+        || lowered.contains("grant:")
+        || looks_like_email(value.trim())
+    {
+        return Err(invalid(format!(
+            "{field} must not contain credential-like material"
+        )));
+    }
+    Ok(())
+}
+
+fn reject_prompt_like(field: &str, value: &str) -> Result<(), CapabilityError> {
+    let lowered = value.to_ascii_lowercase();
+    if lowered.contains("ignore previous")
+        || lowered.contains("system prompt")
+        || lowered.contains("hidden chain")
+        || lowered.contains("chain-of-thought")
+        || lowered.contains("developer message")
+    {
+        return Err(invalid(format!(
+            "{field} must not contain prompt-injection-like material"
+        )));
+    }
+    Ok(())
+}
+
+fn looks_like_email(text: &str) -> bool {
+    let Some((local, domain)) = text.split_once('@') else {
+        return false;
+    };
+    !local.is_empty() && domain.contains('.') && !domain.ends_with('.')
+}
+
+pub(super) fn invalid(message: impl Into<String>) -> CapabilityError {
+    CapabilityError::InvalidParams {
+        message: message.into(),
+    }
+}

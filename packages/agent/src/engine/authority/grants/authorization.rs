@@ -73,6 +73,9 @@ pub(super) fn authorize_with_grant(
     if is_module_registry_invocation(invocation) {
         ensure_module_registry_grant_is_explicit(grant)?;
     }
+    if is_module_authoring_invocation(invocation) {
+        ensure_module_authoring_grant_is_explicit(grant)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -139,6 +142,25 @@ fn ensure_module_registry_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
     Ok(())
 }
 
+fn ensure_module_authoring_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module proposal operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ensure_resource_selectors(
     grant: &EngineGrant,
     invocation: &Invocation,
@@ -198,6 +220,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "queryResourceId",
         "decisionResourceId",
         "moduleManifestResourceId",
+        "moduleProposalResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -327,6 +350,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "module_registry.read");
             push_unique(&mut scopes, "resource.read");
         }
+        Some("module_proposal_list" | "module_proposal_inspect") => {
+            push_unique(&mut scopes, "module_authoring.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("module_proposal_record") => {
+            push_unique(&mut scopes, "module_authoring.read");
+            push_unique(&mut scopes, "module_authoring.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("procedural_state_list" | "procedural_state_inspect") => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
@@ -433,6 +466,9 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             .map(|kind| vec![kind])
             .unwrap_or_default(),
         Some("module_list" | "module_inspect") => vec!["module_manifest"],
+        Some("module_proposal_record" | "module_proposal_list" | "module_proposal_inspect") => {
+            vec!["module_proposal"]
+        }
         Some(
             "subagent_launch"
             | "subagent_status"
@@ -451,6 +487,14 @@ fn is_module_registry_invocation(invocation: &Invocation) -> bool {
         && matches!(
             invocation.payload.get("operation").and_then(Value::as_str),
             Some("module_list" | "module_inspect")
+        )
+}
+
+fn is_module_authoring_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some("module_proposal_record" | "module_proposal_list" | "module_proposal_inspect")
         )
 }
 
@@ -930,6 +974,132 @@ mod tests {
                 &test_invocation(json!({"operation": "module_list"})),
             ) {
                 Ok(()) => panic!("module registry {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn module_proposal_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "module_authoring.read",
+                "resource.read",
+            ],
+            &["module_proposal"],
+            &["kind:module_proposal", "resource:module_proposal:first"],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "module_proposal_inspect",
+            "moduleProposalResourceId": "module_proposal:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first proposal allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "module_proposal_inspect",
+            "moduleProposalResourceId": "module_proposal:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind proposal must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource module_proposal:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_proposal_requires_explicit_authority_and_resource_kind() {
+        let function = test_execute_function();
+        let missing_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &["module_proposal"],
+            &["kind:module_proposal"],
+        );
+        let error = authorize_with_grant(
+            &missing_scope,
+            &function,
+            &test_invocation(json!({"operation": "module_proposal_list"})),
+        )
+        .expect_err("missing module authoring read authority denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority module_authoring.read"),
+            "{error}"
+        );
+
+        let wrong_kind = test_grant(
+            &[
+                "capability.execute",
+                "module_authoring.read",
+                "resource.read",
+            ],
+            &["module_manifest"],
+            &["kind:module_proposal"],
+        );
+        let error = authorize_with_grant(
+            &wrong_kind,
+            &function,
+            &test_invocation(json!({"operation": "module_proposal_list"})),
+        )
+        .expect_err("missing module proposal resource kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind module_proposal"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_proposal_rejects_wildcard_authority_kinds_and_selectors() {
+        let function = test_execute_function();
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "module_authoring.read", "resource.read"],
+                    &["module_proposal"],
+                    &["kind:module_proposal"],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_authoring.read",
+                        "resource.read",
+                    ],
+                    &["*", "module_proposal"],
+                    &["kind:module_proposal"],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_authoring.read",
+                        "resource.read",
+                    ],
+                    &["module_proposal"],
+                    &["*", "kind:module_proposal"],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "module_proposal_list"})),
+            ) {
+                Ok(()) => panic!("module proposal {name} wildcard grant must be denied"),
                 Err(error) => error.to_string(),
             };
             assert!(error.contains(expected), "{error}");

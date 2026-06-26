@@ -182,14 +182,25 @@ panels, or production deploy/update behavior.
 Objective: create a governed place for agent-authored module proposals that is
 not the core engine tree and not the old repo-managed skills directory.
 
+Implementation-candidate status: Slice 23B now adds a focused
+`module_authoring` domain backed by generic `module_proposal` resources, with
+provider-visible `module_proposal_record`, `module_proposal_list`, and
+`module_proposal_inspect` execute operations. The candidate keeps proposal
+state scoped to the current session/workspace, stores bounded metadata/refs
+only, fingerprints idempotency and runtime refs, emits
+`module_authoring.lifecycle`, and proves no install, activation, execution,
+dependency restore, package-manager, network, physical workspace directory, or
+repo-managed skills side effects. It remains pending independent review.
+
 Minimal shape:
 
 - proposal resource kind for module drafts;
 - bounded source/doc/test refs rather than raw unbounded code payloads in
   provider-visible projections;
-- workspace path policy, unsafe path denial, idempotency evidence, lifecycle
-  events, and trace/replay refs;
-- read-only list/inspect operations for proposals.
+- unsafe path denial, idempotency evidence, lifecycle events, and
+  fingerprinted trace/replay refs;
+- read-only list/inspect operations for proposals with exact inspect-resource
+  selectors.
 
 Out of scope:
 

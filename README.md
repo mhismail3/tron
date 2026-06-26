@@ -737,6 +737,22 @@ identity, capability/resource declarations, authority needs, settings and
 dependency intents, validation, provenance, lifecycle, and redaction proof
 without raw manifests, local paths, commands, env values, secrets, grant ids,
 network access, install, activation, dependency resolution, or execution.
+`domains/module_authoring` is the Phase 3 Slice 23B implementation-candidate
+foundation for inert module proposals. It records current-session/workspace
+`module_proposal` resources with schema `tron.resource.module_proposal.v1` and
+payload schema `tron.module_proposal.v1`, bounded title/summary identity,
+intended module refs, source/doc/test refs, trace/replay fingerprints,
+idempotency fingerprints, validation placeholder status, lifecycle state, and
+explicit no-install/no-execution proof. `module_proposal_record`,
+`module_proposal_list`, and `module_proposal_inspect` stay behind
+`capability::execute` with explicit `module_authoring.read` /
+`module_authoring.write` plus `resource.read` / `resource.write` authority,
+`kind:module_proposal` selectors, exact `resource:<id>` inspect selectors, and
+`networkPolicy: none`. The authoring foundation does not install or activate
+modules, execute code, restore dependencies, use package managers, create a
+physical module workspace directory, touch repo-managed `packages/agent/skills`,
+store raw prompt/proposal/code/command/file-content fields, expose raw grant or
+authority ids, add public `/engine` APIs, or add fixed iOS panels.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -1020,6 +1036,9 @@ Current primitive operations:
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `module_list` | List system-scoped `module_manifest` records as bounded provider-safe module summaries after stored kind/schema/scope/payload revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, network, or write side effects. |
 | `module_inspect` | Inspect one system-scoped `module_manifest` after stored kind/schema/scope/version/payload revalidation, returning bounded provider-safe identity, declarations, authority/settings/dependency intents, validation, provenance, distinct resource and manifest lifecycle fields, refs, and redaction proof without raw manifests, local paths, env values, commands, secrets, token-like strings, raw grant ids, or personal-info literals. |
+| `module_proposal_record` | Implementation-candidate Slice 23B operation that records one scoped `module_proposal` resource for bounded module authoring metadata only, with title/summary identity, intended module refs, bounded source/doc/test refs, validation placeholder status, lifecycle evidence, trace/replay fingerprints, idempotency fingerprint, and explicit proof of no install, execution, dependency restore, package manager, network, physical workspace directory, repo-managed skills, raw prompt/proposal/code/command/file-content storage, or raw grant/authority ids. |
+| `module_proposal_list` | Implementation-candidate Slice 23B operation that lists scoped `module_proposal` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, package-manager, network, or workspace-directory side effects. |
+| `module_proposal_inspect` | Implementation-candidate Slice 23B operation that inspects one scoped `module_proposal` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only proposal identity, refs, lifecycle, validation status, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without unsafe paths, env values, secrets, commands, token-like material, raw proposal bodies, raw prompts, file contents, raw grant ids, raw authority ids, or personal-info literals. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
@@ -1407,6 +1426,23 @@ secrets/raw grant ids/token-like material/personal-info literals, install or
 activate modules, resolve dependencies, execute module behavior, access
 networks, add public `/engine` APIs, restore repo-managed skills, or add fixed
 iOS panels.
+
+Phase 3 Slice 23B is an implementation candidate for module authoring
+workspace state. The generic resource store registers `module_proposal` with
+resource schema `tron.resource.module_proposal.v1` and payload schema version
+`tron.module_proposal.v1`. Proposal operations stay behind the single
+`capability::execute` primitive and require explicit module-authoring/resource
+authority plus non-wildcard `kind:module_proposal` selectors; inspect also
+requires an exact `resource:<module_proposal_id>` selector through engine
+authorization. Records are current-session/workspace scoped and metadata-only:
+bounded identity, intended module refs, source/doc/test refs, trace/replay
+fingerprints, idempotency fingerprint, validation placeholder/status,
+lifecycle state, and no-install/no-execution proof. This candidate does not
+create a physical module workspace directory, store raw code/prompts/proposal
+bodies/commands/file contents/unsafe paths, expose raw grant or authority ids,
+install or activate modules, execute code, restore dependencies, use package
+managers, touch repo-managed `packages/agent/skills`, access networks, add
+public `/engine` APIs, or add fixed iOS panels.
 
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
@@ -2053,7 +2089,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `module_manifest` registry records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `module_manifest` registry records, implementation-candidate `module_proposal` authoring records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

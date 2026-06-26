@@ -158,6 +158,10 @@ pub const UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID: &str = "tron.resource.update_diagn
 pub const MODULE_MANIFEST_KIND: &str = "module_manifest";
 /// Built-in inspect-only module manifest resource schema id.
 pub const MODULE_MANIFEST_SCHEMA_ID: &str = "tron.resource.module_manifest.v1";
+/// Built-in module authoring proposal resource kind.
+pub const MODULE_PROPOSAL_KIND: &str = "module_proposal";
+/// Built-in module authoring proposal resource schema id.
+pub const MODULE_PROPOSAL_SCHEMA_ID: &str = "tron.resource.module_proposal.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

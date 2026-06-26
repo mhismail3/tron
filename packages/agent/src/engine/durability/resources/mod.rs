@@ -24,6 +24,7 @@ mod import_preview_definitions;
 mod job_definitions;
 mod media_definitions;
 mod memory_definitions;
+mod module_authoring_definitions;
 mod module_registry_definitions;
 mod notification_definitions;
 mod procedural_definitions;
@@ -42,6 +43,7 @@ mod versions;
 mod web_definitions;
 
 pub use definitions::builtin_resource_type_definitions;
+pub(crate) use module_authoring_definitions::MODULE_PROPOSAL_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_registry_definitions::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
 pub(in crate::engine) use module_registry_definitions::builtin_module_manifest_resources;
 pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore};

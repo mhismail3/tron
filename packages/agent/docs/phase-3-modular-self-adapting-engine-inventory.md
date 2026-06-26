@@ -87,6 +87,19 @@ SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.
 
+P3MSA-INV-002 is pending review as a Slice 23B implementation candidate. The
+candidate adds inert `domains/module_authoring` custody for scoped
+`module_proposal` resources using the generic resource store, provider-visible
+`module_proposal_record`, `module_proposal_list`, and
+`module_proposal_inspect` execute operation values, explicit
+module-authoring/resource read-write grants for record, read-only grants for
+list/inspect, exact proposal inspect selectors, bounded resource-backed refs,
+idempotency fingerprints, lifecycle stream evidence, validation placeholder
+status, and explicit no-install/no-execution proof. It does not install or
+execute modules, restore dependencies, use package managers, create physical
+module workspace directories, touch repo-managed skills, expand public
+`/engine`, add fixed native panels, or introduce a new SQLite table.
+
 ## Slice Families
 
 ### Module Plane Foundation

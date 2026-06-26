@@ -146,3 +146,48 @@ feature-pack migration remain later Phase 3 slices.
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 evidence as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.
+
+## Slice 23B Implementation Candidate
+
+Candidate branch:
+`codex/phase-3-slice-23b-module-authoring-workspace`
+
+Candidate baseline:
+`2ceea2e5df1c367b8c41b6ed2ffa2cb9d0410f61`
+(`docs: accept phase 3 slice 23a`)
+
+Candidate scope:
+
+- Adds focused `domains/module_authoring` custody for scoped, inert
+  `module_proposal` resources using the existing generic resource store.
+- Registers resource schema `tron.resource.module_proposal.v1` and payload
+  schema version `tron.module_proposal.v1` without a new SQLite table.
+- Adds provider-visible `capability::execute` operation values
+  `module_proposal_record`, `module_proposal_list`, and
+  `module_proposal_inspect`.
+- Enforces explicit `module_authoring.read` / `module_authoring.write` plus
+  `resource.read` / `resource.write` authority for record, read-only authority
+  for list/inspect, `kind:module_proposal` selectors, exact inspect
+  `resource:<id>` selectors, and `networkPolicy: none`.
+- Stores bounded title/summary identity, intended module refs,
+  source/doc/test refs, validation placeholder/status, lifecycle state,
+  fingerprinted idempotency/runtime refs, and explicit no-install/no-execution
+  proof.
+- Deliberately excludes module install, activation, execution, dependency
+  restoration, package managers, physical module workspace directories,
+  repo-managed `packages/agent/skills`, raw prompt/proposal/code/command/file
+  payloads, unsafe paths, raw grant/authority ids, public `/engine`
+  expansion, fixed iOS panels, and production deploy/update behavior.
+
+Candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_authoring --lib` | exit 0 | Module proposal resource registration, create/list/inspect, idempotent replay, unsafe field/path/injection denial, bounded refs, projection redaction, lifecycle stream evidence, and no repo-managed skills side effects passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_proposal --lib` | exit 0 | Module proposal runtime grants, exact selector enforcement, explicit authority/resource-kind requirements, wildcard denial, and resource schema registration passed. |
+
+Deferred scope remains unchanged for later review acceptance: validation report
+resources, review/install gates, enable/disable/quarantine/rollback, runtime
+supervisor, dependency policy execution, generic autonomous-work cockpit, and
+feature-pack migration.

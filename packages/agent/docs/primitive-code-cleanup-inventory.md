@@ -6,8 +6,8 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-26 during `P3MSA-S23A` module-registry foundation
-inventory refresh.
+Last updated: 2026-06-26 during `P3MSA-S23B` module-authoring implementation
+candidate inventory refresh.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)

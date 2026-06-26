@@ -1897,6 +1897,7 @@ packages/agent/src/domains/program_execution/tests.rs	test	test_harness	TPC-10/P
 packages/agent/src/domains/program_execution/validation.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution raw-code raw-IO command path secret idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/program_execution_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S15A	built-in program_execution_record resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_prompt_artifacts_tests.rs	test	test_harness	TPC-10/P2AER-S16A	focused Slice 16A accepted prompt-artifact runtime grant regression coverage
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_authoring_tests.rs	test	test_harness	TPC-10/P3MSA-S23B	focused Slice 23B implementation-candidate module proposal runtime grant regression coverage
 packages/agent/src/domains/capability/prompt_artifacts_contract.rs	implementation	capability_execute	TPC-10/P2AER-S16A	prompt-artifact request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/prompt_artifacts.rs	implementation	capability_execute	TPC-10/P2AER-S16A	provider execute adapter for redacted durable prompt_artifact record list and inspect operations
 packages/agent/src/domains/prompt_artifacts/authority.rs	implementation	prompt_artifacts	TPC-10/P2AER-S16A	prompt-artifact authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
@@ -1914,6 +1915,15 @@ packages/agent/src/domains/module_registry/projection.rs	implementation	module_r
 packages/agent/src/domains/module_registry/service.rs	implementation	module_registry	TPC-10/P3MSA-S23A	resource-backed module_list and module_inspect service owner
 packages/agent/src/domains/module_registry/tests.rs	test	test_harness	TPC-10/P3MSA-S23A	focused Slice 23A module manifest schema seed redaction authority scope lifecycle and side-effect coverage
 packages/agent/src/engine/durability/resources/module_registry_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23A	built-in module_manifest resource schema and first-party seed records
+packages/agent/src/domains/capability/operations/module_authoring.rs	implementation	capability_execute	TPC-10/P3MSA-S23B	provider execute adapter for bounded module_proposal record list and inspect operations
+packages/agent/src/domains/module_authoring/authority.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module proposal authority guard owner for exact resource kind selectors current scope isolation inspect resource selectors and networkPolicy none
+packages/agent/src/domains/module_authoring/contract.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module-authoring worker contract constants retained for authority and lifecycle stream ownership
+packages/agent/src/domains/module_authoring/mod.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module-authoring domain docs and registration boundary for inert proposal foundation
+packages/agent/src/domains/module_authoring/projection.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	bounded provider-safe module proposal summary and detail projection owner
+packages/agent/src/domains/module_authoring/service.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	resource-backed module_proposal record list and inspect service owner
+packages/agent/src/domains/module_authoring/tests.rs	test	test_harness	TPC-10/P3MSA-S23B	focused Slice 23B module proposal schema redaction authority lifecycle selector idempotency and side-effect coverage
+packages/agent/src/domains/module_authoring/validation.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module proposal bounded ref unsafe field path prompt-injection idempotency and text validation owner
+packages/agent/src/engine/durability/resources/module_authoring_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23B	built-in module_proposal resource schema for inert authoring records
 packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 modular self-adapting engine scorecard and module-plane planning evidence with self-sufficient-agent-runtime-readiness classification
 packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 evidence manifest with accepted Slice 23A validation status
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 narrative inventory for module-plane roadmap and successor-readiness classification

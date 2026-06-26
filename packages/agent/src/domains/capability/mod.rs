@@ -47,6 +47,11 @@
 //! list and inspect provider-safe `module_manifest` projections without module
 //! install, activation, execution, dependency resolution, network behavior, or
 //! raw manifest exposure.
+//! Module-authoring operations are inert resource-backed operations: they
+//! record, list, and inspect bounded `module_proposal` metadata and refs
+//! without module workspace directories, install, activation, execution,
+//! dependency restoration, network behavior, repo-managed skills, raw prompt
+//! bodies, or raw proposal bodies.
 //!
 //! ## Submodules
 //!
@@ -74,7 +79,8 @@
 //! remain pure metadata inspection or resource-backed report creation. Replay
 //! manifest reads deliberately bypass trace insertion so the exported manifest
 //! is not changed by the read. Module-registry reads deliberately stay inside
-//! `capability::execute`; they do not expand the public `/engine` protocol.
+//! `capability::execute`; module-authoring proposal records deliberately stay
+//! inert and resource-backed. Neither expands the public `/engine` protocol.
 
 pub(crate) mod contract;
 mod import_history_contract;
