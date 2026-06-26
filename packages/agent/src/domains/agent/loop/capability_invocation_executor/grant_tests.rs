@@ -218,6 +218,42 @@ async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
 }
 
 #[tokio::test]
+async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped() {
+    for (operation, kind, id_field, resource_id) in [
+        ("memory_query_list", "memory_query", None, None),
+        (
+            "memory_query_inspect",
+            "memory_query",
+            Some("queryResourceId"),
+            Some("memory_query:runtime-grant"),
+        ),
+        ("memory_decision_list", "memory_decision", None, None),
+        (
+            "memory_decision_inspect",
+            "memory_decision",
+            Some("decisionResourceId"),
+            Some("memory_decision:runtime-grant"),
+        ),
+    ] {
+        let mut payload = json!({
+            "operation": operation,
+            "idempotencyKey": format!("{operation}-grant")
+        });
+        if let (Some(field), Some(resource_id)) = (id_field, resource_id) {
+            payload[field] = json!(resource_id);
+        }
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_memory_evidence_runtime_grant_is_read_only(&grant, kind, resource_id);
+    }
+}
+
+#[tokio::test]
 async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_list",
@@ -412,6 +448,84 @@ fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::Engine
                 .allowed_capabilities
                 .contains(&forbidden_capability.to_owned()),
             "subagent task read grant must not include capability {forbidden_capability}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec![
+            "capability::execute".to_owned(),
+            "state::get".to_owned(),
+            "state::list".to_owned(),
+            "state::set".to_owned(),
+        ]
+    );
+}
+
+fn assert_memory_evidence_runtime_grant_is_read_only(
+    grant: &crate::engine::EngineGrant,
+    expected_kind: &str,
+    expected_resource_id: Option<&str>,
+) {
+    assert_eq!(grant.network_policy, "none");
+    for scope in ["memory.read", "resource.read"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "memory evidence read grant should include {scope}"
+        );
+    }
+    for forbidden_scope in [
+        "memory.write",
+        "resource.write",
+        "web.read",
+        "web.write",
+        "subagents.write",
+        "worker.lifecycle.write",
+        "catalog.write",
+        "tool.execute",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "memory evidence read grant must not include {forbidden_scope}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_resource_kinds,
+        vec!["agent_state".to_owned(), expected_kind.to_owned()]
+    );
+    assert!(
+        grant
+            .resource_selectors
+            .contains(&format!("kind:{expected_kind}")),
+        "memory evidence grant should include selector kind:{expected_kind}"
+    );
+    for forbidden_kind in [
+        "memory_record",
+        "memory_prompt_trace",
+        "web_source",
+        "subagent_task",
+        "worker_package",
+    ] {
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&forbidden_kind.to_owned()),
+            "memory evidence read grant must not include kind {forbidden_kind}"
+        );
+        assert!(
+            !grant
+                .resource_selectors
+                .contains(&format!("kind:{forbidden_kind}")),
+            "memory evidence read grant must not include selector kind:{forbidden_kind}"
+        );
+    }
+    if let Some(resource_id) = expected_resource_id {
+        assert!(
+            grant
+                .resource_selectors
+                .contains(&format!("resource:{resource_id}")),
+            "memory inspect grant should include selector resource:{resource_id}"
         );
     }
     assert_eq!(

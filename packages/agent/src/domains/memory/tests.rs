@@ -803,7 +803,17 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         "memory-execute-evidence-decision",
     )
     .await;
-    let execute_grant = derive_execute_grant(&ctx, "memory-execute-grant").await;
+    let query_resource_id = query["queryResourceId"].as_str().expect("query id");
+    let decision_resource_id = decision["decisionResourceId"]
+        .as_str()
+        .expect("decision id");
+    let execute_grant = derive_execute_grant(
+        &ctx,
+        "memory-execute-grant",
+        query_resource_id,
+        decision_resource_id,
+    )
+    .await;
 
     let query_list = invoke_read_with_context(
         &ctx,
@@ -829,7 +839,7 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
         json!({
             "operation": "memory_decision_inspect",
-            "decisionResourceId": decision["decisionResourceId"]
+            "decisionResourceId": decision_resource_id
         }),
         agent_context("memory-execute-decision-inspect", execute_grant.clone())
             .with_scope("capability.execute")
@@ -846,7 +856,6 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         false
     );
 
-    let query_resource_id = query["queryResourceId"].as_str().expect("query id");
     let query_inspect = invoke_read_with_context(
         &ctx,
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
@@ -1027,7 +1036,12 @@ fn client_context(trace_id: &str) -> CausalContext {
     .with_workspace_id("memory-workspace")
 }
 
-async fn derive_execute_grant(ctx: &ServerRuntimeContext, suffix: &str) -> AuthorityGrantId {
+async fn derive_execute_grant(
+    ctx: &ServerRuntimeContext,
+    suffix: &str,
+    query_resource_id: &str,
+    decision_resource_id: &str,
+) -> AuthorityGrantId {
     let grant = ctx
         .engine_host
         .derive_authority_grant(DeriveGrant {
@@ -1043,6 +1057,7 @@ async fn derive_execute_grant(ctx: &ServerRuntimeContext, suffix: &str) -> Autho
             allowed_authority_scopes: vec![
                 "capability.execute".to_owned(),
                 super::READ_SCOPE.to_owned(),
+                "resource.read".to_owned(),
             ],
             allowed_resource_kinds: vec![
                 super::MEMORY_QUERY_KIND.to_owned(),
@@ -1051,6 +1066,8 @@ async fn derive_execute_grant(ctx: &ServerRuntimeContext, suffix: &str) -> Autho
             resource_selectors: vec![
                 "kind:memory_query".to_owned(),
                 "kind:memory_decision".to_owned(),
+                format!("resource:{query_resource_id}"),
+                format!("resource:{decision_resource_id}"),
             ],
             file_roots: vec!["/tmp".to_owned()],
             network_policy: "none".to_owned(),
