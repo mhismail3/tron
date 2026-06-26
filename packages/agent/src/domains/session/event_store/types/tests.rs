@@ -5,7 +5,9 @@ mod session_event_tests {
     use serde_json::json;
 
     use crate::domains::session::event_store::types::base::SessionEvent;
+    use crate::domains::session::event_store::types::payloads::message::AssistantMessagePayload;
     use crate::domains::session::event_store::types::{EventType, SessionEventPayload};
+    use crate::shared::protocol::model_audit::ModelProviderReasoningStatusPhase;
 
     fn make_event(event_type: EventType, payload: serde_json::Value) -> SessionEvent {
         SessionEvent {
@@ -136,6 +138,89 @@ mod session_event_tests {
                 assert_eq!(p.stop_reason, "end_turn");
                 assert_eq!(p.token_usage.unwrap().input_tokens, 100);
                 assert_eq!(p.model, "claude-opus-4-6");
+                assert!(p.reasoning_status_evidence.is_none());
+            }
+            other => panic!("expected MessageAssistant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_payload_message_assistant_round_trips_reasoning_status_evidence() {
+        let event = make_event(
+            EventType::MessageAssistant,
+            json!({
+                "content": [{"type": "text", "text": "Hi there"}],
+                "turn": 2,
+                "tokenUsage": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "reasoningOutputTokens": 7,
+                    "thoughtTokens": 3,
+                    "totalTokens": 150
+                },
+                "stopReason": "end_turn",
+                "model": "gpt-5.5",
+                "hasThinking": true,
+                "reasoningStatusEvidence": {
+                    "format": "tron.model_provider_reasoning_status_evidence.v1",
+                    "phase": "message_assistant",
+                    "providerType": "openai",
+                    "providerName": "openai",
+                    "model": "gpt-5.5",
+                    "requestedReasoningLevel": "high",
+                    "status": {
+                        "statusEmitted": true,
+                        "stopReason": "end_turn",
+                        "thinkingEmitted": true
+                    },
+                    "tokens": {
+                        "tokenUsageAvailable": true,
+                        "reasoningOutputTokens": 7,
+                        "thoughtTokens": 3,
+                        "totalTokens": 150
+                    },
+                    "refs": {
+                        "providerAuditEventType": "model.provider_request",
+                        "providerAuditFormat": "tron.model_provider_request.v1",
+                        "traceId": "trace-17a",
+                        "parentInvocationId": "invoke-17a",
+                        "replaySource": "session_event_log"
+                    },
+                    "safety": {
+                        "projection": "metadata_only",
+                        "rawReasoningText": "omitted",
+                        "syntheticReasoningSummary": "omitted",
+                        "providerReasoningPayload": "redacted_or_omitted",
+                        "sensitiveMaterial": "redacted",
+                        "pathMaterial": "redacted"
+                    }
+                }
+            }),
+        );
+        let payload = event.typed_payload().unwrap();
+        match payload {
+            SessionEventPayload::MessageAssistant(p) => {
+                let json = serde_json::to_value(&p).unwrap();
+                assert_eq!(
+                    json["reasoningStatusEvidence"]["phase"],
+                    "message_assistant"
+                );
+                let round_trip: AssistantMessagePayload = serde_json::from_value(json).unwrap();
+                let evidence = round_trip
+                    .reasoning_status_evidence
+                    .expect("assistant payload should preserve reasoning evidence");
+                assert_eq!(
+                    evidence.phase,
+                    ModelProviderReasoningStatusPhase::MessageAssistant
+                );
+                assert_eq!(evidence.provider_type.as_str(), "openai");
+                assert_eq!(evidence.requested_reasoning_level.as_deref(), Some("high"));
+                assert_eq!(evidence.status.thinking_emitted, Some(true));
+                assert_eq!(evidence.tokens.reasoning_output_tokens, Some(7));
+                assert_eq!(evidence.tokens.thought_tokens, Some(3));
+                assert_eq!(evidence.refs.trace_id.as_deref(), Some("trace-17a"));
+                assert_eq!(evidence.safety.raw_reasoning_text, "omitted");
+                assert_eq!(evidence.safety.synthetic_reasoning_summary, "omitted");
             }
             other => panic!("expected MessageAssistant, got {other:?}"),
         }
@@ -159,6 +244,7 @@ mod session_event_tests {
                 assert_eq!(p.stop_reason, "interrupted");
                 assert_eq!(p.token_usage, None);
                 assert_eq!(p.token_record, None);
+                assert!(p.reasoning_status_evidence.is_none());
             }
             other => panic!("expected MessageAssistant, got {other:?}"),
         }

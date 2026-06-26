@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::shared::protocol::model_audit::ModelProviderReasoningStatusEvidence;
+
 use super::token_usage::{TokenRecord, TokenUsage};
 
 /// Payload for `message.user` events.
@@ -44,6 +46,9 @@ pub struct AssistantMessagePayload {
     /// Whether the response included thinking blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_thinking: Option<bool>,
+    /// Metadata-only provider reasoning/status evidence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_status_evidence: Option<ModelProviderReasoningStatusEvidence>,
 }
 
 /// Payload for `message.system` events.

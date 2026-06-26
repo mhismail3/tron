@@ -7,7 +7,7 @@
 //! | [`events`] | Runtime event payloads and stream event DTOs |
 //! | [`memory`] | Source-backed memory contract DTOs: policy, records, prompt traces, evals, and migration |
 //! | [`messages`] | Chat message DTOs |
-//! | [`model_audit`] | Provider request audit and metadata-only reasoning/status evidence DTOs consumed by replay manifests; redacted and bounded before persistence |
+//! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests, plus metadata-only reasoning/status evidence DTOs; redacted and bounded before persistence |
 //! | [`model_capabilities`] | Model-facing capability result DTOs |
 
 pub mod content;
