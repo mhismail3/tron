@@ -2689,7 +2689,7 @@ Validation evidence:
 | Mainline DRC check | exit 101 | `determinism_replayability_invariants` passed protocol/docs parity and failed only on the known non-selected UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`; no Slice 19A event/protocol paths were reported. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
 
-### Slice 20A Implementation Candidate: Database Schema Catalog Parity Foundation
+### Accepted Slice 20A: Database Schema Catalog Parity Foundation
 
 Discovery thread `019efe16-09d7-73d3-9708-6c6ba5bc6493` selected Slice 20A
 with exact final status `implementation may start` from baseline
@@ -2699,11 +2699,25 @@ with exact final status `implementation may start` from baseline
 Implementation branch:
 `codex/phase-2-slice-20a-database-schema-catalog-parity`
 
+Implementation thread:
+`019f026c-9002-79d3-a5ad-212385123500`
+
+Independent review thread:
+`019f0276-48fc-7cd1-9a26-d6cf580bed7e`
+
 Baseline HEAD:
 `aff715c49b828b7f3ade0b8e9af41b3554fe78d4`
 (`docs: accept phase 2 slice 19a`)
 
-Implementation-candidate scope:
+Accepted implementation commit:
+`4d4f7f0b3a260632591152b06d725788197cd8c8`
+(`test: guard database schema catalog parity`)
+
+Mainline merge commit:
+`a5d4e4f8e52a8f90761b3aba3ddc6cdebe43aba3`
+(`merge: integrate phase 2 slice 20a branch`)
+
+Accepted scope:
 
 - Strengthens the retained DSEMD static gate with
   `readme_database_schema_table_catalog_matches_sqlite_sources`, which parses
@@ -2712,8 +2726,9 @@ Implementation-candidate scope:
   then requires the README Database Schema table catalog to match.
 - Fixes the README table catalog drift exposed by the guard by documenting the
   existing `engine_stream_subscriptions` table beside `engine_stream_events`.
-- Updates Phase 2 planning artifacts for `P2AER-INV-021` with
-  implementation-candidate / `pending_review` wording only.
+- Updates Phase 2 planning artifacts for `P2AER-INV-021` as the current
+  accepted backend database schema catalog parity baseline after independent
+  review.
 - Keeps the slice evidence-only: no new migration, compatibility reader,
   product table, settings/profile schema, dependency restoration, public
   `/engine` method, Swift UI, runtime execution, live network/APNs behavior,
@@ -2737,3 +2752,7 @@ Validation evidence:
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f0276-48fc-7cd1-9a26-d6cf580bed7e` | exact verdict `slice accepted` | Review verified branch/head cleanliness, baseline ancestry, full diff, README/schema-source table parity, no migrations or runtime schema behavior changes, pending-review wording before acceptance, focused storage/migration/durability tests, DSEMD, DESI, BPRC, PPACD, hygiene checks, and no repo-managed skills. |
+| Mainline focused Slice 20A regressions | exit 0 | On merged `main`, shared storage tests, session event-store SQLite migration tests, engine durability tests, and DSEMD README/schema-source table-catalog parity passed. |
+| Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, DESI, PPACD, and BPRC passed on merged `main`; check emitted only existing dead-code warnings. |
+| Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
