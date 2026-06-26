@@ -2557,7 +2557,7 @@ retrieval, embeddings, reranking, summarization, episodic event-to-memory
 conversion, prompt inclusion, automatic retention, native iOS UI, settings
 profile migration, public `/engine` expansion, repo-managed skills, and
 unrelated DRC cleanup.
-Slice 19A is an implementation candidate for `P2AER-INV-020` /
+Accepted Slice 19A closes the narrow backend portion of `P2AER-INV-020` /
 `BPRC-FEATURE-20` / `BPRC-FEATURE-21`: Event Protocol Catalog Parity
 Foundation. It keeps the generated persisted session event catalog unchanged
 and adds source-backed parity evidence for the 24 typed primitive loop event

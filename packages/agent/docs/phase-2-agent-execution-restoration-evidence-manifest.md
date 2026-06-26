@@ -2622,7 +2622,21 @@ runtime execution, repo-managed skills, broad DTO resurrection, unrelated DRC
 cleanup, and production deployment remain deferred. The known non-selected DRC
 UTC allow-list gap in `goals`, `web`, and `tool_sources` remains deferred.
 
-### Phase 2 Slice 19A Implementation Candidate: Event Protocol Catalog Parity Foundation
+### Accepted Slice 19A: Event Protocol Catalog Parity Foundation
+
+Discovery thread `019f0252-0ee6-7450-8a4c-3b068ed6472c` selected Slice 19A
+with exact final status `implementation may start` from baseline
+`origin/main@9a75b741150a9cc648c85d74c1da1f680f8fc8f0`. Implementation thread
+`019f0256-9f00-7070-8067-a71c5d5b4782` completed with exact final status
+`implementation complete` on branch
+`codex/phase-2-slice-19a-event-protocol-catalog-parity` at
+`58df927f8d0381ccb1a9d3f98ca8dc2d2631f227` (`test: guard event protocol
+catalog parity`). Independent review thread
+`019f0260-6af2-73c2-bd4d-3570119c9a86` returned exact verdict
+`slice accepted` with no blocking findings. The accepted branch was merged to
+`main` at `da6f6e1c04dc1abab01e2aea11ed04aa04b54db0`
+(`merge: integrate phase 2 slice 19a branch`) before this closeout
+documentation was recorded.
 
 Implementation branch:
 `codex/phase-2-slice-19a-event-protocol-catalog-parity`
@@ -2631,11 +2645,7 @@ Baseline HEAD:
 `9a75b741150a9cc648c85d74c1da1f680f8fc8f0`
 (`docs: accept phase 2 slice 18a`)
 
-Status: `pending_review`; this entry records the implementation candidate only
-and does not mark Slice 19A accepted or current-baseline before independent
-review.
-
-Candidate scope:
+Accepted scope:
 
 - Fixes the stale `event_store/types` progressive docs that still described a
   23-variant persisted event catalog after Slice 17A brought the generated
@@ -2665,11 +2675,16 @@ Validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types::generated::tests --lib -- --nocapture` | exit 0 | All 22 generated event catalog tests passed, including count/docs parity, wire-label serde parity, loop-domain restriction, and retired product event rejection. |
 | `cargo test --manifest-path packages/agent/Cargo.toml event_catalog --lib -- --nocapture` | exit 0 | Focused event catalog parity tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml from_str_rejects_retired_product_event_types --lib -- --nocapture` | exit 0 | Focused retired product event rejection test passed. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI static gate passed with Slice 19A docs still marked pending review. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI static gate passed with Slice 19A implementation-candidate evidence. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | Public protocol gate passed; Slice 19A added no public `/engine` expansion. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC static gate passed with the Phase 2 TSV row marked `pending_review`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC static gate passed with the Phase 2 TSV row marked `pending_review` before independent review. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC protocol/docs parity passed; the only failure remained the pre-existing non-selected UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f0260-6af2-73c2-bd4d-3570119c9a86` | exact verdict `slice accepted` | Review verified branch/head cleanliness, baseline ancestry, full diff, no runtime event catalog changes, no new event variants or product DTO resurrection, docs/evidence pending-review wording before acceptance, generated event catalog tests, DESI, PPACD, BPRC, hygiene checks, and DRC with only the known non-selected UTC allow-list gap. |
+| Mainline focused Slice 19A regressions | exit 0 | On merged `main`, generated event catalog tests, `event_catalog` filters, and `from_str_rejects_retired_product_event_types` passed. |
+| Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, DESI, PPACD, and BPRC passed on merged `main`; check emitted only existing provider/resource dead-code warnings. |
+| Mainline DRC check | exit 101 | `determinism_replayability_invariants` passed protocol/docs parity and failed only on the known non-selected UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`; no Slice 19A event/protocol paths were reported. |
+| Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
