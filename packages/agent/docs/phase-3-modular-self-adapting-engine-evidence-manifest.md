@@ -176,15 +176,16 @@ Candidate scope:
 - Deliberately excludes module install, activation, execution, dependency
   restoration, package managers, physical module workspace directories,
   repo-managed `packages/agent/skills`, raw prompt/proposal/code/command/file
-  payloads, unsafe paths, raw grant/authority ids, public `/engine`
-  expansion, fixed iOS panels, and production deploy/update behavior.
+  payloads, unsafe paths, token-like title/summary identity material, raw
+  grant/authority ids, public `/engine` expansion, fixed iOS panels, and
+  production deploy/update behavior.
 
 Candidate validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
-| `cargo test --manifest-path packages/agent/Cargo.toml module_authoring --lib` | exit 0 | Module proposal resource registration, create/list/inspect, idempotent replay, unsafe field/path/injection denial, bounded refs, projection redaction, lifecycle stream evidence, and no repo-managed skills side effects passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_authoring --lib` | exit 0 | Module proposal resource registration, create/list/inspect, idempotent replay, record/list/inspect unsafe field/path/injection denial, token-like title/summary denial, bounded refs, projection redaction, lifecycle stream evidence, and no repo-managed skills side effects passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml module_proposal --lib` | exit 0 | Module proposal runtime grants, exact selector enforcement, explicit authority/resource-kind requirements, wildcard denial, and resource schema registration passed. |
 
 Deferred scope remains unchanged for later review acceptance: validation report

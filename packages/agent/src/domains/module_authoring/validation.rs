@@ -97,6 +97,7 @@ pub(super) fn bounded_text(
         return Err(invalid(format!("{field} exceeds {max_bytes} bytes")));
     }
     reject_secret_like(field, trimmed)?;
+    reject_provider_visible_token_like(field, trimmed)?;
     reject_prompt_like(field, trimmed)?;
     Ok(trimmed.to_owned())
 }
@@ -342,6 +343,58 @@ fn reject_secret_like(field: &str, value: &str) -> Result<(), CapabilityError> {
         )));
     }
     Ok(())
+}
+
+fn reject_provider_visible_token_like(field: &str, value: &str) -> Result<(), CapabilityError> {
+    if value
+        .split(|character: char| !matches!(character, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '-' | '.'))
+        .any(|candidate| {
+            looks_like_github_token(candidate)
+                || looks_like_jwt(candidate)
+                || looks_like_aws_access_key(candidate)
+        })
+    {
+        return Err(invalid(format!(
+            "{field} must not contain token-like material"
+        )));
+    }
+    Ok(())
+}
+
+fn looks_like_github_token(candidate: &str) -> bool {
+    let lowered = candidate.to_ascii_lowercase();
+    lowered.starts_with("github_pat_")
+        || lowered.starts_with("ghp_")
+        || lowered.starts_with("gho_")
+        || lowered.starts_with("ghu_")
+        || lowered.starts_with("ghs_")
+        || lowered.starts_with("ghr_")
+}
+
+fn looks_like_jwt(candidate: &str) -> bool {
+    let mut parts = candidate.split('.');
+    let (Some(header), Some(payload), Some(signature)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    if parts.next().is_some() || !header.starts_with("eyJ") {
+        return false;
+    }
+    [header, payload, signature].iter().all(|part| {
+        part.len() >= 8
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    })
+}
+
+fn looks_like_aws_access_key(candidate: &str) -> bool {
+    let bytes = candidate.as_bytes();
+    bytes.len() == 20
+        && (candidate.starts_with("AKIA") || candidate.starts_with("ASIA"))
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
 }
 
 fn reject_prompt_like(field: &str, value: &str) -> Result<(), CapabilityError> {

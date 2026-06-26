@@ -197,8 +197,9 @@ Minimal shape:
 - proposal resource kind for module drafts;
 - bounded source/doc/test refs rather than raw unbounded code payloads in
   provider-visible projections;
-- unsafe path denial, idempotency evidence, lifecycle events, and
-  fingerprinted trace/replay refs;
+- record/list/inspect unsafe field and unsafe path denial, token-like identity
+  denial, idempotency evidence, lifecycle events, and fingerprinted
+  trace/replay refs;
 - read-only list/inspect operations for proposals with exact inspect-resource
   selectors.
 

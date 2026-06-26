@@ -181,6 +181,7 @@ pub(crate) async fn list_module_proposal_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reject_unsafe_payload(payload)?;
     let _grant = inspect_read_grant(deps, invocation, "module_proposal_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
@@ -247,6 +248,7 @@ pub(crate) async fn inspect_module_proposal_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reject_unsafe_payload(payload)?;
     let grant = inspect_read_grant(deps, invocation, "module_proposal_inspect").await?;
     let resource_id = required_string(payload, "moduleProposalResourceId")?;
     validate_module_proposal_resource_id(&resource_id)?;

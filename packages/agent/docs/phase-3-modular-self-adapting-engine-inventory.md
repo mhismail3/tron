@@ -98,7 +98,10 @@ idempotency fingerprints, lifecycle stream evidence, validation placeholder
 status, and explicit no-install/no-execution proof. It does not install or
 execute modules, restore dependencies, use package managers, create physical
 module workspace directories, touch repo-managed skills, expand public
-`/engine`, add fixed native panels, or introduce a new SQLite table.
+`/engine`, add fixed native panels, or introduce a new SQLite table. Record,
+list, and inspect reject raw payload/code/command/path/prompt fields before
+resource handling, and provider-visible title/summary identity rejects
+representative token-like material before storage/projection.
 
 ## Slice Families
 
