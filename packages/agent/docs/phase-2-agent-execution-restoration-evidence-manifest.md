@@ -2827,7 +2827,7 @@ Validation evidence:
 | Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, BPRC, DESI, and PPACD passed on merged `main`; check emitted only existing dead-code warnings. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
 
-### Slice 22A Implementation Candidate: Dependency Restoration Review Foundation
+### Accepted Slice 22A: Dependency Restoration Review Foundation
 
 Discovery thread `019f0292-aa8e-7cb3-afff-4edaf907903c` selected Slice 22A
 with exact final status `implementation may start` from baseline
@@ -2837,16 +2837,29 @@ with exact final status `implementation may start` from baseline
 Implementation branch:
 `codex/phase-2-slice-22a-dependency-restoration-review`
 
+Implementation thread:
+`019f0297-81e5-7572-9623-7b5e55b18302`
+
+Independent review thread:
+`019f02a1-76c6-7ec0-9fa5-bfc0cc173058`
+
 Baseline HEAD:
 `47bdc52bbae01040144a10e81d1f3a95345b9093`
 (`docs: accept phase 2 slice 21a`)
 
-Implementation status: `pending_review`.
+Accepted implementation commit:
+`f86b47f22be3c816d1c1503680f5bdd4d25f9134`
+(`test: guard dependency restoration policy`)
 
-Implementation candidate scope:
+Mainline merge commit:
+`eaddc6ffb1a7037134b86956d493fed19e2ba30d`
+(`merge: integrate phase 2 slice 22a branch`)
+
+Accepted scope:
 
 - Moves `P2AER-INV-023` / `BPRC-FEATURE-24` from `planned` to
-  `pending_review` for Slice 22A implementation-candidate evidence only.
+  `current_baseline` after independent review accepted the source-backed
+  dependency policy evidence.
 - Strengthens the retained PCC dependency-residue guard so it parses feature
   index section 24 as the source-backed removed-dependency catalog.
 - Checks `packages/agent/Cargo.toml` and `packages/agent/Cargo.lock` so removed
@@ -2875,3 +2888,7 @@ Validation evidence:
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f02a1-76c6-7ec0-9fa5-bfc0cc173058` | exact verdict `slice accepted` | Review verified branch/head cleanliness, baseline ancestry, full diff, source-backed dependency catalog policy, no Cargo dependency changes or speculative restoration, pending-review wording before acceptance, TPC accepted budget rows, PCC/BPRC/DESI/TPC validation, hygiene checks, and no repo-managed skills. |
+| Mainline closeout compile and format checks | exit 0 | On merged `main`, `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` and `cargo check --manifest-path packages/agent/Cargo.toml` passed; check emitted only existing provider/resource dead-code warnings. |
+| Mainline Slice 22A static gates | exit 0 | On merged `main`, focused dependency policy guard, full PCC, BPRC, DESI, and TPC targets passed after updating `P2AER-INV-023` to `current_baseline`. |
+| Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |

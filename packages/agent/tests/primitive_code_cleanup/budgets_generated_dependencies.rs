@@ -202,8 +202,8 @@ fn dependency_restoration_review_is_source_backed_by_phase_two_policy() {
     assert_eq!(inventory_row[1], "dependency restoration review");
     assert_eq!(inventory_row[4], "deferred");
     assert_eq!(inventory_row[10], "module_contract");
-    assert_eq!(inventory_row[11], "Slice 22A");
-    assert_eq!(inventory_row[14], "pending_review");
+    assert_eq!(inventory_row[11], "Accepted Slice 22A");
+    assert_eq!(inventory_row[14], "current_baseline");
     for required in [
         "source-backed dependency policy guard",
         "Cargo.toml/Cargo.lock",
@@ -226,14 +226,14 @@ fn dependency_restoration_review_is_source_backed_by_phase_two_policy() {
         for required in [
             "Slice 22A",
             "Dependency Restoration Review Foundation",
-            "pending_review",
+            "accepted",
             "P2AER-INV-023",
             "BPRC-FEATURE-24",
             "no dependencies are restored",
         ] {
             assert!(
                 lower_contents.contains(&required.to_ascii_lowercase()),
-                "{path} must record Slice 22A implementation-candidate dependency policy evidence: {required}"
+                "{path} must record Slice 22A accepted dependency policy evidence: {required}"
             );
         }
     }
