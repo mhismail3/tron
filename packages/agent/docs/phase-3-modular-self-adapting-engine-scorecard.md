@@ -1,0 +1,563 @@
+# Phase 3 Modular Self-Adapting Engine Scorecard
+
+Status: **complete**
+Current score: **100/100**
+Passing threshold: **100/100**
+Total weight: **100**
+
+Planning baseline:
+`main@bae6ddacd02bef1187118af00b19742aa3d5e7ac`
+(`docs: accept phase 2 slice 22a`)
+
+Historical comparison baseline:
+`origin/next/modular-capability-engine@ad5e484722c6f7abbe764126409494026216ad92`
+
+Companion artifacts:
+
+- [`phase-3-modular-self-adapting-engine-evidence-manifest.md`](phase-3-modular-self-adapting-engine-evidence-manifest.md)
+- [`phase-3-modular-self-adapting-engine-inventory.md`](phase-3-modular-self-adapting-engine-inventory.md)
+- [`phase-3-modular-self-adapting-engine-inventory.tsv`](phase-3-modular-self-adapting-engine-inventory.tsv)
+
+## Goal
+
+Phase 3 restores the full modular-engine direction without rebuilding the old
+branch as a fixed set of core domains and fixed iOS product panels. The target
+architecture is:
+
+- a small engine core that owns only provider boundaries, authority,
+  resource/event/replay substrate, module supervision, storage primitives,
+  and observability;
+- modular capability packages that own feature behavior, dependency requests,
+  package-specific resources, tests, docs, and lifecycle;
+- agent-accessible authoring and improvement workflows for modules, governed by
+  review, authority, dependency policy, validation, and rollback;
+- an app surface that lets the user understand, steer, approve, and audit
+  autonomous work without hardcoding every old feature as a native panel.
+
+The old modular-capability branch is therefore a product feature inventory and
+risk record, not the implementation template.
+
+## Current Baseline
+
+Phase 1 restored local iOS chat affordances and the generic runtime shell.
+Phase 2 restored safe backend foundations for the old feature families:
+capability execution, filesystem, jobs, git, web, goals, approvals, workers,
+tool sources, subagents, procedural records, scheduling, notifications, media,
+imports, repository metadata, update diagnostics, program-execution metadata,
+prompt artifacts, provider reasoning status, memory query/decision evidence,
+event/storage/settings/catalog parity, and dependency policy.
+
+The current gap is not broad feature discovery. The current gap is ownership:
+too many restored foundations are still compiled-in capability foundations
+instead of installable, inspectable, agent-adaptable modules.
+
+## Core Boundary
+
+Phase 3 keeps these responsibilities in the engine core:
+
+- provider/model boundary, redaction, token accounting, and no hidden
+  chain-of-thought exposure;
+- `capability::execute` dispatch, provider-visible schema bounding, and generic
+  result transport;
+- authority, grants, selectors, approvals, freshness, and denial evidence;
+- resource type definitions, resource versions, lifecycle events, links,
+  retention, leases, compensation, and replay refs;
+- session event log, stream payload compatibility, trace/replay, and audit
+  projection helpers;
+- durable storage primitives, settings/profile primitives, auth custody, and
+  dependency policy gates;
+- worker/module supervisor primitives: launch envelope, cancellation, logs,
+  quarantine, rollback, and health;
+- generic observability channels consumed by iOS and future clients.
+
+Everything else needs a module owner unless a slice proves it is a true
+primitive.
+
+## Modular Ownership Rule
+
+A Phase 3 slice may add a new core primitive only when all of these are true:
+
+1. Every future module needs the primitive.
+2. The primitive can be expressed without product-specific behavior.
+3. The primitive has deterministic tests, static inventory coverage, and
+   explicit authority/resource boundaries.
+4. The primitive cannot reasonably live inside a package without making safety,
+   replay, or provider-boundary behavior weaker.
+
+Feature behavior belongs in modules by default.
+
+## First-Principles Implementation Standard
+
+Every Phase 3 worker must start from the current product goal, not from old
+code shape. A valid slice is:
+
+- agent-first: designed around what an autonomous agent needs to inspect,
+  decide, request, validate, execute, improve, and explain;
+- user-governed: exposing the minimum facts and controls a user needs to
+  understand, approve, interrupt, audit, or roll back autonomous work;
+- minimal-core: keeping the engine limited to primitives all modules need;
+- module-owned: placing feature behavior, dependencies, settings, resources,
+  tests, docs, and UI facts under a named module owner;
+- first-principles: defining data flow, authority, lifecycle, idempotency,
+  replay, failure semantics, and redaction before coding;
+- deduplicated: reusing established resource, authority, stream, trace,
+  replay, settings, storage, validation, and cockpit projection patterns;
+- discoverable: organizing files under clear module/domain ownership, updating
+  `mod.rs` progressive docs, keeping submodule tables accurate, and splitting
+  large owners before adding more behavior.
+
+Phase 3 rejects legacy layering. Implementations must not wrap old shapes,
+broad DTOs, stale adapters, compatibility shims, hidden fallback paths,
+alternate unaudited code paths, client-owned server truth, duplicate helpers,
+unused provider/schema variants, or dead code unless discovery proves a
+concrete active compatibility requirement and review accepts that rationale.
+
+These are acceptance criteria. A review may return `changes required` when an
+implementation leaves duplicate paths, fallbacks, stale compatibility code,
+dead code, poor file organization, or old fixed product architecture in place
+even if focused tests pass.
+
+## Scorecard
+
+| Row | Name | Weight | Status | Evidence |
+| --- | --- | ---: | --- | --- |
+| P3MSA-0 | Source baseline and restoration goal | 7 | passed | Baseline commit, old-branch comparison point, Phase 1/2 ledgers, and Phase 2 closeout state are identified. |
+| P3MSA-1 | Minimal core boundary | 9 | passed | Core-owned primitives are explicitly limited to provider, authority, resource/event/replay, storage, module supervision, and observability substrate. |
+| P3MSA-2 | Module manifest and registry roadmap | 10 | passed | Slice 23A defines the manifest, registry, package identity, capability schema, resource declarations, authority needs, settings, dependency intents, provenance, and provider-safe inspection path. |
+| P3MSA-3 | Agent self-authoring lifecycle roadmap | 10 | passed | Slices 23B through 23E define governed module proposal, workspace, validation, review, install, enable, disable, quarantine, and rollback flow. |
+| P3MSA-4 | Authority, dependency, and sandbox roadmap | 10 | passed | Slices 23D, 23F, and 23G require scoped grants, approval gates, dependency review, sandbox envelopes, secrets separation, and fail-closed execution checks. |
+| P3MSA-5 | Runtime execution and autonomy roadmap | 10 | passed | Slices 24A through 24C activate jobs/program execution, subagents, scheduling handoff, and result merge only through module-owned contracts. |
+| P3MSA-6 | Memory and procedural learning roadmap | 9 | passed | Slices 24D and 24E separate memory retrieval/retention and procedural skills/rules/hooks from core while preserving audit, provenance, and user control. |
+| P3MSA-7 | User cockpit and native surface roadmap | 10 | passed | Slice 23H establishes generic autonomous-work visibility before any workflow-specific native panel; later surfaces require stable module contracts and proof that generic rendering is insufficient. |
+| P3MSA-8 | Slice execution protocol | 10 | passed | The plan defines discovery, implementation, independent review, focused fix, re-review, integration, validation, summary, next-discovery thread statuses, and first-principles/no-legacy acceptance rules for every slice. |
+| P3MSA-9 | Validation and static-gate policy | 8 | passed | Each row includes expected focused tests plus shared gates for formatting, checking, docs/evidence, boundary discipline, organization, deduplication, dead-code rejection, personal-info guard, ignored files, and no repo-managed skills. |
+| P3MSA-10 | Deferred and rejected old shapes | 7 | passed | The plan rejects speculative dependency restoration, broad DTO resurrection, fixed old iOS panels, public `/engine` expansion, repo-managed skills, and production deployment behavior. |
+
+## Ordered Slice Roadmap
+
+Each slice starts with an independent discovery thread even though this roadmap
+is written up front. Discovery must restate the first-principles problem,
+inspect current code/docs, confirm that the slice is still the smallest clean
+next step, and either return exact final status `implementation may start` or
+`blocked`. Discovery must also identify any duplicate, fallback, legacy, dead,
+or poorly organized code in the touched area and decide whether the slice
+removes it or records a precise reason it is outside scope.
+
+### Slice 23A: Module Manifest And Registry Foundation
+
+Objective: define the smallest source-backed module manifest and registry
+contract that lets the engine inspect module identity, capabilities, resource
+schemas, authority needs, settings, dependency intents, validation status, and
+provenance without executing module behavior.
+
+Minimal shape:
+
+- module/package manifest schema;
+- registry storage/resource records;
+- provider-safe `module_list` and `module_inspect` or closest existing
+  `capability::execute` operation values;
+- static guard proving modules are inspectable without adding provider-visible
+  tools beyond `execute`;
+- docs that distinguish engine primitives from module-owned behavior.
+
+Out of scope:
+
+- installing new modules;
+- executing module code;
+- adding dependencies;
+- repo-managed skills under `packages/agent/skills`;
+- fixed iOS module marketplace UI.
+
+### Slice 23B: Module Authoring Workspace Foundation
+
+Objective: create a governed place for agent-authored module proposals that is
+not the core engine tree and not the old repo-managed skills directory.
+
+Minimal shape:
+
+- proposal resource kind for module drafts;
+- bounded source/doc/test refs rather than raw unbounded code payloads in
+  provider-visible projections;
+- workspace path policy, unsafe path denial, idempotency evidence, lifecycle
+  events, and trace/replay refs;
+- read-only list/inspect operations for proposals.
+
+Out of scope:
+
+- automatic install;
+- generated code execution;
+- prompt injection from module drafts;
+- unreviewed dependency additions.
+
+### Slice 23C: Module Contract Test Harness
+
+Objective: define how a module proves that its manifest, docs, tests, resource
+schemas, provider projections, and authority declarations are internally
+consistent before it can be installed or enabled.
+
+Minimal shape:
+
+- module validation report resource;
+- deterministic validation command envelope;
+- static checks for manifest/resource/schema/provider projection parity;
+- docs/test requirements for each module;
+- failure evidence that is bounded and provider-safe.
+
+Out of scope:
+
+- broad CI rewrite;
+- runtime execution of arbitrary untrusted module code;
+- accepting modules without deterministic validation evidence.
+
+### Slice 23D: Module Review, Approval, And Install Gate
+
+Objective: add the policy gate that turns a validated module proposal into an
+install candidate only after explicit review, approval, authority, dependency,
+and rollback checks.
+
+Minimal shape:
+
+- install-request and install-decision resources;
+- approval integration with existing fail-closed approval checks;
+- dependency-policy linkage to Slice 22A guard;
+- explicit installed/quarantined/rejected lifecycle states;
+- reasoned denial evidence.
+
+Out of scope:
+
+- silent auto-install;
+- dependency restoration without module owner;
+- production update/deploy behavior;
+- package signing trust beyond recorded provenance unless selected by discovery.
+
+### Slice 23E: Module Enable, Disable, Quarantine, And Rollback
+
+Objective: make module activation reversible and auditable before any module
+executes meaningful work.
+
+Minimal shape:
+
+- enable/disable/quarantine/rollback operations;
+- state machine with version/freshness guards;
+- resource lease and compensation evidence;
+- disabled/quarantined module denial path through real authorization;
+- user-visible lifecycle events.
+
+Out of scope:
+
+- complex dependency graph resolution;
+- live code execution side effects;
+- native package-management UI beyond generic cockpit rendering.
+
+### Slice 23F: Module Runtime Execution Supervisor
+
+Objective: allow enabled modules to run through a generic supervisor that owns
+process boundaries, cancellation, logs, stdout/stderr custody, leases,
+timeouts, and cleanup, while module packages own feature semantics.
+
+Minimal shape:
+
+- execution envelope resource;
+- sandbox/network/secrets policy labels;
+- bounded log/output artifacts;
+- cancellation/timeout/shutdown behavior;
+- scoped module authority derivation;
+- no provider-visible raw command/code/secret leakage.
+
+Out of scope:
+
+- PTY or interactive terminal by default;
+- browser automation by default;
+- language-specific interpreter restoration without module ownership;
+- live network unless a module declares and is granted it.
+
+### Slice 23G: Module Dependency Request And Policy Activation
+
+Objective: turn the Slice 22A dependency guard into a governed dependency
+request path for modules.
+
+Minimal shape:
+
+- dependency request resource;
+- owner module linkage;
+- rationale, security class, license class, runtime need, and removal plan;
+- Cargo/package manifest parity guard;
+- denial for high-risk removed dependencies without an approved module row.
+
+Out of scope:
+
+- speculative restoration of old dependency sets;
+- adding portable PTY, browser automation, embeddings, APNs, interpreters, or
+  signing packages without selected module scope and review.
+
+### Slice 23H: Generic Autonomous Work Cockpit
+
+Objective: give the user a coherent view of autonomous work without adding old
+fixed product panels.
+
+Minimal shape:
+
+- generic activity timeline grouped by module, session, resource, approval,
+  job, and error;
+- active work summary, blocked/waiting states, authority labels, resource touch
+  summaries, and rollback/quarantine status;
+- iOS rendering from current server facts only;
+- source guards preserving thin-client ownership.
+
+Out of scope:
+
+- fixed source-control, memory, process, subagent, notification, or skill
+  panels;
+- fake activity states;
+- client-owned server truth.
+
+### Slice 24A: File And Source-Control Module Pack Activation
+
+Objective: migrate or wrap existing filesystem and git foundations behind a
+module-owned workflow that supports reviewable file/git work without expanding
+core.
+
+Minimal shape:
+
+- module manifest for file/source-control pack;
+- authority mapping for file and git operations;
+- patch/diff/resource review evidence;
+- optional native review surface only after generic cockpit insufficiency is
+  proven.
+
+Out of scope:
+
+- arbitrary checkout, merge, rebase, reset, stash, fetch, pull, push, PR
+  submission, or conflict resolution unless discovery selects a narrower
+  sub-slice.
+
+### Slice 24B: Jobs And Program Execution Module Pack Activation
+
+Objective: connect durable jobs and program-execution metadata to a real
+module-owned execution path with sandboxed runtime policy.
+
+Minimal shape:
+
+- module-owned runtime declaration;
+- execution envelope and output custody;
+- approval triggers for filesystem/network/package behavior;
+- deterministic tests for cancellation, timeout, output bounds, and cleanup.
+
+Out of scope:
+
+- unconstrained shell;
+- package install by default;
+- PTY by default;
+- network by default.
+
+### Slice 24C: Subagent Delegation Module Pack Activation
+
+Objective: turn subagent task lifecycle records into real delegated work only
+through enabled worker/module packages.
+
+Minimal shape:
+
+- child-task launch contract;
+- worker/module selection policy;
+- bounded context handoff;
+- status/result/cancel wiring;
+- result merge proposal rather than silent parent mutation.
+
+Out of scope:
+
+- hidden autonomous spawning;
+- unbounded prompt/context transfer;
+- direct parent-state mutation without reviewable evidence.
+
+### Slice 24D: Memory Retrieval And Retention Module Pack
+
+Objective: add memory retrieval as a replaceable module engine instead of core
+behavior.
+
+Minimal shape:
+
+- memory engine module manifest;
+- retrieval query/result resources;
+- ranking/provenance/confidence metadata;
+- retention/edit/delete policy evidence;
+- prompt-inclusion decision resource with user-visible proof.
+
+Out of scope:
+
+- embeddings/vector dependencies without module dependency approval;
+- hidden prompt injection;
+- invented summaries without source refs;
+- automatic retention without policy and audit.
+
+### Slice 24E: Procedural Skills, Rules, And Hooks Module Pack
+
+Objective: make learned procedures and rules agent-authorable, testable,
+reviewable, and reversible.
+
+Minimal shape:
+
+- procedure/rule/hook module contract;
+- trigger declaration and authority scope;
+- validation report;
+- activation/deactivation lifecycle;
+- provenance and user audit trail.
+
+Out of scope:
+
+- repo-managed bootstrap skills;
+- hidden hook firing;
+- prompt injection without explicit policy;
+- learned behavior that bypasses review.
+
+### Slice 24F: Web, Browser, And Research Module Pack
+
+Objective: extend current web provenance foundations through modules for search,
+crawling, browser automation, or logged-in session work only when selected and
+authorized.
+
+Minimal shape:
+
+- separate module manifests for search, crawl, and browser automation;
+- network authority and robots/citation policy;
+- cookie/session custody rules;
+- dependency requests for browser automation packages if needed.
+
+Out of scope:
+
+- broad browser automation in core;
+- login/cookie reuse without explicit user authority;
+- unbounded crawling;
+- raw page dumps in provider-visible payloads.
+
+### Slice 24G: Notifications And Device Delivery Module Pack
+
+Objective: decide whether server notification resources should activate live
+device delivery and native inbox behavior.
+
+Minimal shape:
+
+- APNs/delivery module manifest if selected;
+- credential custody and entitlement proof;
+- physical-device validation;
+- native inbox only if backed by server notification facts;
+- delivery failure evidence.
+
+Out of scope:
+
+- fake local inbox;
+- raw token exposure;
+- production push behavior without explicit environment and user decision.
+
+### Slice 24H: Import, Repository, And Update Module Pack
+
+Objective: decide which import/repository/update metadata foundations should
+become real module workflows.
+
+Minimal shape:
+
+- module-owned import execution proposal;
+- repository tree or update-diagnostic action contracts;
+- approval and rollback policy;
+- generic cockpit rendering first.
+
+Out of scope:
+
+- production update/deploy commands;
+- raw repository tree dumps;
+- installer/restart commands;
+- native fixed panels without stable contracts.
+
+## Execution Protocol
+
+Every Phase 3 slice follows this thread sequence:
+
+1. Discovery thread from clean `origin/main`.
+   - Title: `Tron Phase 3 Slice <id> Discovery`.
+   - Required final status: `implementation may start` or `blocked`.
+   - Output: selected slice, baseline commit, recommended branch, exact scope,
+     files likely touched, validation, out-of-scope list, user decisions, and
+     deferred scope.
+   - Required analysis: first-principles product goal, agent-first design,
+     user-control needs, owning abstractions, duplicate/fallback/dead-code
+     audit, file organization plan, and explicit rejection of old branch shape.
+2. Implementation thread on one focused branch.
+   - Branch format:
+     `codex/phase-3-slice-<id>-<short-topic>`.
+   - Required final status: `implementation complete` or `blocked`.
+   - Must include code, focused tests, docs, README updates when source truth
+     changes, static inventory/evidence updates, and no unrelated cleanup.
+   - Must implement the clean minimal contract from first principles, keep code
+     under clear module ownership, update progressive docs, split large owners
+     before expanding them, deduplicate helpers, and remove dead/fallback/legacy
+     paths introduced or made obsolete by the slice.
+3. Independent adversarial review thread.
+   - Required verdict: `slice accepted` or `changes required`.
+   - Must compare `baseline..head`, verify branch/head/cleanliness/ancestry,
+     inspect code/tests/docs/evidence, and run focused validation.
+   - Must verify the implementation is agent-first, user-governed,
+     first-principles, deduplicated, discoverable, well organized, and free of
+     new legacy/fallback/dead code.
+4. Focused fix thread when required.
+   - Required final status: `fix ready for review` or `blocked`.
+   - Must address only review findings with deterministic regression coverage.
+5. Independent re-review thread.
+   - Required verdict: `slice accepted` or `changes required`.
+   - Loop with additional focused fix threads until accepted or blocked.
+6. Mainline integration.
+   - Merge accepted commits into `main`.
+   - Update Phase 3 scorecard/inventory/evidence, README, and any touched
+     static inventories with accepted wording.
+   - Validate from `main`.
+   - Push `main`.
+   - Verify `HEAD == origin/main`.
+   - Verify accepted commits are ancestors of `origin/main`.
+7. Final summary and next discovery.
+   - Start a summary thread with exact accepted commits, validation, deferred
+     scope, and final status.
+   - Start the next discovery thread from fresh `origin/main`.
+
+## Shared Validation
+
+Each implementation or review chooses the smallest useful validation set, but
+the default Phase 3 closeout set is:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+- `cargo check --manifest-path packages/agent/Cargo.toml`
+- focused Rust tests for touched domains/modules
+- focused iOS tests and `xcodegen generate` when Swift or project files change
+- `baseline_pre_restoration_closure_invariants`
+- `documentation_evidence_scorecard_integrity_invariants`
+- `self_sufficient_agent_runtime_readiness_invariants`
+- `self_updating_worker_runtime_foundation_invariants`
+- `true_modularity_boundary_invariants`
+- `security_authority_capability_boundaries_invariants`
+- `public_protocol_api_contract_discipline_invariants`
+- `configuration_profile_environment_discipline_invariants` when settings are
+  touched
+- `data_integrity_storage_evolution_migration_discipline_invariants` when
+  storage is touched
+- `primitive_code_cleanup_invariants`
+- `true_primitive_cleanup_invariants`
+- `scripts/personal-info-guard.sh`
+- `git diff --check`
+- `git ls-files -ci --exclude-standard`
+- `test ! -e packages/agent/skills`
+
+Known caveats remain non-goals unless selected by discovery: the pre-existing
+DRC UTC allow-list gap in non-selected `goals`, `web`, and `tool_sources`, and
+broad pre-existing SOL marker rows outside a touched slice.
+
+## Rejected Shapes
+
+Phase 3 explicitly rejects:
+
+- rebuilding the old modular branch as fixed core domains;
+- broad product DTO resurrection;
+- fixed native iOS panels before stable module contracts;
+- speculative dependency restoration;
+- repo-managed first-party skills under `packages/agent/skills`;
+- public `/engine` expansion as a substitute for module contracts;
+- hidden chain-of-thought exposure or invented reasoning summaries;
+- hidden memory or prompt injection;
+- live production deployment/update behavior;
+- `tron deploy` or production deployment commands.

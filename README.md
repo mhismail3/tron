@@ -407,6 +407,19 @@ Current living entry points:
 - `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`:
   machine-readable Phase 2 feature-family inventory used by future slice
   handoffs.
+- `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`:
+  completed planning scorecard for the Phase 3 modular self-adapting engine
+  roadmap, minimal-core boundary, first-principles implementation standard,
+  module-plane slices, feature-pack activation order, and review/fix/re-review
+  execution protocol.
+- `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`:
+  companion evidence manifest for the Phase 3 planning scorecard.
+- `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`:
+  narrative inventory for Phase 3 module-plane foundations, feature module
+  packs, rejected old shapes, and deferred product decisions.
+- `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`:
+  machine-readable Phase 3 slice inventory used by future discovery and
+  implementation handoffs.
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
@@ -2123,6 +2136,11 @@ packages/ios-app/Sources/
   `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
   `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and
   `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`.
+  The durable Phase 3 modular self-adapting engine plan is recorded in
+  `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`,
+  `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`,
+  `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`, and
+  `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`.
   Retrospective audit ordering and review-only constraints are tracked in
   `packages/agent/docs/restoration-retrospective-audit-status.md`.
 
