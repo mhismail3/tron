@@ -60,6 +60,9 @@ Total weight: **100**
 - SQLite durability and authority store constructors now apply shared storage
   runtime pragmas and validate the shared storage schema before creating
   owner-specific tables.
+- Slice 20A strengthens the retained DSEMD static gate with a README Database
+  Schema table-catalog parity check against active SQLite schema sources,
+  preventing undocumented active tables without adding a migration.
 
 ## Verification Summary
 

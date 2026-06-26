@@ -237,6 +237,16 @@ add new event variants, resurrect retired product DTOs, add fixed iOS panels,
 expand public `/engine`, add database migrations, change settings/profile
 schemas, or widen runtime execution.
 
+`P2AER-INV-021` is a Slice 20A implementation candidate pending independent
+review: Database Schema Catalog Parity Foundation. The candidate adds a
+source-backed static guard that compares the README Database Schema table
+catalog against active SQLite schema sources, records the existing
+`engine_stream_subscriptions` table in the README catalog, and keeps the
+database/storage row focused on evidence parity. It deliberately does not add a
+new migration, compatibility reader, product table, settings/profile schema,
+dependency restoration, public `/engine` method, iOS panel, runtime execution,
+or production update/deploy behavior.
+
 iOS remains a thin client. The default Phase 2 iOS answer is generic runtime
 surface or server-fact rendering. Native surfaces are justified only when the
 workflow is stable, frequent, and platform-specific: approvals, questions,
