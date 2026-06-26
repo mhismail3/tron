@@ -257,6 +257,16 @@ panel, public `/engine` expansion, runtime execution, live network/APNs behavior
 repo-managed skills, production deployment/update behavior, or unrelated DRC
 cleanup.
 
+`P2AER-INV-023` has a Slice 22A implementation candidate:
+Dependency Restoration Review Foundation. The candidate keeps dependency
+restoration deferred and adds a source-backed dependency policy guard that
+parses feature index section 24, treats that removed-dependency catalog as
+policy evidence, and checks `packages/agent/Cargo.toml` plus
+`packages/agent/Cargo.lock` so removed dependencies fail if they reappear
+without an owning module and Phase 2 rationale. The row is `pending_review`;
+no dependencies are restored, no package/runtime behavior changes, and no
+fixed iOS panels or Swift UI work are included.
+
 iOS remains a thin client. The default Phase 2 iOS answer is generic runtime
 surface or server-fact rendering. Native surfaces are justified only when the
 workflow is stable, frequent, and platform-specific: approvals, questions,
