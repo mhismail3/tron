@@ -112,7 +112,8 @@ async fn list_and_inspect_return_bounded_provider_safe_projections() {
         "dependencyIntents",
         "validation",
         "provenance",
-        "lifecycle",
+        "resourceLifecycle",
+        "manifestLifecycle",
         "redactionProof",
         "redaction",
     ] {
@@ -124,6 +125,11 @@ async fn list_and_inspect_return_bounded_provider_safe_projections() {
     assert!(
         resource.get("payload").is_none(),
         "raw manifest payload must not be provider visible"
+    );
+    assert_eq!(resource["resourceLifecycle"], json!("validated"));
+    assert_eq!(
+        resource["manifestLifecycle"]["state"]["text"],
+        json!("validated")
     );
     assert_provider_projection_has_no_raw_sensitive_material(&inspected);
 }

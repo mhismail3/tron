@@ -509,6 +509,8 @@ fn assert_module_registry_runtime_grant_is_read_only(
         );
     }
     for forbidden_scope in [
+        "state.read",
+        "state.write",
         "module_registry.write",
         "resource.write",
         "worker.lifecycle.read",
@@ -528,21 +530,22 @@ fn assert_module_registry_runtime_grant_is_read_only(
             "module registry read grant must not include {forbidden_scope}"
         );
     }
-    assert!(
-        grant
-            .allowed_resource_kinds
-            .contains(&"module_manifest".to_owned()),
-        "module registry read grant should include module_manifest resources"
+    assert_eq!(
+        grant.allowed_resource_kinds,
+        vec!["module_manifest".to_owned()],
+        "module registry runtime grant must be module-manifest-only"
     );
-    assert!(
-        grant
-            .resource_selectors
-            .contains(&"kind:module_manifest".to_owned()),
-        "module registry read grant should include explicit kind selector"
-    );
-    assert!(
-        !grant.resource_selectors.contains(&"*".to_owned()),
-        "module registry runtime grant must not use wildcard selectors"
+    let expected_selectors = if let Some(resource_id) = expected_resource_id {
+        vec![
+            "kind:module_manifest".to_owned(),
+            format!("resource:{resource_id}"),
+        ]
+    } else {
+        vec!["kind:module_manifest".to_owned()]
+    };
+    assert_eq!(
+        grant.resource_selectors, expected_selectors,
+        "module registry runtime grant must use only explicit module_manifest selectors"
     );
     for forbidden_kind in [
         "worker_package",
@@ -552,6 +555,7 @@ fn assert_module_registry_runtime_grant_is_read_only(
         "tool_source_proposal",
         "subagent_task",
         "procedural_record",
+        "agent_state",
     ] {
         assert!(
             !grant
@@ -566,15 +570,10 @@ fn assert_module_registry_runtime_grant_is_read_only(
             "module registry read grant must not include selector kind:{forbidden_kind}"
         );
     }
-    if let Some(resource_id) = expected_resource_id {
-        assert!(
-            grant
-                .resource_selectors
-                .contains(&format!("resource:{resource_id}")),
-            "module registry inspect grant should include selector resource:{resource_id}"
-        );
-    }
     for forbidden_capability in [
+        "state::get",
+        "state::list",
+        "state::set",
         "worker_lifecycle::install_package",
         "worker_lifecycle::launch_worker",
         "procedural::activate",
@@ -593,15 +592,7 @@ fn assert_module_registry_runtime_grant_is_read_only(
             "module registry read grant must not include capability {forbidden_capability}"
         );
     }
-    assert_eq!(
-        grant.allowed_capabilities,
-        vec![
-            "capability::execute".to_owned(),
-            "state::get".to_owned(),
-            "state::list".to_owned(),
-            "state::set".to_owned(),
-        ]
-    );
+    assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
 }
 
 fn assert_memory_evidence_runtime_grant_is_read_only(
