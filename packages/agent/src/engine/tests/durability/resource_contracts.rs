@@ -22,6 +22,7 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "schedule_run",
         "media_artifact",
         "import_preview",
+        "prompt_artifact",
         "repository_tree_snapshot",
         "update_diagnostic_record",
     ] {

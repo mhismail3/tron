@@ -6,7 +6,8 @@
 //! evidence, memory contract custody, durable media/voice-note resource
 //! custody, durable import/session-resource graph lineage records, durable
 //! content-free repository tree snapshot records, durable import preview
-//! records, durable program execution metadata records, durable system update
+//! records, durable program execution metadata records, durable prompt artifact
+//! metadata records, durable system update
 //! diagnostic metadata records, durable non-interactive jobs,
 //! read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
@@ -30,6 +31,7 @@
 //! | `repository_tree` | Durable content-free repository tree snapshot records |
 //! | `import_preview` | Durable content-free import preview records |
 //! | `program_execution` | Durable content-free program execution metadata records |
+//! | `prompt_artifacts` | Durable explicit prompt artifact metadata records |
 //! | `update_diagnostics` | Durable system update diagnostics metadata records |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
@@ -96,6 +98,12 @@
 //! trace/replay refs, and lifecycle evidence without raw code, command strings,
 //! raw stdin/stdout/stderr, subprocesses, runtime installs, file writes, network
 //! behavior, result merge, or native UI. Update
+//! Prompt artifact restoration is metadata-only explicit artifact custody: it
+//! stores artifact kinds, bounded titles/summaries/previews, content refs or
+//! fingerprints, retention state, trace/replay refs, and lifecycle evidence
+//! without raw prompt bodies, automatic prompt-history capture, provider-visible
+//! raw prompt payloads, prompt injection, learned behavior, context inclusion,
+//! native snippet/template UI, or settings/profile migration. Update
 //! diagnostics restoration is metadata-only signed-release and provenance
 //! custody: it does not perform live update checks, execute
 //! installers, restart processes, register packages/catalog entries, expose
@@ -140,6 +148,7 @@ pub mod model;
 pub mod notifications;
 pub mod procedural;
 pub mod program_execution;
+pub mod prompt_artifacts;
 pub mod registration;
 pub mod repository_tree;
 pub mod scheduler;

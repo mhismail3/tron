@@ -42,9 +42,9 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 710 |
+| implementation | 719 |
 | support | 385 |
-| test | 557 |
+| test | 559 |
 | docs | 131 |
 | delete | 0 |
 
@@ -57,7 +57,7 @@ The TSV covers tracked and newly introduced files under:
 | `app_bootstrap` | 11 |
 | `auth` | 19 |
 | `capability` | 4 |
-| `capability_execute` | 32 |
+| `capability_execute` | 34 |
 | `catalog_discovery` | 8 |
 | `docs/static gates` | 123 |
 | `device` | 6 |
@@ -84,8 +84,9 @@ The TSV covers tracked and newly introduced files under:
 | `registration` | 5 |
 | `procedural` | 3 |
 | `program_execution` | 6 |
+| `prompt_artifacts` | 6 |
 | `repository_tree` | 6 |
-| `resource_kernel` | 10 |
+| `resource_kernel` | 11 |
 | `rust_crate` | 2 |
 | `scheduler` | 7 |
 | `scripts` | 22 |
@@ -97,7 +98,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 555 |
+| `test_harness` | 557 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

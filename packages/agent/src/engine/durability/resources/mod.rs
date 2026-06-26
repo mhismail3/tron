@@ -27,6 +27,7 @@ mod memory_definitions;
 mod notification_definitions;
 mod procedural_definitions;
 mod program_execution_definitions;
+mod prompt_artifact_definitions;
 mod repository_tree_definitions;
 mod scheduler_definitions;
 mod store;

@@ -34,6 +34,11 @@
 //! with runtime/language identifiers, resource-limit policy, I/O-envelope refs,
 //! fingerprints, and lifecycle evidence, without storing code or I/O bytes and
 //! without launching runtimes, subprocesses, package managers, or networks.
+//! Prompt-artifact operations are resource-backed metadata operations: they
+//! record, list, and inspect explicit `prompt_artifact` records with bounded
+//! title/summary/preview fields and content refs/fingerprints only, without raw
+//! prompt body storage, automatic capture, prompt injection, learned behavior,
+//! provider-visible raw prompt payloads, or native snippet/template UI.
 //! Update-diagnostics operations are resource-backed metadata operations: they
 //! record, list, and inspect bounded `update_diagnostic_record` signed-release
 //! and provenance facts without live update checks, package bytes, install or
@@ -72,6 +77,7 @@ mod import_preview_contract;
 mod media_contract;
 mod operations;
 mod program_execution_contract;
+mod prompt_artifacts_contract;
 mod repository_tree_contract;
 mod scheduler_contract;
 mod update_diagnostics_contract;

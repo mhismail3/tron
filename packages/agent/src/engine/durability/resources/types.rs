@@ -134,6 +134,10 @@ pub const IMPORT_PREVIEW_SCHEMA_ID: &str = "tron.resource.import_preview.v1";
 pub const PROGRAM_EXECUTION_KIND: &str = "program_execution_record";
 /// Built-in content-free program execution record resource schema id.
 pub const PROGRAM_EXECUTION_SCHEMA_ID: &str = "tron.resource.program_execution_record.v1";
+/// Built-in prompt artifact metadata resource kind.
+pub const PROMPT_ARTIFACT_KIND: &str = "prompt_artifact";
+/// Built-in prompt artifact metadata resource schema id.
+pub const PROMPT_ARTIFACT_SCHEMA_ID: &str = "tron.resource.prompt_artifact.v1";
 /// Built-in content-free repository tree snapshot resource kind.
 pub const REPOSITORY_TREE_SNAPSHOT_KIND: &str = "repository_tree_snapshot";
 /// Built-in content-free repository tree snapshot resource schema id.

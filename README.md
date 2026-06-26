@@ -1009,6 +1009,9 @@ Current primitive operations:
 | `program_execution_record` | Accepted Slice 15A operation that records one scoped `program_execution_record` resource for content-free program execution metadata only, with runtime/language identifiers, resource-limit policy, I/O-envelope metadata, source/input/output refs or fingerprints, lifecycle evidence, trace/replay refs, fingerprinted idempotency evidence, and no raw code, raw stdin/stdout/stderr, command text, runtime execution, process launch, package install, file writes, or live network behavior. |
 | `program_execution_list` | Accepted Slice 15A operation that lists scoped `program_execution_record` resources as bounded/redacted metadata projections with runtime/language identifiers, lifecycle state, fingerprints, and resource-limit summaries only. |
 | `program_execution_inspect` | Accepted Slice 15A operation that inspects one scoped `program_execution_record` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, refs, lifecycle evidence, and explicit non-execution proof without raw code, raw I/O, command strings, unsafe paths, or raw authority ids. |
+| `prompt_artifact_record` | Review-candidate Slice 16A operation that records one scoped `prompt_artifact` resource for explicit opt-in prompt artifact metadata only, with artifact kind, title/summary/preview, content refs or fingerprints, retention state, lifecycle evidence, trace/replay/source refs, fingerprinted idempotency evidence, and no raw prompt body, provider-visible raw prompt payload, automatic prompt-history capture, prompt injection, context inclusion, or learned behavior. |
+| `prompt_artifact_list` | Review-candidate Slice 16A operation that lists scoped `prompt_artifact` resources as bounded/redacted metadata projections with artifact kind, lifecycle state, retention state, content fingerprints, and explicit metadata-only proof. |
+| `prompt_artifact_inspect` | Review-candidate Slice 16A operation that inspects one scoped `prompt_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, refs, lifecycle evidence, retention evidence, and explicit no-raw-prompt proof without raw prompt bodies, provider raw payloads, unsafe paths, raw idempotency keys, or raw authority ids. |
 | `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
 | `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
@@ -1182,6 +1185,18 @@ manager directives, absolute or unsafe paths, file contents, secrets, personal
 info, process state, runtime execution output, or provider-visible raw payloads.
 Embedded runtimes, subprocess/job launch, package installation, live network
 behavior, file writes, notebook/PTY surfaces, and result merge remain absent.
+Review-candidate Slice 16A adds a backend-only
+`domains/prompt_artifacts` foundation behind `capability::execute`. Prompt
+artifact records are durable `prompt_artifact` resources for explicit opt-in
+prompt artifact metadata only: artifact kind, title/summary/preview,
+content refs or fingerprints, retention state, source/evidence refs,
+trace/replay refs, lifecycle evidence, and fingerprinted idempotency evidence.
+They do not store raw prompt bodies, provider-visible raw prompt payloads, raw
+idempotency keys, absolute or unsafe paths, secrets, token-like material,
+personal info, automatic prompt-history capture, prompt injection/context
+inclusion state, or learned-behavior state. Native snippet/template UI, prompt
+injection into future turns, automatic capture, settings/profile migration, and
+public `/engine` expansion remain deferred.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
 owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
@@ -1422,6 +1437,11 @@ Slice 15A adds an accepted backend-only
 `program_execution_record` metadata foundation; embedded runtimes, shell
 execution, subprocess/job launch, package installation, live network behavior,
 file writes, notebook/PTY surfaces, and result merge remain absent.
+Slice 16A adds a review-candidate backend-only
+`prompt_artifact` metadata foundation; automatic prompt-history capture, raw
+prompt body persistence, snippet/template native UI, prompt injection/context
+inclusion, learned behavior, settings/profile migration, and public prompt APIs
+remain absent.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,
@@ -1961,7 +1981,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, review-candidate `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

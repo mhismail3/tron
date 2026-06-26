@@ -171,6 +171,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "repositoryTreeResourceId",
         "importPreviewResourceId",
         "programExecutionResourceId",
+        "promptArtifactResourceId",
         "updateDiagnosticResourceId",
     ]
     .into_iter()
@@ -261,6 +262,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("program_execution_record") => {
             push_unique(&mut scopes, "program_execution.read");
             push_unique(&mut scopes, "program_execution.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("prompt_artifact_list" | "prompt_artifact_inspect") => {
+            push_unique(&mut scopes, "prompt_artifacts.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("prompt_artifact_record") => {
+            push_unique(&mut scopes, "prompt_artifacts.read");
+            push_unique(&mut scopes, "prompt_artifacts.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
@@ -366,6 +377,9 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         ) => {
             vec!["program_execution_record"]
         }
+        Some("prompt_artifact_record" | "prompt_artifact_list" | "prompt_artifact_inspect") => {
+            vec!["prompt_artifact"]
+        }
         Some(
             "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect",
         ) => {
@@ -456,6 +470,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("repository_tree_snapshot") => push_unique(&mut kinds, "repository_tree_snapshot"),
         Some("import_preview_record") => push_unique(&mut kinds, "import_preview"),
         Some("program_execution_record") => push_unique(&mut kinds, "program_execution_record"),
+        Some("prompt_artifact_record") => push_unique(&mut kinds, "prompt_artifact"),
         Some("update_diagnostic_record") => push_unique(&mut kinds, "update_diagnostic_record"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
@@ -710,6 +725,38 @@ mod tests {
             .to_string();
         assert!(
             error.contains("does not allow resource program_execution_record:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn prompt_artifact_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "prompt_artifacts.read",
+                "resource.read",
+            ],
+            &["prompt_artifact"],
+            &["kind:prompt_artifact", "resource:prompt_artifact:first"],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "prompt_artifact_inspect",
+            "promptArtifactResourceId": "prompt_artifact:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first resource allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "prompt_artifact_inspect",
+            "promptArtifactResourceId": "prompt_artifact:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind resource must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource prompt_artifact:second"),
             "{error}"
         );
     }

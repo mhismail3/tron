@@ -344,9 +344,13 @@ Data ownership and privacy:
   `InputHistoryStore`.
 - The store uses the existing `tron.inputHistory` `UserDefaults` payload,
   dedupes entries, and caps retention at 100 sent text prompts.
-- No server prompt-history API, old server prompt-history client, generated management
-  surface, skill activation, queueing, prompt routing, subagent behavior, or
-  fixed template catalog was restored.
+- No old server prompt-history API, old server prompt-history client,
+  generated management surface, skill activation, queueing, prompt routing,
+  subagent behavior, or fixed template catalog was restored. Review-candidate
+  Slice 16A adds only backend `prompt_artifact` metadata resources through
+  `capability::execute`; automatic capture, raw prompt body storage, native
+  prompt-library UI, prompt injection/context inclusion, and learned behavior
+  remain deferred.
 
 Validated:
 

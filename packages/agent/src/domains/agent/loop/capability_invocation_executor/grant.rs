@@ -129,6 +129,21 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "prompt_artifact_list" | "prompt_artifact_inspect"
+    ) {
+        allowed_authority_scopes.extend([
+            "prompt_artifacts.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if operation == "prompt_artifact_record" {
+        allowed_authority_scopes.extend([
+            "prompt_artifacts.read".to_owned(),
+            "prompt_artifacts.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_authority_scopes.extend([
@@ -228,6 +243,11 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.push("program_execution_record".to_owned());
     } else if matches!(
         operation,
+        "prompt_artifact_record" | "prompt_artifact_list" | "prompt_artifact_inspect"
+    ) {
+        allowed_resource_kinds.push("prompt_artifact".to_owned());
+    } else if matches!(
+        operation,
         "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_resource_kinds.push("update_diagnostic_record".to_owned());
@@ -315,6 +335,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "program_execution_inspect"
         && let Some(resource_id) = effective_args
             .get("programExecutionResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "prompt_artifact_inspect"
+        && let Some(resource_id) = effective_args
+            .get("promptArtifactResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

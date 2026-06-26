@@ -2376,3 +2376,74 @@ execution, subprocess/job launch, package installation, shell execution,
 process control, file writes, live network behavior, notebook/PTY surfaces,
 result merge, native iOS UI, public `/engine` expansion, repo-managed skills,
 and deployment automation remain deferred.
+
+### Review-Candidate Slice 16A: Prompt Artifact Resource Foundation
+
+Discovery thread `019f010e-2df6-71e2-b20f-d2947dd06623` selected Slice 16A
+with exact final status `implementation may start` from baseline
+`origin/main@fc20482eed20d3a669f15f5f53161cb4a9fab6f2`. Implementation work
+used the already-created branch in `/Users/<USER>/.codex/worktrees/a31b/tron`
+because automatic worktree creation failed before implementation started.
+
+Review-candidate branch:
+`codex/phase-2-slice-16a-prompt-artifact-resource-foundation`.
+
+Baseline HEAD:
+`fc20482eed20d3a669f15f5f53161cb4a9fab6f2`
+
+Review-candidate scope:
+
+- Adds `domains/prompt_artifacts` as the server owner for durable
+  `prompt_artifact` resources containing explicit opt-in prompt artifact
+  metadata only: artifact kind, title, bounded summary/preview, content refs or
+  fingerprints, retention state, lifecycle evidence, source refs, trace/replay
+  refs, and fingerprinted idempotency evidence.
+- Adds the built-in `prompt_artifact` resource definition with append-only
+  versions, active lifecycle state, metadata-only materialization, and explicit
+  prompt-artifact/resource capability requirements.
+- Adds execute-only operation values `prompt_artifact_record`,
+  `prompt_artifact_list`, and `prompt_artifact_inspect` behind the existing
+  single `capability::execute` primitive.
+- Requires trusted current-session/workspace context, exact non-wildcard
+  `prompt_artifact` resource selectors including `promptArtifactResourceId`,
+  `prompt_artifacts.read` / `prompt_artifacts.write` plus resource scopes,
+  idempotency for writes, and `networkPolicy: none`.
+- Keeps Slice 16A narrow: no automatic prompt-history capture, no raw prompt
+  body persistence, no provider-visible raw prompt payloads, no prompt
+  injection or context inclusion, no learned behavior, no native prompt
+  snippet/template UI, no settings/profile migration, no public `/engine`
+  expansion, no repo-managed skills, and no deployment automation.
+
+Implementation validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Slice 16A Rust sources were formatted. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml prompt_artifact --lib -- --nocapture` | exit 0 | Focused prompt-artifact domain, validation, projection, idempotency, authorization scanner, and runtime-grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml message_converter --lib -- --nocapture` | exit 0 | Provider message-converter tests passed, including prompt-artifact capability guidance coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml resource_contracts --lib -- --nocapture` | exit 0 | Resource contract tests passed with the built-in `prompt_artifact` resource definition included. |
+| `cargo test --manifest-path packages/agent/Cargo.toml capability::contract --lib -- --nocapture` | exit 0 | Capability contract tests passed with prompt-artifact operations model-reachable through only `capability::execute`; the stale accepted `import_preview` non-goal assertion was corrected while `import_execute` remains blocked. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC gate passed with Slice 16A recorded as a review candidate before independent acceptance. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | IARM gate passed; Slice 16A added no native prompt UI. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB gate passed after adding prompt-artifact security-marker inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | HRA gate passed with prompt-artifact ownership and file-inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | TMB gate passed with prompt-artifact boundary rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC gate passed after recording prompt-artifact retained-file rows and refreshing retention summaries. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC gate passed with prompt-artifact retained-file rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI gate passed after the final Slice 16A evidence-manifest entry. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | CSD gate passed; Slice 16A added no scheduling primitive or runtime execution. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | PMBD gate passed after provider guidance changed for prompt-artifact operations. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | Public protocol gate passed; Slice 16A added no public `/engine` expansion. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants -- --nocapture` | exit 0 | Performance/resource governance gate passed with prompt-artifact resource inventory coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC still reports the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap; the failure list contained no prompt-artifact findings. |
+| `rg -n "Utc::now|chrono::Utc::now|SystemTime::now|Instant::now|thread_rng|random" packages/agent/src/domains/prompt_artifacts packages/agent/src/domains/capability/operations/prompt_artifacts.rs packages/agent/src/engine/durability/resources/prompt_artifact_definitions.rs packages/agent/src/domains/capability/prompt_artifacts_contract.rs packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_prompt_artifacts_tests.rs` | exit 1 | Direct Slice 16A entropy scan found no matches in prompt-artifact implementation files. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source after the evidence manifest redacted the local worktree path. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+
+Deferred scope remains unchanged: automatic prompt-history capture, raw prompt
+body persistence, prompt injection/context inclusion, learned behavior, native
+prompt snippet/template UI, settings/profile migration, public `/engine`
+expansion, repo-managed skills, and deployment automation remain deferred.
