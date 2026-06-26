@@ -2574,16 +2574,15 @@ stream table in README, and leaves migrations, compatibility readers, product
 tables, settings/profile parity, dependency restoration, public `/engine` APIs,
 iOS panels, runtime execution, and deploy flows out of scope until separately
 selected and reviewed.
-Slice 21A is an implementation candidate for the narrow parity portion of
-`P2AER-INV-022` / `BPRC-FEATURE-23`: Settings/Profile Catalog Parity
-Foundation. It strengthens the CPE static gate so the root README Key
-Configuration catalog must match source-backed settings defaults and so every
-current iOS user-editable server setting has decode, update, state, UI, and
-parity-test coverage. It fixes README drift for `retry.maxRetries` and leaves
-new settings, profile migrations, broad settings UI work, dependency
-restoration, fixed iOS panels, public `/engine` expansion, runtime execution,
-repo-managed skills, and deploy/update flows out of scope pending independent
-review.
+Accepted Slice 21A closes the narrow parity portion of `P2AER-INV-022` /
+`BPRC-FEATURE-23`: Settings/Profile Catalog Parity Foundation. It strengthens
+the CPE static gate so the root README Key Configuration catalog must match
+source-backed settings defaults and so every current iOS user-editable server
+setting has decode, update, state, UI, and parity-test coverage. It fixes README
+drift for `retry.maxRetries` and leaves new settings, profile migrations, broad
+settings UI work, dependency restoration, fixed iOS panels, public `/engine`
+expansion, runtime execution, repo-managed skills, and deploy/update flows out
+of scope until separately selected and reviewed.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,

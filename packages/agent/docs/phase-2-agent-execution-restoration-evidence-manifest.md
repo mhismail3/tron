@@ -2757,7 +2757,7 @@ Validation evidence:
 | Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, DESI, PPACD, and BPRC passed on merged `main`; check emitted only existing dead-code warnings. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
 
-### Slice 21A Implementation Candidate: Settings/Profile Catalog Parity Foundation
+### Accepted Slice 21A: Settings/Profile Catalog Parity Foundation
 
 Discovery thread `019efe16-09d7-73d3-9708-6c6ba5bc6493` selected Slice 21A
 with exact final status `implementation may start` from baseline
@@ -2767,11 +2767,25 @@ with exact final status `implementation may start` from baseline
 Implementation branch:
 `codex/phase-2-slice-21a-settings-profile-catalog-parity`
 
+Implementation thread:
+`019f0281-c28d-7043-8d71-72379d123c43`
+
+Independent review thread:
+`019f028c-6116-7953-9212-0df13adf2885`
+
 Baseline HEAD:
 `d3588578ca8f6e06ac11252a0f24aa777afb98ba`
 (`docs: accept phase 2 slice 20a`)
 
-Implementation-candidate scope:
+Accepted implementation commit:
+`2892f3ea42b2cb263f69cbcf29cce98e2c153120`
+(`test: guard settings profile catalog parity`)
+
+Mainline merge commit:
+`50fa40eda0ec070e51f13f9e5cc6cf0ba1a25cc6`
+(`merge: integrate phase 2 slice 21a branch`)
+
+Accepted scope:
 
 - Strengthens the retained CPE static gate with
   `readme_key_configuration_catalog_matches_settings_defaults`, which parses
@@ -2808,3 +2822,7 @@ Validation evidence:
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
 | iOS simulator settings tests | not run | No Swift source, Xcode project, or iOS test file changed in Slice 21A; existing iOS parity is guarded through the Rust CPE source-backed scan. |
+| Independent review thread `019f028c-6116-7953-9212-0df13adf2885` | exact verdict `slice accepted` | Review verified branch/head cleanliness, baseline ancestry, full diff, README/default parity, iOS editable-setting source-scan parity, pending-review wording before acceptance, focused settings tests, CPE, BPRC, DESI, PPACD, hygiene checks, no Swift changes, and no repo-managed skills. |
+| Mainline focused Slice 21A regressions | exit 0 | On merged `main`, focused settings-domain tests and `configuration_profile_environment_discipline_invariants` passed. |
+| Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, BPRC, DESI, and PPACD passed on merged `main`; check emitted only existing dead-code warnings. |
+| Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |

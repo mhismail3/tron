@@ -246,11 +246,11 @@ It deliberately does not add a new migration, compatibility reader, product
 table, settings/profile schema, dependency restoration, public `/engine` method,
 iOS panel, runtime execution, or production update/deploy behavior.
 
-`P2AER-INV-022` has a Slice 21A implementation candidate: Settings/Profile
-Catalog Parity Foundation. The candidate strengthens the retained CPE static
-gate with README Key Configuration/default parity against `TronSettings` and
-source-backed iOS editable-setting catalog checks across Swift decode, update,
-state, UI controls, and parity tests. It fixes documented drift for
+`P2AER-INV-022` is current baseline after accepted Slice 21A: Settings/Profile
+Catalog Parity Foundation. The accepted slice strengthens the retained CPE
+static gate with README Key Configuration/default parity against `TronSettings`
+and source-backed iOS editable-setting catalog checks across Swift decode,
+update, state, UI controls, and parity tests. It fixes documented drift for
 `retry.maxRetries` and deliberately does not add a new setting, profile schema
 migration, broad settings UI redesign, dependency restoration, fixed iOS product
 panel, public `/engine` expansion, runtime execution, live network/APNs behavior,
