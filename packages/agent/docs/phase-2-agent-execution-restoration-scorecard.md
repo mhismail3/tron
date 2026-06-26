@@ -2583,6 +2583,15 @@ drift for `retry.maxRetries` and leaves new settings, profile migrations, broad
 settings UI work, dependency restoration, fixed iOS panels, public `/engine`
 expansion, runtime execution, repo-managed skills, and deploy/update flows out
 of scope until separately selected and reviewed.
+Slice 22A is a `pending_review` implementation candidate for `P2AER-INV-023` /
+`BPRC-FEATURE-24`: Dependency Restoration Review Foundation. It adds a
+source-backed dependency policy guard that derives the removed-dependency
+catalog from feature index section 24 and checks `packages/agent/Cargo.toml`
+plus `packages/agent/Cargo.lock` so removed dependencies cannot reappear
+without an owning module and Phase 2 rationale. No dependencies are restored,
+no runtime/package behavior changes, no profile/settings migration, no public
+`/engine` expansion, no fixed iOS panels or Swift UI work, no repo-managed
+skills, and no deploy/update behavior are included.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,

@@ -2826,3 +2826,52 @@ Validation evidence:
 | Mainline focused Slice 21A regressions | exit 0 | On merged `main`, focused settings-domain tests and `configuration_profile_environment_discipline_invariants` passed. |
 | Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, BPRC, DESI, and PPACD passed on merged `main`; check emitted only existing dead-code warnings. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
+
+### Slice 22A Implementation Candidate: Dependency Restoration Review Foundation
+
+Discovery thread `019f0292-aa8e-7cb3-afff-4edaf907903c` selected Slice 22A
+with exact final status `implementation may start` from baseline
+`origin/main@47bdc52bbae01040144a10e81d1f3a95345b9093`
+(`docs: accept phase 2 slice 21a`).
+
+Implementation branch:
+`codex/phase-2-slice-22a-dependency-restoration-review`
+
+Baseline HEAD:
+`47bdc52bbae01040144a10e81d1f3a95345b9093`
+(`docs: accept phase 2 slice 21a`)
+
+Implementation status: `pending_review`.
+
+Implementation candidate scope:
+
+- Moves `P2AER-INV-023` / `BPRC-FEATURE-24` from `planned` to
+  `pending_review` for Slice 22A implementation-candidate evidence only.
+- Strengthens the retained PCC dependency-residue guard so it parses feature
+  index section 24 as the source-backed removed-dependency catalog.
+- Checks `packages/agent/Cargo.toml` and `packages/agent/Cargo.lock` so removed
+  dependencies fail if they reappear without an owning module and Phase 2
+  dependency-restoration rationale.
+- Records the dependency policy evidence in the Phase 2 scorecard, narrative
+  inventory, and TSV.
+- Keeps the slice policy-only: no dependencies are restored, no package/runtime
+  behavior changes, no settings/profile migration, no public `/engine`
+  expansion, no fixed iOS panels or Swift UI work, no semantic/vector retrieval,
+  no live network/APNs/runtime execution, no repo-managed skills, no production
+  deploy/update behavior, and no unrelated DRC cleanup.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants dependency_restoration_review_is_source_backed_by_phase_two_policy -- --nocapture` | exit 0 | New focused source-backed dependency policy guard passed after proving `P2AER-INV-023` / `BPRC-FEATURE-24` candidate evidence, exact feature-index dependency catalog coverage, and Cargo absence checks. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed with Slice 22A kept as `pending_review`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed with Slice 22A implementation-candidate docs/evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 17 PCC tests passed, including the new dependency-restoration policy guard and the existing dead-dependency absence scan. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed after documenting two baseline over-budget accepted post-restoration budget rows that existed at the Slice 21A baseline. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
