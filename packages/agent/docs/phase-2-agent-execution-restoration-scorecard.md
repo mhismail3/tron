@@ -2566,6 +2566,14 @@ domains, and retired product event rejection. It deliberately excludes new
 event variants, product DTO resurrection, fixed iOS panels, public `/engine`
 expansion, database migrations, settings/profile migration, runtime execution,
 repo-managed skills, and unrelated DRC cleanup.
+Slice 20A implementation candidate covers the narrow backend parity portion of
+`P2AER-INV-021` / `BPRC-FEATURE-22`: Database Schema Catalog Parity
+Foundation. It strengthens the DSEMD static gate so the README Database Schema
+table catalog must match active SQLite schema sources, records the existing
+`engine_stream_subscriptions` stream table in README, and leaves migrations,
+compatibility readers, product tables, settings/profile parity, dependency
+restoration, public `/engine` APIs, iOS panels, runtime execution, and deploy
+flows out of scope until separately selected and reviewed.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,

@@ -28,7 +28,7 @@ and
 | `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability --lib -- --nocapture` | pass | 43 passed; 0 failed; 2944 filtered out |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | pass | Formatting check passed after applying `cargo fmt --manifest-path packages/agent/Cargo.toml --all`. |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | pass | Check completed; existing dead-code warnings only. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture` | pass | 6 passed; 0 failed; 0 filtered out |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture` | pass | 7 passed; 0 failed; 0 filtered out, including the Slice 20A README Database Schema table-catalog parity guard. |
 | `cargo test --manifest-path packages/agent/Cargo.toml session_event_store --lib -- --nocapture` | pass | 0 passed; 0 failed; 2987 filtered out |
 | `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability --lib -- --nocapture` | pass | 43 passed; 0 failed; 2944 filtered out |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | pass | 17 passed; 0 failed |

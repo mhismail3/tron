@@ -2688,3 +2688,52 @@ Validation evidence:
 | Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, DESI, PPACD, and BPRC passed on merged `main`; check emitted only existing provider/resource dead-code warnings. |
 | Mainline DRC check | exit 101 | `determinism_replayability_invariants` passed protocol/docs parity and failed only on the known non-selected UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`; no Slice 19A event/protocol paths were reported. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
+
+### Slice 20A Implementation Candidate: Database Schema Catalog Parity Foundation
+
+Discovery thread `019efe16-09d7-73d3-9708-6c6ba5bc6493` selected Slice 20A
+with exact final status `implementation may start` from baseline
+`origin/main@aff715c49b828b7f3ade0b8e9af41b3554fe78d4`
+(`docs: accept phase 2 slice 19a`).
+
+Implementation branch:
+`codex/phase-2-slice-20a-database-schema-catalog-parity`
+
+Baseline HEAD:
+`aff715c49b828b7f3ade0b8e9af41b3554fe78d4`
+(`docs: accept phase 2 slice 19a`)
+
+Implementation-candidate scope:
+
+- Strengthens the retained DSEMD static gate with
+  `readme_database_schema_table_catalog_matches_sqlite_sources`, which parses
+  active SQLite table declarations from `v001_schema.sql`, shared storage
+  schema setup, and engine durability/authority/resource SQLite schema sources,
+  then requires the README Database Schema table catalog to match.
+- Fixes the README table catalog drift exposed by the guard by documenting the
+  existing `engine_stream_subscriptions` table beside `engine_stream_events`.
+- Updates Phase 2 planning artifacts for `P2AER-INV-021` with
+  implementation-candidate / `pending_review` wording only.
+- Keeps the slice evidence-only: no new migration, compatibility reader,
+  product table, settings/profile schema, dependency restoration, public
+  `/engine` method, Swift UI, runtime execution, live network/APNs behavior,
+  repo-managed skills, production deployment/update flow, or unrelated DRC
+  cleanup.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after applying `cargo fmt --manifest-path packages/agent/Cargo.toml --all` for assertion wrapping. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml shared::storage --lib -- --nocapture` | exit 0 | 12 shared storage tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::sqlite::migrations --lib -- --nocapture` | exit 0 | 4 migration tests passed for the single fresh primitive schema. |
+| `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability --lib -- --nocapture` | exit 0 | 43 engine durability tests passed, including SQLite storage-discipline coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test data_integrity_storage_evolution_migration_discipline_invariants -- --nocapture` | exit 0 | 7 DSEMD tests passed, including README/schema-source table catalog parity. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed with Slice 20A implementation-candidate docs/evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed with `P2AER-INV-021` marked `pending_review`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | 7 public-protocol tests passed; Slice 20A adds no public `/engine` expansion. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |

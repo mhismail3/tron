@@ -420,6 +420,101 @@ fn dsemd_negative_guards_reject_silent_corruption_patterns() {
     }
 }
 
+fn extract_sqlite_table_names(source: &str) -> BTreeSet<String> {
+    const MARKER: &str = "CREATE TABLE IF NOT EXISTS ";
+    source
+        .lines()
+        .filter_map(|line| {
+            let marker_start = line.find(MARKER)?;
+            let rest = &line[marker_start + MARKER.len()..];
+            let table_name: String = rest
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect();
+            (!table_name.is_empty()).then_some(table_name)
+        })
+        .collect()
+}
+
+fn readme_database_table_names() -> BTreeSet<String> {
+    let readme = read_repo_file("README.md");
+    let mut in_table_section = false;
+    let mut saw_table_row = false;
+    let mut names = BTreeSet::new();
+    for line in readme.lines() {
+        if line.trim() == "### Tables" {
+            in_table_section = true;
+            continue;
+        }
+        if !in_table_section {
+            continue;
+        }
+        if line.trim().is_empty() {
+            if saw_table_row {
+                break;
+            }
+            continue;
+        }
+        let columns: Vec<_> = line.trim_matches('|').split('|').map(str::trim).collect();
+        if columns.len() < 2 || columns[0] == "Table" || columns[0].starts_with("---") {
+            continue;
+        }
+        saw_table_row = true;
+        let mut rest = columns[0];
+        while let Some(start) = rest.find('`') {
+            rest = &rest[start + 1..];
+            let end = rest
+                .find('`')
+                .unwrap_or_else(|| panic!("unclosed README table name literal in {line}"));
+            let table_name = &rest[..end];
+            assert!(
+                table_name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'),
+                "README database table literal is not a SQLite table name: {table_name}"
+            );
+            names.insert(table_name.to_owned());
+            rest = &rest[end + 1..];
+        }
+    }
+    names
+}
+
+#[test]
+fn readme_database_schema_table_catalog_matches_sqlite_sources() {
+    let schema_sources = [
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+        "packages/agent/src/shared/storage/schema.rs",
+        "packages/agent/src/engine/durability/ledger/sqlite_codec.rs",
+        "packages/agent/src/engine/durability/queue/sqlite_store.rs",
+        "packages/agent/src/engine/durability/streams/sqlite_store.rs",
+        "packages/agent/src/engine/durability/state.rs",
+        "packages/agent/src/engine/durability/resources/store/sqlite_codec.rs",
+        "packages/agent/src/engine/authority/grants/mod.rs",
+        "packages/agent/src/engine/authority/leases.rs",
+        "packages/agent/src/engine/authority/compensation.rs",
+    ];
+    let mut source_tables = BTreeSet::new();
+    for path in schema_sources {
+        let tables = extract_sqlite_table_names(&read_repo_file(path));
+        assert!(
+            !tables.is_empty(),
+            "schema source declares no tables: {path}"
+        );
+        source_tables.extend(tables);
+    }
+
+    let readme_tables = readme_database_table_names();
+    assert!(
+        !readme_tables.is_empty(),
+        "README Database Schema table catalog was not found"
+    );
+    assert_eq!(
+        readme_tables, source_tables,
+        "README Database Schema table catalog must match active SQLite schema sources"
+    );
+}
+
 #[test]
 fn dsemd_closeout_claims_require_concrete_command_results() {
     let evidence = read_repo_file(EVIDENCE_PATH);
