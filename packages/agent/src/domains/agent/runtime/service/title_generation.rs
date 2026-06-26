@@ -184,6 +184,8 @@ async fn generate_title(
         },
         session_id: session_id.to_owned(),
         reasoning_level: Some(ModelReasoningLevel::None),
+        trace_id: None,
+        parent_invocation_id: None,
         cancel,
         retry_config: None,
     };

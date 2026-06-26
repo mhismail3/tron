@@ -234,6 +234,17 @@ recorded on rows `P2AER-INV-002`, `P2AER-INV-025`, and `P2AER-INV-035`.
 Rows with remaining provider-reasoning or future-native-surface questions stay
 planned until their own contract work lands.
 
+`P2AER-INV-024` is pending review as Slice 17A: Model Provider Reasoning
+Status Evidence Foundation. The implementation candidate stays backend-only at
+the existing model/responder audit and turn-persistence boundaries. It records
+metadata-only reasoning/status evidence for requested reasoning level,
+provider/model ids, bounded stop/status labels, thinking-emitted status,
+reasoning/thought token counts, provider-audit refs, trace/replay refs, and
+explicit redaction policy. It deliberately does not add hidden chain-of-thought
+exposure, synthetic reasoning summaries, raw provider reasoning payload
+persistence, new provider-visible operations, public `/engine` expansion,
+native iOS panels, settings/profile migration, or broad DTO resurrection.
+
 Slice 2 is represented as current backend evidence on rows `P2AER-INV-011`
 and `P2AER-INV-034`: approval requests, approval decisions, lifecycle stream
 events, idempotent decision recording, reusable fail-closed checks, and

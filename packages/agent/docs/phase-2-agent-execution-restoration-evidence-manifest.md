@@ -2458,3 +2458,57 @@ Deferred scope remains unchanged: automatic prompt-history capture, raw prompt
 body persistence, prompt injection/context inclusion, learned behavior, native
 prompt snippet/template UI, settings/profile migration, public `/engine`
 expansion, repo-managed skills, and deployment automation remain deferred.
+
+### Slice 17A Implementation Candidate: Model Provider Reasoning Status Evidence Foundation
+
+Discovery thread `019f01cd-faf3-7171-8d22-ecef8feab694` selected Slice 17A
+with exact final status `implementation may start` from baseline
+`origin/main@42f74534116572f6c30f2936c008a51d0a016f3d`. Implementation work
+uses branch `codex/phase-2-slice-17a-model-provider-reasoning-status-evidence`.
+The slice is pending independent review and is not accepted yet.
+
+Implementation candidate scope:
+
+- Adds typed, bounded, metadata-only provider reasoning/status evidence at the
+  existing model/responder audit and turn-persistence boundaries.
+- Attaches the evidence to existing `model.provider_request`,
+  `message.assistant`, and `stream.turn_end` payloads rather than adding a new
+  event, public `/engine` method, provider-visible operation, native UI panel,
+  settings migration, or runtime execution surface.
+- Preserves requested reasoning level, provider/model identifiers, bounded
+  stop/status facts, thinking/status emitted booleans, reasoning/thought token
+  accounting where already represented, provider-audit references, trace/replay
+  references, and redaction-policy evidence.
+- Hardens provider audit redaction for raw reasoning/thinking payload keys,
+  token-like and secret-like strings, unsafe relative paths, and absolute
+  path-like debug strings.
+- Proves the new evidence projections do not persist hidden chain-of-thought,
+  invent synthetic reasoning summaries, retain raw provider reasoning payloads,
+  leak token-like material, leak secrets, retain unsafe paths, or expose raw
+  reasoning data back to providers.
+
+Implementation candidate validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Slice 17A Rust sources remained formatted. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Rust check passed; existing provider dead-code warnings were unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib model_audit -- --nocapture` | exit 0 | Focused model audit tests passed, including metadata-only reasoning evidence and raw reasoning/path redaction coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib responder -- --nocapture` | exit 0 | Focused responder tests passed, including provider request audit evidence projection coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner::persistence -- --nocapture` | exit 0 | Focused turn-runner persistence tests passed, including `message.assistant` and `stream.turn_end` reasoning/status evidence coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib streaming::tests -- --nocapture` | exit 0 | Streaming payload tests passed, including legacy compatibility and evidence round-trip coverage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib token_usage -- --nocapture` | exit 0 | Token usage tests passed, covering existing reasoning/thought token accounting behavior. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | Provider/model boundary gate passed with no new provider-visible reasoning operation or raw reasoning payload exposure. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI gate passed with Slice 17A implementation-candidate evidence and pending-review tracker wording. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+
+Deferred scope remains unchanged: hidden chain-of-thought exposure, invented
+reasoning summaries, raw provider reasoning payload persistence, provider-visible
+raw reasoning payloads, public `/engine` expansion, native iOS panel/UI work,
+settings/profile migration, runtime execution, deployment/update flows, APNs,
+memory retrieval, prompt artifact UI or automatic capture, repo-managed skills,
+broad DTO resurrection, unrelated DRC cleanup, and production deployment remain
+deferred.

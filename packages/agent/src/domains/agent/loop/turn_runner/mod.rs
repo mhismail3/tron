@@ -212,6 +212,14 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         context,
         session_id: session_id.to_owned(),
         reasoning_level: run_context.reasoning_level.clone(),
+        trace_id: run_context
+            .engine_trace_id
+            .as_ref()
+            .map(|trace_id| trace_id.as_str().to_owned()),
+        parent_invocation_id: run_context
+            .parent_invocation_id
+            .as_ref()
+            .map(|invocation_id| invocation_id.as_str().to_owned()),
         cancel: cancel.clone(),
         retry_config: retry_config.cloned(),
     };
@@ -546,6 +554,15 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         provider_type,
         token_record_json.as_ref(),
         cost,
+        model_request_audit.reasoning_level.clone(),
+        run_context
+            .engine_trace_id
+            .as_ref()
+            .map(|trace_id| trace_id.as_str().to_owned()),
+        run_context
+            .parent_invocation_id
+            .as_ref()
+            .map(|invocation_id| invocation_id.as_str().to_owned()),
     );
 
     if let Err(error) = persist_completed_assistant_message(
@@ -658,6 +675,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         cost,
         context_manager.get_context_limit(),
         &model_name,
+        provider_type,
+        model_request_audit.reasoning_level.as_deref(),
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
