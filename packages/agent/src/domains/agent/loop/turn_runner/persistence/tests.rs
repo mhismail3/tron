@@ -9,6 +9,8 @@ use crate::domains::session::event_store::ListEventsOptions;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::{AppendOptions, EventStore};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::{Provider, TokenUsage};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -220,6 +222,8 @@ async fn emit_turn_end_persists_before_broadcasting() {
         None,
         25_000,
         "m",
+        Provider::Anthropic,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -267,6 +271,8 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
         None,
         25_000,
         "m",
+        Provider::Anthropic,
+        None,
         Some(&h.counter),
         None,
         None,
@@ -278,6 +284,112 @@ async fn emit_turn_end_skips_broadcast_on_persist_failure() {
         result.is_err(),
         "no broadcast should fire when persist fails, got: {result:?}"
     );
+}
+
+#[test]
+fn completed_assistant_payload_carries_metadata_only_reasoning_evidence() {
+    let mut stream = stream_result_stub();
+    stream.message.content = vec![AssistantContent::Text {
+        text: "done".to_owned(),
+    }];
+    stream.token_usage = Some(TokenUsage {
+        input_tokens: 100,
+        output_tokens: 20,
+        reasoning_output_tokens: Some(7),
+        thought_tokens: Some(3),
+        total_tokens: Some(120),
+        provider_type: Some(Provider::OpenAi),
+        ..Default::default()
+    });
+
+    let payload = build_completed_assistant_payload(
+        &stream,
+        2,
+        "gpt-5.5",
+        123,
+        true,
+        Provider::OpenAi,
+        None,
+        None,
+        Some("high".to_owned()),
+        Some("trace-17a".to_owned()),
+        Some("invoke-17a".to_owned()),
+    );
+
+    let evidence = &payload["reasoningStatusEvidence"];
+    let evidence_string = evidence.to_string();
+    assert_eq!(
+        evidence["format"],
+        crate::shared::protocol::model_audit::MODEL_PROVIDER_REASONING_STATUS_EVIDENCE_FORMAT
+    );
+    assert_eq!(evidence["phase"], "message_assistant");
+    assert_eq!(evidence["providerType"], "openai");
+    assert_eq!(evidence["model"], "gpt-5.5");
+    assert_eq!(evidence["requestedReasoningLevel"], "high");
+    assert_eq!(evidence["status"]["thinkingEmitted"], true);
+    assert_eq!(evidence["status"]["stopReason"], "end_turn");
+    assert_eq!(evidence["tokens"]["reasoningOutputTokens"], 7);
+    assert_eq!(evidence["tokens"]["thoughtTokens"], 3);
+    assert_eq!(evidence["refs"]["traceId"], "trace-17a");
+    assert_eq!(evidence["safety"]["rawReasoningText"], "omitted");
+    assert_eq!(evidence["safety"]["syntheticReasoningSummary"], "omitted");
+    assert!(
+        !evidence_string.contains("chainOfThought"),
+        "reasoning evidence must not carry raw reasoning payload markers: {evidence_string}"
+    );
+    assert!(
+        !evidence_string.contains("/tmp/tron-provider"),
+        "reasoning evidence must not carry raw paths: {evidence_string}"
+    );
+}
+
+#[tokio::test]
+async fn emit_turn_end_persists_reasoning_status_evidence() {
+    let h = harness().await;
+    let mut stream = stream_result_stub();
+    stream.message.content = vec![AssistantContent::Text {
+        text: "done".to_owned(),
+    }];
+    stream.token_usage = Some(TokenUsage {
+        input_tokens: 50,
+        output_tokens: 10,
+        reasoning_output_tokens: Some(4),
+        thought_tokens: Some(2),
+        total_tokens: Some(60),
+        provider_type: Some(Provider::Google),
+        ..Default::default()
+    });
+
+    emit_turn_end(
+        &h.emitter,
+        Some(&h.persister),
+        &h.session_id,
+        3,
+        77,
+        &stream,
+        None,
+        None,
+        25_000,
+        "gemini-3-pro-preview",
+        Provider::Google,
+        Some("medium"),
+        Some(&h.counter),
+        None,
+        None,
+    )
+    .await;
+    h.persister.flush().await.unwrap();
+
+    let payloads = persisted_payloads(&h.store, &h.session_id, "stream.turn_end");
+    let evidence = &payloads[0]["reasoningStatusEvidence"];
+    assert_eq!(evidence["phase"], "turn_end");
+    assert_eq!(evidence["providerType"], "google");
+    assert_eq!(evidence["model"], "gemini-3-pro-preview");
+    assert_eq!(evidence["requestedReasoningLevel"], "medium");
+    assert_eq!(evidence["status"]["thinkingEmitted"], false);
+    assert_eq!(evidence["tokens"]["reasoningOutputTokens"], 4);
+    assert_eq!(evidence["tokens"]["thoughtTokens"], 2);
+    assert_eq!(evidence["refs"]["replaySource"], "session_event_log");
 }
 
 // ── Persist-before-broadcast: response-complete events ─────────────────

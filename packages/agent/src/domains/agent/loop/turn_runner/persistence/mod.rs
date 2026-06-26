@@ -16,7 +16,10 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::agent::r#loop::pipeline::persistence;
 use crate::domains::agent::r#loop::types::StreamResult;
 use crate::engine::{InvocationId, TraceId};
-use crate::shared::protocol::model_audit::ModelProviderRequestAudit;
+use crate::shared::protocol::model_audit::{
+    ModelProviderReasoningStatusEvidence, ModelProviderReasoningStatusPhase,
+    ModelProviderRequestAudit,
+};
 
 fn base_event(
     session_id: &str,
@@ -331,7 +334,22 @@ pub(super) fn build_completed_assistant_payload(
     provider_type: Provider,
     token_record_json: Option<&Value>,
     cost: Option<f64>,
+    requested_reasoning_level: Option<String>,
+    trace_id: Option<String>,
+    parent_invocation_id: Option<String>,
 ) -> Value {
+    let reasoning_status_evidence = ModelProviderReasoningStatusEvidence::response(
+        ModelProviderReasoningStatusPhase::MessageAssistant,
+        provider_type,
+        provider_type.as_str(),
+        model,
+        requested_reasoning_level,
+        &stream_result.stop_reason,
+        has_thinking,
+        stream_result.token_usage.as_ref(),
+        trace_id,
+        parent_invocation_id,
+    );
     let mut payload = json!({
         "content": persistence::build_content_json(&stream_result.message.content),
         "turn": turn,
@@ -340,6 +358,7 @@ pub(super) fn build_completed_assistant_payload(
         "stopReason": &stream_result.stop_reason,
         "hasThinking": has_thinking,
         "providerType": provider_type.as_str(),
+        "reasoningStatusEvidence": reasoning_status_evidence,
     });
     if let Some(token_usage) = stream_result.token_usage.as_ref() {
         payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
@@ -401,15 +420,35 @@ pub(super) async fn emit_turn_end(
     cost: Option<f64>,
     context_limit: u64,
     model_name: &str,
+    provider_type: Provider,
+    requested_reasoning_level: Option<&str>,
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) {
     if let Some(persister) = persister {
+        let reasoning_status_evidence = ModelProviderReasoningStatusEvidence::response(
+            ModelProviderReasoningStatusPhase::TurnEnd,
+            provider_type,
+            provider_type.as_str(),
+            model_name,
+            requested_reasoning_level.map(str::to_owned),
+            &stream_result.stop_reason,
+            stream_result.message.content.iter().any(|content| {
+                matches!(
+                    content,
+                    crate::shared::protocol::content::AssistantContent::Thinking { .. }
+                )
+            }),
+            stream_result.token_usage.as_ref(),
+            trace_id.map(|id| id.as_str().to_owned()),
+            parent_invocation_id.map(|id| id.as_str().to_owned()),
+        );
         let mut payload = json!({
             "turn": turn,
             "stopReason": &stream_result.stop_reason,
             "contextLimit": context_limit,
+            "reasoningStatusEvidence": reasoning_status_evidence,
         });
         if let Some(token_usage) = stream_result.token_usage.as_ref() {
             payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);

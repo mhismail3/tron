@@ -10,6 +10,9 @@
 //! malformed provider capability arguments fail closed at that boundary.
 //! Token normalization, pricing, and token record types live under `tokens/`
 //! because they are canonical model-domain accounting, not provider wiring.
+//! Provider reasoning/status evidence is metadata-only and stays in the
+//! responder/audit plus token-accounting boundary; it must not expose hidden
+//! reasoning text, synthesize summaries, or add model-visible tools.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
