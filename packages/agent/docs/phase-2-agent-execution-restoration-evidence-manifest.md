@@ -2459,15 +2459,28 @@ body persistence, prompt injection/context inclusion, learned behavior, native
 prompt snippet/template UI, settings/profile migration, public `/engine`
 expansion, repo-managed skills, and deployment automation remain deferred.
 
-### Slice 17A Implementation Candidate: Model Provider Reasoning Status Evidence Foundation
+### Accepted Slice 17A: Model Provider Reasoning Status Evidence Foundation
 
 Discovery thread `019f01cd-faf3-7171-8d22-ecef8feab694` selected Slice 17A
 with exact final status `implementation may start` from baseline
-`origin/main@42f74534116572f6c30f2936c008a51d0a016f3d`. Implementation work
-uses branch `codex/phase-2-slice-17a-model-provider-reasoning-status-evidence`.
-The slice is pending independent review and is not accepted yet.
+`origin/main@42f74534116572f6c30f2936c008a51d0a016f3d`. Implementation thread
+`019f01d2-5e91-7650-b9ce-97e54740237a` completed with exact final status
+`implementation complete` on branch
+`codex/phase-2-slice-17a-model-provider-reasoning-status-evidence` at
+`3381f5755fc5e40e10d552916548cdd04c86c64d` (`feat: add provider reasoning
+status evidence`). Independent review thread
+`019f01ea-7d58-7403-85bf-8b749c6f001a` returned exact verdict
+`changes required`; focused fix thread `019f01f0-82a0-7e53-a218-30916a3244bf`
+completed with exact final status `fix ready for review` at
+`0ad3d222546d496ba471dc293dc80c0df488d1c1` (`fix: preserve assistant
+reasoning evidence typing`). Re-review thread
+`019f01fa-ec17-71d3-b86b-f1a133f2e8d6` returned exact verdict
+`slice accepted` with no blocking findings.
+The accepted branch was merged to `main` at
+`c766d66f7c8a704dcc724df6d3918551021e2f61` (`merge: integrate phase 2
+slice 17a branch`) before this closeout documentation was recorded.
 
-Implementation candidate scope:
+Accepted scope:
 
 - Adds typed, bounded, metadata-only provider reasoning/status evidence at the
   existing model/responder audit and turn-persistence boundaries.
@@ -2487,7 +2500,7 @@ Implementation candidate scope:
   leak token-like material, leak secrets, retain unsafe paths, or expose raw
   reasoning data back to providers.
 
-Implementation candidate validation:
+Validation and review evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -2499,11 +2512,21 @@ Implementation candidate validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib streaming::tests -- --nocapture` | exit 0 | Streaming payload tests passed, including legacy compatibility and evidence round-trip coverage. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib token_usage -- --nocapture` | exit 0 | Token usage tests passed, covering existing reasoning/thought token accounting behavior. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | Provider/model boundary gate passed with no new provider-visible reasoning operation or raw reasoning payload exposure. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI gate passed with Slice 17A implementation-candidate evidence and pending-review tracker wording. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI gate passed during branch review with pre-acceptance tracker wording; mainline closeout DESI passed after acceptance documentation. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f01ea-7d58-7403-85bf-8b749c6f001a` | exact verdict `changes required` | Review found the DRC protocol-doc parity phrase regression and missing typed assistant payload support for `reasoningStatusEvidence`. |
+| Focused fix thread `019f01f0-82a0-7e53-a218-30916a3244bf` | exact final status `fix ready for review` | Fix restored DRC-required protocol wording and added optional typed assistant payload support with old-payload compatibility plus serde round-trip coverage. DRC then failed only on the known non-selected UTC allow-list gap. |
+| Independent re-review thread `019f01fa-ec17-71d3-b86b-f1a133f2e8d6` | exact verdict `slice accepted` | Re-review verified baseline and implementation ancestry, full and fix diffs, protocol docs parity, typed assistant payload support, old stream payload compatibility, metadata-only provider reasoning/status evidence, and bounded/redacted provider-visible surfaces. |
+| Re-review DRC check | known non-selected failure only | `determinism_replayability_invariants` passed protocol docs parity; only the pre-existing non-selected `goals`/`web`/`tool_sources` `Utc::now` allow-list gap remained. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` on merged `main` | exit 0 | Mainline closeout format check passed before acceptance commit. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` on merged `main` | exit 0 | Mainline closeout Rust check passed; existing provider dead-code warnings were unchanged. |
+| Focused Slice 17A Rust tests on merged `main` | exit 0 | `typed_payload_message_assistant`, `model_audit`, `responder`, `turn_runner::persistence`, `streaming::tests`, and `token_usage` tests passed after the accepted branch merge. |
+| Mainline policy and documentation gates | exit 0 | `provider_model_boundary_discipline_invariants`, `documentation_evidence_scorecard_integrity_invariants`, and `baseline_pre_restoration_closure_invariants` passed after the accepted branch merge. |
+| Mainline DRC check | known non-selected failure only | `determinism_replayability_invariants` passed protocol docs parity and failed only on the pre-existing UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`. |
+| Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the accepted branch merge. |
 
 Deferred scope remains unchanged: hidden chain-of-thought exposure, invented
 reasoning summaries, raw provider reasoning payload persistence, provider-visible

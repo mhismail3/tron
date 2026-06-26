@@ -760,6 +760,17 @@ injection/context inclusion, and learned behavior. Native snippet/template UI,
 automatic capture policy, prompt inclusion semantics, settings/profile
 migration, and public prompt APIs remain future decisions.
 
+Slice 17A is the accepted backend-only model provider reasoning/status evidence
+foundation under `P2AER-INV-024` / `BPRC-FEATURE-20` / `BPRC-FEATURE-21`: it
+adds metadata-only reasoning/status evidence at the existing model/responder
+audit and turn-persistence boundaries, typed assistant and stream payload
+compatibility, bounded provider/model/status/token facts, provider-audit and
+trace/replay refs, and redaction policy evidence. Hidden chain-of-thought
+exposure, invented reasoning summaries, raw provider reasoning payload
+persistence, provider-visible raw reasoning payloads, native reasoning UI,
+settings/profile migration, public reasoning APIs, and unrelated DRC cleanup
+remain future decisions.
+
 Focused tests: queue lifecycle, cancellation, stream replay, log retention,
 lease expiry, shutdown, process sandbox, interpreter isolation, CSD inventory.
 
@@ -2514,6 +2525,14 @@ persistence, provider-visible raw prompt payloads, automatic prompt-history
 capture, prompt injection/context inclusion, learned behavior, native
 snippet/template UI, settings/profile migration, public prompt APIs, and
 repo-managed skills.
+Accepted Slice 17A begins the provider-reasoning row by adding metadata-only
+provider reasoning/status evidence at the existing model/responder audit and
+turn-persistence boundaries, typed assistant and stream payload support,
+provider audit redaction hardening, README, and evidence/inventory updates. It
+deliberately excludes hidden chain-of-thought exposure, invented reasoning
+summaries, raw provider reasoning payload persistence, provider-visible raw
+reasoning payloads, native reasoning UI, settings/profile migration, public
+reasoning APIs, broad DTO resurrection, and unrelated DRC cleanup.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,

@@ -1442,6 +1442,11 @@ Slice 16A adds an accepted backend-only
 prompt body persistence, snippet/template native UI, prompt injection/context
 inclusion, learned behavior, settings/profile migration, and public prompt APIs
 remain absent.
+Slice 17A adds accepted backend-only provider reasoning/status evidence at the
+model/responder audit boundary; hidden chain-of-thought exposure, invented
+reasoning summaries, raw provider reasoning payload persistence, provider-visible
+raw reasoning payloads, native reasoning UI, settings/profile migration, and
+public reasoning APIs remain absent.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,

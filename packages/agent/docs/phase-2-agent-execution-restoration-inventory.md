@@ -231,11 +231,11 @@ Slice 1 is now represented as current baseline evidence in the TSV where
 implemented: catalog discovery search/inspect/report contracts, Runtime
 Cockpit discovery rendering, and resource-backed conformance evidence are
 recorded on rows `P2AER-INV-002`, `P2AER-INV-025`, and `P2AER-INV-035`.
-Rows with remaining provider-reasoning or future-native-surface questions stay
-planned until their own contract work lands.
+Rows with future-native-surface questions stay planned until their own contract
+work lands.
 
-`P2AER-INV-024` is pending review as Slice 17A: Model Provider Reasoning
-Status Evidence Foundation. The implementation candidate stays backend-only at
+`P2AER-INV-024` is current baseline after accepted Slice 17A: Model Provider
+Reasoning Status Evidence Foundation. The accepted scope stays backend-only at
 the existing model/responder audit and turn-persistence boundaries. It records
 metadata-only reasoning/status evidence for requested reasoning level,
 provider/model ids, bounded stop/status labels, thinking-emitted status,
