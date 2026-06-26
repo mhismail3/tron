@@ -2621,3 +2621,55 @@ migration, native iOS memory UI, public `/engine` expansion, live network/APNs,
 runtime execution, repo-managed skills, broad DTO resurrection, unrelated DRC
 cleanup, and production deployment remain deferred. The known non-selected DRC
 UTC allow-list gap in `goals`, `web`, and `tool_sources` remains deferred.
+
+### Phase 2 Slice 19A Implementation Candidate: Event Protocol Catalog Parity Foundation
+
+Implementation branch:
+`codex/phase-2-slice-19a-event-protocol-catalog-parity`
+
+Baseline HEAD:
+`9a75b741150a9cc648c85d74c1da1f680f8fc8f0`
+(`docs: accept phase 2 slice 18a`)
+
+Status: `pending_review`; this entry records the implementation candidate only
+and does not mark Slice 19A accepted or current-baseline before independent
+review.
+
+Candidate scope:
+
+- Fixes the stale `event_store/types` progressive docs that still described a
+  23-variant persisted event catalog after Slice 17A brought the generated
+  catalog and README to 24 variants.
+- Adds source-backed guards in the generated event catalog tests so
+  `ALL_EVENT_TYPES` count and wire labels stay synchronized with the README
+  Event System section and module docs.
+- Adds a loop/protocol domain guard for the persisted session event catalog and
+  explicit rejection coverage for representative retired product event names.
+- Leaves the generated event table unchanged at 24 variants and keeps
+  product/domain lifecycle streams in engine stream/resource evidence rather
+  than transport-visible session event variants.
+
+Out-of-scope items remain unchanged: no new event variants, no resurrected
+product DTOs, no fixed iOS panels or Swift UI work, no public `/engine`
+expansion, no database migration, no settings/profile migration, no
+semantic/vector retrieval, no embeddings/reranking/summarization, no APNs/live
+network/runtime execution, no repo-managed skills, no deployment/update flow,
+and no unrelated DRC cleanup.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after event catalog parity changes. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types::generated::tests --lib -- --nocapture` | exit 0 | All 22 generated event catalog tests passed, including count/docs parity, wire-label serde parity, loop-domain restriction, and retired product event rejection. |
+| `cargo test --manifest-path packages/agent/Cargo.toml event_catalog --lib -- --nocapture` | exit 0 | Focused event catalog parity tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml from_str_rejects_retired_product_event_types --lib -- --nocapture` | exit 0 | Focused retired product event rejection test passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI static gate passed with Slice 19A docs still marked pending review. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | Public protocol gate passed; Slice 19A added no public `/engine` expansion. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC static gate passed with the Phase 2 TSV row marked `pending_review`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known non-selected failure only | DRC protocol/docs parity passed; the only failure remained the pre-existing non-selected UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |

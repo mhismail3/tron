@@ -81,6 +81,8 @@ define_events! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
 
     const EXPECTED: [(EventType, &str); 24] = [
         (EventType::SessionStart, "session.start"),
@@ -121,6 +123,34 @@ mod tests {
     #[test]
     fn all_event_types_constant_has_correct_count() {
         assert_eq!(ALL_EVENT_TYPES.len(), 24);
+    }
+
+    #[test]
+    fn event_catalog_docs_stay_in_sync_with_generated_table() {
+        let expected_count = ALL_EVENT_TYPES.len();
+        let module_docs =
+            read_repo_file("packages/agent/src/domains/session/event_store/types/mod.rs");
+        assert!(
+            module_docs.contains(&format!("{expected_count}-variant enum")),
+            "event_store/types module docs must name the generated event count"
+        );
+        assert!(
+            module_docs.contains(&format!("ALL_EVENT_TYPES.len() == {expected_count}")),
+            "event_store/types module docs must point at the generated count guard"
+        );
+
+        let readme = read_repo_file("README.md");
+        assert!(
+            readme.contains(&format!("**{expected_count} typed event variants**")),
+            "README Event System section must name the generated event count"
+        );
+        for event_type in ALL_EVENT_TYPES {
+            assert!(
+                readme.contains(event_type.as_str()),
+                "README Event Categories must list persisted event type {}",
+                event_type.as_str()
+            );
+        }
     }
 
     #[test]
@@ -223,6 +253,61 @@ mod tests {
     }
 
     #[test]
+    fn from_str_rejects_retired_product_event_types() {
+        for retired in [
+            "approval.lifecycle",
+            "device.lifecycle",
+            "git.lifecycle",
+            "goals.lifecycle",
+            "import_preview.lifecycle",
+            "jobs.lifecycle",
+            "memory.query",
+            "mcp.server_started",
+            "notification.created",
+            "procedural.record",
+            "prompt.queue",
+            "push.token_registered",
+            "repository_tree.lifecycle",
+            "schedule.lifecycle",
+            "skill.installed",
+            "subagent.task",
+            "tool_source.proposal",
+            "web.lifecycle",
+            "worker.package",
+            "worktree.status",
+        ] {
+            assert!(
+                retired.parse::<EventType>().is_err(),
+                "retired product event type must stay outside the persisted session enum: {retired}"
+            );
+        }
+    }
+
+    #[test]
+    fn event_catalog_domains_remain_loop_protocol_only() {
+        let actual_domains: BTreeSet<_> = ALL_EVENT_TYPES
+            .iter()
+            .map(|event_type| event_type.domain())
+            .collect();
+        let expected_domains = BTreeSet::from([
+            "capability",
+            "compact",
+            "context",
+            "error",
+            "message",
+            "metadata",
+            "model",
+            "session",
+            "stream",
+            "turn",
+        ]);
+        assert_eq!(
+            actual_domains, expected_domains,
+            "persisted session events must remain limited to primitive loop/protocol domains"
+        );
+    }
+
+    #[test]
     fn serde_roundtrip_from_string() {
         for et in &ALL_EVENT_TYPES {
             let s = et.as_str();
@@ -302,5 +387,19 @@ mod tests {
         let cloned = event.typed_payload().unwrap();
         let owned = event.into_typed_payload().unwrap();
         assert_eq!(cloned, owned);
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("agent crate should live under packages/agent")
+            .to_path_buf()
+    }
+
+    fn read_repo_file(path: &str) -> String {
+        let full_path = repo_root().join(path);
+        std::fs::read_to_string(&full_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
     }
 }
