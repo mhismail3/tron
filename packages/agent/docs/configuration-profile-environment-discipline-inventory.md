@@ -24,10 +24,11 @@ This inventory maps the configuration surfaces that can affect effective Tron se
 5. Environment variables are explicit owner surfaces. `TRON_DATA_DIR` and `TRON_HOME_NAME` own path resolution; `TRON_DEFAULT_MODEL`, `TRON_DEFAULT_PROVIDER`, `TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID` are the only settings env overrides in Rust.
 6. iOS reads and writes server-authoritative settings through `settings::get`, `settings::update`, and `settings::reset_to_defaults`; malformed server settings payloads must surface as errors.
 7. Mac wrapper settings writes are limited to the wrapper-owned `settings.server.tailscaleIp` cache in the sparse user overlay.
+8. The root README Key Configuration catalog is a source-backed current-settings excerpt; documented default values must match `TronSettings::default()` and the managed default profile.
 
 ## User-Controlled And Server-Only Classification
 
-The iOS user-controllable settings are `server.defaultModel`, `server.defaultWorkspace`, `context.compactor.preserveRecentCount`, `context.compactor.triggerTokenThreshold`, `observability.logLevel`, `observability.verboseRetentionDays`, `storage.retentionEnabled`, and `storage.maxDatabaseMb`. They have Swift decode, update, state, UI, and tests.
+The iOS user-controllable settings are `server.defaultProvider`, `server.defaultModel`, `server.defaultWorkspace`, `context.compactor.preserveRecentCount`, `context.compactor.triggerTokenThreshold`, `observability.logLevel`, `observability.verboseRetentionDays`, `storage.retentionEnabled`, `storage.maxDatabaseMb`, and `server.transcription.enabled`. They have Swift decode, update, state, UI, and tests, and Slice 21A guards that each entry remains present in the source-backed README catalog plus the Swift decode/update/state/UI/parity chain.
 
 Other Rust settings are server-owned or implementation-owned defaults: provider OAuth URLs/client IDs/scopes, retry timing, compactor hard bounds, agent max turns, logging module overrides, heartbeat interval, tmux timing, empty session settings, and TUI palette/icon/input/menu settings. They remain profile-editable by source/user TOML but are not exposed as iOS controls because they either configure server internals, provider auth protocol, TUI-only behavior, or safety bounds that the mobile thin client should not mutate directly.
 

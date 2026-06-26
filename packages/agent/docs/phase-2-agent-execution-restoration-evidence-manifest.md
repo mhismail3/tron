@@ -2756,3 +2756,55 @@ Validation evidence:
 | Mainline focused Slice 20A regressions | exit 0 | On merged `main`, shared storage tests, session event-store SQLite migration tests, engine durability tests, and DSEMD README/schema-source table-catalog parity passed. |
 | Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, DESI, PPACD, and BPRC passed on merged `main`; check emitted only existing dead-code warnings. |
 | Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
+
+### Slice 21A Implementation Candidate: Settings/Profile Catalog Parity Foundation
+
+Discovery thread `019efe16-09d7-73d3-9708-6c6ba5bc6493` selected Slice 21A
+with exact final status `implementation may start` from baseline
+`origin/main@d3588578ca8f6e06ac11252a0f24aa777afb98ba`
+(`docs: accept phase 2 slice 20a`).
+
+Implementation branch:
+`codex/phase-2-slice-21a-settings-profile-catalog-parity`
+
+Baseline HEAD:
+`d3588578ca8f6e06ac11252a0f24aa777afb98ba`
+(`docs: accept phase 2 slice 20a`)
+
+Implementation-candidate scope:
+
+- Strengthens the retained CPE static gate with
+  `readme_key_configuration_catalog_matches_settings_defaults`, which parses
+  the root README Key Configuration JSONC block and compares the documented
+  source-backed settings excerpt with `TronSettings::default()`.
+- Strengthens iOS settings parity evidence with
+  `ios_user_editable_settings_have_decode_update_state_and_ui_coverage`, which
+  requires every current iOS user-editable server setting to appear in the
+  source-backed README catalog, Swift `ServerSettings` decode surface,
+  `ServerSettingsUpdate` mutation path, `SettingsState`, settings UI controls,
+  and `SettingsParityTests`.
+- Fixes README drift exposed by the new guard by documenting
+  `retry.maxRetries` as `3`, matching `TronSettings::default()` and the managed
+  default profile.
+- Keeps the slice evidence-only: no new server setting, no profile schema
+  migration, no broad settings UI redesign, no dependency restoration, no fixed
+  iOS product panel, no public `/engine` expansion, no runtime execution, no
+  live network/APNs behavior, no repo-managed skills, no production deployment
+  or update flow, and no unrelated DRC cleanup.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after applying `cargo fmt --manifest-path packages/agent/Cargo.toml --all` to the new CPE assertions. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::settings --lib -- --nocapture` | exit 0 | 130 focused settings-domain library tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test configuration_profile_environment_discipline_invariants -- --nocapture` | exit 0 | 12 CPE tests passed with the new README Key Configuration/default parity and iOS editable-setting catalog guards. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed with `P2AER-INV-022` marked `pending_review`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed with Slice 21A implementation-candidate docs/evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | 7 public-protocol tests passed; Slice 21A adds no public `/engine` expansion. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| iOS simulator settings tests | not run | No Swift source, Xcode project, or iOS test file changed in Slice 21A; existing iOS parity is guarded through the Rust CPE source-backed scan. |
