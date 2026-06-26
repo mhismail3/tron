@@ -510,6 +510,12 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("runtime/language identifiers"));
     assert!(result.contains("raw code, stdin/stdout/stderr"));
     assert!(result.contains("programFingerprint"));
+    assert!(result.contains("prompt_artifact_record"));
+    assert!(result.contains("prompt_artifact_list"));
+    assert!(result.contains("prompt_artifact_inspect"));
+    assert!(result.contains("explicit opt-in artifact kind"));
+    assert!(result.contains("raw prompt bodies"));
+    assert!(result.contains("contentFingerprint"));
     assert!(result.contains("device_register"));
     assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));

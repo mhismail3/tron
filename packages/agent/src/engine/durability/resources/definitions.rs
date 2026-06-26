@@ -13,6 +13,7 @@ use super::memory_definitions::memory_resource_type_definitions;
 use super::notification_definitions::notification_resource_type_definitions;
 use super::procedural_definitions::procedural_resource_type_definitions;
 use super::program_execution_definitions::program_execution_resource_type_definitions;
+use super::prompt_artifact_definitions::prompt_artifact_resource_type_definitions;
 use super::repository_tree_definitions::repository_tree_resource_type_definitions;
 use super::scheduler_definitions::scheduler_resource_type_definitions;
 use super::subagent_definitions::subagent_resource_type_definitions;
@@ -664,6 +665,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(import_history_resource_type_definitions());
     definitions.extend(import_preview_resource_type_definitions());
     definitions.extend(program_execution_resource_type_definitions());
+    definitions.extend(prompt_artifact_resource_type_definitions());
     definitions.extend(repository_tree_resource_type_definitions());
     definitions.extend(update_diagnostics_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());

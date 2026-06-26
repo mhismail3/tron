@@ -748,6 +748,18 @@ provider-visible raw payloads. Runtime execution, subprocess/job launch,
 interpreter isolation, package installation, file writes, live network behavior,
 notebook/PTY UX, and result merge remain future decisions.
 
+Slice 16A is a review-candidate implementation for the backend-only prompt
+artifact resource foundation under `P2AER-INV-018` / `BPRC-FEATURE-11`: it
+adds `domains/prompt_artifacts`, durable `prompt_artifact` resources,
+execute-only record/list/inspect operations, exact resource authority/selectors
+including `promptArtifactResourceId`, bounded/redacted projections,
+deterministic injected timestamps, and validation that rejects raw prompt
+bodies, provider-visible raw prompt payloads, raw idempotency keys, unsafe
+paths, secrets, token-like material, automatic prompt-history capture, prompt
+injection/context inclusion, and learned behavior. Native snippet/template UI,
+automatic capture policy, prompt inclusion semantics, settings/profile
+migration, and public prompt APIs remain future decisions.
+
 Focused tests: queue lifecycle, cancellation, stream replay, log retention,
 lease expiry, shutdown, process sandbox, interpreter isolation, CSD inventory.
 
@@ -2493,6 +2505,15 @@ schema/instruction text, README, and static inventories for metadata-only
 program execution records. It deliberately excludes runtime execution,
 subprocess/job launch, package installation, file writes, live network behavior,
 notebook/PTY surfaces, result merge, and native UI.
+Review-candidate Slice 16A begins the prompt-artifact row by adding
+`domains/prompt_artifacts`, the built-in `prompt_artifact` resource
+definition, execute adapters, runtime grant narrowing, provider
+schema/instruction text, README, and static inventories for explicit opt-in
+metadata-only prompt artifacts. It deliberately excludes raw prompt body
+persistence, provider-visible raw prompt payloads, automatic prompt-history
+capture, prompt injection/context inclusion, learned behavior, native
+snippet/template UI, settings/profile migration, public prompt APIs, and
+repo-managed skills.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,
