@@ -106,6 +106,171 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .collect()
 }
 
+fn key_configuration_jsonc() -> String {
+    let readme = read_repo_file("README.md");
+    let section = readme
+        .split("### Key Configuration")
+        .nth(1)
+        .expect("README must contain Key Configuration section");
+    let block = section
+        .split("```jsonc")
+        .nth(1)
+        .expect("README Key Configuration must contain a jsonc block")
+        .split("```")
+        .next()
+        .expect("README Key Configuration jsonc block must terminate");
+    block
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or("").trim_end())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn flatten_json(prefix: &str, value: &serde_json::Value, out: &mut BTreeMap<String, String>) {
+    match value {
+        serde_json::Value::Object(map) if map.is_empty() => {
+            out.insert(prefix.to_owned(), "{}".to_owned());
+        }
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                let path = if prefix.is_empty() {
+                    key.to_owned()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                flatten_json(&path, child, out);
+            }
+        }
+        serde_json::Value::String(text) => {
+            out.insert(prefix.to_owned(), text.to_owned());
+        }
+        serde_json::Value::Number(number) => {
+            out.insert(prefix.to_owned(), number.to_string());
+        }
+        serde_json::Value::Bool(flag) => {
+            out.insert(prefix.to_owned(), flag.to_string());
+        }
+        serde_json::Value::Null => {
+            out.insert(prefix.to_owned(), "null".to_owned());
+        }
+        serde_json::Value::Array(items) => {
+            out.insert(
+                prefix.to_owned(),
+                serde_json::Value::Array(items.clone()).to_string(),
+            );
+        }
+    }
+}
+
+fn flattened_key_configuration() -> BTreeMap<String, String> {
+    let jsonc = key_configuration_jsonc();
+    let value: serde_json::Value =
+        serde_json::from_str(&jsonc).expect("README Key Configuration jsonc must parse as JSON");
+    let mut flattened = BTreeMap::new();
+    flatten_json("", &value, &mut flattened);
+    flattened
+}
+
+fn source_backed_key_configuration_catalog() -> BTreeMap<String, String> {
+    let defaults = TronSettings::default();
+    BTreeMap::from([
+        ("version".to_owned(), defaults.version),
+        ("name".to_owned(), defaults.name),
+        (
+            "server.heartbeatIntervalMs".to_owned(),
+            defaults.server.heartbeat_interval_ms.to_string(),
+        ),
+        (
+            "server.defaultProvider".to_owned(),
+            defaults.server.default_provider,
+        ),
+        (
+            "server.defaultModel".to_owned(),
+            defaults.server.default_model,
+        ),
+        (
+            "server.defaultWorkspace".to_owned(),
+            defaults
+                .server
+                .default_workspace
+                .as_deref()
+                .unwrap_or("null")
+                .to_owned(),
+        ),
+        (
+            "server.tailscaleIp".to_owned(),
+            defaults
+                .server
+                .tailscale_ip
+                .as_deref()
+                .unwrap_or("null")
+                .to_owned(),
+        ),
+        (
+            "server.transcription.enabled".to_owned(),
+            defaults.server.transcription.enabled.to_string(),
+        ),
+        (
+            "agent.maxTurns".to_owned(),
+            defaults.agent.max_turns.to_string(),
+        ),
+        (
+            "context.compactor.maxTokens".to_owned(),
+            defaults.context.compactor.max_tokens.to_string(),
+        ),
+        (
+            "context.compactor.compactionThreshold".to_owned(),
+            defaults.context.compactor.compaction_threshold.to_string(),
+        ),
+        (
+            "context.compactor.targetTokens".to_owned(),
+            defaults.context.compactor.target_tokens.to_string(),
+        ),
+        (
+            "context.compactor.charsPerToken".to_owned(),
+            defaults.context.compactor.chars_per_token.to_string(),
+        ),
+        (
+            "context.compactor.bufferTokens".to_owned(),
+            defaults.context.compactor.buffer_tokens.to_string(),
+        ),
+        (
+            "context.compactor.triggerTokenThreshold".to_owned(),
+            defaults
+                .context
+                .compactor
+                .trigger_token_threshold
+                .expect("default trigger threshold should be documented")
+                .to_string(),
+        ),
+        (
+            "context.compactor.preserveRecentCount".to_owned(),
+            defaults.context.compactor.preserve_recent_count.to_string(),
+        ),
+        (
+            "observability.logLevel".to_owned(),
+            defaults.observability.log_level.as_filter_str().to_owned(),
+        ),
+        (
+            "observability.verboseRetentionDays".to_owned(),
+            defaults.observability.verbose_retention_days.to_string(),
+        ),
+        (
+            "storage.retentionEnabled".to_owned(),
+            defaults.storage.retention_enabled.to_string(),
+        ),
+        (
+            "storage.maxDatabaseMb".to_owned(),
+            defaults.storage.max_database_mb.to_string(),
+        ),
+        (
+            "retry.maxRetries".to_owned(),
+            defaults.retry.max_retries.to_string(),
+        ),
+        ("session".to_owned(), "{}".to_owned()),
+    ])
+}
+
 #[test]
 fn cpe_artifacts_and_static_gate_wiring_exist() {
     for path in [
@@ -312,6 +477,16 @@ fn managed_default_profile_cannot_drift_from_compiled_settings_defaults() {
 }
 
 #[test]
+fn readme_key_configuration_catalog_matches_settings_defaults() {
+    let documented = flattened_key_configuration();
+    let expected = source_backed_key_configuration_catalog();
+    assert_eq!(
+        documented, expected,
+        "README Key Configuration must stay in parity with source-backed settings defaults"
+    );
+}
+
+#[test]
 fn nested_rust_settings_schemas_reject_unknown_fields() {
     for path in [
         "packages/agent/src/domains/settings/profile/types/api.rs",
@@ -461,6 +636,157 @@ fn ios_settings_decode_is_server_authoritative_and_ui_wired() {
         assert!(
             parity.contains(required),
             "iOS parity test missing {required}"
+        );
+    }
+}
+
+#[test]
+fn ios_user_editable_settings_have_decode_update_state_and_ui_coverage() {
+    struct EditableSetting<'a> {
+        rust_path: &'a str,
+        dto_marker: &'a str,
+        update_marker: &'a str,
+        state_marker: &'a str,
+        ui_marker: &'a str,
+        parity_marker: &'a str,
+    }
+
+    let editable_settings = [
+        EditableSetting {
+            rust_path: "server.defaultProvider",
+            dto_marker: "let defaultProvider: String",
+            update_marker: "case .defaultProvider(let provider)",
+            state_marker: "var defaultProvider: String",
+            ui_marker: "updateServerSetting(.defaultProvider(newValue))",
+            parity_marker: "\"defaultProvider\"",
+        },
+        EditableSetting {
+            rust_path: "server.defaultModel",
+            dto_marker: "let defaultModel: String",
+            update_marker: "case .defaultModel(let model)",
+            state_marker: "var defaultModel: String",
+            ui_marker: "updateServerSetting(.defaultModel(model.id))",
+            parity_marker: "\"defaultModel\"",
+        },
+        EditableSetting {
+            rust_path: "server.defaultWorkspace",
+            dto_marker: "let defaultWorkspace: String?",
+            update_marker: "case .defaultWorkspace(let workspace)",
+            state_marker: "var quickSessionWorkspace: String",
+            ui_marker: "updateServerSetting(.defaultWorkspace(newValue))",
+            parity_marker: "\"quickSessionWorkspace\"",
+        },
+        EditableSetting {
+            rust_path: "context.compactor.preserveRecentCount",
+            dto_marker: "let preserveRecentCount: Int",
+            update_marker: "case .compactionPreserveRecentCount(let count)",
+            state_marker: "var preserveRecentCount: Int",
+            ui_marker: "updateServerSetting(.compactionPreserveRecentCount(newValue))",
+            parity_marker: "\"preserveRecentCount\"",
+        },
+        EditableSetting {
+            rust_path: "context.compactor.triggerTokenThreshold",
+            dto_marker: "let triggerTokenThreshold: Double",
+            update_marker: "case .compactionTriggerTokenThreshold(let threshold)",
+            state_marker: "var triggerTokenThreshold: Double",
+            ui_marker: "updateServerSetting(.compactionTriggerTokenThreshold(newValue))",
+            parity_marker: "\"triggerTokenThreshold\"",
+        },
+        EditableSetting {
+            rust_path: "observability.logLevel",
+            dto_marker: "let observabilityLogLevel: String",
+            update_marker: "case .observabilityLogLevel(let level)",
+            state_marker: "var observabilityLogLevel: String",
+            ui_marker: "updateServerSetting(.observabilityLogLevel(newValue))",
+            parity_marker: "\"observabilityLogLevel\"",
+        },
+        EditableSetting {
+            rust_path: "observability.verboseRetentionDays",
+            dto_marker: "let observabilityVerboseRetentionDays: UInt64",
+            update_marker: "case .observabilityVerboseRetentionDays(let days)",
+            state_marker: "var observabilityVerboseRetentionDays: UInt64",
+            ui_marker: "updateServerSetting(.observabilityVerboseRetentionDays(clamped))",
+            parity_marker: "\"observabilityVerboseRetentionDays\"",
+        },
+        EditableSetting {
+            rust_path: "storage.retentionEnabled",
+            dto_marker: "let storageRetentionEnabled: Bool",
+            update_marker: "case .storageRetentionEnabled(let enabled)",
+            state_marker: "var storageRetentionEnabled: Bool",
+            ui_marker: "updateServerSetting(.storageRetentionEnabled(newValue))",
+            parity_marker: "\"storageRetentionEnabled\"",
+        },
+        EditableSetting {
+            rust_path: "storage.maxDatabaseMb",
+            dto_marker: "let storageMaxDatabaseMb: UInt64",
+            update_marker: "case .storageMaxDatabaseMb(let megabytes)",
+            state_marker: "var storageMaxDatabaseMb: UInt64",
+            ui_marker: "updateServerSetting(.storageMaxDatabaseMb(clamped))",
+            parity_marker: "\"storageMaxDatabaseMb\"",
+        },
+        EditableSetting {
+            rust_path: "server.transcription.enabled",
+            dto_marker: "let transcriptionEnabled: Bool",
+            update_marker: "case .transcriptionEnabled(let enabled)",
+            state_marker: "var transcriptionEnabled: Bool",
+            ui_marker: "updateServerSetting(.transcriptionEnabled(newValue))",
+            parity_marker: "\"transcriptionEnabled\"",
+        },
+    ];
+
+    let readme_catalog = source_backed_key_configuration_catalog();
+    let dto = read_repo_file(
+        "packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift",
+    );
+    let updates = read_repo_file(
+        "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultEngineAccessRepositories.swift",
+    ) + &read_repo_file(
+        "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/EngineAccessRepositories.swift",
+    );
+    let state = read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift");
+    let ui = read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift")
+        + &read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ContextSettingsPage.swift")
+        + &read_repo_file(
+            "packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift",
+        );
+    let parity =
+        read_repo_file("packages/ios-app/Tests/Session/Chat/State/SettingsParityTests.swift");
+
+    for setting in editable_settings {
+        assert!(
+            readme_catalog.contains_key(setting.rust_path),
+            "user-editable setting {} must be documented in the source-backed README catalog",
+            setting.rust_path
+        );
+        assert!(
+            dto.contains(setting.dto_marker),
+            "{} missing Swift ServerSettings decode marker {}",
+            setting.rust_path,
+            setting.dto_marker
+        );
+        assert!(
+            updates.contains(setting.update_marker),
+            "{} missing Swift ServerSettingsUpdate mutation marker {}",
+            setting.rust_path,
+            setting.update_marker
+        );
+        assert!(
+            state.contains(setting.state_marker),
+            "{} missing SettingsState marker {}",
+            setting.rust_path,
+            setting.state_marker
+        );
+        assert!(
+            ui.contains(setting.ui_marker),
+            "{} missing settings UI control marker {}",
+            setting.rust_path,
+            setting.ui_marker
+        );
+        assert!(
+            parity.contains(setting.parity_marker),
+            "{} missing SettingsParityTests marker {}",
+            setting.rust_path,
+            setting.parity_marker
         );
     }
 }

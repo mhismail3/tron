@@ -1816,7 +1816,7 @@ The schema is defined in `packages/agent/src/domains/settings/profile/types/`. A
     "maxDatabaseMb": 512                        // Soft cap surfaced by storage reports
   },
 
-  "retry":  { "maxRetries": 1 },
+  "retry":  { "maxRetries": 3 },
 
   "session": {}
 }
