@@ -1751,6 +1751,8 @@ packages/agent/src/domains/memory/errors.rs	retain	phase2 memory	P2AER-S3	Memory
 packages/agent/src/domains/memory/handlers.rs	retain	phase2 memory	P2AER-S3	Memory handlers retained as narrow invocation entrypoints for memory contract operations.
 packages/agent/src/domains/memory/migration.rs	retain	phase2 memory	P2AER-S3	Memory migration helpers retained for redacted export/import envelopes without embedding/index engines.
 packages/agent/src/domains/memory/prompt_trace.rs	retain	phase2 memory	P2AER-S3	Memory prompt-trace assembly retained to expose provider-safe mode/count/ref audit text without private body content.
+packages/agent/src/domains/memory/query_decision.rs	retain	phase2 memory	P2AER-S18A	Memory query/decision evidence retained for metadata-only audit resources without retrieval algorithms or prompt inclusion.
+packages/agent/src/domains/memory/query_decision_validation.rs	retain	phase2 memory	P2AER-S18A	Memory query/decision validation retained for bounded metadata-only evidence and raw prompt body payload path secret rejection.
 packages/agent/src/domains/memory/schema_tests.rs	retain	phase2 memory	P2AER-S3	Memory schema alignment tests retained to guard resource kind, schema id, output contract, and required field drift.
 packages/agent/src/domains/memory/service.rs	retain	phase2 memory	P2AER-S3	Memory service retained for resource-backed policy, retain/edit/tombstone/list/inspect, and migration behavior.
 packages/agent/src/domains/memory/support.rs	retain	phase2 memory	P2AER-S3	Memory support helpers retained for payload parsing, redaction, stream events, and resource refs.

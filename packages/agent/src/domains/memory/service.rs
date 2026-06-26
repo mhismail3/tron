@@ -14,6 +14,10 @@ use crate::shared::server::errors::CapabilityError;
 use super::errors::{engine_error, invalid_params};
 pub(crate) use super::migration::{migrate_export_value, migrate_import_value};
 pub(crate) use super::prompt_trace::{load_prompt_memory_context, record_prompt_trace_value};
+pub(crate) use super::query_decision::{
+    inspect_memory_decision_value, inspect_memory_query_value, list_memory_decisions_value,
+    list_memory_queries_value, record_memory_decision_value, record_memory_query_value,
+};
 use super::support::*;
 use super::{
     MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID, MEMORY_POLICY_KIND, MEMORY_POLICY_SCHEMA_ID,

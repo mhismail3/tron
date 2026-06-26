@@ -1,17 +1,19 @@
 //! Built-in memory resource type definitions.
 //!
 //! These schemas define the engine-owned memory contract surface: engine
-//! identity, policy, records, prompt traces, eval runs, and migration
-//! envelopes. They do not define a retrieval/indexing algorithm.
+//! identity, policy, records, prompt traces, query/decision evidence, eval
+//! runs, and migration envelopes. They do not define a retrieval/indexing
+//! algorithm.
 
 use serde_json::{Value, json};
 
 use super::types::{
-    EngineResourceVersioningMode, MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID,
-    MEMORY_EVAL_RUN_KIND, MEMORY_EVAL_RUN_SCHEMA_ID, MEMORY_MIGRATION_ENVELOPE_KIND,
-    MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID, MEMORY_POLICY_KIND, MEMORY_POLICY_SCHEMA_ID,
-    MEMORY_PROMPT_TRACE_KIND, MEMORY_PROMPT_TRACE_SCHEMA_ID, MEMORY_RECORD_KIND,
-    MEMORY_RECORD_SCHEMA_ID, RegisterResourceType,
+    EngineResourceVersioningMode, MEMORY_DECISION_KIND, MEMORY_DECISION_SCHEMA_ID,
+    MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID, MEMORY_EVAL_RUN_KIND, MEMORY_EVAL_RUN_SCHEMA_ID,
+    MEMORY_MIGRATION_ENVELOPE_KIND, MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID, MEMORY_POLICY_KIND,
+    MEMORY_POLICY_SCHEMA_ID, MEMORY_PROMPT_TRACE_KIND, MEMORY_PROMPT_TRACE_SCHEMA_ID,
+    MEMORY_QUERY_KIND, MEMORY_QUERY_SCHEMA_ID, MEMORY_RECORD_KIND, MEMORY_RECORD_SCHEMA_ID,
+    RegisterResourceType,
 };
 use crate::engine::kernel::ids::WorkerId;
 
@@ -212,6 +214,102 @@ pub(super) fn memory_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "considered_record",
                 "included_record",
                 "excluded_record",
+                "derived_from",
+                "evidence_for",
+            ],
+        ),
+        memory_builtin_type(
+            MEMORY_QUERY_KIND,
+            MEMORY_QUERY_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "schemaVersion",
+                    "queryKind",
+                    "intent",
+                    "filters",
+                    "engineId",
+                    "mode",
+                    "selectedRefs",
+                    "excludedRefs",
+                    "decisionRefs",
+                    "redaction",
+                    "traceRefs",
+                    "replayRefs",
+                    "lifecycle",
+                    "idempotency",
+                    "occurredAt"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "queryKind": {"type": "string"},
+                    "intent": {"type": "object"},
+                    "filters": {"type": "object"},
+                    "engineId": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["disabled", "active", "shadow", "compare"]},
+                    "selectedRefs": {"type": "array"},
+                    "excludedRefs": {"type": "array"},
+                    "decisionRefs": {"type": "array"},
+                    "redaction": {"type": "object"},
+                    "traceRefs": {"type": "array"},
+                    "replayRefs": {"type": "array"},
+                    "lifecycle": {"type": "object"},
+                    "idempotency": {"type": "object"},
+                    "occurredAt": {"type": "string"}
+                }
+            }),
+            vec!["recorded", "archived"],
+            vec![
+                "governed_by",
+                "selected_record",
+                "excluded_record",
+                "supported_by_decision",
+                "derived_from",
+                "evidence_for",
+            ],
+        ),
+        memory_builtin_type(
+            MEMORY_DECISION_KIND,
+            MEMORY_DECISION_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "schemaVersion",
+                    "decisionKind",
+                    "reasonCodes",
+                    "sourceRefs",
+                    "redaction",
+                    "traceRefs",
+                    "replayRefs",
+                    "lifecycle",
+                    "idempotency",
+                    "occurredAt"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "decisionKind": {"type": "string"},
+                    "reasonCodes": {"type": "array"},
+                    "subjectRef": {"type": "object"},
+                    "queryRef": {"type": "object"},
+                    "sourceRefs": {"type": "array"},
+                    "redaction": {"type": "object"},
+                    "traceRefs": {"type": "array"},
+                    "replayRefs": {"type": "array"},
+                    "lifecycle": {"type": "object"},
+                    "idempotency": {"type": "object"},
+                    "occurredAt": {"type": "string"}
+                }
+            }),
+            vec!["recorded", "rejected", "applied", "archived"],
+            vec![
+                "governed_by",
+                "decides_record",
+                "decides_query",
+                "source_event",
+                "source_resource",
+                "source_trace",
                 "derived_from",
                 "evidence_for",
             ],
