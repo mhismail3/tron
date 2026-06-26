@@ -1915,6 +1915,6 @@ packages/agent/src/domains/module_registry/service.rs	implementation	module_regi
 packages/agent/src/domains/module_registry/tests.rs	test	test_harness	TPC-10/P3MSA-S23A	focused Slice 23A module manifest schema seed redaction authority scope lifecycle and side-effect coverage
 packages/agent/src/engine/durability/resources/module_registry_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23A	built-in module_manifest resource schema and first-party seed records
 packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 modular self-adapting engine scorecard and module-plane planning evidence with self-sufficient-agent-runtime-readiness classification
-packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 evidence manifest with Slice 23A review-candidate validation status
+packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 evidence manifest with accepted Slice 23A validation status
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 narrative inventory for module-plane roadmap and successor-readiness classification
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 machine-readable module-plane slice inventory

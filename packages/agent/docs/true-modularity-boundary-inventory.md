@@ -2,7 +2,7 @@
 
 Status: **completed**
 Scorecard row: `TMB-1`
-Last verified: 2026-06-26 (P3MSA-S23A module registry implementation candidate)
+Last verified: 2026-06-26 (P3MSA-S23A accepted module registry foundation)
 Machine-readable inventory: `packages/agent/docs/true-modularity-boundary-inventory.tsv`
 
 This inventory classifies every tracked Rust and Swift source file in the current TMB boundary scope. The TSV remains the source of truth for static coverage; this Markdown file records the dependency rules and approved composition-root exceptions preserved after campaign closeout.

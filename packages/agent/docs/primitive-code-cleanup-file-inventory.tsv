@@ -1952,14 +1952,14 @@ packages/agent/src/domains/prompt_artifacts/service.rs	retain	prompt-artifact ow
 packages/agent/src/domains/prompt_artifacts/tests.rs	retain	prompt-artifact test owner	PCC-10/P2AER-S16A	Accepted prompt-artifact bounds redaction retention authority scope lifecycle selector and idempotency tests retained.
 packages/agent/src/domains/prompt_artifacts/validation.rs	retain	prompt-artifact owner	PCC-10/P2AER-S16A	Accepted prompt-artifact raw prompt provider payload path secret idempotency and retention validation retained.
 packages/agent/src/engine/durability/resources/prompt_artifact_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S16A	Accepted prompt-artifact resource schema retained.
-packages/agent/src/domains/capability/operations/module_registry.rs	retain	capability execute owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate execute adapter for module manifest list and inspect operations retained.
-packages/agent/src/domains/module_registry/manifest.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate provider-safe module manifest validation retained.
-packages/agent/src/domains/module_registry/mod.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate module-registry domain facade and docs retained.
-packages/agent/src/domains/module_registry/projection.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate bounded provider-safe module manifest projections retained.
-packages/agent/src/domains/module_registry/service.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate module_list and module_inspect service owner retained.
-packages/agent/src/domains/module_registry/tests.rs	retain	module-registry test owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate module manifest schema redaction authority and side-effect tests retained.
-packages/agent/src/engine/durability/resources/module_registry_definitions.rs	retain	resource definition owner	PCC-10/P3MSA-S23A	Phase 3 Slice 23A candidate built-in module_manifest resource schema retained.
+packages/agent/src/domains/capability/operations/module_registry.rs	retain	capability execute owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A execute adapter for module manifest list and inspect operations retained.
+packages/agent/src/domains/module_registry/manifest.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A provider-safe module manifest validation retained.
+packages/agent/src/domains/module_registry/mod.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module-registry domain facade and docs retained.
+packages/agent/src/domains/module_registry/projection.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A bounded provider-safe module manifest projections retained.
+packages/agent/src/domains/module_registry/service.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module_list and module_inspect service owner retained.
+packages/agent/src/domains/module_registry/tests.rs	retain	module-registry test owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module manifest schema redaction authority and side-effect tests retained.
+packages/agent/src/engine/durability/resources/module_registry_definitions.rs	retain	resource definition owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A built-in module_manifest resource schema retained.
 packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 modular self-adapting engine scorecard retained as active planning evidence with self-sufficient-agent-runtime-readiness classification.
-packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 evidence manifest retained with Slice 23A review-candidate status and validation boundary.
+packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 evidence manifest retained with accepted Slice 23A status and validation boundary.
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 narrative inventory retained for module-plane roadmap and SSARR classification.
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 machine-readable inventory retained for module-plane slice status and validation tracking.

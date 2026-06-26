@@ -168,6 +168,15 @@ Out of scope:
 - repo-managed skills under `packages/agent/skills`;
 - fixed iOS module marketplace UI.
 
+Accepted Slice 23A closes `P3MSA-INV-001` as current baseline. It adds the
+inspect-only `module_registry` domain, source-backed `module_manifest`
+resources, provider-safe `module_list` and `module_inspect` execute operation
+values, explicit read-only module/resource authority, exact module-manifest
+selectors, and bounded lifecycle/provenance projections. It remains a registry
+foundation only: no module install, module execution, dependency restoration,
+repo-managed skills, public `/engine` expansion, marketplace UI, fixed native
+panels, or production deploy/update behavior.
+
 ### Slice 23B: Module Authoring Workspace Foundation
 
 Objective: create a governed place for agent-authored module proposals that is

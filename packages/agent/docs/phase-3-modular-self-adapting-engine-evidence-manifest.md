@@ -62,17 +62,87 @@ state. The audit covered:
 
 ## Implementation Evidence
 
-No Phase 3 implementation slice is accepted as `current_baseline` until
-independent review and integration. P3MSA-INV-001 has a pending implementation
-candidate on branch `codex/phase-3-slice-23a-module-manifest-registry` from
-baseline `origin/main@710fa0e8dd2f160c0af04f8bbdc005094f0c4a1c`; it remains
-`pending_review`.
+### Accepted Slice 23A: Module Manifest And Registry Foundation
+
+Discovery thread `019f059a-0ee3-7fb3-aed4-5c7048e297e8` selected Slice 23A
+with exact final status `implementation may start` from baseline
+`origin/main@710fa0e8dd2f160c0af04f8bbdc005094f0c4a1c`
+(`docs: plan phase 3 modular self-adapting engine`).
+
+Implementation branch:
+`codex/phase-3-slice-23a-module-manifest-registry`
+
+Implementation thread:
+`019f05a1-12f9-7023-97d7-ab239b71abc0`
+
+Independent review thread:
+`019f05dd-4eb5-7ca2-a843-1989f9ccd8e7`
+
+Focused fix thread:
+`019f05e3-2163-7b93-ae96-7adbe6bf6a00`
+
+Independent re-review thread:
+`019f05f2-56e3-7c11-8002-ed3dd18a1835`
+
+Baseline HEAD:
+`710fa0e8dd2f160c0af04f8bbdc005094f0c4a1c`
+(`docs: plan phase 3 modular self-adapting engine`)
+
+Accepted implementation commit:
+`47763bf52f341a336593d0c343b6ada6616e03df`
+(`feat: add module manifest registry foundation`)
+
+Accepted fix commit:
+`6e1d3176cbe99acbef827b634e51b0076c8153be`
+(`fix: narrow module registry grant projection`)
+
+Mainline merge commit:
+`a8b891e961f07ba410a0466f047b64103fb96eda`
+(`merge: integrate phase 3 slice 23a branch`)
+
+Accepted scope:
+
+- Moves `P3MSA-INV-001` from `pending_review` to `current_baseline` after
+  independent re-review accepted the module manifest registry foundation.
+- Adds the inspect-only `domains/module_registry` owner with source-backed
+  first-party `module_manifest` resources using existing generic resource
+  definitions, not a new database table.
+- Adds provider-safe `module_list` and `module_inspect` execute operation
+  values with bounded identity, capability, resource, authority, settings,
+  dependency, validation, provenance, lifecycle, and redaction-proof fields.
+- Enforces explicit read-only `module_registry.read` plus `resource.read`
+  authority, `module_manifest` resource kind, exact `kind:module_manifest`
+  selectors, and exact inspect-resource selectors. Fix 1 removed inherited
+  state write/read/list and `agent_state` runtime grant material from module
+  registry operations.
+- Keeps provider-visible projections metadata-only, with distinct
+  `resourceLifecycle` and `manifestLifecycle` detail fields.
+- Deliberately excludes module install, module execution, dependency
+  restoration, repo-managed `packages/agent/skills`, public `/engine`
+  expansion, marketplace UI, fixed iOS panels, broad DTO resurrection, fallback
+  shims, production deploy/update behavior, and unrelated cleanup.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed during implementation, fix, re-review, and mainline closeout. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
+| Focused `module_registry`, `module_manifest`, execute schema, provider guidance, and capability invocation runtime-grant tests | exit 0 | Module manifest schema, seed registration, provider-safe projections, no-write behavior, exact authority/resource selectors, read-only runtime grants, and duplicate lifecycle regression coverage passed. |
+| BPRC, DESI, SSARR, TMB, SACB, PPACD, PCC, and TPC invariant suites | exit 0 | Static inventories, provider/protocol boundaries, security/authority boundaries, primitive cleanup, and Phase 3 documentation evidence matched accepted Slice 23A scope. |
+| `self_updating_worker_runtime_foundation_invariants` | known baseline failure only | The suite still fails only on the documented pre-existing `packages/agent/src/domains/program_execution` guard mismatch; that path existed at baseline and was not touched by Slice 23A. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f05dd-4eb5-7ca2-a843-1989f9ccd8e7` | exact verdict `changes required` | Review found runtime grant overreach and duplicate lifecycle projection keys before Fix 1. |
+| Independent re-review thread `019f05f2-56e3-7c11-8002-ed3dd18a1835` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline and implementation ancestry, full and fix diffs, read-only module-manifest-only runtime grants, distinct lifecycle fields, provider-safe execute-only scope, pending-review wording before acceptance, focused validation, hygiene checks, and no repo-managed skills. |
+
+Deferred scope remains unchanged: module authoring workspace, validation report
+resources, review/install gates, enable/disable/quarantine/rollback, runtime
+supervisor, dependency policy execution, generic autonomous-work cockpit, and
+feature-pack migration remain later Phase 3 slices.
 
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
-Phase 3 evidence as planning and review-candidate evidence, not successor
-runtime completion proof.
-
-Accepted Phase 3 slices update this manifest with implementation thread id,
-review thread id, fix/re-review threads when present, branch, baseline, head
-commits, validation, docs/tests touched, deferred scope, and exact final
-status.
+Phase 3 evidence as planning plus accepted inspect-only module-registry
+foundation evidence, not successor runtime execution completion proof.

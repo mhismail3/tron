@@ -72,14 +72,20 @@ packs. This ordering is deliberate:
 5. Feature packs are activated one at a time after their module ownership,
    authority, dependency, and UI story is proven.
 
-P3MSA-INV-001 has an implementation candidate on branch
-`codex/phase-3-slice-23a-module-manifest-registry` and is marked
-`pending_review` in the TSV. It is not `current_baseline` until independent
-review accepts and integrates it.
+P3MSA-INV-001 is current baseline after accepted Slice 23A: Module Manifest And
+Registry Foundation. The accepted slice adds the inspect-only `module_registry`
+domain, `module_manifest` resource kind/schema, provider-safe `module_list` and
+`module_inspect` execute operation values, explicit read-only
+`module_registry.read` plus `resource.read` authority, exact
+`kind:module_manifest` and inspect-resource selectors, first-party source-backed
+manifest seed records, and bounded redacted projections. It deliberately does
+not install or execute modules, restore dependencies, add repo-managed skills,
+expand public `/engine`, add fixed native panels, or introduce a new SQLite
+table.
 
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
-Phase 3 inventory as planning and review-candidate evidence, not successor
-runtime completion proof.
+Phase 3 inventory as planning plus accepted inspect-only module-registry
+foundation evidence, not successor runtime execution completion proof.
 
 ## Slice Families
 
