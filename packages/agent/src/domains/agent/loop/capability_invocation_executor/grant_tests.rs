@@ -254,6 +254,42 @@ async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped(
 }
 
 #[tokio::test]
+async fn module_registry_list_runtime_grant_is_read_only_and_kind_scoped() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "module_list",
+        "idempotencyKey": "module-list-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_module_registry_runtime_grant_is_read_only(&grant, None);
+}
+
+#[tokio::test]
+async fn module_registry_inspect_runtime_grant_is_read_only_and_resource_scoped() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "module_inspect",
+        "moduleManifestResourceId": "module_manifest:module_registry",
+        "idempotencyKey": "module-inspect-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_module_registry_runtime_grant_is_read_only(
+        &grant,
+        Some("module_manifest:module_registry"),
+    );
+}
+
+#[tokio::test]
 async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_list",
@@ -448,6 +484,113 @@ fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::Engine
                 .allowed_capabilities
                 .contains(&forbidden_capability.to_owned()),
             "subagent task read grant must not include capability {forbidden_capability}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec![
+            "capability::execute".to_owned(),
+            "state::get".to_owned(),
+            "state::list".to_owned(),
+            "state::set".to_owned(),
+        ]
+    );
+}
+
+fn assert_module_registry_runtime_grant_is_read_only(
+    grant: &crate::engine::EngineGrant,
+    expected_resource_id: Option<&str>,
+) {
+    assert_eq!(grant.network_policy, "none");
+    for scope in ["module_registry.read", "resource.read"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "module registry read grant should include {scope}"
+        );
+    }
+    for forbidden_scope in [
+        "module_registry.write",
+        "resource.write",
+        "worker.lifecycle.read",
+        "worker.lifecycle.write",
+        "procedural.write",
+        "subagents.write",
+        "web.read",
+        "web.write",
+        "catalog.write",
+        "mcp.write",
+        "tool.execute",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "module registry read grant must not include {forbidden_scope}"
+        );
+    }
+    assert!(
+        grant
+            .allowed_resource_kinds
+            .contains(&"module_manifest".to_owned()),
+        "module registry read grant should include module_manifest resources"
+    );
+    assert!(
+        grant
+            .resource_selectors
+            .contains(&"kind:module_manifest".to_owned()),
+        "module registry read grant should include explicit kind selector"
+    );
+    assert!(
+        !grant.resource_selectors.contains(&"*".to_owned()),
+        "module registry runtime grant must not use wildcard selectors"
+    );
+    for forbidden_kind in [
+        "worker_package",
+        "worker_launch_attempt",
+        "web_source",
+        "web_robots_policy",
+        "tool_source_proposal",
+        "subagent_task",
+        "procedural_record",
+    ] {
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&forbidden_kind.to_owned()),
+            "module registry read grant must not include kind {forbidden_kind}"
+        );
+        assert!(
+            !grant
+                .resource_selectors
+                .contains(&format!("kind:{forbidden_kind}")),
+            "module registry read grant must not include selector kind:{forbidden_kind}"
+        );
+    }
+    if let Some(resource_id) = expected_resource_id {
+        assert!(
+            grant
+                .resource_selectors
+                .contains(&format!("resource:{resource_id}")),
+            "module registry inspect grant should include selector resource:{resource_id}"
+        );
+    }
+    for forbidden_capability in [
+        "worker_lifecycle::install_package",
+        "worker_lifecycle::launch_worker",
+        "procedural::activate",
+        "procedural::execute",
+        "jobs::start",
+        "process::run",
+        "mcp::start_server",
+        "mcp::restart_server",
+        "tool::execute",
+        "catalog::register",
+    ] {
+        assert!(
+            !grant
+                .allowed_capabilities
+                .contains(&forbidden_capability.to_owned()),
+            "module registry read grant must not include capability {forbidden_capability}"
         );
     }
     assert_eq!(

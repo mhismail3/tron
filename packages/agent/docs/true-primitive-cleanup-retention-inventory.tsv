@@ -1907,3 +1907,14 @@ packages/agent/src/domains/prompt_artifacts/service.rs	implementation	prompt_art
 packages/agent/src/domains/prompt_artifacts/tests.rs	test	test_harness	TPC-10/P2AER-S16A	focused Slice 16A prompt-artifact bounds redaction retention resource authority scope lifecycle selector and idempotency coverage
 packages/agent/src/domains/prompt_artifacts/validation.rs	implementation	prompt_artifacts	TPC-10/P2AER-S16A	prompt-artifact raw-prompt provider-payload path secret idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/prompt_artifact_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S16A	built-in prompt_artifact resource schema
+packages/agent/src/domains/capability/operations/module_registry.rs	implementation	capability_execute	TPC-10/P3MSA-S23A	provider execute adapter for provider-safe module_manifest list and inspect operations
+packages/agent/src/domains/module_registry/manifest.rs	implementation	module_registry	TPC-10/P3MSA-S23A	module manifest schema bounds provider-safety and stored payload validation owner
+packages/agent/src/domains/module_registry/mod.rs	implementation	module_registry	TPC-10/P3MSA-S23A	module-registry domain docs and registration boundary for inspect-only manifest foundation
+packages/agent/src/domains/module_registry/projection.rs	implementation	module_registry	TPC-10/P3MSA-S23A	bounded provider-safe module manifest summary and detail projection owner
+packages/agent/src/domains/module_registry/service.rs	implementation	module_registry	TPC-10/P3MSA-S23A	resource-backed module_list and module_inspect service owner
+packages/agent/src/domains/module_registry/tests.rs	test	test_harness	TPC-10/P3MSA-S23A	focused Slice 23A module manifest schema seed redaction authority scope lifecycle and side-effect coverage
+packages/agent/src/engine/durability/resources/module_registry_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23A	built-in module_manifest resource schema and first-party seed records
+packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 modular self-adapting engine scorecard and module-plane planning evidence with self-sufficient-agent-runtime-readiness classification
+packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 evidence manifest with Slice 23A review-candidate validation status
+packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 narrative inventory for module-plane roadmap and successor-readiness classification
+packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 machine-readable module-plane slice inventory

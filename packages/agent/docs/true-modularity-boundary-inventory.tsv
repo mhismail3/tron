@@ -1261,3 +1261,9 @@ packages/agent/src/domains/prompt_artifacts/projection.rs	rust	implementation	ag
 packages/agent/src/domains/prompt_artifacts/service.rs	rust	implementation	agent:prompt_artifacts	owner-private durable prompt-artifact record list and inspect service using engine resources streams and scoped authority
 packages/agent/src/domains/prompt_artifacts/validation.rs	rust	implementation	agent:prompt_artifacts	owner-private raw-prompt provider-payload path secret idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/prompt_artifact_definitions.rs	rust	implementation	rust:engine	owner-private prompt_artifact resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/module_registry.rs	rust	adapter	rust:capability	execute primitive may call module-registry list/inspect service methods with explicit grants and provider-safe projections
+packages/agent/src/domains/module_registry/manifest.rs	rust	contract	agent:module_registry	owner-private module manifest schema bounds stored payload validation and provider-safety rules
+packages/agent/src/domains/module_registry/mod.rs	rust	facade	agent:module_registry	domain root owns module-registry docs and worker registration; behavior stays in owner modules
+packages/agent/src/domains/module_registry/projection.rs	rust	implementation	agent:module_registry	owner-private provider-safe module manifest summary/detail projection helpers; callers enter through authorized service methods
+packages/agent/src/domains/module_registry/service.rs	rust	implementation	agent:module_registry	owner-private resource-backed module_list and module_inspect service using explicit grants and system-scoped module_manifest resources
+packages/agent/src/engine/durability/resources/module_registry_definitions.rs	rust	implementation	rust:engine	owner-private module_manifest resource definition and seed module records; callers use engine resource facade

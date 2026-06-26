@@ -43,6 +43,10 @@
 //! record, list, and inspect bounded `update_diagnostic_record` signed-release
 //! and provenance facts without live update checks, package bytes, install or
 //! restart execution, package/catalog registration, or deploy automation.
+//! Module-registry operations are read-only resource-backed operations: they
+//! list and inspect provider-safe `module_manifest` projections without module
+//! install, activation, execution, dependency resolution, network behavior, or
+//! raw manifest exposure.
 //!
 //! ## Submodules
 //!
@@ -69,7 +73,8 @@
 //! metadata is required only for file/process operations; catalog discovery must
 //! remain pure metadata inspection or resource-backed report creation. Replay
 //! manifest reads deliberately bypass trace insertion so the exported manifest
-//! is not changed by the read.
+//! is not changed by the read. Module-registry reads deliberately stay inside
+//! `capability::execute`; they do not expand the public `/engine` protocol.
 
 pub(crate) mod contract;
 mod import_history_contract;

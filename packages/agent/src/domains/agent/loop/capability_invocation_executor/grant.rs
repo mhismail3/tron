@@ -170,6 +170,11 @@ pub(super) async fn derive_capability_runtime_grant(
             "worker.lifecycle.read".to_owned(),
             "resource.read".to_owned(),
         ]);
+    } else if matches!(operation, "module_list" | "module_inspect") {
+        allowed_authority_scopes.extend([
+            "module_registry.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
     } else if matches!(
         operation,
         "procedural_state_list" | "procedural_state_inspect"
@@ -274,6 +279,8 @@ pub(super) async fn derive_capability_runtime_grant(
         && let Some(kind) = worker_package_inspect_kind(effective_args)
     {
         allowed_resource_kinds.push(kind.to_owned());
+    } else if matches!(operation, "module_list" | "module_inspect") {
+        allowed_resource_kinds.push("module_manifest".to_owned());
     } else if matches!(
         operation,
         "subagent_launch"
@@ -382,6 +389,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "memory_decision_inspect"
         && let Some(resource_id) = effective_args
             .get("decisionResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "module_inspect"
+        && let Some(resource_id) = effective_args
+            .get("moduleManifestResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

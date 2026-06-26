@@ -154,6 +154,10 @@ pub const REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID: &str = "tron.resource.repository_t
 pub const UPDATE_DIAGNOSTIC_RECORD_KIND: &str = "update_diagnostic_record";
 /// Built-in system update diagnostic metadata resource schema id.
 pub const UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID: &str = "tron.resource.update_diagnostic_record.v1";
+/// Built-in inspect-only module manifest resource kind.
+pub const MODULE_MANIFEST_KIND: &str = "module_manifest";
+/// Built-in inspect-only module manifest resource schema id.
+pub const MODULE_MANIFEST_SCHEMA_ID: &str = "tron.resource.module_manifest.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

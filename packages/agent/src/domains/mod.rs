@@ -7,8 +7,8 @@
 //! custody, durable import/session-resource graph lineage records, durable
 //! content-free repository tree snapshot records, durable import preview
 //! records, durable program execution metadata records, durable prompt artifact
-//! metadata records, durable system update
-//! diagnostic metadata records, durable non-interactive jobs,
+//! metadata records, durable system update diagnostic metadata records,
+//! inspect-only module manifest registry records, durable non-interactive jobs,
 //! read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
@@ -33,6 +33,7 @@
 //! | `program_execution` | Durable content-free program execution metadata records |
 //! | `prompt_artifacts` | Durable explicit prompt artifact metadata records |
 //! | `update_diagnostics` | Durable system update diagnostics metadata records |
+//! | `module_registry` | Inspect-only module identity/declaration manifest registry |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -116,9 +117,13 @@
 //! learned behavior, and autonomous execution remain absent. Device and
 //! notification domains are server-owned foundations only: raw APNs tokens are
 //! not provider-visible, live APNs transport and native iOS inbox affordances
-//! remain absent, and the old notification product surface is not restored. New
-//! domain behavior must add a contract, deps narrowing, handler binding, tests,
-//! and README/domain-doc updates together.
+//! remain absent, and the old notification product surface is not restored.
+//! Module registry restoration is inspect-only source-backed manifest custody:
+//! it stores first-party `module_manifest` resources and provider-safe
+//! list/inspect projections without module install, activation, execution,
+//! dependency resolution, network behavior, public `/engine` expansion, or
+//! native marketplace panels. New domain behavior must add a contract, deps
+//! narrowing, handler binding, tests, and README/domain-doc updates together.
 //!
 //! ## Test Ownership
 //!
@@ -145,6 +150,7 @@ pub mod media;
 pub mod memory;
 pub mod message;
 pub mod model;
+pub mod module_registry;
 pub mod notifications;
 pub mod procedural;
 pub mod program_execution;

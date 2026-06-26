@@ -535,6 +535,10 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("subagent_task_list"));
     assert!(result.contains("subagent_task_inspect"));
     assert!(result.contains("bounded-placeholder subagent lifecycle records"));
+    assert!(result.contains("module_list"));
+    assert!(result.contains("module_inspect"));
+    assert!(result.contains("module manifest identity"));
+    assert!(result.contains("without install, activation, execution, dependency resolution"));
     assert!(result.contains("procedural_state_list"));
     assert!(result.contains("procedural_state_inspect"));
     assert!(result.contains("skill/rule/hook/procedure provenance evidence"));
@@ -581,6 +585,10 @@ fn clarification_includes_capability_execution_guidance() {
         "autonomous_execute",
         "trigger_register",
         "package_install",
+        "module_install",
+        "module_activate",
+        "module_execute",
+        "module_dependency_resolve",
     ] {
         assert!(
             !result.contains(non_goal),

@@ -72,6 +72,15 @@ packs. This ordering is deliberate:
 5. Feature packs are activated one at a time after their module ownership,
    authority, dependency, and UI story is proven.
 
+P3MSA-INV-001 has an implementation candidate on branch
+`codex/phase-3-slice-23a-module-manifest-registry` and is marked
+`pending_review` in the TSV. It is not `current_baseline` until independent
+review accepts and integrates it.
+
+SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
+Phase 3 inventory as planning and review-candidate evidence, not successor
+runtime completion proof.
+
 ## Slice Families
 
 ### Module Plane Foundation

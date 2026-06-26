@@ -70,6 +70,9 @@ pub(super) fn authorize_with_grant(
             grant.grant_id, function.id
         )));
     }
+    if is_module_registry_invocation(invocation) {
+        ensure_module_registry_grant_is_explicit(grant)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -110,6 +113,25 @@ fn ensure_budget_available(grant: &EngineGrant) -> Result<()> {
         {
             return Err(EngineError::PolicyViolation(format!(
                 "authority grant {} budget {field} is exhausted",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_module_registry_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module registry reads",
                 grant.grant_id
             )));
         }
@@ -175,6 +197,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "updateDiagnosticResourceId",
         "queryResourceId",
         "decisionResourceId",
+        "moduleManifestResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -300,6 +323,10 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "worker.lifecycle.read");
             push_unique(&mut scopes, "resource.read");
         }
+        Some("module_list" | "module_inspect") => {
+            push_unique(&mut scopes, "module_registry.read");
+            push_unique(&mut scopes, "resource.read");
+        }
         Some("procedural_state_list" | "procedural_state_inspect") => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
@@ -405,6 +432,7 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("worker_package_inspect") => worker_package_inspect_kind(invocation)
             .map(|kind| vec![kind])
             .unwrap_or_default(),
+        Some("module_list" | "module_inspect") => vec!["module_manifest"],
         Some(
             "subagent_launch"
             | "subagent_status"
@@ -416,6 +444,14 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("procedural_state_list" | "procedural_state_inspect") => vec!["procedural_record"],
         _ => Vec::new(),
     }
+}
+
+fn is_module_registry_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some("module_list" | "module_inspect")
+        )
 }
 
 fn worker_package_list_kind(invocation: &Invocation) -> Option<&'static str> {
@@ -772,6 +808,132 @@ mod tests {
             error.contains("does not allow resource prompt_artifact:second"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn module_manifest_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "module_registry.read",
+                "resource.read",
+            ],
+            &["module_manifest"],
+            &["kind:module_manifest", "resource:module_manifest:first"],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first resource allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind resource must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource module_manifest:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_manifest_requires_explicit_authority_and_resource_kind() {
+        let function = test_execute_function();
+        let missing_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &["module_manifest"],
+            &["kind:module_manifest"],
+        );
+        let error = authorize_with_grant(
+            &missing_scope,
+            &function,
+            &test_invocation(json!({"operation": "module_list"})),
+        )
+        .expect_err("missing module registry read authority denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority module_registry.read"),
+            "{error}"
+        );
+
+        let wrong_kind = test_grant(
+            &[
+                "capability.execute",
+                "module_registry.read",
+                "resource.read",
+            ],
+            &["web_source"],
+            &["kind:module_manifest"],
+        );
+        let error = authorize_with_grant(
+            &wrong_kind,
+            &function,
+            &test_invocation(json!({"operation": "module_list"})),
+        )
+        .expect_err("missing module manifest resource kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind module_manifest"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_manifest_rejects_wildcard_authority_kinds_and_selectors() {
+        let function = test_execute_function();
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "module_registry.read", "resource.read"],
+                    &["module_manifest"],
+                    &["kind:module_manifest"],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_registry.read",
+                        "resource.read",
+                    ],
+                    &["*", "module_manifest"],
+                    &["kind:module_manifest"],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_registry.read",
+                        "resource.read",
+                    ],
+                    &["module_manifest"],
+                    &["*", "kind:module_manifest"],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "module_list"})),
+            ) {
+                Ok(()) => panic!("module registry {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
     }
 
     fn test_grant(
