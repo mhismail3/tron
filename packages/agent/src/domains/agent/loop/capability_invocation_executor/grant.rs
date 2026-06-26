@@ -30,6 +30,7 @@ pub(super) async fn derive_capability_runtime_grant(
         .get("operation")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let module_registry_read_operation = matches!(operation, "module_list" | "module_inspect");
     let notification_push_requested = operation == "notification_send"
         && effective_args
             .get("pushRequested")
@@ -38,16 +39,22 @@ pub(super) async fn derive_capability_runtime_grant(
     let web_fetch_uses_robots_policy = operation == "web_fetch"
         && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
         && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
-    let mut allowed_capabilities = vec![
-        target_function_id.as_str().to_owned(),
-        "state::get".to_owned(),
-        "state::set".to_owned(),
-        "state::list".to_owned(),
-    ];
+    let mut allowed_capabilities = if module_registry_read_operation {
+        vec![target_function_id.as_str().to_owned()]
+    } else {
+        vec![
+            target_function_id.as_str().to_owned(),
+            "state::get".to_owned(),
+            "state::set".to_owned(),
+            "state::list".to_owned(),
+        ]
+    };
     allowed_capabilities.sort();
     allowed_capabilities.dedup();
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
+    if !module_registry_read_operation {
+        allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
+    }
     if operation == "web_fetch" {
         allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
         if web_fetch_uses_robots_policy {
@@ -170,6 +177,11 @@ pub(super) async fn derive_capability_runtime_grant(
             "worker.lifecycle.read".to_owned(),
             "resource.read".to_owned(),
         ]);
+    } else if matches!(operation, "module_list" | "module_inspect") {
+        allowed_authority_scopes.extend([
+            "module_registry.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
     } else if matches!(
         operation,
         "procedural_state_list" | "procedural_state_inspect"
@@ -213,7 +225,11 @@ pub(super) async fn derive_capability_runtime_grant(
     } else {
         "none"
     };
-    let mut allowed_resource_kinds = vec!["agent_state".to_owned()];
+    let mut allowed_resource_kinds = if module_registry_read_operation {
+        Vec::new()
+    } else {
+        vec!["agent_state".to_owned()]
+    };
     if operation == "web_robots_check" {
         allowed_resource_kinds.push("web_robots_policy".to_owned());
     } else if matches!(
@@ -274,6 +290,8 @@ pub(super) async fn derive_capability_runtime_grant(
         && let Some(kind) = worker_package_inspect_kind(effective_args)
     {
         allowed_resource_kinds.push(kind.to_owned());
+    } else if matches!(operation, "module_list" | "module_inspect") {
+        allowed_resource_kinds.push("module_manifest".to_owned());
     } else if matches!(
         operation,
         "subagent_launch"
@@ -382,6 +400,14 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "memory_decision_inspect"
         && let Some(resource_id) = effective_args
             .get("decisionResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "module_inspect"
+        && let Some(resource_id) = effective_args
+            .get("moduleManifestResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

@@ -728,6 +728,15 @@ stop/retire functions, verified source-tree package digests, scoped token
 minting, conformance reports, and `worker_package` resource/event evidence.
 It is host lifecycle infrastructure, not a provider-visible toolbox, and it
 does not add fixed iOS product panels.
+`domains/module_registry` owns the Phase 3 Slice 23A inspect-only module
+manifest registry. It seeds first-party `module_manifest` resources in the
+generic resource store and exposes provider-safe `module_list` and
+`module_inspect` projections behind `capability::execute`. The registry
+revalidates stored kind/schema/system scope/payload shape and returns bounded
+identity, capability/resource declarations, authority needs, settings and
+dependency intents, validation, provenance, lifecycle, and redaction proof
+without raw manifests, local paths, commands, env values, secrets, grant ids,
+network access, install, activation, dependency resolution, or execution.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -924,8 +933,9 @@ primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `successCriteria`, `constraints`, `queueRefs`, `planRefs`, `evidenceRefs`,
 `kind`, `id`, `mediaId`, `mediaKind`, `mimeType`, `sizeBytes`, `blobRef`,
 `contentHash`, `durationMs`, `summary`, `transcriptionState`,
-`transcriptionText`, `transcriptionLanguage`, `transcriptionModel`, catalog
-search filters, `idempotencyKey`, and `reason`.
+`transcriptionText`, `transcriptionLanguage`, `transcriptionModel`,
+`workerPackageResourceId`, `workerPackageKind`, `moduleManifestResourceId`,
+catalog search filters, `idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
@@ -1008,6 +1018,8 @@ Current primitive operations:
 | `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, process metadata, or network scope. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
+| `module_list` | List system-scoped `module_manifest` records as bounded provider-safe module summaries after stored kind/schema/scope/payload revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, network, or write side effects. |
+| `module_inspect` | Inspect one system-scoped `module_manifest` after stored kind/schema/scope/version/payload revalidation, returning bounded provider-safe identity, declarations, authority/settings/dependency intents, validation, provenance, distinct resource and manifest lifecycle fields, refs, and redaction proof without raw manifests, local paths, env values, commands, secrets, token-like strings, raw grant ids, or personal-info literals. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
@@ -1375,6 +1387,27 @@ grant-like nested metadata, and local paths. It does not add package
 proposal, install, enable, disable, launch, stop, retire, MCP start/restart,
 catalog registration, proposed-tool execution, trust promotion, public
 `/engine` expansion, or fixed native source/package UI.
+
+Phase 3 Slice 23A adds the inspect-only module manifest registry foundation.
+The generic resource store registers `module_manifest` with resource schema
+`tron.resource.module_manifest.v1` and payload schema version
+`tron.module_manifest.v1`; bootstrap seeding creates narrow first-party
+metadata for the registry and capability domains without converting Phase 2
+domains into modules. `module_list` and `module_inspect` stay behind the
+single `capability::execute` primitive and require explicit non-wildcard
+`module_registry.read` and `resource.read` authority, `module_manifest`
+resource-kind grants, `kind:module_manifest` selectors, and `networkPolicy:
+none`. The operations read only system-scoped manifests, revalidate stored
+kind/schema/scope/current-version/payload bounds, and return provider-safe
+projections for identity, capability declarations, resource declarations,
+authority needs, settings declarations, dependency intents, validation status
+and refs, provenance/source refs, lifecycle, and redaction proof. They do not
+write resources, expose raw manifests, expose local paths/env values/commands/
+secrets/raw grant ids/token-like material/personal-info literals, install or
+activate modules, resolve dependencies, execute module behavior, access
+networks, add public `/engine` APIs, restore repo-managed skills, or add fixed
+iOS panels.
+
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
@@ -2020,7 +2053,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `module_manifest` registry records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

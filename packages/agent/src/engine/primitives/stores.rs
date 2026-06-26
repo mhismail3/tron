@@ -23,7 +23,7 @@ use crate::engine::durability::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
     EngineResourceTypeDefinition, EngineResourceVersion, InMemoryEngineResourceStore,
     LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
-    builtin_resource_type_definitions,
+    builtin_module_manifest_resources, builtin_resource_type_definitions,
 };
 use crate::engine::durability::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
@@ -583,6 +583,14 @@ impl PrimitiveStores {
             .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?;
         for definition in builtin_resource_type_definitions() {
             resources.register_type(definition)?;
+        }
+        for resource in builtin_module_manifest_resources() {
+            let Some(resource_id) = resource.resource_id.clone() else {
+                continue;
+            };
+            if resources.inspect(&resource_id)?.is_none() {
+                resources.create(resource)?;
+            }
         }
         Ok(())
     }
