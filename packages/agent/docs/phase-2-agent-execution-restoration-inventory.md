@@ -226,6 +226,17 @@ summarization, episodic event-to-memory conversion, prompt inclusion, automatic
 retention, native iOS memory UI, public `/engine` expansion, or settings/profile
 migration.
 
+`P2AER-INV-020` is now pending review as Slice 19A: Event Protocol Catalog
+Parity Foundation. The implementation candidate keeps the persisted session
+event surface unchanged at 24 typed primitive loop variants and adds parity
+guards that synchronize the generated `ALL_EVENT_TYPES` table with progressive
+module docs and the README Event System section. It also records the boundary
+that product/domain lifecycle streams remain engine stream evidence, not
+transport-visible session event variants. The candidate deliberately does not
+add new event variants, resurrect retired product DTOs, add fixed iOS panels,
+expand public `/engine`, add database migrations, change settings/profile
+schemas, or widen runtime execution.
+
 iOS remains a thin client. The default Phase 2 iOS answer is generic runtime
 surface or server-fact rendering. Native surfaces are justified only when the
 workflow is stable, frequent, and platform-specific: approvals, questions,

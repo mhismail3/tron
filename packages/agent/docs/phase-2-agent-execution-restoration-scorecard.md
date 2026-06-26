@@ -2557,6 +2557,15 @@ retrieval, embeddings, reranking, summarization, episodic event-to-memory
 conversion, prompt inclusion, automatic retention, native iOS UI, settings
 profile migration, public `/engine` expansion, repo-managed skills, and
 unrelated DRC cleanup.
+Slice 19A is an implementation candidate for `P2AER-INV-020` /
+`BPRC-FEATURE-20` / `BPRC-FEATURE-21`: Event Protocol Catalog Parity
+Foundation. It keeps the generated persisted session event catalog unchanged
+and adds source-backed parity evidence for the 24 typed primitive loop event
+variants, README/progressive docs synchronization, allowed loop/protocol
+domains, and retired product event rejection. It deliberately excludes new
+event variants, product DTO resurrection, fixed iOS panels, public `/engine`
+expansion, database migrations, settings/profile migration, runtime execution,
+repo-managed skills, and unrelated DRC cleanup.
 
 Old evidence paths: `BPRC-FEATURE-13`, `BPRC-FEATURE-16`,
 `BPRC-FEATURE-18`, `BPRC-FEATURE-19`, `BPRC-FEATURE-20`,
