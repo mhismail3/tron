@@ -180,8 +180,8 @@ It also maps every BPRC backlog row:
 - `BPRC-FEATURE-23`: settings and profile controls.
 - `BPRC-FEATURE-24`: dependencies that indicate removed behavior.
 
-`P2AER-INV-018` / `BPRC-FEATURE-11` is now a Slice 16A review
-candidate for the backend-only half of prompt artifacts. The candidate adds
+`P2AER-INV-018` / `BPRC-FEATURE-11` is now accepted as Slice 16A
+for the backend-only half of prompt artifacts. The slice adds
 `domains/prompt_artifacts`, durable `prompt_artifact` resources,
 `prompt_artifacts.lifecycle` stream evidence, and execute-only
 `prompt_artifact_record`, `prompt_artifact_list`, and

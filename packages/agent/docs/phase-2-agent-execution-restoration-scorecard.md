@@ -748,7 +748,7 @@ provider-visible raw payloads. Runtime execution, subprocess/job launch,
 interpreter isolation, package installation, file writes, live network behavior,
 notebook/PTY UX, and result merge remain future decisions.
 
-Slice 16A is a review-candidate implementation for the backend-only prompt
+Slice 16A is the accepted backend-only prompt
 artifact resource foundation under `P2AER-INV-018` / `BPRC-FEATURE-11`: it
 adds `domains/prompt_artifacts`, durable `prompt_artifact` resources,
 execute-only record/list/inspect operations, exact resource authority/selectors
@@ -2505,7 +2505,7 @@ schema/instruction text, README, and static inventories for metadata-only
 program execution records. It deliberately excludes runtime execution,
 subprocess/job launch, package installation, file writes, live network behavior,
 notebook/PTY surfaces, result merge, and native UI.
-Review-candidate Slice 16A begins the prompt-artifact row by adding
+Accepted Slice 16A begins the prompt-artifact row by adding
 `domains/prompt_artifacts`, the built-in `prompt_artifact` resource
 definition, execute adapters, runtime grant narrowing, provider
 schema/instruction text, README, and static inventories for explicit opt-in
