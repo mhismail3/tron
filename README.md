@@ -1455,6 +1455,10 @@ model/responder audit boundary; hidden chain-of-thought exposure, invented
 reasoning summaries, raw provider reasoning payload persistence, provider-visible
 raw reasoning payloads, native reasoning UI, settings/profile migration, and
 public reasoning APIs remain absent.
+Slice 18A adds accepted backend-only memory query/decision evidence resources;
+semantic/vector retrieval, embeddings, ranking, summarization, episodic
+event-to-memory conversion, prompt inclusion, automatic retention, native memory
+UI, settings/profile migration, and public memory APIs remain absent.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,

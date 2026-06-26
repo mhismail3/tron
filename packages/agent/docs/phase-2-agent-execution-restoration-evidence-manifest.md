@@ -2536,13 +2536,25 @@ memory retrieval, prompt artifact UI or automatic capture, repo-managed skills,
 broad DTO resurrection, unrelated DRC cleanup, and production deployment remain
 deferred.
 
-### Slice 18A Implementation Candidate: Memory Query And Decision Evidence Foundation
+### Accepted Slice 18A: Memory Query And Decision Evidence Foundation
 
-Discovery thread `019efe16-09d7-73d3-9708-6c6ba5bc6493` selected Slice 18A
+Discovery thread `019f0208-7ac5-7211-8258-5e51d3d32af5` selected Slice 18A
 with exact final status `implementation may start` from baseline
-`origin/main@846d196cb0221affd18d60967b6f518cef09e898`. This section records
-branch implementation evidence only; Slice 18A is not accepted/current baseline
-until independent review accepts it.
+`origin/main@846d196cb0221affd18d60967b6f518cef09e898`. Implementation thread
+`019f020c-f98c-7eb3-bf5a-38546ff7e6cb` completed with exact final status
+`implementation complete` on branch
+`codex/phase-2-slice-18a-memory-query-decision-evidence` at
+`aa40d5d7d5bf074c6f45d6ec283cc481cc75dba8` (`feat: add memory query decision
+evidence`). Independent review thread
+`019f022f-670b-7202-b2fb-205affa7fb60` returned exact verdict
+`changes required`; focused fix thread `019f0238-8c5f-7a92-9697-901c0ec720e9`
+completed with exact final status `fix ready for review` at
+`44b1895d629661a6d784799a2e8c89caeda331de` (`fix: enforce memory evidence
+execute grants`). Re-review thread `019f0246-d061-74d0-a4f3-def6b4f7b5fd`
+returned exact verdict `slice accepted` with no blocking findings. The accepted
+branch was merged to `main` at `884092c20859cebb34cc5bbb5c121571168dd4bb`
+(`merge: integrate phase 2 slice 18a branch`) before this closeout
+documentation was recorded.
 
 Implementation branch:
 `codex/phase-2-slice-18a-memory-query-decision-evidence`.
@@ -2550,7 +2562,7 @@ Implementation branch:
 Baseline HEAD:
 `846d196cb0221affd18d60967b6f518cef09e898`
 
-Implementation candidate scope:
+Accepted scope:
 
 - Adds built-in `memory_query` and `memory_decision` resource definitions as
   inert, backend-owned memory evidence primitives.
@@ -2566,11 +2578,12 @@ Implementation candidate scope:
 - Adds read-only `capability::execute` inspection operations for
   `memory_query_list`, `memory_query_inspect`, `memory_decision_list`, and
   `memory_decision_inspect` behind trusted current-session context and explicit
-  memory/resource grants.
+  `memory.read`/`resource.read`, resource-kind, and inspect-resource selector
+  grants.
 - Keeps mutating query/decision recording as backend memory-domain contracts,
   not provider-visible retrieval APIs.
 
-Implementation candidate validation:
+Validation and review evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -2592,6 +2605,14 @@ Implementation candidate validation:
 | `rg -n "Utc::now\|chrono::Utc::now\|SystemTime::now\|Instant::now\|thread_rng\|random" packages/agent/src/domains/memory/query_decision.rs packages/agent/src/domains/memory/query_decision_validation.rs packages/agent/src/domains/capability/operations/memory.rs packages/agent/src/domains/memory/contract.rs packages/agent/src/engine/durability/resources/memory_definitions.rs packages/agent/src/shared/protocol/memory.rs packages/agent/src/domains/memory/tests.rs` | exit 1 | Direct Slice 18A entropy scan found no nondeterministic timestamp/random calls in touched memory evidence files. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 101 | DRC still fails only on the known non-selected UTC allow-list gap in `domains/goals`, `domains/web`, and `domains/tool_sources`; Slice 18A code does not add new DRC entropy. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` | exit 101 | SOL validates Slice 18A row structure/classification but still reports broad pre-existing missing marker rows outside Slice 18A. |
+| Independent review thread `019f022f-670b-7202-b2fb-205affa7fb60` | exact verdict `changes required` | Review found missing `capability::execute` authority/resource-kind/selector mapping for `memory_query_*` and `memory_decision_*` read operations and a SOL row gap for the touched execute context. |
+| Focused fix thread `019f0238-8c5f-7a92-9697-901c0ec720e9` | exact final status `fix ready for review` | Fix added `memory.read`/`resource.read`, resource-kind, and inspect-selector enforcement through the real execute authorization path, runtime grant derivation coverage, and scoped SOL rows for the touched execute context/test fixture. |
+| Independent re-review thread `019f0246-d061-74d0-a4f3-def6b4f7b5fd` | exact verdict `slice accepted` | Re-review verified full and fix diffs, branch/head cleanliness, baseline and implementation ancestry, read-only provider-visible execute scope, real-path grant denial coverage, provider runtime grant derivation, scoped SOL evidence, metadata-only resources/projections, and no broad out-of-scope behavior. |
+| Mainline focused Slice 18A regressions | exit 0 | On merged `main`, `capability_execute_memory_query_decision_reads_require_memory_resource_authority`, `memory_query_decision_runtime_grants_are_read_only_and_resource_scoped`, and `execute_can_read_only_inspect_query_and_decision_evidence` passed. |
+| Mainline closeout static checks | exit 0 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, BPRC, DESI, and HRA passed on merged `main`; check emitted only existing provider/resource dead-code warnings. |
+| Mainline SOL check | exit 101 | `state_ownership_lifecycle_invariants` still fails only on broad pre-existing missing marker rows outside Slice 18A; Slice 18A `operations/context.rs`, `memory/query_decision.rs`, `memory/query_decision_validation.rs`, and touched grant fixture rows are resolved. |
+| Mainline DRC check | exit 101 | `determinism_replayability_invariants` passed protocol docs parity and failed only on the known non-selected UTC allow-list gap in `goals/service.rs`, `goals/tests.rs`, `web/fetch.rs`, `web/robots/mod.rs`, `web/archive.rs`, and `tool_sources/tool_sources_inspect_tests.rs`; no Slice 18A paths were reported. |
+| Mainline hygiene checks | exit 0 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, and `test ! -e packages/agent/skills` passed after the acceptance documentation update. |
 
 Deferred scope remains unchanged: semantic/vector retrieval, embeddings,
 reranking, summarization, index rebuilds, episodic event retrieval, event to

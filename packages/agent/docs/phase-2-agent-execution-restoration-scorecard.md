@@ -771,16 +771,17 @@ persistence, provider-visible raw reasoning payloads, native reasoning UI,
 settings/profile migration, public reasoning APIs, and unrelated DRC cleanup
 remain future decisions.
 
-Slice 18A is a pending-review backend-only memory query/decision evidence
-candidate under `P2AER-INV-015` / `P2AER-INV-016` / `BPRC-FEATURE-10`: it adds
-inert `memory_query` and `memory_decision` resources, backend domain
+Slice 18A is the accepted backend-only memory query/decision evidence
+foundation under `P2AER-INV-015` / `P2AER-INV-016` / `BPRC-FEATURE-10`: it
+adds inert `memory_query` and `memory_decision` resources, backend domain
 record/list/inspect functions, read-only provider-safe inspection operations,
 bounded refs/reason codes/redaction proof/trace and replay refs, deterministic
-injected timestamps, and fingerprinted idempotency evidence. Semantic/vector
-retrieval, embeddings, ranking, summarization, episodic event retrieval,
-prompt inclusion, automatic retention, native memory UI, public `/engine`
-expansion, settings/profile migration, and unrelated DRC cleanup remain future
-decisions.
+injected timestamps, fingerprinted idempotency evidence, and explicit
+`memory.read`/`resource.read` plus resource-kind/selector enforcement for the
+provider-visible execute reads. Semantic/vector retrieval, embeddings, ranking,
+summarization, episodic event retrieval, prompt inclusion, automatic retention,
+native memory UI, public `/engine` expansion, settings/profile migration, and
+unrelated DRC cleanup remain future decisions.
 
 Focused tests: queue lifecycle, cancellation, stream replay, log retention,
 lease expiry, shutdown, process sandbox, interpreter isolation, CSD inventory.
@@ -2544,12 +2545,14 @@ deliberately excludes hidden chain-of-thought exposure, invented reasoning
 summaries, raw provider reasoning payload persistence, provider-visible raw
 reasoning payloads, native reasoning UI, settings/profile migration, public
 reasoning APIs, broad DTO resurrection, and unrelated DRC cleanup.
-Slice 18A is a pending-review implementation candidate for the memory
-query/decision evidence rows. It adds built-in `memory_query` and
-`memory_decision` resource definitions, memory-domain record/list/inspect
-functions, read-only provider-safe inspection through `capability::execute`,
-resource/protocol DTOs, README, and static inventory/evidence updates for
-metadata-only audit records. It deliberately excludes semantic/vector
+Accepted Slice 18A adds the memory query/decision evidence rows. It adds built-in
+`memory_query` and `memory_decision` resource definitions, memory-domain
+record/list/inspect functions, read-only provider-safe inspection through
+`capability::execute`, resource/protocol DTOs, README, and static
+inventory/evidence updates for metadata-only audit records. It also enforces
+explicit memory/resource authority, resource-kind grants, and inspect-resource
+selectors for the provider-visible reads after independent review found the
+initial authority mapping incomplete. It deliberately excludes semantic/vector
 retrieval, embeddings, reranking, summarization, episodic event-to-memory
 conversion, prompt inclusion, automatic retention, native iOS UI, settings
 profile migration, public `/engine` expansion, repo-managed skills, and

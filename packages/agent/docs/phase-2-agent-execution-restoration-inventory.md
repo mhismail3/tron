@@ -214,15 +214,17 @@ text, eval-run custody, and migration envelopes. It deliberately leaves
 semantic/vector retrieval, episodic event retrieval, procedural rules/hooks, and
 automatic retention as future packages behind the memory contract.
 
-Slice 18A is a pending-review implementation candidate for the next narrow
-memory foundation step on rows `P2AER-INV-015` and `P2AER-INV-016`. It adds
+Slice 18A is the accepted current-baseline foundation for the next narrow memory
+evidence step on rows `P2AER-INV-015` and `P2AER-INV-016`. It adds
 metadata-only `memory_query` and `memory_decision` evidence resources, bounded
 query intent/filters, selected/excluded/decision refs, reason codes, redaction
-proof, trace/replay refs, deterministic caller-provided timestamps, and
-fingerprinted idempotency evidence. It deliberately does not add semantic/vector
-retrieval, embeddings, ranking, summarization, episodic event-to-memory
-conversion, prompt inclusion, automatic retention, native iOS memory UI, public
-`/engine` expansion, or settings/profile migration.
+proof, trace/replay refs, deterministic caller-provided timestamps,
+fingerprinted idempotency evidence, and explicit memory/resource
+authority/resource-kind/selector enforcement for read-only provider inspection.
+It deliberately does not add semantic/vector retrieval, embeddings, ranking,
+summarization, episodic event-to-memory conversion, prompt inclusion, automatic
+retention, native iOS memory UI, public `/engine` expansion, or settings/profile
+migration.
 
 iOS remains a thin client. The default Phase 2 iOS answer is generic runtime
 surface or server-fact rendering. Native surfaces are justified only when the
