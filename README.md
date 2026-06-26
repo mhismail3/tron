@@ -752,8 +752,9 @@ explicit no-install/no-execution proof. `module_proposal_record`,
 modules, execute code, restore dependencies, use package managers, create a
 physical module workspace directory, touch repo-managed `packages/agent/skills`,
 store raw prompt/proposal/code/command/file-content fields, expose raw grant or
-authority ids, store or project token-like title/summary identity material, add
-public `/engine` APIs, or add fixed iOS panels.
+authority ids, store or project token-like title/summary identity material, or
+write rejected raw proposal payloads into provider-visible trace metadata. It
+does not add public `/engine` APIs or fixed iOS panels.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -1441,7 +1442,8 @@ fingerprints, idempotency fingerprint, validation placeholder/status,
 lifecycle state, and no-install/no-execution proof. This candidate does not
 create a physical module workspace directory, store raw code/prompts/proposal
 bodies/commands/file contents/unsafe paths, store or project token-like
-title/summary identity material, expose raw grant or authority ids, install or
+title/summary identity material, expose raw grant or authority ids, write
+rejected raw proposal payloads into provider-visible trace metadata, install or
 activate modules, execute code, restore dependencies, use package managers,
 touch repo-managed `packages/agent/skills`, access networks, add public
 `/engine` APIs, or add fixed iOS panels.

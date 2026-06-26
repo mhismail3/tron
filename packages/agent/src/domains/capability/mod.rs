@@ -51,7 +51,8 @@
 //! record, list, and inspect bounded `module_proposal` metadata and refs
 //! without module workspace directories, install, activation, execution,
 //! dependency restoration, network behavior, repo-managed skills, raw prompt
-//! bodies, or raw proposal bodies.
+//! bodies, or raw proposal bodies; their trace records use a redacted
+//! request/authority projection before module-authoring validation runs.
 //!
 //! ## Submodules
 //!
@@ -80,7 +81,8 @@
 //! manifest reads deliberately bypass trace insertion so the exported manifest
 //! is not changed by the read. Module-registry reads deliberately stay inside
 //! `capability::execute`; module-authoring proposal records deliberately stay
-//! inert and resource-backed. Neither expands the public `/engine` protocol.
+//! inert, resource-backed, and trace-safe before unsafe payload rejection.
+//! Neither expands the public `/engine` protocol.
 
 pub(crate) mod contract;
 mod import_history_contract;

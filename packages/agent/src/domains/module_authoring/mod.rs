@@ -5,7 +5,10 @@
 //! provider-visible surface is limited to `capability::execute` operations
 //! `module_proposal_record`, `module_proposal_list`, and
 //! `module_proposal_inspect`. Proposals are metadata-only, resource-backed, and
-//! intentionally non-installable/non-executable.
+//! intentionally non-installable/non-executable. The surrounding execute trace
+//! layer records only a redacted request and authority projection for these
+//! operations, so rejected unsafe payloads cannot become provider-visible trace
+//! metadata.
 //!
 //! ## Submodules
 //!
@@ -23,8 +26,9 @@
 //! This domain stores proposal metadata only. It must not create a physical
 //! module workspace directory, install dependencies, run commands, execute code,
 //! touch repo-managed `packages/agent/skills`, access networks, inject prompts,
-//! or expose raw proposal bodies. Later gates own validation reports, install
-//! review, activation, execution, and UI.
+//! expose raw proposal bodies, or leak rejected raw payload material through
+//! trace records. Later gates own validation reports, install review,
+//! activation, execution, and UI.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

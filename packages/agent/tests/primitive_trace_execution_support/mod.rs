@@ -8,6 +8,7 @@ pub use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
+#[allow(unused_imports)]
 pub use tron::domains::session::event_store::{AgentTraceListOptions, ClientLogEntry};
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
 pub use tron::engine::{
@@ -139,6 +140,50 @@ pub async fn causal_context_raw(
         .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
 }
 
+#[allow(dead_code)]
+pub async fn module_proposal_causal_context(
+    ctx: &ServerRuntimeContext,
+    trace_id: TraceId,
+    session_id: &str,
+    workspace_id: &str,
+    working_directory: &Path,
+    provider_invocation_id: &str,
+    idempotency_key: &str,
+) -> CausalContext {
+    let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
+    let grant_id = derive_module_proposal_execute_grant(
+        ctx,
+        &actor_id,
+        trace_id.clone(),
+        session_id,
+        workspace_id,
+        working_directory.to_str().unwrap(),
+        provider_invocation_id,
+    )
+    .await;
+    CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
+        .with_scope("capability.execute")
+        .with_scope("module_authoring.read")
+        .with_scope("module_authoring.write")
+        .with_scope("resource.read")
+        .with_scope("resource.write")
+        .with_session_id(session_id.to_owned())
+        .with_workspace_id(workspace_id.to_owned())
+        .with_idempotency_key(idempotency_key.to_owned())
+        .with_runtime_metadata(
+            RUNTIME_METADATA_WORKING_DIRECTORY,
+            working_directory.display().to_string(),
+        )
+        .with_runtime_metadata(
+            RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+            provider_invocation_id,
+        )
+        .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+        .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+        .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_trace_test")
+        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn derive_capability_execute_grant(
     ctx: &ServerRuntimeContext,
@@ -216,6 +261,83 @@ pub async fn derive_capability_execute_grant(
     assert_eq!(
         result.error, None,
         "grant derivation failed: {:?}",
+        result.error
+    );
+    AuthorityGrantId::new(
+        result.value.unwrap()["grant"]["grantId"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+    )
+    .unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
+pub async fn derive_module_proposal_execute_grant(
+    ctx: &ServerRuntimeContext,
+    actor_id: &ActorId,
+    trace_id: TraceId,
+    session_id: &str,
+    workspace_id: &str,
+    working_directory: &str,
+    provider_invocation_id: &str,
+) -> AuthorityGrantId {
+    let root = tron::shared::foundation::paths::normalize_working_directory(working_directory)
+        .unwrap()
+        .display()
+        .to_string();
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("grant::derive").unwrap(),
+            json!({
+                "parentGrantId": "agent-capability-runtime",
+                "subjectActorId": actor_id.as_str(),
+                "allowedCapabilities": ["capability::execute"],
+                "allowedNamespaces": ["__no_namespace_authority__"],
+                "allowedAuthorityScopes": [
+                    "capability.execute",
+                    "module_authoring.read",
+                    "module_authoring.write",
+                    "resource.read",
+                    "resource.write"
+                ],
+                "allowedResourceKinds": ["module_proposal"],
+                "resourceSelectors": ["kind:module_proposal"],
+                "fileRoots": [root],
+                "networkPolicy": "none",
+                "maxRisk": "medium",
+                "budget": {
+                    "remainingInvocations": 2,
+                    "remainingProcessMs": 120000
+                },
+                "canDelegate": false,
+                "provenance": {
+                    "source": "primitive_trace_module_proposal_test",
+                    "sessionId": session_id,
+                    "workspaceId": workspace_id,
+                    "providerInvocationId": provider_invocation_id,
+                    "networkPolicy": "none",
+                    "workingDirectory": root
+                }
+            }),
+            CausalContext::new(
+                ActorId::new("system:primitive-trace-test").unwrap(),
+                ActorKind::System,
+                AuthorityGrantId::new("grant").unwrap(),
+                trace_id,
+            )
+            .with_scope("grant.write")
+            .with_session_id(session_id.to_owned())
+            .with_idempotency_key(format!(
+                "derive-module-proposal-grant-{provider_invocation_id}"
+            )),
+        ))
+        .await;
+    assert_eq!(
+        result.error, None,
+        "module proposal grant derivation failed: {:?}",
         result.error
     );
     AuthorityGrantId::new(
