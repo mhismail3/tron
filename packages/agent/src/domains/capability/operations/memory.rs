@@ -62,3 +62,85 @@ pub(super) async fn memory_inspect(
         }),
     ))
 }
+
+pub(super) async fn memory_query_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let queries =
+        service::list_memory_queries_value(&deps.engine_host, invocation, &invocation.payload)
+            .await?;
+    let count = queries
+        .get("queries")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(ok_result(
+        format!("Memory query evidence list returned {count} redacted records."),
+        json!({
+            "primitiveOperation": "memory_query_list",
+            "status": "ok",
+            "memory": queries
+        }),
+    ))
+}
+
+pub(super) async fn memory_query_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let query =
+        service::inspect_memory_query_value(&deps.engine_host, invocation, &invocation.payload)
+            .await?;
+    let resource_id = query["resource"]["resourceId"]
+        .as_str()
+        .unwrap_or("unknown");
+    Ok(ok_result(
+        format!("Memory query evidence inspected with redacted payload: {resource_id}."),
+        json!({
+            "primitiveOperation": "memory_query_inspect",
+            "status": "ok",
+            "memory": query
+        }),
+    ))
+}
+
+pub(super) async fn memory_decision_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let decisions =
+        service::list_memory_decisions_value(&deps.engine_host, invocation, &invocation.payload)
+            .await?;
+    let count = decisions
+        .get("decisions")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(ok_result(
+        format!("Memory decision evidence list returned {count} redacted records."),
+        json!({
+            "primitiveOperation": "memory_decision_list",
+            "status": "ok",
+            "memory": decisions
+        }),
+    ))
+}
+
+pub(super) async fn memory_decision_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let decision =
+        service::inspect_memory_decision_value(&deps.engine_host, invocation, &invocation.payload)
+            .await?;
+    let resource_id = decision["resource"]["resourceId"]
+        .as_str()
+        .unwrap_or("unknown");
+    Ok(ok_result(
+        format!("Memory decision evidence inspected with redacted payload: {resource_id}."),
+        json!({
+            "primitiveOperation": "memory_decision_inspect",
+            "status": "ok",
+            "memory": decision
+        }),
+    ))
+}

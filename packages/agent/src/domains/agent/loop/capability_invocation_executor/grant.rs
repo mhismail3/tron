@@ -157,6 +157,14 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if matches!(
+        operation,
+        "memory_query_list"
+            | "memory_query_inspect"
+            | "memory_decision_list"
+            | "memory_decision_inspect"
+    ) {
+        allowed_authority_scopes.extend(["memory.read".to_owned(), "resource.read".to_owned()]);
     } else if matches!(operation, "worker_package_list" | "worker_package_inspect") {
         allowed_authority_scopes.extend([
             "worker.lifecycle.read".to_owned(),
@@ -251,6 +259,13 @@ pub(super) async fn derive_capability_runtime_grant(
         "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_resource_kinds.push("update_diagnostic_record".to_owned());
+    } else if matches!(operation, "memory_query_list" | "memory_query_inspect") {
+        allowed_resource_kinds.push("memory_query".to_owned());
+    } else if matches!(
+        operation,
+        "memory_decision_list" | "memory_decision_inspect"
+    ) {
+        allowed_resource_kinds.push("memory_decision".to_owned());
     } else if operation == "worker_package_list" {
         if let Some(kind) = worker_package_list_kind(effective_args) {
             allowed_resource_kinds.push(kind.to_owned());
@@ -351,6 +366,22 @@ pub(super) async fn derive_capability_runtime_grant(
     if operation == "update_diagnostic_inspect"
         && let Some(resource_id) = effective_args
             .get("updateDiagnosticResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "memory_query_inspect"
+        && let Some(resource_id) = effective_args
+            .get("queryResourceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    {
+        resource_selectors.push(format!("resource:{resource_id}"));
+    }
+    if operation == "memory_decision_inspect"
+        && let Some(resource_id) = effective_args
+            .get("decisionResourceId")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
     {

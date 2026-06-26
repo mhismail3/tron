@@ -2,9 +2,10 @@
 //!
 //! This worker owns the source-backed memory contract for Phase 2 Slice 3:
 //! engine identity, policy/mode selection, canonical memory records, prompt
-//! inclusion traces, eval-run resources, and migration envelopes. It does not
-//! implement semantic/vector retrieval, embeddings, ranking, summarization,
-//! hooks, rules, procedural skills, or automatic prompt memory.
+//! inclusion traces, metadata-only query/decision evidence, eval-run resources,
+//! and migration envelopes. It does not implement semantic/vector retrieval,
+//! embeddings, ranking, summarization, hooks, rules, procedural skills, or
+//! automatic prompt memory.
 //!
 //! ## Submodules
 //!
@@ -15,6 +16,8 @@
 //! | `handlers` | Operation binding table |
 //! | `migration` | Migration export/import envelope behavior |
 //! | `prompt_trace` | Provider-safe memory prompt trace assembly |
+//! | `query_decision` | Metadata-only query and decision evidence records |
+//! | `query_decision_validation` | Bounds and leakage guards for query/decision evidence |
 //! | `schema_tests` | Test-only resource schema drift guards |
 //! | `service` | Resource-backed memory policy, record lifecycle, list, and inspect behavior |
 //! | `support` | Payload parsing, stream publication, and resource projections |
@@ -34,10 +37,10 @@
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{
-    MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID, MEMORY_MIGRATION_ENVELOPE_KIND,
-    MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID, MEMORY_POLICY_KIND, MEMORY_POLICY_SCHEMA_ID,
-    MEMORY_PROMPT_TRACE_KIND, MEMORY_PROMPT_TRACE_SCHEMA_ID, MEMORY_RECORD_KIND,
-    MEMORY_RECORD_SCHEMA_ID,
+    MEMORY_DECISION_KIND, MEMORY_DECISION_SCHEMA_ID, MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID,
+    MEMORY_MIGRATION_ENVELOPE_KIND, MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID, MEMORY_POLICY_KIND,
+    MEMORY_POLICY_SCHEMA_ID, MEMORY_PROMPT_TRACE_KIND, MEMORY_PROMPT_TRACE_SCHEMA_ID,
+    MEMORY_QUERY_KIND, MEMORY_QUERY_SCHEMA_ID, MEMORY_RECORD_KIND, MEMORY_RECORD_SCHEMA_ID,
 };
 
 pub(crate) mod contract;
@@ -45,6 +48,8 @@ mod errors;
 mod handlers;
 mod migration;
 mod prompt_trace;
+mod query_decision;
+mod query_decision_validation;
 pub(crate) mod service;
 mod support;
 
@@ -63,6 +68,12 @@ pub(crate) const INSPECT_FUNCTION: &str = "memory::inspect";
 pub(crate) const EXPORT_FUNCTION: &str = "memory::migrate_export";
 pub(crate) const IMPORT_FUNCTION: &str = "memory::migrate_import";
 pub(crate) const PROMPT_TRACE_FUNCTION: &str = "memory::record_prompt_trace";
+pub(crate) const RECORD_QUERY_FUNCTION: &str = "memory::record_query";
+pub(crate) const LIST_QUERIES_FUNCTION: &str = "memory::query_list";
+pub(crate) const INSPECT_QUERY_FUNCTION: &str = "memory::query_inspect";
+pub(crate) const RECORD_DECISION_FUNCTION: &str = "memory::record_decision";
+pub(crate) const LIST_DECISIONS_FUNCTION: &str = "memory::decision_list";
+pub(crate) const INSPECT_DECISION_FUNCTION: &str = "memory::decision_inspect";
 
 /// Memory dependencies narrowed from server setup.
 #[derive(Clone)]

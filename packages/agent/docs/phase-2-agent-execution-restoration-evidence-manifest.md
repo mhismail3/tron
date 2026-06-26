@@ -2535,3 +2535,68 @@ settings/profile migration, runtime execution, deployment/update flows, APNs,
 memory retrieval, prompt artifact UI or automatic capture, repo-managed skills,
 broad DTO resurrection, unrelated DRC cleanup, and production deployment remain
 deferred.
+
+### Slice 18A Implementation Candidate: Memory Query And Decision Evidence Foundation
+
+Discovery thread `019efe16-09d7-73d3-9708-6c6ba5bc6493` selected Slice 18A
+with exact final status `implementation may start` from baseline
+`origin/main@846d196cb0221affd18d60967b6f518cef09e898`. This section records
+branch implementation evidence only; Slice 18A is not accepted/current baseline
+until independent review accepts it.
+
+Implementation branch:
+`codex/phase-2-slice-18a-memory-query-decision-evidence`.
+
+Baseline HEAD:
+`846d196cb0221affd18d60967b6f518cef09e898`
+
+Implementation candidate scope:
+
+- Adds built-in `memory_query` and `memory_decision` resource definitions as
+  inert, backend-owned memory evidence primitives.
+- Adds memory-domain record/list/inspect functions for bounded query intent,
+  filters, selected/excluded refs, decision refs, reason codes, redaction
+  proof, trace/replay refs, lifecycle metadata, deterministic caller-provided
+  timestamps, and fingerprinted idempotency evidence.
+- Adds typed protocol DTOs for memory query and decision evidence while keeping
+  projections provider-safe: no memory body content, raw event payloads, hidden
+  chain-of-thought, summaries, raw prompt/provider payloads, raw idempotency
+  keys, secrets, token-like strings, unsafe paths, absolute paths, or personal
+  literals.
+- Adds read-only `capability::execute` inspection operations for
+  `memory_query_list`, `memory_query_inspect`, `memory_decision_list`, and
+  `memory_decision_inspect` behind trusted current-session context and explicit
+  memory/resource grants.
+- Keeps mutating query/decision recording as backend memory-domain contracts,
+  not provider-visible retrieval APIs.
+
+Implementation candidate validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after Slice 18A changes. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::memory -- --nocapture` | exit 0 | Focused memory tests passed, including query/decision metadata-only evidence, scope isolation, wrong-kind/stale ref denial, raw body/prompt/payload rejection, deterministic timestamp projection, idempotency replay, lifecycle evidence, and read-only execute inspection. |
+| `cargo test --manifest-path packages/agent/Cargo.toml capability::contract --lib -- --nocapture` | exit 0 | Capability contract tests passed with read-only memory query/decision execute operations and no provider-visible record operations. |
+| `cargo test --manifest-path packages/agent/Cargo.toml resource_contracts --lib -- --nocapture` | exit 0 | Built-in resource contract tests passed with `memory_query` and `memory_decision` definitions present. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC static gate passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI static gate passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | HRA static gate passed after adding Slice 18A file ownership rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC static gate passed after adding Slice 18A retention rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | TMB static gate passed after adding Slice 18A boundary rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC static gate passed after recording the accepted memory test budget exception. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB static gate passed after adding Slice 18A authority rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | SSARR static gate passed after preserving the execute-schema source-backed guard marker. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | PPACD static gate passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | PMBD static gate passed. |
+| `rg -n "Utc::now\|chrono::Utc::now\|SystemTime::now\|Instant::now\|thread_rng\|random" packages/agent/src/domains/memory/query_decision.rs packages/agent/src/domains/memory/query_decision_validation.rs packages/agent/src/domains/capability/operations/memory.rs packages/agent/src/domains/memory/contract.rs packages/agent/src/engine/durability/resources/memory_definitions.rs packages/agent/src/shared/protocol/memory.rs packages/agent/src/domains/memory/tests.rs` | exit 1 | Direct Slice 18A entropy scan found no nondeterministic timestamp/random calls in touched memory evidence files. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 101 | DRC still fails only on the known non-selected UTC allow-list gap in `domains/goals`, `domains/web`, and `domains/tool_sources`; Slice 18A code does not add new DRC entropy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` | exit 101 | SOL validates Slice 18A row structure/classification but still reports broad pre-existing missing marker rows outside Slice 18A. |
+
+Deferred scope remains unchanged: semantic/vector retrieval, embeddings,
+reranking, summarization, index rebuilds, episodic event retrieval, event to
+memory conversion, automatic retention, prompt inclusion, settings/profile
+migration, native iOS memory UI, public `/engine` expansion, live network/APNs,
+runtime execution, repo-managed skills, broad DTO resurrection, unrelated DRC
+cleanup, and production deployment remain deferred. The known non-selected DRC
+UTC allow-list gap in `goals`, `web`, and `tool_sources` remains deferred.

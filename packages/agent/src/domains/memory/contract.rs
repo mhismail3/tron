@@ -5,10 +5,13 @@ use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{DurableOutputContract, EffectClass, IdempotencyContract, RiskLevel};
 
 use super::{
-    CONFIGURE_FUNCTION, EDIT_FUNCTION, EXPORT_FUNCTION, IMPORT_FUNCTION, INSPECT_FUNCTION,
-    LIST_FUNCTION, MEMORY_ENGINE_KIND, MEMORY_LIFECYCLE_TOPIC, MEMORY_MIGRATION_ENVELOPE_KIND,
-    MEMORY_POLICY_KIND, MEMORY_PROMPT_TRACE_KIND, MEMORY_RECORD_KIND, PROMPT_TRACE_FUNCTION,
-    READ_SCOPE, RETAIN_FUNCTION, STATUS_FUNCTION, TOMBSTONE_FUNCTION, WORKER, WRITE_SCOPE,
+    CONFIGURE_FUNCTION, EDIT_FUNCTION, EXPORT_FUNCTION, IMPORT_FUNCTION, INSPECT_DECISION_FUNCTION,
+    INSPECT_FUNCTION, INSPECT_QUERY_FUNCTION, LIST_DECISIONS_FUNCTION, LIST_FUNCTION,
+    LIST_QUERIES_FUNCTION, MEMORY_DECISION_KIND, MEMORY_ENGINE_KIND, MEMORY_LIFECYCLE_TOPIC,
+    MEMORY_MIGRATION_ENVELOPE_KIND, MEMORY_POLICY_KIND, MEMORY_PROMPT_TRACE_KIND,
+    MEMORY_QUERY_KIND, MEMORY_RECORD_KIND, PROMPT_TRACE_FUNCTION, READ_SCOPE,
+    RECORD_DECISION_FUNCTION, RECORD_QUERY_FUNCTION, RETAIN_FUNCTION, STATUS_FUNCTION,
+    TOMBSTONE_FUNCTION, WORKER, WRITE_SCOPE,
 };
 
 /// Canonical memory capability contracts.
@@ -100,6 +103,52 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .output_contract(DurableOutputContract::resource_backed([
             MEMORY_PROMPT_TRACE_KIND,
         ]))
+        .build()?,
+        write_contract(
+            RECORD_QUERY_FUNCTION,
+            "Record metadata-only memory query evidence without executing retrieval.",
+        )
+        .request_schema(query_record_schema())
+        .response_schema(query_response_schema("recorded"))
+        .output_contract(DurableOutputContract::resource_backed([MEMORY_QUERY_KIND]))
+        .build()?,
+        write_contract(
+            RECORD_DECISION_FUNCTION,
+            "Record metadata-only memory decision evidence without applying prompt inclusion.",
+        )
+        .request_schema(decision_record_schema())
+        .response_schema(decision_response_schema("recorded"))
+        .output_contract(DurableOutputContract::resource_backed([
+            MEMORY_DECISION_KIND,
+        ]))
+        .build()?,
+        read_contract(
+            LIST_QUERIES_FUNCTION,
+            "List redacted memory query evidence in the current scope.",
+        )
+        .request_schema(list_schema())
+        .response_schema(list_response_schema())
+        .build()?,
+        read_contract(
+            INSPECT_QUERY_FUNCTION,
+            "Inspect one redacted memory query evidence resource.",
+        )
+        .request_schema(query_inspect_schema())
+        .response_schema(json_schema())
+        .build()?,
+        read_contract(
+            LIST_DECISIONS_FUNCTION,
+            "List redacted memory decision evidence in the current scope.",
+        )
+        .request_schema(list_schema())
+        .response_schema(list_response_schema())
+        .build()?,
+        read_contract(
+            INSPECT_DECISION_FUNCTION,
+            "Inspect one redacted memory decision evidence resource.",
+        )
+        .request_schema(decision_inspect_schema())
+        .response_schema(json_schema())
         .build()?,
     ])
 }
@@ -270,6 +319,67 @@ fn prompt_trace_schema() -> serde_json::Value {
     })
 }
 
+fn query_record_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["queryKind", "occurredAt"],
+        "additionalProperties": false,
+        "properties": {
+            "queryId": {"type": "string"},
+            "queryKind": {"type": "string"},
+            "intent": {"type": "object"},
+            "filters": {"type": "object"},
+            "selectedRefs": {"type": "array"},
+            "excludedRefs": {"type": "array"},
+            "decisionRefs": {"type": "array"},
+            "traceRefs": {"type": "array"},
+            "replayRefs": {"type": "array"},
+            "occurredAt": {"type": "string"}
+        }
+    })
+}
+
+fn decision_record_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["decisionKind", "reasonCodes", "occurredAt"],
+        "additionalProperties": false,
+        "properties": {
+            "decisionId": {"type": "string"},
+            "decisionKind": {"type": "string"},
+            "reasonCodes": {"type": "array", "items": {"type": "string"}},
+            "subjectRef": {"type": "object"},
+            "queryRef": {"type": "object"},
+            "sourceRefs": {"type": "array"},
+            "traceRefs": {"type": "array"},
+            "replayRefs": {"type": "array"},
+            "occurredAt": {"type": "string"}
+        }
+    })
+}
+
+fn query_inspect_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["queryResourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "queryResourceId": {"type": "string"}
+        }
+    })
+}
+
+fn decision_inspect_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["decisionResourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "decisionResourceId": {"type": "string"}
+        }
+    })
+}
+
 fn status_response_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -317,5 +427,23 @@ fn prompt_trace_response_schema() -> serde_json::Value {
         "type": "object",
         "required": ["schemaVersion", "status", "traceResourceId", "traceVersionId", "context", "trace", "resourceRefs"],
         "additionalProperties": true
+    })
+}
+
+fn query_response_schema(status: &'static str) -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["schemaVersion", "status", "queryResourceId", "queryVersionId", "resourceRefs"],
+        "additionalProperties": true,
+        "properties": {"status": {"const": status}}
+    })
+}
+
+fn decision_response_schema(status: &'static str) -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["schemaVersion", "status", "decisionResourceId", "decisionVersionId", "resourceRefs"],
+        "additionalProperties": true,
+        "properties": {"status": {"const": status}}
     })
 }

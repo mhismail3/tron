@@ -1707,6 +1707,8 @@ packages/agent/src/domains/memory/errors.rs	implementation	memory	Phase2-Slice3	
 packages/agent/src/domains/memory/handlers.rs	implementation	memory	Phase2-Slice3	Memory handlers retained as narrow domain invocation bindings.
 packages/agent/src/domains/memory/migration.rs	implementation	memory	Phase2-Slice3	Memory migration helpers retained for redacted export/import envelopes without embedding/index engines.
 packages/agent/src/domains/memory/prompt_trace.rs	implementation	memory	Phase2-Slice3	Memory prompt-trace helper retained for provider-safe audit context without hidden body content.
+packages/agent/src/domains/memory/query_decision.rs	implementation	memory	Phase2-Slice18A	Memory query/decision evidence helper retained for metadata-only audit records without retrieval, ranking, summarization, or prompt inclusion.
+packages/agent/src/domains/memory/query_decision_validation.rs	implementation	memory	Phase2-Slice18A	Memory query/decision validation helper retained for bounded metadata-only evidence and raw prompt body payload path secret rejection.
 packages/agent/src/domains/memory/schema_tests.rs	test	test_harness	Phase2-Slice3	Memory schema alignment tests retained to prevent resource contract drift.
 packages/agent/src/domains/memory/service.rs	implementation	memory	Phase2-Slice3	Memory service retained for resource-backed policy, record lifecycle, and migration operations.
 packages/agent/src/domains/memory/support.rs	implementation	memory	Phase2-Slice3	Memory support helpers retained for parsing, redaction, resource refs, and stream publication.

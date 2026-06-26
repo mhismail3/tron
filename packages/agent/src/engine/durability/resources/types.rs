@@ -41,6 +41,14 @@ pub const MEMORY_RECORD_SCHEMA_ID: &str = "tron.resource.memory_record.v1";
 pub const MEMORY_PROMPT_TRACE_KIND: &str = "memory_prompt_trace";
 /// Built-in memory prompt inclusion trace resource schema id.
 pub const MEMORY_PROMPT_TRACE_SCHEMA_ID: &str = "tron.resource.memory_prompt_trace.v1";
+/// Built-in memory retrieval query evidence resource kind.
+pub const MEMORY_QUERY_KIND: &str = "memory_query";
+/// Built-in memory retrieval query evidence resource schema id.
+pub const MEMORY_QUERY_SCHEMA_ID: &str = "tron.resource.memory_query.v1";
+/// Built-in memory decision evidence resource kind.
+pub const MEMORY_DECISION_KIND: &str = "memory_decision";
+/// Built-in memory decision evidence resource schema id.
+pub const MEMORY_DECISION_SCHEMA_ID: &str = "tron.resource.memory_decision.v1";
 /// Built-in memory eval-run resource kind.
 pub const MEMORY_EVAL_RUN_KIND: &str = "memory_eval_run";
 /// Built-in memory eval-run resource schema id.

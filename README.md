@@ -688,16 +688,20 @@ resources plus the reusable fail-closed freshness check consumed by future tool
 packages. Approval evidence is never an authority grant; existing engine
 authority grants remain the execution-permission primitive.
 `domains/memory` owns the Phase 2 memory foundation: source-backed memory
-engine/policy/record/prompt-trace/eval-run/migration resource contracts,
-explicit disabled/active/shadow/compare policy state, redacted record audit, and
-provider-safe prompt trace text. Memory policy resolves by session, then
+engine/policy/record/prompt-trace/query/decision/eval-run/migration resource
+contracts, explicit disabled/active/shadow/compare policy state, redacted record
+audit, provider-safe prompt trace text, and metadata-only memory query/decision
+evidence. Memory policy resolves by session, then
 workspace, then system scope; prompt-trace audit writes use trace-specific
 idempotency so later turns do not replay stale memory status. Retained
 `bodyRef` payloads are pointer-only and reject inline body-like keys at any
 nested depth on retain, edit, and migration import. Direct
 record-id operations fail closed when the addressed resource is outside the
-caller memory scope. It does not implement semantic retrieval, embeddings,
-ranking, summarization, procedural rules, or automatic prompt memory.
+caller memory scope. Query/decision evidence stores bounded refs, reason codes,
+redaction proof, trace/replay refs, deterministic timestamps, and idempotency
+fingerprints only. It does not implement semantic retrieval, embeddings,
+ranking, summarization, episodic event retrieval, procedural rules, prompt
+inclusion, or automatic prompt memory.
 `domains/filesystem` owns two separate surfaces: the iOS workspace-browser
 functions for home/list/create-dir selection and the Phase 2 agent filesystem
 toolbox. Agent operations resolve only from trusted working-directory metadata,
@@ -1021,6 +1025,10 @@ Current primitive operations:
 | `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled fallback. |
 | `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
 | `memory_inspect` | Inspect one redacted memory record and its version history within the current session. |
+| `memory_query_list` | List redacted current-session `memory_query` evidence records with metadata-only refs, redaction proof, and no retrieval execution. |
+| `memory_query_inspect` | Inspect one current-session `memory_query` evidence resource/version with bounded refs and proof that no prompt content or memory body was included. |
+| `memory_decision_list` | List redacted current-session `memory_decision` evidence records with reason codes, refs, redaction proof, and no automatic retention or prompt inclusion. |
+| `memory_decision_inspect` | Inspect one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, and report evidence without invoking catalog targets. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution. |
@@ -1991,7 +1999,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

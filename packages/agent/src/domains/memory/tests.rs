@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, InvocationResult,
-    TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
+    InvocationResult, RiskLevel, TraceId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -551,6 +551,330 @@ async fn migration_import_rejects_nested_inline_body_ref_content() {
     );
 }
 
+#[tokio::test]
+async fn query_and_decision_evidence_are_metadata_only_and_idempotent() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-evidence-configure").await;
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        retain_payload("evidence-record"),
+        "memory-evidence-retain",
+    )
+    .await;
+    let record_resource_id = retained["recordResourceId"].as_str().expect("record id");
+    let record_version_id = retained["recordVersionId"]
+        .as_str()
+        .expect("record version");
+    let record_ref = json!({
+        "kind": super::MEMORY_RECORD_KIND,
+        "resourceId": record_resource_id,
+        "versionId": record_version_id,
+        "role": "selected_memory_record"
+    });
+
+    let query = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryId": "candidate-query",
+            "queryKind": "semantic_candidate_query",
+            "intent": {"kind": "candidate_refs_only"},
+            "filters": {"scope": "current_session"},
+            "selectedRefs": [record_ref.clone()],
+            "occurredAt": "2026-06-26T00:00:00Z"
+        }),
+        "memory-evidence-query",
+    )
+    .await;
+    assert_eq!(query["status"], "recorded");
+    assert_eq!(query["query"]["redaction"]["metadataOnly"], true);
+    assert_eq!(query["query"]["redaction"]["memoryBodyStored"], false);
+    assert_eq!(query["query"]["lifecycle"]["retrievalExecuted"], false);
+    assert_eq!(query["query"]["idempotency"]["rawKeyStored"], false);
+    let query_resource_id = query["queryResourceId"].as_str().expect("query id");
+    let query_version_id = query["queryVersionId"].as_str().expect("query version");
+
+    let replay = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryId": "candidate-query",
+            "queryKind": "semantic_candidate_query",
+            "intent": {"kind": "candidate_refs_only"},
+            "filters": {"scope": "current_session"},
+            "selectedRefs": [record_ref.clone()],
+            "occurredAt": "2026-06-26T00:00:00Z"
+        }),
+        "memory-evidence-query",
+    )
+    .await;
+    assert_eq!(replay["query"]["idempotency"]["rawKeyStored"], false);
+    assert_eq!(replay["queryResourceId"], query_resource_id);
+
+    let decision = invoke_write(
+        &ctx,
+        super::RECORD_DECISION_FUNCTION,
+        json!({
+            "decisionId": "candidate-decision",
+            "decisionKind": "retrieve",
+            "reasonCodes": ["candidate_ref_selected"],
+            "subjectRef": record_ref,
+            "queryRef": {
+                "kind": super::MEMORY_QUERY_KIND,
+                "resourceId": query_resource_id,
+                "versionId": query_version_id,
+                "role": "source_query"
+            },
+            "sourceRefs": [{"kind": "trace", "id": "memory-evidence-trace"}],
+            "occurredAt": "2026-06-26T00:00:01Z"
+        }),
+        "memory-evidence-decision",
+    )
+    .await;
+    assert_eq!(decision["status"], "recorded");
+    assert_eq!(decision["decision"]["redaction"]["metadataOnly"], true);
+    assert_eq!(
+        decision["decision"]["lifecycle"]["decisionAppliedToPrompt"],
+        false
+    );
+    assert_eq!(
+        decision["decision"]["lifecycle"]["automaticRetentionPerformed"],
+        false
+    );
+
+    let inspected = invoke_read(
+        &ctx,
+        super::INSPECT_QUERY_FUNCTION,
+        json!({"queryResourceId": query_resource_id}),
+        "memory-evidence-query-inspect",
+    )
+    .await
+    .expect("query inspect");
+    assert_eq!(inspected["resource"]["kind"], super::MEMORY_QUERY_KIND);
+    assert_eq!(
+        inspected["versions"][0]["record"]["redaction"]["metadataOnly"],
+        true
+    );
+    let serialized = serde_json::to_string(&inspected).expect("serialize");
+    assert!(!serialized.contains("vault://"));
+}
+
+#[tokio::test]
+async fn query_and_decision_evidence_reject_wrong_scope_kind_stale_and_raw_material() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-evidence-guards-configure").await;
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        retain_payload("evidence-guards-record"),
+        "memory-evidence-guards-retain",
+    )
+    .await;
+    let record_resource_id = retained["recordResourceId"].as_str().expect("record id");
+    let record_version_id = retained["recordVersionId"]
+        .as_str()
+        .expect("record version");
+
+    let raw = invoke_write_result(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryKind": "semantic_candidate_query",
+            "intent": {"prompt": "raw prompt text must not be stored"},
+            "occurredAt": "2026-06-26T00:01:00Z"
+        }),
+        "memory-evidence-raw-query",
+    )
+    .await;
+    assert!(
+        raw.error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("raw/private")),
+        "raw query material must be rejected: {:?}",
+        raw.error
+    );
+
+    let wrong_kind = invoke_write_result(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryKind": "semantic_candidate_query",
+            "selectedRefs": [{
+                "kind": super::MEMORY_QUERY_KIND,
+                "resourceId": record_resource_id,
+                "versionId": record_version_id,
+                "role": "wrong_kind"
+            }],
+            "occurredAt": "2026-06-26T00:01:01Z"
+        }),
+        "memory-evidence-wrong-kind-query",
+    )
+    .await;
+    assert!(
+        wrong_kind
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("wrong kind")),
+        "wrong-kind selected ref must fail: {:?}",
+        wrong_kind.error
+    );
+
+    let stale = invoke_write_result(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryKind": "semantic_candidate_query",
+            "selectedRefs": [{
+                "kind": super::MEMORY_RECORD_KIND,
+                "resourceId": record_resource_id,
+                "versionId": "stale-version",
+                "role": "stale"
+            }],
+            "occurredAt": "2026-06-26T00:01:02Z"
+        }),
+        "memory-evidence-stale-query",
+    )
+    .await;
+    assert!(
+        stale
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("stale version")),
+        "stale selected ref must fail: {:?}",
+        stale.error
+    );
+
+    let cross_scope = invoke_write_result_with_context(
+        &ctx,
+        super::RECORD_DECISION_FUNCTION,
+        json!({
+            "decisionKind": "retrieve",
+            "reasonCodes": ["scope_mismatch"],
+            "subjectRef": {
+                "kind": super::MEMORY_RECORD_KIND,
+                "resourceId": record_resource_id,
+                "versionId": record_version_id,
+                "role": "subject"
+            },
+            "occurredAt": "2026-06-26T00:01:03Z"
+        }),
+        other_session_context("memory-evidence-cross-scope-decision")
+            .with_scope(super::READ_SCOPE)
+            .with_scope(super::WRITE_SCOPE)
+            .with_idempotency_key("memory-evidence-cross-scope-decision"),
+    )
+    .await;
+    assert!(
+        cross_scope
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("scope mismatch")),
+        "cross-scope decision ref must fail: {:?}",
+        cross_scope.error
+    );
+}
+
+#[tokio::test]
+async fn execute_can_read_only_inspect_query_and_decision_evidence() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-execute-evidence-configure").await;
+    let query = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryId": "execute-query",
+            "queryKind": "episodic_trace_query",
+            "intent": {"kind": "trace_refs_only"},
+            "occurredAt": "2026-06-26T00:02:00Z"
+        }),
+        "memory-execute-evidence-query",
+    )
+    .await;
+    let decision = invoke_write(
+        &ctx,
+        super::RECORD_DECISION_FUNCTION,
+        json!({
+            "decisionId": "execute-decision",
+            "decisionKind": "reject",
+            "reasonCodes": ["retrieval_engine_absent"],
+            "occurredAt": "2026-06-26T00:02:01Z"
+        }),
+        "memory-execute-evidence-decision",
+    )
+    .await;
+    let query_resource_id = query["queryResourceId"].as_str().expect("query id");
+    let decision_resource_id = decision["decisionResourceId"]
+        .as_str()
+        .expect("decision id");
+    let execute_grant = derive_execute_grant(
+        &ctx,
+        "memory-execute-grant",
+        query_resource_id,
+        decision_resource_id,
+    )
+    .await;
+
+    let query_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_query_list"}),
+        agent_context("memory-execute-query-list", execute_grant.clone())
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("execute query list");
+    assert_eq!(
+        query_list["details"]["primitiveOperation"],
+        "memory_query_list"
+    );
+    assert_eq!(
+        query_list["details"]["memory"]["queries"][0]["record"]["lifecycle"]["retrievalExecuted"],
+        false
+    );
+
+    let decision_inspect = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({
+            "operation": "memory_decision_inspect",
+            "decisionResourceId": decision_resource_id
+        }),
+        agent_context("memory-execute-decision-inspect", execute_grant.clone())
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("execute decision inspect");
+    assert_eq!(
+        decision_inspect["details"]["primitiveOperation"],
+        "memory_decision_inspect"
+    );
+    assert_eq!(
+        decision_inspect["details"]["memory"]["versions"][0]["record"]["redaction"]["memoryBodyStored"],
+        false
+    );
+
+    let query_inspect = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({
+            "operation": "memory_query_inspect",
+            "queryResourceId": query_resource_id
+        }),
+        agent_context("memory-execute-query-inspect", execute_grant)
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("execute query inspect");
+    assert_eq!(
+        query_inspect["details"]["primitiveOperation"],
+        "memory_query_inspect"
+    );
+}
+
 async fn configure_active(ctx: &ServerRuntimeContext, key: &str) -> Value {
     invoke_write(
         ctx,
@@ -706,6 +1030,64 @@ fn client_context(trace_id: &str) -> CausalContext {
         ActorId::new("engine-client").unwrap(),
         ActorKind::Client,
         AuthorityGrantId::new("engine-transport").unwrap(),
+        TraceId::new(trace_id).unwrap(),
+    )
+    .with_session_id("memory-session")
+    .with_workspace_id("memory-workspace")
+}
+
+async fn derive_execute_grant(
+    ctx: &ServerRuntimeContext,
+    suffix: &str,
+    query_resource_id: &str,
+    decision_resource_id: &str,
+) -> AuthorityGrantId {
+    let grant = ctx
+        .engine_host
+        .derive_authority_grant(DeriveGrant {
+            grant_id: Some(AuthorityGrantId::new(format!("memory-execute-{suffix}")).unwrap()),
+            parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
+            subject_actor_id: Some(ActorId::new("agent:memory-session").unwrap()),
+            subject_worker_id: None,
+            subject_invocation_id: None,
+            allowed_capabilities: vec![
+                crate::domains::capability::contract::EXECUTE_FUNCTION_ID.to_owned(),
+            ],
+            allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
+            allowed_authority_scopes: vec![
+                "capability.execute".to_owned(),
+                super::READ_SCOPE.to_owned(),
+                "resource.read".to_owned(),
+            ],
+            allowed_resource_kinds: vec![
+                super::MEMORY_QUERY_KIND.to_owned(),
+                super::MEMORY_DECISION_KIND.to_owned(),
+            ],
+            resource_selectors: vec![
+                "kind:memory_query".to_owned(),
+                "kind:memory_decision".to_owned(),
+                format!("resource:{query_resource_id}"),
+                format!("resource:{decision_resource_id}"),
+            ],
+            file_roots: vec!["/tmp".to_owned()],
+            network_policy: "none".to_owned(),
+            max_risk: RiskLevel::Medium,
+            budget: json!({"class": "memory_query_decision_test"}),
+            expires_at: None,
+            can_delegate: false,
+            provenance: json!({"source": "memory_query_decision_test"}),
+            trace_id: TraceId::new(format!("trace-{suffix}")).unwrap(),
+        })
+        .await
+        .expect("derive memory execute grant");
+    grant.grant_id
+}
+
+fn agent_context(trace_id: &str, grant_id: AuthorityGrantId) -> CausalContext {
+    CausalContext::new(
+        ActorId::new("agent:memory-session").unwrap(),
+        ActorKind::Agent,
+        grant_id,
         TraceId::new(trace_id).unwrap(),
     )
     .with_session_id("memory-session")

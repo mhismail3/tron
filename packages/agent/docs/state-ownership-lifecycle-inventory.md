@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-10 `passed_after_fix`; 537 state-surface rows inventoried and classified.
+Status: SOL-10 `passed_after_fix`; 594 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -36,18 +36,22 @@ closeout splits added the capability grant helper and external-worker runtime
 lifecycle rows without changing ownership boundaries. Phase 1 iOS affordance
 closeout rows cover local audio/camera/session-list state, transcription
 runtime state, worker lifecycle projections, and their task/spawn lifecycle
-owners.
+owners. Phase 2 Slice 18A review follow-up added the touched
+`capability::execute` context authority gate for read-only memory query/decision
+evidence.
+The same follow-up records the touched runtime-grant unit test surface as a
+test fixture.
 
 State class distribution:
 
 | State class | Rows |
 |---|---:|
-| `ephemeral_runtime` | 281 |
-| `projection_cache` | 94 |
-| `durable_substrate` | 69 |
+| `ephemeral_runtime` | 292 |
+| `projection_cache` | 124 |
+| `durable_substrate` | 81 |
 | `canonical_truth` | 41 |
 | `secret` | 16 |
-| `test_fixture` | 15 |
+| `test_fixture` | 19 |
 | `diagnostic_buffer` | 11 |
 | `local_device_preference` | 10 |
 

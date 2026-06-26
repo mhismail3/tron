@@ -173,6 +173,8 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "programExecutionResourceId",
         "promptArtifactResourceId",
         "updateDiagnosticResourceId",
+        "queryResourceId",
+        "decisionResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -285,6 +287,15 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some(
+            "memory_query_list"
+            | "memory_query_inspect"
+            | "memory_decision_list"
+            | "memory_decision_inspect",
+        ) => {
+            push_unique(&mut scopes, "memory.read");
+            push_unique(&mut scopes, "resource.read");
+        }
         Some("worker_package_list" | "worker_package_inspect") => {
             push_unique(&mut scopes, "worker.lifecycle.read");
             push_unique(&mut scopes, "resource.read");
@@ -385,6 +396,8 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         ) => {
             vec!["update_diagnostic_record"]
         }
+        Some("memory_query_list" | "memory_query_inspect") => vec!["memory_query"],
+        Some("memory_decision_list" | "memory_decision_inspect") => vec!["memory_decision"],
         Some("web_robots_check") => vec!["web_robots_policy"],
         Some("worker_package_list") => {
             vec![worker_package_list_kind(invocation).unwrap_or("worker_package")]

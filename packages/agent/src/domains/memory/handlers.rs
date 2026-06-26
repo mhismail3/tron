@@ -36,5 +36,23 @@ operation_bindings! {
         "record_prompt_trace" => |invocation, deps| {
             service::record_prompt_trace_value(&deps.engine_host, invocation, &invocation.payload).await
         },
+        "record_query" => |invocation, deps| {
+            service::record_memory_query_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
+        "query_list" => |invocation, deps| {
+            service::list_memory_queries_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
+        "query_inspect" => |invocation, deps| {
+            service::inspect_memory_query_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
+        "record_decision" => |invocation, deps| {
+            service::record_memory_decision_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
+        "decision_list" => |invocation, deps| {
+            service::list_memory_decisions_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
+        "decision_inspect" => |invocation, deps| {
+            service::inspect_memory_decision_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
     ];
 }

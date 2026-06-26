@@ -1,9 +1,10 @@
 //! Source-backed memory contract DTOs.
 //!
 //! This module describes the minimal engine-owned memory record, policy,
-//! prompt-trace, eval, and migration shapes. It deliberately does not define a
-//! retrieval algorithm, embedding/index format, summarizer, procedural rule
-//! runtime, or automatic prompt-retention behavior.
+//! prompt-trace, retrieval-audit query, decision, eval, and migration shapes.
+//! It deliberately does not define a retrieval algorithm, embedding/index
+//! format, summarizer, procedural rule runtime, or automatic prompt-retention
+//! behavior.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -239,6 +240,79 @@ pub struct MemoryPromptTrace {
     pub replay_refs: Vec<Value>,
     /// Trace creation time.
     pub created_at: DateTime<Utc>,
+}
+
+/// Metadata-only query evidence for future memory retrieval engines.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryQueryEvidence {
+    /// Memory schema version.
+    pub schema_version: String,
+    /// Query family, such as `semantic_candidate_query` or `episodic_trace_query`.
+    pub query_kind: String,
+    /// Bounded intent metadata; never raw prompt, provider payload, or private body text.
+    pub intent: Value,
+    /// Bounded filter metadata used to choose candidate refs.
+    pub filters: Value,
+    /// Engine id observed for this query evidence.
+    pub engine_id: String,
+    /// Memory mode observed for this query evidence.
+    pub mode: MemoryMode,
+    /// Candidate refs selected by this audit pass.
+    #[serde(default)]
+    pub selected_refs: Vec<MemoryResourceRef>,
+    /// Candidate refs explicitly excluded by this audit pass.
+    #[serde(default)]
+    pub excluded_refs: Vec<MemoryResourceRef>,
+    /// Decision refs linked to this query evidence.
+    #[serde(default)]
+    pub decision_refs: Vec<MemoryResourceRef>,
+    /// Redaction guarantees for this query evidence.
+    pub redaction: Value,
+    /// Trace refs proving where the evidence came from.
+    pub trace_refs: Vec<Value>,
+    /// Replay refs for deterministic reconstruction.
+    pub replay_refs: Vec<Value>,
+    /// Lifecycle metadata for this evidence record.
+    pub lifecycle: Value,
+    /// Fingerprinted idempotency evidence; never raw idempotency keys.
+    pub idempotency: Value,
+    /// Evidence creation time.
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Metadata-only decision evidence for memory retain/retrieve/redact actions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryDecisionEvidence {
+    /// Memory schema version.
+    pub schema_version: String,
+    /// Decision family, such as `retrieve`, `retain`, `redact`, or `reject`.
+    pub decision_kind: String,
+    /// Bounded reason codes explaining the decision.
+    #[serde(default)]
+    pub reason_codes: Vec<String>,
+    /// Optional subject ref affected by this decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_ref: Option<MemoryResourceRef>,
+    /// Optional query ref that this decision supports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_ref: Option<MemoryResourceRef>,
+    /// Bounded source refs. These are refs only, never raw event or prompt payloads.
+    #[serde(default)]
+    pub source_refs: Vec<Value>,
+    /// Redaction guarantees for this decision evidence.
+    pub redaction: Value,
+    /// Trace refs proving where the evidence came from.
+    pub trace_refs: Vec<Value>,
+    /// Replay refs for deterministic reconstruction.
+    pub replay_refs: Vec<Value>,
+    /// Lifecycle metadata for this evidence record.
+    pub lifecycle: Value,
+    /// Fingerprinted idempotency evidence; never raw idempotency keys.
+    pub idempotency: Value,
+    /// Evidence creation time.
+    pub occurred_at: DateTime<Utc>,
 }
 
 /// Eval-run result contract for future memory engines.

@@ -1078,6 +1078,8 @@ packages/agent/src/domains/memory/errors.rs	rust	implementation	agent:memory	own
 packages/agent/src/domains/memory/handlers.rs	rust	implementation	agent:memory	owner-private handler bindings; external callers use registered functions
 packages/agent/src/domains/memory/migration.rs	rust	implementation	agent:memory	owner-private migration envelope behavior; callers use memory service facade
 packages/agent/src/domains/memory/prompt_trace.rs	rust	implementation	agent:memory	owner-private prompt trace assembly; callers use memory service facade
+packages/agent/src/domains/memory/query_decision.rs	rust	implementation	agent:memory	owner-private query/decision evidence behavior; callers use memory domain functions or read-only execute inspection
+packages/agent/src/domains/memory/query_decision_validation.rs	rust	implementation	agent:memory	owner-private query/decision validation; memory domain callers receive bounded metadata-only evidence checks
 packages/agent/src/domains/memory/schema_tests.rs	rust	test-support	agent:memory	test-only schema alignment guard; production code must not depend on it
 packages/agent/src/domains/memory/service.rs	rust	implementation	agent:memory	owner-private service; callers must enter through domain functions or explicit service facade
 packages/agent/src/domains/memory/support.rs	rust	implementation	agent:memory	owner-private helpers; external code must not import parsing/redaction internals
