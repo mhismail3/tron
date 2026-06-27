@@ -969,6 +969,7 @@ packages/agent/src/domains/worker_lifecycle/resources.rs	rust	implementation	age
 packages/agent/src/shared/foundation/redaction.rs	rust	implementation	agent:shared-foundation	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	swift	generated-wire-dto	ios:engine	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift	swift	generated-wire-dto	ios:engine	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+ModuleActivity.swift	swift	generated-wire-dto	ios:engine	thin server-projection DTO for module_activity overview; no policy ownership or client-owned server truth
 packages/ios-app/Sources/Engine/Transport/Clients/TranscriptionClient.swift	swift	adapter	ios:engine	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Transport/Clients/WorkerLifecycleClient.swift	swift	adapter	ios:engine	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Chat/Coordinators/ChatTranscriptionCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract

@@ -2001,3 +2001,8 @@ packages/agent/src/domains/module_dependencies/service.rs	implementation	module_
 packages/agent/src/domains/module_dependencies/tests.rs	test	test_harness	TPC-10/P3MSA-S23G	focused Slice 23G module dependency schema redaction authority parity denial exact selector idempotency and side-effect coverage
 packages/agent/src/domains/module_dependencies/validation.rs	implementation	module_dependencies	TPC-10/P3MSA-S23G	module dependency bounded ref text parity denial policy status and idempotency validation owner
 packages/agent/src/engine/durability/resources/module_dependencies_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23G	built-in module dependency request decision and policy resource schemas for metadata dependency policy records
+packages/agent/src/domains/module_activity/contract.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity read-only cockpit projection contract constants and schema owner
+packages/agent/src/domains/module_activity/mod.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity projection-only domain root and worker registration owner
+packages/agent/src/domains/module_activity/projection.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity bounded cockpit projection redaction and derived status owner
+packages/agent/src/domains/module_activity/service.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity inspect-only resource aggregation service owner
+packages/agent/src/domains/module_activity/tests.rs	test	test_harness	TPC-10/P3MSA-S23H	focused Slice 23H module activity redaction deterministic fixture state derivation and legacy-panel guard coverage

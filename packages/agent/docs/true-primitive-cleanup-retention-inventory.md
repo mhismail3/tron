@@ -42,9 +42,9 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 796 |
+| implementation | 800 |
 | support | 385 |
-| test | 574 |
+| test | 575 |
 | docs | 135 |
 | delete | 0 |
 
@@ -78,6 +78,7 @@ The TSV covers tracked and newly introduced files under:
 | `memory` | 10 |
 | `model_provider` | 78 |
 | `module_authoring` | 6 |
+| `module_activity` | 4 |
 | `module_dependencies` | 9 |
 | `module_registry` | 4 |
 | `module_install` | 11 |
@@ -105,7 +106,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 572 |
+| `test_harness` | 573 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

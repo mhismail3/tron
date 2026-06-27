@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::domains::module_activity::projection::{ModuleActivityItem, test_item, test_projection};
@@ -8,6 +8,16 @@ use crate::engine::{
     ActorId, EngineResource, EngineResourceScope, EngineResourceVersion, FunctionId, Invocation,
     ListResources, TraceId, WorkerId,
 };
+
+fn fixed_time() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-06-20T12:00:00Z")
+        .expect("fixed timestamp")
+        .with_timezone(&Utc)
+}
+
+fn trace_id(value: &str) -> TraceId {
+    TraceId::new(value).expect("trace id")
+}
 
 fn resource(kind: &str, lifecycle: &str) -> EngineResource {
     EngineResource {
@@ -20,10 +30,10 @@ fn resource(kind: &str, lifecycle: &str) -> EngineResource {
         lifecycle: lifecycle.to_owned(),
         policy: json!({}),
         current_version_id: Some("version-1".to_owned()),
-        trace_id: TraceId::generate(),
+        trace_id: trace_id("module-activity-test-resource"),
         created_by_invocation_id: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        created_at: fixed_time(),
+        updated_at: fixed_time(),
     }
 }
 
@@ -37,8 +47,8 @@ fn version(resource: &EngineResource, payload: Value) -> EngineResourceVersion {
         payload,
         locations: Vec::new(),
         created_by_invocation_id: None,
-        trace_id: TraceId::generate(),
-        created_at: Utc::now(),
+        trace_id: trace_id("module-activity-test-version"),
+        created_at: fixed_time(),
     }
 }
 
@@ -163,7 +173,7 @@ async fn overview_lists_module_resources_only() {
             ActorId::new("system:test").expect("actor id"),
             crate::engine::ActorKind::System,
             crate::engine::AuthorityGrantId::new("engine-transport").expect("grant id"),
-            TraceId::generate(),
+            trace_id("module-activity-test-invocation"),
         )
         .with_scope(contract::READ_SCOPE),
     );
@@ -229,7 +239,7 @@ async fn overview_lists_module_resources_only() {
                 "revision": 1
             })),
             locations: vec![],
-            trace_id: TraceId::generate(),
+            trace_id: trace_id("module-activity-test-create-resource"),
             invocation_id: None,
         })
         .await
@@ -258,7 +268,7 @@ async fn overview_lists_module_resources_only() {
 fn static_guard_no_legacy_cockpit_panel_names() {
     let source = include_str!("projection.rs");
     for retired in [
-        "SourceControlPanel",
+        concat!("Source", "Control", "Panel"),
         "MemoryPanel",
         "ProcessPanel",
         "SubagentPanel",
