@@ -38,6 +38,7 @@
 //! | `module_authoring` | Inert bounded module proposal authoring records |
 //! | `module_validation` | Inert bounded module contract validation reports |
 //! | `module_install` | Metadata-only module review approval and install-candidate gate |
+//! | `module_lifecycle` | Metadata-only module enable/disable/quarantine/rollback state |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -144,7 +145,13 @@
 //! policy refs, and rollback proof refs without physical install, activation,
 //! execution, dependency restoration, package-manager use, network access,
 //! repo-managed skills, raw logs/commands/env/code/file contents, or approval
-//! evidence minting authority. New domain behavior must add a
+//! evidence minting authority. Module lifecycle restoration is metadata-only
+//! state custody: it stores enable, disable, quarantine, and rollback
+//! transitions for current install-candidate decisions with fresh approval,
+//! rollback proof refs, current-version guards, and fail-closed
+//! disabled/quarantined runtime guards without activation, execution,
+//! dependency restore, package-manager use, network behavior, or repo-managed
+//! skills. New domain behavior must add a
 //! contract, deps narrowing, handler binding, tests, and README/domain-doc
 //! updates together.
 //!
@@ -175,6 +182,7 @@ pub mod message;
 pub mod model;
 pub mod module_authoring;
 pub mod module_install;
+pub mod module_lifecycle;
 pub mod module_registry;
 pub mod module_validation;
 pub mod notifications;

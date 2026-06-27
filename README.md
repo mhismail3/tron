@@ -801,6 +801,25 @@ dependencies, run package managers, touch repo-managed skills, store raw paths,
 env values, secrets, logs, commands, code, file contents, raw grant/authority
 ids, or token-like material, access networks, add public `/engine` APIs, or add
 fixed iOS panels.
+`domains/module_lifecycle` owns the Phase 3 Slice 23E implementation-candidate
+metadata lifecycle state for install-candidate modules. It records
+`module_lifecycle_state` resources with schema
+`tron.resource.module_lifecycle_state.v1` and payload schema
+`tron.module_lifecycle_state.v1` for `enable`, `disable`, `quarantine`, and
+`rollback` transitions. `module_lifecycle_request`,
+`module_lifecycle_decision`, `module_lifecycle_list`, and
+`module_lifecycle_inspect` stay behind `capability::execute` with explicit
+`module_lifecycle.read` / `module_lifecycle.write` plus `resource.read` /
+`resource.write` authority, non-wildcard `kind:module_lifecycle_state`
+selectors, exact lifecycle inspect/decision selectors, current-version
+freshness guards, current-scope `module_install_decision` prerequisite
+revalidation, fresh approval checks, and `networkPolicy: none`. Lifecycle state
+is metadata only: it does not install, activate, execute, restore dependencies,
+run package managers, touch repo-managed skills, store raw paths/env/logs/
+commands/code/file contents, expose raw grant/authority ids, access networks,
+add public `/engine` APIs, or add fixed iOS panels. Disabled, quarantined, and
+rolled-back states fail closed through the lifecycle runtime authorization
+guard for future runtime slices to consult.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -1096,6 +1115,10 @@ Current primitive operations:
 | `module_install_decision_record` | Slice 23D accepted operation that records one scoped `module_install_decision` resource for approved install-candidate or rejected decision evidence only after fresh scoped approval and derived authority checks, with denial evidence required for rejected/denied outcomes and no approval-evidence authority minting, physical install, activation, execution, dependency restore, package managers, network, raw local data, or public `/engine` expansion. |
 | `module_install_decision_list` | Slice 23D accepted operation that lists scoped `module_install_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with approval/denial metadata refs, lifecycle state, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
 | `module_install_decision_inspect` | Slice 23D accepted operation that inspects one scoped `module_install_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only approval freshness summary, denial evidence refs, lifecycle, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
+| `module_lifecycle_request` | Slice 23E implementation-candidate operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, with rollback proof refs/readiness, bounded evidence refs, current-version provenance, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
+| `module_lifecycle_decision` | Slice 23E implementation-candidate operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
+| `module_lifecycle_list` | Slice 23E implementation-candidate operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
+| `module_lifecycle_inspect` | Slice 23E implementation-candidate operation that inspects one scoped `module_lifecycle_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only lifecycle transition, approval, rollback, runtime-authorization, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, debug payloads, chain-of-thought, or token-like material. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
