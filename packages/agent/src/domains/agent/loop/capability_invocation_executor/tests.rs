@@ -32,6 +32,8 @@ mod grant_module_dependencies_tests;
 mod grant_module_install_tests;
 #[path = "grant_module_lifecycle_tests.rs"]
 mod grant_module_lifecycle_tests;
+#[path = "grant_module_program_execution_tests.rs"]
+mod grant_module_program_execution_tests;
 #[path = "grant_module_runtime_tests.rs"]
 mod grant_module_runtime_tests;
 #[path = "grant_module_validation_tests.rs"]

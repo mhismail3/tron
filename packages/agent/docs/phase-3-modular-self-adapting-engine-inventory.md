@@ -153,6 +153,25 @@ conflict handling remain rejected until separately selected. It moves
 `P3MSA-INV-009` from `pending_review` to `current_baseline` after independent
 re-review acceptance and mainline integration.
 
+P3MSA-INV-010 has an implementation candidate for Slice 24B: Jobs And Program
+Execution Module Pack Activation. The candidate adds a validated
+`jobs_program_execution_module` manifest and a module-owned
+`module_program_execution_start/status/cancel/cleanup` path through
+`capability::execute`. Start records an enabled-lifecycle-guarded
+`module_runtime_state`, writes content-free `program_execution_record`
+metadata, delegates the actual non-interactive process to the existing jobs
+runtime, then updates module runtime supervision with redacted job/output refs.
+Status, cancel, and cleanup require exact module-runtime and job selectors and
+return bounded refs, version ids, fingerprints, truncation, duration, exit,
+timeout, cancellation, and cleanup metadata only. The candidate deliberately
+does not expose `process_run`, `job_start`, `job_log`, raw commands, code,
+stdin/stdout/stderr, logs, canonical paths, env values, pids, grant ids, raw
+`job_process`/`execution_output` payloads, default network access, package
+installs, PTYs, browser automation, fixed cockpit panels, public `/engine`
+APIs, production deploy/update behavior, or repo-managed
+`packages/agent/skills`. It moves `P3MSA-INV-010` from `planned` to
+`pending_review` for independent review.
+
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.

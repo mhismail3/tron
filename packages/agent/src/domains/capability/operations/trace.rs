@@ -377,8 +377,20 @@ fn is_module_runtime_operation(operation: &str) -> bool {
     )
 }
 
+fn is_module_program_execution_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "module_program_execution_start"
+            | "module_program_execution_status"
+            | "module_program_execution_cancel"
+            | "module_program_execution_cleanup"
+    )
+}
+
 fn is_module_safe_operation(operation: &str) -> bool {
-    is_module_proposal_operation(operation) || is_module_runtime_operation(operation)
+    is_module_proposal_operation(operation)
+        || is_module_runtime_operation(operation)
+        || is_module_program_execution_operation(operation)
 }
 
 fn merge_tron_trace_metadata(record_json: &mut Value, extra: Value) {

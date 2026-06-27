@@ -91,6 +91,12 @@ pub(super) fn authorize_with_grant(
     if is_module_runtime_invocation(invocation) {
         ensure_module_runtime_grant_is_explicit(grant)?;
     }
+    if is_module_program_execution_invocation(invocation) {
+        ensure_module_program_execution_grant_is_explicit(grant, invocation)?;
+    }
+    if is_jobs_invocation(invocation) {
+        ensure_jobs_grant_is_explicit(grant, invocation)?;
+    }
     if is_file_git_module_invocation(invocation) {
         ensure_file_git_module_grant_is_explicit(grant)?;
     }
@@ -294,6 +300,99 @@ fn ensure_file_git_module_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
     Ok(())
 }
 
+fn ensure_module_program_execution_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "jobs/program-execution module-pack operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(
+        grant,
+        &kinds,
+        "jobs/program-execution module-pack operations",
+    )?;
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("module_program_execution_start") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["moduleLifecycleResourceId"],
+            "jobs/program-execution module-pack start",
+        ),
+        Some(
+            "module_program_execution_status"
+            | "module_program_execution_cancel"
+            | "module_program_execution_cleanup",
+        ) => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["moduleRuntimeResourceId", "jobResourceId"],
+            "jobs/program-execution module-pack job operation",
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn ensure_jobs_grant_is_explicit(grant: &EngineGrant, invocation: &Invocation) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "jobs operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "jobs operations")
+}
+
+fn ensure_no_wildcard_grant_items(grant: &EngineGrant, label: &str) -> Result<()> {
+    for (item_label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {item_label} for {label}",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_kind_selectors(grant: &EngineGrant, kinds: &[&'static str], label: &str) -> Result<()> {
+    for kind in kinds {
+        let selector = format!("kind:{kind}");
+        if !grant
+            .resource_selectors
+            .iter()
+            .any(|actual| actual == &selector)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} requires explicit {selector} selector for {label}",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_exact_payload_resource_selectors(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+    fields: &[&str],
+    label: &str,
+) -> Result<()> {
+    for field in fields {
+        if let Some(resource_id) = invocation.payload.get(field).and_then(Value::as_str)
+            && !allows_resource_id(grant, resource_id)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} requires exact selector for {field} resource {resource_id} on {label}",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ensure_resource_selectors(
     grant: &EngineGrant,
     invocation: &Invocation,
@@ -375,6 +474,20 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
     }
     let mut scopes = Vec::new();
     match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("job_start") => {
+            push_unique(&mut scopes, "jobs.write");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("job_status" | "job_list" | "job_log") => {
+            push_unique(&mut scopes, "jobs.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("job_cancel") => {
+            push_unique(&mut scopes, "jobs.read");
+            push_unique(&mut scopes, "jobs.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("goal_create" | "goal_cancel" | "question_create" | "question_answer") => {
             push_unique(&mut scopes, "goals.write");
         }
@@ -567,6 +680,31 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some("module_program_execution_start") => {
+            push_unique(&mut scopes, "module_runtime.read");
+            push_unique(&mut scopes, "module_runtime.write");
+            push_unique(&mut scopes, "program_execution.read");
+            push_unique(&mut scopes, "program_execution.write");
+            push_unique(&mut scopes, "jobs.read");
+            push_unique(&mut scopes, "jobs.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("module_program_execution_status") => {
+            push_unique(&mut scopes, "module_runtime.read");
+            push_unique(&mut scopes, "program_execution.read");
+            push_unique(&mut scopes, "jobs.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("module_program_execution_cancel" | "module_program_execution_cleanup") => {
+            push_unique(&mut scopes, "module_runtime.read");
+            push_unique(&mut scopes, "module_runtime.write");
+            push_unique(&mut scopes, "program_execution.read");
+            push_unique(&mut scopes, "jobs.read");
+            push_unique(&mut scopes, "jobs.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some(
             "filesystem_read"
             | "filesystem_list"
@@ -644,6 +782,9 @@ fn resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String> {
 
 fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static str> {
     match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("job_start" | "job_status" | "job_list" | "job_log" | "job_cancel") => {
+            vec!["job_process", "execution_output"]
+        }
         Some("goal_create" | "goal_list" | "goal_inspect" | "goal_cancel") => vec!["goal"],
         Some("question_create") => {
             if invocation.payload.get("goalResourceId").is_some() {
@@ -740,6 +881,23 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("module_runtime_list" | "module_runtime_inspect" | "module_runtime_cancel") => {
             vec!["module_runtime_state"]
         }
+        Some("module_program_execution_start") => vec![
+            "module_runtime_state",
+            "module_lifecycle_state",
+            "program_execution_record",
+            "job_process",
+            "execution_output",
+        ],
+        Some(
+            "module_program_execution_status"
+            | "module_program_execution_cancel"
+            | "module_program_execution_cleanup",
+        ) => vec![
+            "module_runtime_state",
+            "program_execution_record",
+            "job_process",
+            "execution_output",
+        ],
         Some(
             "filesystem_read"
             | "filesystem_list"
@@ -855,6 +1013,27 @@ fn is_module_runtime_invocation(invocation: &Invocation) -> bool {
         )
 }
 
+fn is_module_program_execution_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "module_program_execution_start"
+                    | "module_program_execution_status"
+                    | "module_program_execution_cancel"
+                    | "module_program_execution_cleanup"
+            )
+        )
+}
+
+fn is_jobs_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some("job_start" | "job_status" | "job_list" | "job_log" | "job_cancel")
+        )
+}
+
 fn is_file_git_module_invocation(invocation: &Invocation) -> bool {
     invocation.function_id.as_str() == "capability::execute"
         && invocation
@@ -941,6 +1120,10 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
     }
     let mut kinds = Vec::new();
     match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("job_start") => {
+            push_unique(&mut kinds, "job_process");
+            push_unique(&mut kinds, "execution_output");
+        }
         Some("goal_create") => push_unique(&mut kinds, "goal"),
         Some("question_create") => push_unique(&mut kinds, "user_question"),
         Some("question_answer") => push_unique(&mut kinds, "goal_answer"),
@@ -969,6 +1152,12 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         }
         Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
         Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),
+        Some("module_program_execution_start") => {
+            push_unique(&mut kinds, "module_runtime_state");
+            push_unique(&mut kinds, "program_execution_record");
+            push_unique(&mut kinds, "job_process");
+            push_unique(&mut kinds, "execution_output");
+        }
         Some("filesystem_write" | "filesystem_edit" | "filesystem_apply_patch") => {
             push_unique(&mut kinds, "patch_proposal");
             push_unique(&mut kinds, "materialized_file");
@@ -1059,6 +1248,7 @@ fn capability_execute_requires_working_directory(invocation: &Invocation) -> boo
                         | "git_branch_start"
                         | "process_run"
                         | "job_start"
+                        | "module_program_execution_start"
                 )
             })
 }
@@ -1907,6 +2097,252 @@ mod tests {
             };
             assert!(error.contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn module_program_execution_requires_exact_job_runtime_and_output_authority() {
+        let function = test_execute_function();
+        let start_grant = test_grant(
+            &[
+                "capability.execute",
+                "module_runtime.read",
+                "module_runtime.write",
+                "program_execution.read",
+                "program_execution.write",
+                "jobs.read",
+                "jobs.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &[
+                "module_runtime_state",
+                "module_lifecycle_state",
+                "program_execution_record",
+                "job_process",
+                "execution_output",
+            ],
+            &[
+                "kind:module_runtime_state",
+                "kind:module_lifecycle_state",
+                "kind:program_execution_record",
+                "kind:job_process",
+                "kind:execution_output",
+                "resource:module_lifecycle_state:enabled",
+            ],
+        );
+        authorize_with_grant(
+            &start_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "module_program_execution_start",
+                "moduleLifecycleResourceId": "module_lifecycle_state:enabled",
+                "runtimeRequestId": "jobs-runtime",
+                "command": "printf redacted",
+                "runtimeId": "runtime.shell",
+                "languageId": "language.shell",
+                "programFingerprint": "sha256:program",
+                "networkPolicy": "none",
+                "reason": "Run delegated module job.",
+                "idempotencyKey": "module-program-start-auth"
+            })),
+        )
+        .expect("start grant accepted");
+
+        let missing_output_kind = test_grant(
+            &[
+                "capability.execute",
+                "module_runtime.read",
+                "module_runtime.write",
+                "program_execution.read",
+                "program_execution.write",
+                "jobs.read",
+                "jobs.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &[
+                "module_runtime_state",
+                "module_lifecycle_state",
+                "program_execution_record",
+                "job_process",
+            ],
+            &[
+                "kind:module_runtime_state",
+                "kind:module_lifecycle_state",
+                "kind:program_execution_record",
+                "kind:job_process",
+                "resource:module_lifecycle_state:enabled",
+            ],
+        );
+        let error = authorize_with_grant(
+            &missing_output_kind,
+            &function,
+            &test_invocation(json!({
+                "operation": "module_program_execution_start",
+                "moduleLifecycleResourceId": "module_lifecycle_state:enabled"
+            })),
+        )
+        .expect_err("missing execution output kind denied")
+        .to_string();
+        assert!(
+            error.contains("resource kind execution_output")
+                || error.contains("kind:execution_output"),
+            "{error}"
+        );
+
+        let followup_grant = test_grant(
+            &[
+                "capability.execute",
+                "module_runtime.read",
+                "program_execution.read",
+                "jobs.read",
+                "resource.read",
+            ],
+            &[
+                "module_runtime_state",
+                "program_execution_record",
+                "job_process",
+                "execution_output",
+            ],
+            &[
+                "kind:module_runtime_state",
+                "kind:program_execution_record",
+                "kind:job_process",
+                "kind:execution_output",
+                "resource:module_runtime_state:running",
+                "resource:job_process:running",
+            ],
+        );
+        authorize_with_grant(
+            &followup_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "module_program_execution_status",
+                "moduleRuntimeResourceId": "module_runtime_state:running",
+                "jobResourceId": "job_process:running"
+            })),
+        )
+        .expect("status grant accepted");
+
+        let missing_job_selector = test_grant(
+            &[
+                "capability.execute",
+                "module_runtime.read",
+                "program_execution.read",
+                "jobs.read",
+                "resource.read",
+            ],
+            &[
+                "module_runtime_state",
+                "program_execution_record",
+                "job_process",
+                "execution_output",
+            ],
+            &[
+                "kind:module_runtime_state",
+                "kind:program_execution_record",
+                "kind:job_process",
+                "kind:execution_output",
+                "resource:module_runtime_state:running",
+            ],
+        );
+        let error = authorize_with_grant(
+            &missing_job_selector,
+            &function,
+            &test_invocation(json!({
+                "operation": "module_program_execution_status",
+                "moduleRuntimeResourceId": "module_runtime_state:running",
+                "jobResourceId": "job_process:running"
+            })),
+        )
+        .expect_err("missing exact job selector denied")
+        .to_string();
+        assert!(
+            error.contains("requires exact selector for jobResourceId"),
+            "{error}"
+        );
+
+        let wildcard = test_grant(
+            &[
+                "capability.execute",
+                "module_runtime.read",
+                "program_execution.read",
+                "jobs.read",
+                "resource.read",
+            ],
+            &[
+                "*",
+                "module_runtime_state",
+                "job_process",
+                "execution_output",
+            ],
+            &["kind:module_runtime_state", "kind:job_process"],
+        );
+        let error = authorize_with_grant(
+            &wildcard,
+            &function,
+            &test_invocation(json!({"operation": "module_program_execution_status"})),
+        )
+        .expect_err("wildcard module program grant denied")
+        .to_string();
+        assert!(error.contains("wildcard resource kinds"), "{error}");
+    }
+
+    #[test]
+    fn jobs_operations_require_jobs_and_output_authority() {
+        let function = test_execute_function();
+        let start_grant = test_grant(
+            &["capability.execute", "jobs.write", "resource.write"],
+            &["job_process", "execution_output"],
+            &["kind:job_process", "kind:execution_output"],
+        );
+        authorize_with_grant(
+            &start_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "job_start",
+                "command": "printf redacted"
+            })),
+        )
+        .expect("job start grant accepted");
+
+        let missing_jobs_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &["job_process", "execution_output"],
+            &["kind:job_process", "kind:execution_output"],
+        );
+        let error = authorize_with_grant(
+            &missing_jobs_scope,
+            &function,
+            &test_invocation(json!({
+                "operation": "job_status",
+                "jobResourceId": "job_process:running"
+            })),
+        )
+        .expect_err("missing jobs.read denied")
+        .to_string();
+        assert!(error.contains("jobs.read"), "{error}");
+
+        let missing_output_kind = test_grant(
+            &["capability.execute", "jobs.read", "resource.read"],
+            &["job_process"],
+            &["kind:job_process"],
+        );
+        let error = authorize_with_grant(
+            &missing_output_kind,
+            &function,
+            &test_invocation(json!({
+                "operation": "job_status",
+                "jobResourceId": "job_process:running"
+            })),
+        )
+        .expect_err("missing execution_output denied")
+        .to_string();
+        assert!(
+            error.contains("resource kind execution_output")
+                || error.contains("kind:execution_output"),
+            "{error}"
+        );
     }
 
     #[test]

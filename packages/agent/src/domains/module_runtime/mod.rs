@@ -24,11 +24,15 @@
 //! # INVARIANT: runtime supervision is a metadata gate
 //!
 //! This domain does not install packages, restore dependencies, launch
-//! interpreters, open PTYs/browsers, access networks, expose raw commands or
-//! logs, or touch repo-managed `packages/agent/skills`. Runtime requests record
-//! a supervised envelope and bounded refs only; disabled, quarantined,
-//! rolled-back, pending, and missing lifecycle states fail closed before any
-//! runtime state can be created.
+//! interpreters directly, open PTYs/browsers, access networks, expose raw
+//! commands or logs, or touch repo-managed `packages/agent/skills`. Slice 24B
+//! may attach delegated `job_process` and `execution_output` refs after the
+//! jobs domain owns a supervised run, but module runtime projections still
+//! expose only refs, fingerprints, truncation, duration, exit, timeout,
+//! cancellation, and cleanup metadata. Runtime requests record a supervised
+//! envelope and bounded refs only; disabled, quarantined, rolled-back, pending,
+//! and missing lifecycle states fail closed before any runtime state can be
+//! created.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
