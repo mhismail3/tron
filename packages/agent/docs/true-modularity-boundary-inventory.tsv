@@ -984,6 +984,7 @@ packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract

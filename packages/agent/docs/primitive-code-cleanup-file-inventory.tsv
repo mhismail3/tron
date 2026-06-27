@@ -1682,6 +1682,7 @@ packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift	retain	
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitDiscoveryState.swift	retain	ios session state	P2AER-S1	Agent cockpit discovery projection state retained for catalog families, schema gaps, and report history.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift	retain	ios session state	IOSAC-3	Agent cockpit view model retained for refresh, confirmations, lifecycle mutations, and ui_surface decoding.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	retain	ios ui	IOSAC-5	Agent cockpit views retained as the user-facing worker lifecycle, module activity, and runtime surface shell.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	retain	ios ui	PCC-10/P3MSA-S23H	Implementation-candidate Slice 23H module activity cockpit views retained as bounded UI rendering for the server-owned Runtime Cockpit activity projection.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	retain	ios ui	P2AER-S1	Agent cockpit discovery views retained for high-signal capability families and conformance report history.
 packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift	retain	ios test	IOSAC-7	Worker lifecycle DTO tests retained for catalog/resource decoding coverage.
 packages/ios-app/Tests/Engine/Transport/Clients/WorkerLifecycleClientTests.swift	retain	ios test	IOSAC-7	Worker lifecycle client tests retained for existing function id and resource primitive coverage.
