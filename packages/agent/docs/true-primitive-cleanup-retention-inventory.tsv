@@ -1647,7 +1647,7 @@ packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
-packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	implementation	ios_ui	TPC-10/P3MSA-S23H	Phase 3 Slice 23H pending-review module activity cockpit views retained under UI ownership as a thin renderer of the server-owned projection.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	implementation	ios_ui	TPC-10/P3MSA-S23H	Accepted Phase 3 Slice 23H module activity cockpit views retained under UI ownership as a thin renderer of the server-owned projection.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	implementation	ios_ui	Phase2-Slice1	Agent cockpit discovery card and report views retained under UI ownership.
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.

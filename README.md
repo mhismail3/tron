@@ -871,8 +871,8 @@ run package managers, allocate PTYs, perform browser automation, access
 networks, expose jobs directly as the module surface, or store provider-visible
 raw commands, logs, stdout/stderr, paths, env values, secrets, code, file
 contents, raw grant ids, or raw authority ids.
-`domains/module_activity` owns the Phase 3 Slice 23H implementation-candidate
-inspect-only autonomous-work cockpit projection. It exposes the system-visible
+`domains/module_activity` owns the accepted Phase 3 Slice 23H inspect-only
+autonomous-work cockpit projection. It exposes the system-visible
 `module_activity::overview` read function for trusted engine clients and
 aggregates current-session/workspace resource-backed module-plane facts from
 manifests, proposals, validation reports, install requests/decisions,
@@ -1202,7 +1202,7 @@ Current primitive operations:
 | `module_runtime_list` | Slice 23F accepted operation that lists scoped `module_runtime_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, output artifact refs only, `networkPolicy: none`, and no execution side effects or raw runtime material. |
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
-| `module_activity::overview` | Slice 23H implementation-candidate system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
+| `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
@@ -1250,11 +1250,10 @@ The accepted startup-registration baseline keeps only loop infrastructure domain
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`, `media`,
 `worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
-accepted Phase 3 module-plane additions through Slice 23G include `module_registry`,
+accepted Phase 3 module-plane additions through Slice 23H include `module_registry`,
 `module_authoring`, `module_validation`, `module_install`, `module_lifecycle`,
-`module_runtime`, and `module_dependencies` metadata policy records. Slice 23H
-adds the pending-review implementation-candidate system-visible inspect-only
-`module_activity` cockpit projection; provider-visible module-plane operations
+`module_runtime`, `module_dependencies`, and `module_activity` metadata and
+cockpit projection records through Slice 23H; provider-visible module-plane operations
 remain operation values under the single `capability::execute` primitive, not
 public `/engine` expansion. The
 `filesystem` domain is deliberately split: workspace-browser functions remain

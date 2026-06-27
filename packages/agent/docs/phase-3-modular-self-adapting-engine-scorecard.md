@@ -414,13 +414,13 @@ Out of scope:
 - fake activity states;
 - client-owned server truth.
 
-Implementation candidate status: Slice 23H now has a `pending_review`
-implementation candidate for `P3MSA-INV-008`. The candidate adds the
-system-visible, inspect-only `module_activity::overview` projection and renders
-it in the existing Runtime Cockpit Activity tab from server-owned module-plane
-facts. It remains pending until independent review verifies the Rust
-aggregation/redaction policy, thin iOS rendering, static guards, documentation,
-and validation evidence.
+Accepted status: Slice 23H moves `P3MSA-INV-008` to `current_baseline` after
+independent re-review accepted the system-visible, inspect-only
+`module_activity::overview` projection and its existing Runtime Cockpit Activity
+tab rendering from server-owned module-plane facts. The accepted slice preserves
+server-owned aggregation/redaction policy, thin iOS rendering, static guards,
+documentation, and validation evidence without adding fixed product panels or a
+provider-visible execute operation.
 
 ### Slice 24A: File And Source-Control Module Pack Activation
 

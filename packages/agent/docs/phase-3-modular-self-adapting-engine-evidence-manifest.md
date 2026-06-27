@@ -672,21 +672,51 @@ wall-clock entropy allow-list entries, and SUWRF still fails only on the
 pre-existing `packages/agent/src/domains/program_execution` fixed-surface guard.
 Slice 23G changed none of those paths.
 
-## Implementation Candidate Slice 23H: Generic Autonomous Work Cockpit
+## Accepted Slice 23H: Generic Autonomous Work Cockpit
 
 Discovery thread `019f088a-7148-78a1-b7a6-3ce4ae25d502` selected Slice 23H
 from accepted baseline
 `origin/main@07d99ce3d6ee83eae432be4ee4f7501c606db74b`
 (`docs: accept phase 3 slice 23g`). Implementation branch
-`codex/phase-3-slice-23h-generic-autonomous-work-cockpit` carries the
-candidate implementation.
+`codex/phase-3-slice-23h-generic-autonomous-work-cockpit` implemented the
+accepted slice.
 
-Status: `pending_review`.
+- Discovery thread `019f088a-7148-78a1-b7a6-3ce4ae25d502` completed exact
+  final status `implementation may start`.
+- Implementation thread `019f09ec-3154-7361-91c3-78bb751d0fff` completed exact
+  final status `implementation complete` at commit
+  `1cead8676e44bdbfc061f93156141ce70f15a22b`.
+- Independent review thread `019f0a6f-9fe6-76d2-9b2f-b439d488d9a1` returned
+  exact verdict `changes required`.
+- Fix 1 thread `019f0a81-6666-7c31-bbfa-f89571d6214e` completed exact final
+  status `fix ready for review` at commit
+  `1cb0f179a2ac8cc43862e461079fdbd3c88686c8`.
+- Fix 1 re-review thread `019f0a87-3e25-7981-8076-e829786be73e` returned exact
+  verdict `changes required`.
+- Fix 2 thread `019f0a98-3159-7741-81a8-a00c9d7b8f00` completed exact final
+  status `fix ready for review` at commit
+  `d579530517e6563e1952d159037534a96f12c6f5`.
+- Fix 2 re-review thread `019f0a9a-5fb1-7480-a469-a255123de3d0` returned exact
+  verdict `changes required`.
+- Fix 3 thread `019f0a9e-6ade-7640-9ce5-9f40dfce71e5` completed exact final
+  status `fix ready for review` at commit
+  `222463b817c289d03796d2b321ed2ed8403df0b3`.
+- Fix 3 re-review thread `019f0aa8-d3d4-76a1-bde1-b2450c9f0813` returned exact
+  verdict `changes required`.
+- Fix 4 thread `019f0ab7-d1d7-7522-8f15-46ebcc8ea293` completed exact final
+  status `fix ready for review` at commit
+  `e7a67f1aec000f6fa400a95c99ea94dd4c269b61`.
+- Fix 4 re-review thread `019f0abb-ab93-7b43-bcfd-6acb2879dfc9` returned exact
+  verdict `changes required`.
+- Fix 5 thread `019f0ac2-4049-7fc2-b171-612e672512fa` completed exact final
+  status `fix ready for review` at commit
+  `4027e08b9759288e7a4e3f368d8f8a1b3935cf6a`.
+- Fix 5 re-review thread `019f0ac5-5e52-7661-ab11-efdd1bb20a6a` returned
+  exact verdict `slice accepted`.
+- Mainline merge commit:
+  `7d4a387218840564f5e41b838381e362f6474159`.
 
-Implementation worker source thread:
-`019efe16-09d7-73d3-9708-6c6ba5bc6493`
-
-Implementation scope:
+Accepted scope:
 
 - Adds focused `domains/module_activity` custody for the system-visible,
   inspect-only `module_activity::overview` cockpit projection.
@@ -704,6 +734,8 @@ Implementation scope:
   activity locally.
 - Adds source/static guards for no fixed old source-control, memory, process,
   subagent, notification, skill, or package-proposal cockpit panels.
+- Moves `P3MSA-INV-008` from `pending_review` to `current_baseline` after
+  independent re-review acceptance and mainline integration.
 
 Rejected scope remains unchanged: no provider-visible execute operation, public
 `/engine` API expansion, fixed old product panels, fake/client-owned activity,
@@ -714,7 +746,7 @@ grant ids, raw authority ids, trace/invocation ids, token-like material,
 personal-info literals, SQLite migration, production deploy/update behavior, or
 repo-managed `packages/agent/skills`.
 
-Candidate validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -725,10 +757,12 @@ Candidate validation evidence:
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed after final source and docs edits. |
 | `CARGO_NET_OFFLINE=true cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Offline agent crate type-check passed with existing provider/model/resource-store dead-code warnings only. |
 | DESI, IARM, IOSAC, IOSTC, DSEMD, SACB, TMB, PCC, TPC, PPACD, SSARR, ODA, and PERF static suites | exit 0 | Documentation, iOS surface, storage, authority/security, modularity, cleanup, public protocol, readiness, observability, and resource-governance inventories passed after Slice 23H updates. |
+| Independent Fix 5 re-review thread `019f0ac5-5e52-7661-ab11-efdd1bb20a6a` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline/implementation/fix ancestry, full and fix diffs, trusted invocation-scoped `module_activity::overview`, thin iOS server-fact rendering, accepted inventory classification, hard-budget split, static gates, hygiene checks, and no repo-managed skills. |
+| Mainline merge `7d4a387218840564f5e41b838381e362f6474159` plus closeout validation from `main` | exit 0 | Accepted Slice 23H implementation, fixes, and re-review evidence were merged into `main`; focused Rust, iOS, static inventory, formatting, type-check, and hygiene validation passed from the integrated branch. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, tracked ignored-file scan, and `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, tracked ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
 
-Known unchanged caveats to carry into review if still present after final
-validation: existing provider/model/resource-store dead-code warnings; DRC may
-fail only on unchanged goals/web/tool-source entropy allow-list entries outside
-Slice 23H; SUWRF may fail at baseline only on unchanged
-`packages/agent/src/domains/program_execution`.
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; DRC still fails only on unchanged goals/web/tool-source entropy
+allow-list entries outside Slice 23H; SUWRF may fail at baseline only on
+unchanged `packages/agent/src/domains/program_execution`. Slice 23H changed none
+of those paths.
