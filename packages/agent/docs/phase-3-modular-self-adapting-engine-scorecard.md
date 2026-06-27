@@ -459,7 +459,7 @@ module-owned execution path with sandboxed runtime policy.
 
 Implementation candidate scope:
 
-- validated `jobs_program_execution_module` manifest declaring only
+- pending-review `jobs_program_execution_module` manifest declaring only
   `module_program_execution_start`, `module_program_execution_status`,
   `module_program_execution_cancel`, and `module_program_execution_cleanup`;
 - module-owned runtime envelope that delegates non-interactive process work to

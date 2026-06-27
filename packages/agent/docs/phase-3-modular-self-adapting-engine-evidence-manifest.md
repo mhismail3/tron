@@ -864,8 +864,8 @@ Baseline HEAD:
 Candidate scope:
 
 - Adds the built-in `jobs_program_execution_module` manifest seed with
-  validation status `validated`, lifecycle state `validated`, and activation
-  mode `authority_mapped_module_pack`.
+  validation status `pending_review`, lifecycle state `pending_review`, and
+  activation mode `authority_mapped_module_pack`.
 - Declares only `module_program_execution_start`,
   `module_program_execution_status`, `module_program_execution_cancel`, and
   `module_program_execution_cleanup` through the existing

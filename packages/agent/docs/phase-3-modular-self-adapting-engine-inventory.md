@@ -154,7 +154,7 @@ conflict handling remain rejected until separately selected. It moves
 re-review acceptance and mainline integration.
 
 P3MSA-INV-010 has an implementation candidate for Slice 24B: Jobs And Program
-Execution Module Pack Activation. The candidate adds a validated
+Execution Module Pack Activation. The candidate adds a pending-review
 `jobs_program_execution_module` manifest and a module-owned
 `module_program_execution_start/status/cancel/cleanup` path through
 `capability::execute`. Start records an enabled-lifecycle-guarded
