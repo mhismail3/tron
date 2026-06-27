@@ -270,6 +270,106 @@ async fn lifecycle_request_decision_inspect_and_runtime_denial_are_bounded() {
 }
 
 #[tokio::test]
+async fn lifecycle_request_after_decision_records_fresh_pending_transition() {
+    let fixture = Fixture::new("module-lifecycle-follow-up").await;
+    let disable_request = request_module_lifecycle_value_at(
+        &fixture.deps,
+        &fixture.write_invocation(
+            "disable-request",
+            request_payload(&fixture.install_decision_id, "disable"),
+        ),
+        &request_payload(&fixture.install_decision_id, "disable"),
+        default_operation_at(),
+    )
+    .await
+    .expect("request disable lifecycle");
+    let disable_request_version = disable_request["moduleLifecycleVersionId"]
+        .as_str()
+        .expect("disable request version");
+    let approval = fixture.approval("follow-up-disable", "disable").await;
+    let disable_decision = decide_module_lifecycle_value_at(
+        &fixture.deps,
+        &fixture.write_invocation(
+            "disable-decision",
+            json!({
+                "moduleLifecycleResourceId": fixture.lifecycle_id,
+                "expectedModuleLifecycleVersionId": disable_request_version,
+                "decision": "approved",
+                "reason": "User approved metadata-only disable state.",
+                "approvalRequestResourceId": approval["requestResourceId"],
+                "approvalDecisionResourceId": approval["decisionResourceId"]
+            }),
+        ),
+        &json!({
+            "moduleLifecycleResourceId": fixture.lifecycle_id,
+            "expectedModuleLifecycleVersionId": disable_request_version,
+            "decision": "approved",
+            "reason": "User approved metadata-only disable state.",
+            "approvalRequestResourceId": approval["requestResourceId"],
+            "approvalDecisionResourceId": approval["decisionResourceId"]
+        }),
+        default_operation_at(),
+    )
+    .await
+    .expect("decide disable lifecycle");
+    assert_eq!(disable_decision["status"], json!("disabled"));
+    let disabled_version = disable_decision["moduleLifecycleVersionId"]
+        .as_str()
+        .expect("disabled version")
+        .to_owned();
+
+    let enable_request = request_module_lifecycle_value_at(
+        &fixture.deps,
+        &fixture.write_invocation(
+            "enable-request",
+            request_payload(&fixture.install_decision_id, "enable"),
+        ),
+        &request_payload(&fixture.install_decision_id, "enable"),
+        default_operation_at() + Duration::minutes(1),
+    )
+    .await
+    .expect("request enable lifecycle after disable");
+    let enable_version = enable_request["moduleLifecycleVersionId"]
+        .as_str()
+        .expect("enable request version");
+    assert_eq!(enable_request["status"], json!("pending"));
+    assert_eq!(enable_request["idempotentReplay"], json!(false));
+    assert_ne!(enable_version, disabled_version);
+    assert_eq!(
+        enable_request["moduleLifecycle"]["transition"]["action"],
+        json!("enable")
+    );
+    assert_eq!(
+        enable_request["moduleLifecycle"]["transition"]["from"],
+        json!("disabled")
+    );
+
+    let inspected = inspect_module_lifecycle_value(
+        &fixture.deps,
+        &fixture.read_invocation(
+            "inspect-follow-up",
+            json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
+        ),
+        &json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
+    )
+    .await
+    .expect("inspect follow-up lifecycle");
+    assert_eq!(inspected["moduleLifecycle"]["lifecycle"], json!("pending"));
+    assert_eq!(
+        inspected["moduleLifecycle"]["moduleLifecycle"]["previous"]["state"],
+        json!("disabled")
+    );
+    assert_eq!(
+        inspected["moduleLifecycle"]["moduleLifecycle"]["previous"]["versionId"],
+        json!(disabled_version)
+    );
+    assert_eq!(
+        inspected["moduleLifecycle"]["moduleLifecycle"]["previous"]["currentVersionRevalidated"],
+        json!(true)
+    );
+}
+
+#[tokio::test]
 async fn rollback_requires_ready_proof_refs_and_prerequisite_candidate() {
     let fixture = Fixture::new("module-lifecycle-rollback").await;
     let denied = request_module_lifecycle_value_at(

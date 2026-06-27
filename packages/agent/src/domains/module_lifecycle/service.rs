@@ -84,23 +84,116 @@ pub(crate) async fn request_module_lifecycle_value_at(
         .await
         .map_err(engine_error)?
     {
-        ensure_module_lifecycle_state(&existing, "module_lifecycle_request replay")?;
-        ensure_scope(&existing, &scope, "module_lifecycle_request replay")?;
-        let (version, payload) = current_payload(&existing, "module_lifecycle_request replay")?;
-        let requested = payload
+        ensure_module_lifecycle_state(&existing, "module_lifecycle_request existing state")?;
+        ensure_scope(&existing, &scope, "module_lifecycle_request existing state")?;
+        let (current_version, current) =
+            current_payload(&existing, "module_lifecycle_request existing state")?;
+        let current_action = current
             .pointer("/transition/action")
             .and_then(Value::as_str)
-            == Some(action.as_str())
-            && existing.resource.lifecycle == "pending";
+            .ok_or_else(|| invalid("module lifecycle state is missing action"))?;
+        if existing.resource.lifecycle == "pending" {
+            if current_action == action {
+                return Ok(json!({
+                    "schemaVersion": MODULE_LIFECYCLE_STATE_SCHEMA_VERSION,
+                    "operation": "module_lifecycle_request",
+                    "status": existing.resource.lifecycle,
+                    "idempotentReplay": true,
+                    "moduleLifecycleResourceId": resource_id,
+                    "moduleLifecycleVersionId": current_version.version_id,
+                    "moduleLifecycle": module_lifecycle_summary(
+                        &existing.resource,
+                        current_version,
+                        current
+                    ),
+                    "resourceRefs": [version_ref(
+                        &existing.resource,
+                        current_version,
+                        "module_lifecycle_state"
+                    )]
+                }));
+            }
+            return Err(invalid(format!(
+                "module lifecycle already has pending {current_action} transition; decide it before requesting {action}"
+            )));
+        }
+
+        let record = module_lifecycle_record(ModuleLifecycleRecordInput {
+            transition_id: &transition_id,
+            action: &action,
+            state,
+            reason: &reason,
+            scope: &scope,
+            install_decision,
+            previous_state: Some(existing.resource.lifecycle.as_str()),
+            previous_version_id: Some(current_version.version_id.as_str()),
+            approval: json!({
+                "allowed": false,
+                "reason": "approval pending",
+                "approvalEvidenceOnly": true,
+                "derivedAuthorityRequired": true,
+                "rawAuthorityIdsStored": false
+            }),
+            rollback_proof_refs,
+            rollback_readiness,
+            evidence_refs,
+            created_at: &now,
+            updated_at: &now,
+            invocation,
+            idempotency_key: &idempotency_key,
+            revision: current
+                .get("revision")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .saturating_add(1),
+        });
+        let version = deps
+            .engine_host
+            .update_resource(UpdateResource {
+                resource_id: resource_id.clone(),
+                expected_current_version_id: Some(current_version.version_id.clone()),
+                lifecycle: Some(state.to_owned()),
+                payload: record,
+                state: None,
+                locations: vec![EngineResourceLocation {
+                    kind: "module_lifecycle_state".to_owned(),
+                    uri: format!("module-lifecycle-state:{resource_id}"),
+                    mime_type: Some("application/json".to_owned()),
+                    size_bytes: None,
+                }],
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+            })
+            .await
+            .map_err(engine_error)?;
+        let updated =
+            inspect_resource_required(deps, &resource_id, "module lifecycle state").await?;
+        publish_lifecycle_event(
+            deps,
+            invocation,
+            "module_lifecycle.requested",
+            &updated.resource,
+            json!({
+                "lifecycleAction": action,
+                "previousLifecycleState": existing.resource.lifecycle,
+                "previousVersionId": current_version.version_id,
+                "metadataOnly": true,
+                "activationPerformed": false,
+                "executionPerformed": false,
+                "rollbackExecuted": false,
+                "networkPolicy": "none"
+            }),
+        )
+        .await?;
         return Ok(json!({
             "schemaVersion": MODULE_LIFECYCLE_STATE_SCHEMA_VERSION,
             "operation": "module_lifecycle_request",
-            "status": existing.resource.lifecycle,
-            "idempotentReplay": requested,
+            "status": updated.resource.lifecycle,
+            "idempotentReplay": false,
             "moduleLifecycleResourceId": resource_id,
             "moduleLifecycleVersionId": version.version_id,
-            "moduleLifecycle": module_lifecycle_summary(&existing.resource, version, payload),
-            "resourceRefs": [version_ref(&existing.resource, version, "module_lifecycle_state")]
+            "moduleLifecycle": module_lifecycle_summary_for_resource(deps, &updated.resource).await?,
+            "resourceRefs": [version_ref(&updated.resource, &version, "module_lifecycle_state")]
         }));
     }
 

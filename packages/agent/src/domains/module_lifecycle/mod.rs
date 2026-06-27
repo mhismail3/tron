@@ -3,6 +3,9 @@
 //! Module lifecycle owns durable `module_lifecycle_state` resources for
 //! metadata-only enable, disable, quarantine, and rollback transitions after a
 //! current-scope `module_install_decision` has reached `install_candidate`.
+//! Follow-up requests reuse the scoped lifecycle resource and append a new
+//! current-version-guarded pending transition instead of creating parallel
+//! state or silently returning stale lifecycle metadata.
 //! The provider-visible surface is limited to `capability::execute` operations
 //! `module_lifecycle_request`, `module_lifecycle_decision`,
 //! `module_lifecycle_list`, and `module_lifecycle_inspect`.
