@@ -10,7 +10,8 @@
 //! metadata records, durable system update diagnostic metadata records,
 //! inspect-only module manifest registry records, inert module proposal
 //! authoring records, inert module validation report records, metadata-only
-//! module install review-gate records, durable non-interactive jobs, read-only Git/worktree observation,
+//! module install review-gate records, metadata-only module dependency request
+//! and policy records, durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
 //! records, inert procedural state provenance records, and the single model-facing
@@ -38,6 +39,7 @@
 //! | `module_authoring` | Inert bounded module proposal authoring records |
 //! | `module_validation` | Inert bounded module contract validation reports |
 //! | `module_install` | Metadata-only module review approval and install-candidate gate |
+//! | `module_dependencies` | Metadata-only module dependency request, decision, and policy activation records |
 //! | `module_lifecycle` | Metadata-only module enable/disable/quarantine/rollback state |
 //! | `module_runtime` | Supervised module runtime envelope records for enabled modules |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
@@ -146,7 +148,12 @@
 //! policy refs, and rollback proof refs without physical install, activation,
 //! execution, dependency restoration, package-manager use, network access,
 //! repo-managed skills, raw logs/commands/env/code/file contents, or approval
-//! evidence minting authority. Module lifecycle restoration is metadata-only
+//! evidence minting authority. Module dependency restoration is metadata-only
+//! request and policy custody: it stores module-owned dependency rationale,
+//! security/license/runtime needs, removal plans, Cargo.toml/Cargo.lock parity
+//! evidence, decisions, and active policy metadata without package-manager
+//! execution, dependency restoration, manifest/lockfile mutation, raw package
+//! artifacts, network access, or runtime execution. Module lifecycle restoration is metadata-only
 //! state custody: it stores enable, disable, quarantine, and rollback
 //! transitions for current install-candidate decisions with fresh approval,
 //! rollback proof refs, current-version guards, and fail-closed
@@ -188,6 +195,7 @@ pub mod memory;
 pub mod message;
 pub mod model;
 pub mod module_authoring;
+pub mod module_dependencies;
 pub mod module_install;
 pub mod module_lifecycle;
 pub mod module_registry;

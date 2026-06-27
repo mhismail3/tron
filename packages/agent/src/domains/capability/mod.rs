@@ -67,6 +67,11 @@
 //! refs without installing, enabling, executing, restoring dependencies,
 //! running package managers, touching repo-managed skills, or accessing
 //! networks.
+//! Module-dependency operations are metadata-only policy operations: they
+//! record, list, inspect, and activate `module_dependency_*` resources with
+//! owner rationale, review decisions, Cargo parity evidence, and no dependency
+//! restoration, package-manager use, manifest/lockfile mutation, or network
+//! access.
 //! Module-lifecycle operations are metadata-only state operations: they
 //! request/decide/list/inspect enable, disable, quarantine, and rollback
 //! lifecycle records for install-candidate modules without installing,
@@ -83,6 +88,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
+//! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
 //! | `module_install_contract` | Module-install review request schema fields |
 //! | `module_lifecycle_contract` | Module-lifecycle request schema fields |
 //! | `module_runtime_contract` | Module-runtime supervisor schema fields |
@@ -117,6 +123,7 @@ pub(crate) mod contract;
 mod import_history_contract;
 mod import_preview_contract;
 mod media_contract;
+mod module_dependencies_contract;
 mod module_install_contract;
 mod module_lifecycle_contract;
 mod module_runtime_contract;

@@ -48,6 +48,18 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_install_decision_list"
             | "module_install_decision_inspect"
     );
+    let module_dependencies_operation = matches!(
+        operation,
+        "module_dependency_request_record"
+            | "module_dependency_request_list"
+            | "module_dependency_request_inspect"
+            | "module_dependency_decision_record"
+            | "module_dependency_decision_list"
+            | "module_dependency_decision_inspect"
+            | "module_dependency_policy_activate"
+            | "module_dependency_policy_list"
+            | "module_dependency_policy_inspect"
+    );
     let module_lifecycle_operation = matches!(
         operation,
         "module_lifecycle_request"
@@ -74,6 +86,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_authoring_operation
         || module_validation_operation
         || module_install_operation
+        || module_dependencies_operation
         || module_lifecycle_operation
         || module_runtime_operation
     {
@@ -93,6 +106,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_authoring_operation
         && !module_validation_operation
         && !module_install_operation
+        && !module_dependencies_operation
         && !module_lifecycle_operation
         && !module_runtime_operation
     {
@@ -276,6 +290,31 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "module_dependency_request_list"
+            | "module_dependency_request_inspect"
+            | "module_dependency_decision_list"
+            | "module_dependency_decision_inspect"
+            | "module_dependency_policy_list"
+            | "module_dependency_policy_inspect"
+    ) {
+        allowed_authority_scopes.extend([
+            "module_dependencies.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "module_dependency_request_record"
+            | "module_dependency_decision_record"
+            | "module_dependency_policy_activate"
+    ) {
+        allowed_authority_scopes.extend([
+            "module_dependencies.read".to_owned(),
+            "module_dependencies.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "module_lifecycle_list" | "module_lifecycle_inspect"
     ) {
         allowed_authority_scopes.extend([
@@ -352,6 +391,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_authoring_operation
         || module_validation_operation
         || module_install_operation
+        || module_dependencies_operation
         || module_lifecycle_operation
         || module_runtime_operation
     {
@@ -443,6 +483,23 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.extend([
             "module_install_request".to_owned(),
             "module_install_decision".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "module_dependency_request_record"
+            | "module_dependency_request_list"
+            | "module_dependency_request_inspect"
+            | "module_dependency_decision_record"
+            | "module_dependency_decision_list"
+            | "module_dependency_decision_inspect"
+            | "module_dependency_policy_activate"
+            | "module_dependency_policy_list"
+            | "module_dependency_policy_inspect"
+    ) {
+        allowed_resource_kinds.extend([
+            "module_dependency_request".to_owned(),
+            "module_dependency_decision".to_owned(),
+            "module_dependency_policy".to_owned(),
         ]);
     } else if matches!(
         operation,
@@ -737,6 +794,24 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (
             &["module_install_decision_inspect"],
             "moduleInstallDecisionResourceId",
+        ),
+        (
+            &[
+                "module_dependency_request_inspect",
+                "module_dependency_decision_record",
+            ],
+            "moduleDependencyRequestResourceId",
+        ),
+        (
+            &[
+                "module_dependency_decision_inspect",
+                "module_dependency_policy_activate",
+            ],
+            "moduleDependencyDecisionResourceId",
+        ),
+        (
+            &["module_dependency_policy_inspect"],
+            "moduleDependencyPolicyResourceId",
         ),
         (
             &["module_lifecycle_decision", "module_lifecycle_inspect"],

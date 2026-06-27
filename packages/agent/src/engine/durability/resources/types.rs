@@ -174,6 +174,19 @@ pub const MODULE_INSTALL_REQUEST_SCHEMA_ID: &str = "tron.resource.module_install
 pub const MODULE_INSTALL_DECISION_KIND: &str = "module_install_decision";
 /// Built-in metadata-only module install decision resource schema id.
 pub const MODULE_INSTALL_DECISION_SCHEMA_ID: &str = "tron.resource.module_install_decision.v1";
+/// Built-in metadata-only module dependency request resource kind.
+pub const MODULE_DEPENDENCY_REQUEST_KIND: &str = "module_dependency_request";
+/// Built-in metadata-only module dependency request resource schema id.
+pub const MODULE_DEPENDENCY_REQUEST_SCHEMA_ID: &str = "tron.resource.module_dependency_request.v1";
+/// Built-in metadata-only module dependency decision resource kind.
+pub const MODULE_DEPENDENCY_DECISION_KIND: &str = "module_dependency_decision";
+/// Built-in metadata-only module dependency decision resource schema id.
+pub const MODULE_DEPENDENCY_DECISION_SCHEMA_ID: &str =
+    "tron.resource.module_dependency_decision.v1";
+/// Built-in metadata-only module dependency policy resource kind.
+pub const MODULE_DEPENDENCY_POLICY_KIND: &str = "module_dependency_policy";
+/// Built-in metadata-only module dependency policy resource schema id.
+pub const MODULE_DEPENDENCY_POLICY_SCHEMA_ID: &str = "tron.resource.module_dependency_policy.v1";
 /// Built-in metadata-only module lifecycle state resource kind.
 pub const MODULE_LIFECYCLE_STATE_KIND: &str = "module_lifecycle_state";
 /// Built-in metadata-only module lifecycle state resource schema id.

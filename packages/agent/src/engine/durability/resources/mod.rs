@@ -13,7 +13,8 @@
 //! generic resource contract, `versions` owns payload hashing/current-version
 //! helpers, domain definition modules own contract resource schemas including
 //! module manifests, module validation reports, procedural
-//! skill/rule/hook/procedure custody records, and media artifacts,
+//! skill/rule/hook/procedure custody records, module dependency policy
+//! metadata records, and media artifacts,
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
 //! the in-memory and SQLite persistence implementations.
 
@@ -26,6 +27,7 @@ mod job_definitions;
 mod media_definitions;
 mod memory_definitions;
 mod module_authoring_definitions;
+mod module_dependencies_definitions;
 mod module_install_definitions;
 mod module_lifecycle_definitions;
 mod module_registry_definitions;
@@ -49,6 +51,11 @@ mod web_definitions;
 
 pub use definitions::builtin_resource_type_definitions;
 pub(crate) use module_authoring_definitions::MODULE_PROPOSAL_PAYLOAD_SCHEMA_VERSION;
+pub(crate) use module_dependencies_definitions::{
+    MODULE_DEPENDENCY_DECISION_PAYLOAD_SCHEMA_VERSION,
+    MODULE_DEPENDENCY_POLICY_PAYLOAD_SCHEMA_VERSION,
+    MODULE_DEPENDENCY_REQUEST_PAYLOAD_SCHEMA_VERSION,
+};
 pub(crate) use module_install_definitions::{
     MODULE_INSTALL_DECISION_PAYLOAD_SCHEMA_VERSION, MODULE_INSTALL_REQUEST_PAYLOAD_SCHEMA_VERSION,
 };

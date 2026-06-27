@@ -24,6 +24,8 @@ mod grant_import_history_tests;
 mod grant_import_preview_tests;
 #[path = "grant_module_authoring_tests.rs"]
 mod grant_module_authoring_tests;
+#[path = "grant_module_dependencies_tests.rs"]
+mod grant_module_dependencies_tests;
 #[path = "grant_module_install_tests.rs"]
 mod grant_module_install_tests;
 #[path = "grant_module_lifecycle_tests.rs"]
