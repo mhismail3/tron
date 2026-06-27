@@ -117,15 +117,15 @@ pub(super) fn started_trace_record(
     let provider = invocation
         .causal_context
         .runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE);
-    let module_proposal_trace = is_module_proposal_operation(operation);
-    let (working_directory, working_directory_metadata) = if module_proposal_trace {
+    let module_safe_trace = is_module_safe_operation(operation);
+    let (working_directory, working_directory_metadata) = if module_safe_trace {
         module_proposal_working_directory_metadata()
     } else {
         trace_working_directory_metadata(invocation)
     };
     let vcs = working_directory.as_ref().and_then(|path| git_vcs(path));
-    let mut trace_metadata = if module_proposal_trace {
-        let request = module_proposal_trace_request(operation);
+    let mut trace_metadata = if module_safe_trace {
+        let request = module_safe_trace_request(operation);
         json!({
             "request": request.clone(),
             "requestHash": hash_json(&request),
@@ -221,10 +221,10 @@ fn module_proposal_working_directory_metadata() -> (Option<PathBuf>, Value) {
     )
 }
 
-fn module_proposal_trace_request(operation: &str) -> Value {
+fn module_safe_trace_request(operation: &str) -> Value {
     json!({
         "operation": operation,
-        "projection": "module_proposal_trace_safe_request.v1",
+        "projection": "module_trace_safe_request.v1",
         "rawPayloadStored": false,
         "metadataOnly": true
     })
@@ -325,7 +325,7 @@ fn agent_trace_json(
 }
 
 fn trace_authority_metadata(invocation: &Invocation, operation: &str) -> Value {
-    if is_module_proposal_operation(operation) {
+    if is_module_safe_operation(operation) {
         return json!({
             "actorId": invocation.causal_context.actor_id.as_str(),
             "actorKind": format!("{:?}", invocation.causal_context.actor_kind),
@@ -365,6 +365,20 @@ fn is_module_proposal_operation(operation: &str) -> bool {
         operation,
         "module_proposal_record" | "module_proposal_list" | "module_proposal_inspect"
     )
+}
+
+fn is_module_runtime_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "module_runtime_request"
+            | "module_runtime_list"
+            | "module_runtime_inspect"
+            | "module_runtime_cancel"
+    )
+}
+
+fn is_module_safe_operation(operation: &str) -> bool {
+    is_module_proposal_operation(operation) || is_module_runtime_operation(operation)
 }
 
 fn merge_tron_trace_metadata(record_json: &mut Value, extra: Value) {

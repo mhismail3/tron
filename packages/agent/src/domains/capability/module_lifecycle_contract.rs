@@ -28,7 +28,7 @@ pub(super) fn insert_module_lifecycle_request_fields(
     );
     properties.insert(
         "lifecycleAction".to_owned(),
-        json!({"type": "string", "enum": ["enable", "disable", "quarantine", "rollback"], "description": "Metadata-only lifecycle transition action."}),
+        json!({"type": "string", "description": "Metadata-only lifecycle transition action: enable, disable, quarantine, or rollback."}),
     );
     properties.insert(
         "lifecycleTransitionId".to_owned(),
@@ -40,6 +40,6 @@ pub(super) fn insert_module_lifecycle_request_fields(
     );
     properties.insert(
         "rollbackReadiness".to_owned(),
-        json!({"type": "string", "enum": ["not_proven", "ready", "blocked"], "description": "Metadata-only rollback readiness state."}),
+        json!({"type": "string", "description": "Metadata-only rollback readiness state: not_proven, ready, or blocked."}),
     );
 }

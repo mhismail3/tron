@@ -39,6 +39,7 @@
 //! | `module_validation` | Inert bounded module contract validation reports |
 //! | `module_install` | Metadata-only module review approval and install-candidate gate |
 //! | `module_lifecycle` | Metadata-only module enable/disable/quarantine/rollback state |
+//! | `module_runtime` | Supervised module runtime envelope records for enabled modules |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -151,7 +152,13 @@
 //! rollback proof refs, current-version guards, and fail-closed
 //! disabled/quarantined runtime guards without activation, execution,
 //! dependency restore, package-manager use, network behavior, or repo-managed
-//! skills. New domain behavior must add a
+//! skills. Module runtime restoration is the first generic supervised runtime
+//! gate: it stores enabled-lifecycle-guarded runtime envelopes with sandbox,
+//! network, secrets, timeout, cancellation, shutdown, output-ref, and authority
+//! proof metadata while leaving package feature semantics outside this domain
+//! and without raw commands/logs/output, PTYs, browser automation, dependency
+//! restoration, package-manager use, network access, or physical install. New
+//! domain behavior must add a
 //! contract, deps narrowing, handler binding, tests, and README/domain-doc
 //! updates together.
 //!
@@ -184,6 +191,7 @@ pub mod module_authoring;
 pub mod module_install;
 pub mod module_lifecycle;
 pub mod module_registry;
+pub mod module_runtime;
 pub mod module_validation;
 pub mod notifications;
 pub mod procedural;

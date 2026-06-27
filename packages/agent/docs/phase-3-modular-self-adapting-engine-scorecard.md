@@ -339,6 +339,22 @@ Out of scope:
 - language-specific interpreter restoration without module ownership;
 - live network unless a module declares and is granted it.
 
+Slice 23F has an implementation candidate for `P3MSA-INV-006`. It adds the
+`module_runtime` domain, `module_runtime_state` resource schema, and
+`module_runtime_request`, `module_runtime_list`, `module_runtime_inspect`, and
+`module_runtime_cancel` execute operation values. Runtime requests require an
+enabled current-scope `module_lifecycle_state` through the lifecycle
+fail-closed authorization guard before any runtime record is created. The
+recorded envelope stores sandbox, network, secrets, timeout, cancellation,
+shutdown, scoped-authority, idempotency, trace/replay, bounded input/output
+artifact refs, and side-effect proof metadata only. It deliberately does not
+physically install modules, activate packages, restore dependencies, run
+package managers, allocate PTYs, perform browser automation, access networks,
+expose jobs directly as the provider-visible module surface, or store raw
+commands, logs, stdout/stderr, code, file contents, paths, env values, secrets,
+raw grant ids, or raw authority ids. The row remains `pending_review` until an
+independent review accepts the branch and mainline integration promotes it.
+
 ### Slice 23G: Module Dependency Request And Policy Activation
 
 Objective: turn the Slice 22A dependency guard into a governed dependency

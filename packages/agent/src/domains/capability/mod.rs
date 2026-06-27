@@ -72,6 +72,11 @@
 //! lifecycle records for install-candidate modules without installing,
 //! activating, executing, restoring dependencies, running package managers,
 //! touching repo-managed skills, or accessing networks.
+//! Module-runtime operations request/list/inspect/cancel enabled-lifecycle-
+//! guarded supervisor envelopes with bounded refs, sandbox/network/secrets
+//! labels, timeout/cancel/shutdown metadata, and provider-safe output refs only,
+//! without raw commands/logs/output, PTYs, browser automation, dependency
+//! restoration, package-manager use, network access, or physical install.
 //!
 //! ## Submodules
 //!
@@ -79,6 +84,8 @@
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
 //! | `module_install_contract` | Module-install review request schema fields |
+//! | `module_lifecycle_contract` | Module-lifecycle request schema fields |
+//! | `module_runtime_contract` | Module-runtime supervisor schema fields |
 //! | `module_validation_contract` | Module-validation request schema fields |
 //! | `operations` | Direct primitive operation implementations |
 //! | `scheduler_contract` | Schedule-specific request schema fields |
@@ -112,6 +119,7 @@ mod import_preview_contract;
 mod media_contract;
 mod module_install_contract;
 mod module_lifecycle_contract;
+mod module_runtime_contract;
 mod module_validation_contract;
 mod operations;
 mod program_execution_contract;

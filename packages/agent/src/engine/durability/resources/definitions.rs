@@ -14,6 +14,7 @@ use super::module_authoring_definitions::module_authoring_resource_type_definiti
 use super::module_install_definitions::module_install_resource_type_definitions;
 use super::module_lifecycle_definitions::module_lifecycle_resource_type_definitions;
 use super::module_registry_definitions::module_registry_resource_type_definitions;
+use super::module_runtime_definitions::module_runtime_resource_type_definitions;
 use super::module_validation_definitions::module_validation_resource_type_definitions;
 use super::notification_definitions::notification_resource_type_definitions;
 use super::procedural_definitions::procedural_resource_type_definitions;
@@ -678,6 +679,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(module_validation_resource_type_definitions());
     definitions.extend(module_install_resource_type_definitions());
     definitions.extend(module_lifecycle_resource_type_definitions());
+    definitions.extend(module_runtime_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions.extend(media_resource_type_definitions());
     definitions.extend(notification_resource_type_definitions());
