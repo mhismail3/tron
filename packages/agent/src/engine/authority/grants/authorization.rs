@@ -82,6 +82,12 @@ pub(super) fn authorize_with_grant(
     if is_module_install_invocation(invocation) {
         ensure_module_install_grant_is_explicit(grant)?;
     }
+    if is_module_lifecycle_invocation(invocation) {
+        ensure_module_lifecycle_grant_is_explicit(grant)?;
+    }
+    if is_module_runtime_invocation(invocation) {
+        ensure_module_runtime_grant_is_explicit(grant)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -205,6 +211,44 @@ fn ensure_module_install_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
     Ok(())
 }
 
+fn ensure_module_lifecycle_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module lifecycle operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_module_runtime_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module runtime operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ensure_resource_selectors(
     grant: &EngineGrant,
     invocation: &Invocation,
@@ -268,6 +312,8 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "moduleValidationReportResourceId",
         "moduleInstallRequestResourceId",
         "moduleInstallDecisionResourceId",
+        "moduleLifecycleResourceId",
+        "moduleRuntimeResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -432,6 +478,26 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some("module_lifecycle_list" | "module_lifecycle_inspect") => {
+            push_unique(&mut scopes, "module_lifecycle.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("module_lifecycle_request" | "module_lifecycle_decision") => {
+            push_unique(&mut scopes, "module_lifecycle.read");
+            push_unique(&mut scopes, "module_lifecycle.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("module_runtime_list" | "module_runtime_inspect") => {
+            push_unique(&mut scopes, "module_runtime.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("module_runtime_request" | "module_runtime_cancel") => {
+            push_unique(&mut scopes, "module_runtime.read");
+            push_unique(&mut scopes, "module_runtime.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("procedural_state_list" | "procedural_state_inspect") => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
@@ -555,6 +621,16 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             | "module_install_decision_inspect",
         ) => vec!["module_install_request", "module_install_decision"],
         Some(
+            "module_lifecycle_request"
+            | "module_lifecycle_decision"
+            | "module_lifecycle_list"
+            | "module_lifecycle_inspect",
+        ) => vec!["module_lifecycle_state"],
+        Some("module_runtime_request") => vec!["module_runtime_state", "module_lifecycle_state"],
+        Some("module_runtime_list" | "module_runtime_inspect" | "module_runtime_cancel") => {
+            vec!["module_runtime_state"]
+        }
+        Some(
             "subagent_launch"
             | "subagent_status"
             | "subagent_result"
@@ -604,6 +680,32 @@ fn is_module_install_invocation(invocation: &Invocation) -> bool {
                     | "module_install_decision_record"
                     | "module_install_decision_list"
                     | "module_install_decision_inspect"
+            )
+        )
+}
+
+fn is_module_lifecycle_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "module_lifecycle_request"
+                    | "module_lifecycle_decision"
+                    | "module_lifecycle_list"
+                    | "module_lifecycle_inspect"
+            )
+        )
+}
+
+fn is_module_runtime_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "module_runtime_request"
+                    | "module_runtime_list"
+                    | "module_runtime_inspect"
+                    | "module_runtime_cancel"
             )
         )
 }
@@ -680,6 +782,8 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("module_install_decision_record") => {
             push_unique(&mut kinds, "module_install_decision")
         }
+        Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
+        Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }
@@ -1474,6 +1578,132 @@ mod tests {
                 &test_invocation(json!({"operation": "module_install_request_list"})),
             ) {
                 Ok(()) => panic!("module install {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn module_runtime_resource_ids_are_selector_enforced() {
+        let grant = test_grant(
+            &["capability.execute", "module_runtime.read", "resource.read"],
+            &["module_runtime_state"],
+            &[
+                "kind:module_runtime_state",
+                "resource:module_runtime_state:first",
+            ],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "module_runtime_inspect",
+            "moduleRuntimeResourceId": "module_runtime_state:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first runtime allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "module_runtime_inspect",
+            "moduleRuntimeResourceId": "module_runtime_state:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind runtime must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource module_runtime_state:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_runtime_request_requires_lifecycle_and_runtime_resource_authority() {
+        let function = test_execute_function();
+        let missing_lifecycle_kind = test_grant(
+            &[
+                "capability.execute",
+                "module_runtime.read",
+                "module_runtime.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["module_runtime_state"],
+            &[
+                "kind:module_runtime_state",
+                "resource:module_lifecycle_state:enabled",
+            ],
+        );
+        let error = authorize_with_grant(
+            &missing_lifecycle_kind,
+            &function,
+            &test_invocation(json!({
+                "operation": "module_runtime_request",
+                "moduleLifecycleResourceId": "module_lifecycle_state:enabled"
+            })),
+        )
+        .expect_err("missing lifecycle resource kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind module_lifecycle_state"),
+            "{error}"
+        );
+
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &[
+                        "*",
+                        "module_runtime.read",
+                        "module_runtime.write",
+                        "resource.read",
+                        "resource.write",
+                    ],
+                    &["module_runtime_state", "module_lifecycle_state"],
+                    &["kind:module_runtime_state", "kind:module_lifecycle_state"],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_runtime.read",
+                        "module_runtime.write",
+                        "resource.read",
+                        "resource.write",
+                    ],
+                    &["*", "module_runtime_state", "module_lifecycle_state"],
+                    &["kind:module_runtime_state", "kind:module_lifecycle_state"],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_runtime.read",
+                        "module_runtime.write",
+                        "resource.read",
+                        "resource.write",
+                    ],
+                    &["module_runtime_state", "module_lifecycle_state"],
+                    &[
+                        "*",
+                        "kind:module_runtime_state",
+                        "kind:module_lifecycle_state",
+                    ],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "module_runtime_request"})),
+            ) {
+                Ok(()) => panic!("module runtime {name} wildcard grant must be denied"),
                 Err(error) => error.to_string(),
             };
             assert!(error.contains(expected), "{error}");

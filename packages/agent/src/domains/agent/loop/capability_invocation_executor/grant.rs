@@ -55,6 +55,13 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_lifecycle_list"
             | "module_lifecycle_inspect"
     );
+    let module_runtime_operation = matches!(
+        operation,
+        "module_runtime_request"
+            | "module_runtime_list"
+            | "module_runtime_inspect"
+            | "module_runtime_cancel"
+    );
     let notification_push_requested = operation == "notification_send"
         && effective_args
             .get("pushRequested")
@@ -68,6 +75,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_lifecycle_operation
+        || module_runtime_operation
     {
         vec![target_function_id.as_str().to_owned()]
     } else {
@@ -86,6 +94,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_validation_operation
         && !module_install_operation
         && !module_lifecycle_operation
+        && !module_runtime_operation
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     }
@@ -283,6 +292,19 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if matches!(operation, "module_runtime_list" | "module_runtime_inspect") {
+        allowed_authority_scopes
+            .extend(["module_runtime.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "module_runtime_request" | "module_runtime_cancel"
+    ) {
+        allowed_authority_scopes.extend([
+            "module_runtime.read".to_owned(),
+            "module_runtime.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(
         operation,
         "procedural_state_list" | "procedural_state_inspect"
@@ -331,6 +353,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_lifecycle_operation
+        || module_runtime_operation
     {
         Vec::new()
     } else {
@@ -431,6 +454,17 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.push("module_lifecycle_state".to_owned());
     } else if matches!(
         operation,
+        "module_runtime_request"
+            | "module_runtime_list"
+            | "module_runtime_inspect"
+            | "module_runtime_cancel"
+    ) {
+        allowed_resource_kinds.push("module_runtime_state".to_owned());
+        if operation == "module_runtime_request" {
+            allowed_resource_kinds.push("module_lifecycle_state".to_owned());
+        }
+    } else if matches!(
+        operation,
         "subagent_launch"
             | "subagent_status"
             | "subagent_result"
@@ -477,6 +511,9 @@ pub(super) async fn derive_capability_runtime_grant(
     }
     if operation == "module_lifecycle_request" {
         push_module_lifecycle_request_selector(&mut resource_selectors, session_id, effective_args);
+    }
+    if operation == "module_runtime_request" {
+        push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
     }
     if matches!(
         operation,
@@ -618,6 +655,34 @@ fn push_module_lifecycle_request_selector(
     }
 }
 
+fn push_module_runtime_request_selector(
+    selectors: &mut Vec<String>,
+    session_id: &str,
+    args: &Value,
+) {
+    if let Some(lifecycle_resource_id) = args
+        .get("moduleLifecycleResourceId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        selectors.push(format!(
+            "resource:{}",
+            module_runtime_state_resource_id(
+                session_id,
+                lifecycle_resource_id,
+                args.get("runtimeRequestId")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        args.get("idempotencyKey")
+                            .and_then(Value::as_str)
+                            .unwrap_or("runtime")
+                    })
+            )
+        ));
+    }
+}
+
 fn module_lifecycle_state_resource_id(
     session_id: &str,
     install_decision_resource_id: &str,
@@ -625,6 +690,19 @@ fn module_lifecycle_state_resource_id(
     format!(
         "module_lifecycle_state:{}",
         sha256_hex(format!("session:{session_id}:{install_decision_resource_id}").as_bytes())
+    )
+}
+
+fn module_runtime_state_resource_id(
+    session_id: &str,
+    lifecycle_resource_id: &str,
+    runtime_request_id: &str,
+) -> String {
+    format!(
+        "module_runtime_state:{}",
+        sha256_hex(
+            format!("session:{session_id}:{lifecycle_resource_id}:{runtime_request_id}").as_bytes()
+        )
     )
 }
 
@@ -667,6 +745,11 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (
             &["module_lifecycle_request"],
             "moduleInstallDecisionResourceId",
+        ),
+        (&["module_runtime_request"], "moduleLifecycleResourceId"),
+        (
+            &["module_runtime_inspect", "module_runtime_cancel"],
+            "moduleRuntimeResourceId",
         ),
     ]
 }

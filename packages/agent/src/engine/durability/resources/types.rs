@@ -178,6 +178,10 @@ pub const MODULE_INSTALL_DECISION_SCHEMA_ID: &str = "tron.resource.module_instal
 pub const MODULE_LIFECYCLE_STATE_KIND: &str = "module_lifecycle_state";
 /// Built-in metadata-only module lifecycle state resource schema id.
 pub const MODULE_LIFECYCLE_STATE_SCHEMA_ID: &str = "tron.resource.module_lifecycle_state.v1";
+/// Built-in supervised module runtime state resource kind.
+pub const MODULE_RUNTIME_STATE_KIND: &str = "module_runtime_state";
+/// Built-in supervised module runtime state resource schema id.
+pub const MODULE_RUNTIME_STATE_SCHEMA_ID: &str = "tron.resource.module_runtime_state.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

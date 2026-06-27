@@ -535,3 +535,54 @@ Acceptance validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | SSARR passed; Slice 23E remains metadata lifecycle state custody, not runtime completion. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture` | exit 0 | ODA passed after Slice 23E evidence and audit metadata updates. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
+
+## Implementation Candidate Slice 23F: Module Runtime Execution Supervisor
+
+Discovery thread `019f07ef-8331-7ea1-9f48-e444219a7733` selected Slice 23F
+from accepted baseline
+`origin/main@c18b5413235c7de8ebefc012251c3f9ca03e69e9`
+(`docs: accept phase 3 slice 23e`). Implementation branch
+`codex/phase-3-slice-23f-module-runtime-supervisor` implements the candidate
+and leaves `P3MSA-INV-006` in `pending_review` until independent review and
+mainline integration accept it.
+
+Candidate scope:
+
+- Adds focused `domains/module_runtime` custody for generic supervised runtime
+  envelope metadata, separate from module feature semantics and separate from
+  provider-visible `jobs`.
+- Registers `module_runtime_state` resource schema
+  `tron.resource.module_runtime_state.v1` with payload schema
+  `tron.module_runtime_state.v1`.
+- Adds provider-visible `capability::execute` operations
+  `module_runtime_request`, `module_runtime_list`, `module_runtime_inspect`,
+  and `module_runtime_cancel`.
+- Enforces explicit `module_runtime.read` / `module_runtime.write` plus
+  `resource.read` / `resource.write` authority, non-wildcard
+  `kind:module_runtime_state` selectors, exact runtime/lifecycle resource
+  selectors, current session/workspace scope, and `networkPolicy: none`.
+- Requires `module_lifecycle::service::ensure_runtime_allowed` before runtime
+  requests persist any runtime resource, so disabled, quarantined, and
+  rolled-back lifecycle states fail closed through lifecycle authorization.
+- Stores sandbox, network, secrets, timeout, cancellation, shutdown,
+  scoped-authority, idempotency, trace/replay, bounded input/output artifact
+  refs, and side-effect proof metadata only.
+- Adds trace-safe request projection for module runtime execute requests before
+  validation rejects unsafe payloads.
+- Deliberately excludes silent activation, physical install, dependency
+  restoration, package managers, PTYs, browser automation, live network access,
+  direct provider-visible job records, raw commands/logs/stdout/stderr/code/file
+  contents/paths/env values/secrets, raw grant ids, raw authority ids,
+  production deploy/update behavior, repo-managed `packages/agent/skills`,
+  public `/engine` expansion, and fixed native panels.
+
+Implementation validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23F source, tests, and docs. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check gate passed; existing provider/model/resource-store dead-code warnings remain. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_runtime --lib` | exit 0 | Module runtime schema, request/list/inspect/cancel, lifecycle prerequisite denial, idempotency, cancellation metadata, provider-safe projection, runtime grant derivation, and engine authorization tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml execute_model_schema --lib` | exit 0 | Provider-visible execute schema exposes bounded module-runtime operation values and fields. |
+| DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, ODA, and PERF invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, observability, and resource-governance inventories passed after the Slice 23F updates. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |

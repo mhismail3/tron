@@ -78,10 +78,21 @@ domain, `module_manifest` resource kind/schema, provider-safe `module_list` and
 `module_inspect` execute operation values, explicit read-only
 `module_registry.read` plus `resource.read` authority, exact
 `kind:module_manifest` and inspect-resource selectors, first-party source-backed
-manifest seed records, and bounded redacted projections. It deliberately does
+manifest seed records, bounded redacted projections, and no execution or
+install side effects. It deliberately does
 not install or execute modules, restore dependencies, add repo-managed skills,
 expand public `/engine`, add fixed native panels, or introduce a new SQLite
 table.
+
+P3MSA-INV-006 has an implementation candidate after Slice 23F: Module Runtime
+Execution Supervisor. The candidate adds the `module_runtime` domain and
+`module_runtime_state` resource kind/schema for enabled-lifecycle-guarded
+supervisor envelopes with bounded refs, timeout/cancel/shutdown metadata,
+trace-safe request projection, exact runtime/lifecycle selectors, and no raw
+commands/logs/output, PTY, browser automation, dependency restore, package
+manager, network, direct provider-visible job surface, or physical install
+side effects. It remains `pending_review` until independent review accepts and
+mainline integration promotes it to `current_baseline`.
 
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
