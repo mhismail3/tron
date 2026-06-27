@@ -87,8 +87,9 @@ SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.
 
-P3MSA-INV-002 is pending review as a Slice 23B implementation candidate. The
-candidate adds inert `domains/module_authoring` custody for scoped
+P3MSA-INV-002 is current baseline after accepted Slice 23B: Module Authoring
+Workspace Foundation. The accepted slice adds inert `domains/module_authoring`
+custody for scoped
 `module_proposal` resources using the generic resource store, provider-visible
 `module_proposal_record`, `module_proposal_list`, and
 `module_proposal_inspect` execute operation values, explicit
@@ -100,8 +101,10 @@ execute modules, restore dependencies, use package managers, create physical
 module workspace directories, touch repo-managed skills, expand public
 `/engine`, add fixed native panels, or introduce a new SQLite table. Record,
 list, and inspect reject raw payload/code/command/path/prompt fields before
-resource handling, and provider-visible title/summary identity rejects
-representative token-like material before storage/projection.
+resource handling, and provider-visible title/summary, proposal id, validation
+status, and ref metadata reject exact and embedded token-like material before
+storage/projection. Rejected module proposal execute payloads are redacted in
+provider-visible traces before service validation can fail them.
 
 ## Slice Families
 

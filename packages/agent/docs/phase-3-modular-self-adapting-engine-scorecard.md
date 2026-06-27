@@ -182,15 +182,18 @@ panels, or production deploy/update behavior.
 Objective: create a governed place for agent-authored module proposals that is
 not the core engine tree and not the old repo-managed skills directory.
 
-Implementation-candidate status: Slice 23B now adds a focused
-`module_authoring` domain backed by generic `module_proposal` resources, with
-provider-visible `module_proposal_record`, `module_proposal_list`, and
-`module_proposal_inspect` execute operations. The candidate keeps proposal
-state scoped to the current session/workspace, stores bounded metadata/refs
-only, fingerprints idempotency and runtime refs, emits
+Accepted Slice 23B closes `P3MSA-INV-002` as current baseline. It adds a
+focused `module_authoring` domain backed by generic `module_proposal`
+resources, with provider-visible `module_proposal_record`,
+`module_proposal_list`, and `module_proposal_inspect` execute operations. It
+keeps proposal state scoped to the current session/workspace, stores bounded
+metadata/refs only, fingerprints idempotency and runtime refs, emits
 `module_authoring.lifecycle`, and proves no install, activation, execution,
 dependency restore, package-manager, network, physical workspace directory, or
-repo-managed skills side effects. It remains pending independent review.
+repo-managed skills side effects. Review/fix loops hardened read-operation
+unsafe-payload denial, provider-visible token-like metadata rejection,
+trace-safe rejected-payload redaction, exact resource selectors, and SACB/PCC/
+TPC inventory coverage before independent acceptance.
 
 Minimal shape:
 
@@ -198,8 +201,8 @@ Minimal shape:
 - bounded source/doc/test refs rather than raw unbounded code payloads in
   provider-visible projections;
 - record/list/inspect unsafe field and unsafe path denial, token-like identity
-  denial, idempotency evidence, lifecycle events, and fingerprinted
-  trace/replay refs;
+  and provider-visible metadata denial, idempotency evidence, lifecycle events,
+  and fingerprinted trace/replay refs;
 - read-only list/inspect operations for proposals with exact inspect-resource
   selectors.
 

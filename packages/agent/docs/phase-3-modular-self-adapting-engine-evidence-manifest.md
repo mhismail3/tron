@@ -147,17 +147,60 @@ SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 evidence as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.
 
-## Slice 23B Implementation Candidate
+## Accepted Slice 23B: Module Authoring Workspace Foundation
 
-Candidate branch:
+Discovery thread `019f0604-9ff0-71e0-8fbe-d00a1dd7aedf` selected Slice 23B
+with exact final status `implementation may start` from baseline
+`origin/main@2ceea2e5df1c367b8c41b6ed2ffa2cb9d0410f61`
+(`docs: accept phase 3 slice 23a`).
+
+Implementation branch:
 `codex/phase-3-slice-23b-module-authoring-workspace`
 
-Candidate baseline:
+Implementation thread:
+`019f0609-bf3a-7823-a554-a56e4e7de8e8`
+
+Independent review thread:
+`019f062b-868a-7090-b369-ff97e8dcc887`
+
+Focused fix threads:
+`019f0631-bd1d-7272-87db-a3f8931b82f2`,
+`019f0649-a88d-76f3-adee-2b8ab0006b8a`,
+`019f0664-2e89-7181-bb10-d0d0632a1b10`, and
+`019f0678-f812-7d61-947d-ec5b55fcf452`
+
+Independent re-review threads:
+`019f0640-0d16-7fb1-a4a6-ea5b0f8b1209`,
+`019f065c-7840-7772-8c5e-a42ed5fd99c1`,
+`019f0672-7da6-7011-a3a0-37343ad8c46e`, and
+`019f0687-ce04-7993-8be3-b38734df2e01`
+
+Baseline HEAD:
 `2ceea2e5df1c367b8c41b6ed2ffa2cb9d0410f61`
 (`docs: accept phase 3 slice 23a`)
 
-Candidate scope:
+Accepted implementation commit:
+`34aa65c8869e20bd02f8a7a385e90f707c135f0a`
+(`feat: add module authoring proposal foundation`)
 
+Accepted fix commits:
+`d6867d9d0b055d101d6c349d84a127ccf203585c`
+(`fix: harden module proposal validation`),
+`76979ebe9d3d0d978958a5cca131ce0050dd7e97`
+(`fix: redact module proposal traces`),
+`bd93ba13bbd8a0f1ca9b5456b4cbc774a7e38e3c`
+(`fix: harden module proposal metadata tokens`), and
+`b19fbfdb0f148335156bcf1eb3f7ee4bb7908554`
+(`fix: detect embedded module proposal tokens`)
+
+Mainline merge commit:
+`31c61e18f21c7fd0f8a001d078dc61ab28ae3810`
+(`merge: integrate phase 3 slice 23b branch`)
+
+Accepted scope:
+
+- Moves `P3MSA-INV-002` from `pending_review` to `current_baseline` after
+  independent re-review accepted the module authoring workspace foundation.
 - Adds focused `domains/module_authoring` custody for scoped, inert
   `module_proposal` resources using the existing generic resource store.
 - Registers resource schema `tron.resource.module_proposal.v1` and payload
@@ -173,22 +216,40 @@ Candidate scope:
   source/doc/test refs, validation placeholder/status, lifecycle state,
   fingerprinted idempotency/runtime refs, and explicit no-install/no-execution
   proof.
+- Rejects unsafe read/write payload fields, unsafe paths, raw prompts, raw code,
+  raw commands, package/dependency install requests, and exact or embedded
+  token-like provider-visible proposal metadata before storage/projection.
+- Stores trace-safe metadata for module proposal execute attempts so rejected
+  unsafe payloads, raw authority grant ids, and raw idempotency keys are not
+  durable provider-visible trace content.
 - Deliberately excludes module install, activation, execution, dependency
   restoration, package managers, physical module workspace directories,
   repo-managed `packages/agent/skills`, raw prompt/proposal/code/command/file
-  payloads, unsafe paths, token-like title/summary identity material, raw
+  payloads, unsafe paths, token-like provider-visible metadata, raw
   grant/authority ids, public `/engine` expansion, fixed iOS panels, and
   production deploy/update behavior.
 
-Candidate validation evidence:
+Validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/resource dead-code warnings were emitted. |
-| `cargo test --manifest-path packages/agent/Cargo.toml module_authoring --lib` | exit 0 | Module proposal resource registration, create/list/inspect, idempotent replay, record/list/inspect unsafe field/path/injection denial, token-like title/summary denial, bounded refs, projection redaction, lifecycle stream evidence, and no repo-managed skills side effects passed. |
-| `cargo test --manifest-path packages/agent/Cargo.toml module_proposal --lib` | exit 0 | Module proposal runtime grants, exact selector enforcement, explicit authority/resource-kind requirements, wildcard denial, and resource schema registration passed. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed during implementation, fix, re-review, and mainline closeout. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing model/provider dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_authoring -- --nocapture` | exit 0 | Module proposal registration, create/list/inspect, idempotent replay, read-operation unsafe payload denial, exact inspect selectors, token-like title/summary denial, exact and embedded token-like provider-visible metadata denial, safe ordinary metadata acceptance, bounded refs, and projection redaction passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_module_proposal_trace -- --nocapture` | exit 0 | Rejected unsafe module proposal execute attempts did not expose raw payloads through provider-visible `trace_list` / `trace_get` projections. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture` | exit 0 | Existing primitive execute trace behavior still passed after module proposal trace-safe request projection support. |
+| SACB, PCC, TPC, TMB, PMBD, PPACD, ODA, SSARR, and DESI invariant suites | exit 0 | Authority/resource selector boundaries, cleanup inventories, hard file budgets, provider/model boundaries, public protocol boundaries, observability, readiness, and documentation/evidence scorecard integrity matched accepted Slice 23B scope during fix/re-review loops. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were reported. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f062b-868a-7090-b369-ff97e8dcc887` | exact verdict `changes required` | Review found missing unsafe payload guards on list/inspect, insufficient token-like title/summary detection, and missing primitive cleanup inventory coverage. |
+| Independent re-review thread `019f0640-0d16-7fb1-a4a6-ea5b0f8b1209` | exact verdict `changes required` | Re-review found rejected unsafe proposal payloads could still be stored in provider-visible capability traces before service validation. |
+| Independent re-review thread `019f065c-7840-7772-8c5e-a42ed5fd99c1` | exact verdict `changes required` | Re-review found provider-visible metadata token denial did not cover proposal ids, validation status, and ref ids, and found missing SACB/PCC/TPC classification for the trace regression. |
+| Independent re-review thread `019f0672-7da6-7011-a3a0-37343ad8c46e` | exact verdict `changes required` | Re-review found token-like material could still be embedded in otherwise safe-looking proposal ids and refs. |
+| Independent re-review thread `019f0687-ce04-7993-8be3-b38734df2e01` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline and fix ancestry, full and fix diffs, shared embedded token detection, provider-visible metadata protections, accepted scope, focused validation, hygiene checks, and no repo-managed skills. |
 
-Deferred scope remains unchanged for later review acceptance: validation report
-resources, review/install gates, enable/disable/quarantine/rollback, runtime
-supervisor, dependency policy execution, generic autonomous-work cockpit, and
-feature-pack migration.
+Deferred scope remains unchanged: validation report resources, review/install
+gates, enable/disable/quarantine/rollback, runtime supervisor, dependency
+policy execution, generic autonomous-work cockpit, and feature-pack migration
+remain later Phase 3 slices.
