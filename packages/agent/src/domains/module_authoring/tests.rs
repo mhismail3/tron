@@ -548,46 +548,49 @@ async fn proposal_identity_rejects_provider_visible_token_like_material() {
 #[tokio::test]
 async fn proposal_metadata_tokens_reject_provider_visible_token_like_material() {
     let fixture = Fixture::new("module-proposal-token-metadata").await;
+    let github_pat = "github_pat_11AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJtb2R1bGUifQ.c2lnbmF0dXJl";
 
-    for (label, payload) in [
+    for (label, field, value) in [
+        ("github-pat-proposal-id", "proposalId", json!(github_pat)),
         (
-            "github-pat-proposal-id",
-            with_extra(
-                proposal_payload(),
-                "proposalId",
-                json!("github_pat_11AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
-            ),
+            "prefixed-github-pat-proposal-id",
+            "proposalId",
+            json!(format!("proposal-{github_pat}-v1")),
         ),
+        ("jwt-validation-status", "validationStatus", json!(jwt)),
         (
-            "jwt-validation-status",
-            with_extra(proposal_payload(), "validationStatus", json!(jwt)),
+            "prefixed-jwt-validation-status",
+            "validationStatus",
+            json!(format!("review_pending-{jwt}-v1")),
         ),
         (
             "aws-source-ref-id",
-            with_extra(
-                proposal_payload(),
-                "sourceRefs",
-                json!([{"kind": "resource", "resourceId": "AKIAIOSFODNN7EXAMPLE", "role": "source"}]),
-            ),
+            "sourceRefs",
+            json!([{"kind": "resource", "resourceId": "AKIAIOSFODNN7EXAMPLE", "role": "source"}]),
+        ),
+        (
+            "prefixed-aws-source-ref-id",
+            "sourceRefs",
+            json!([{"kind": "resource", "resourceId": "source-AKIAIOSFODNN7EXAMPLE-v1", "role": "source"}]),
+        ),
+        (
+            "prefixed-github-short-test-ref-id",
+            "testRefs",
+            json!([{"kind": "resource", "id": "source-ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-v1", "role": "tests"}]),
         ),
         (
             "github-test-ref-id",
-            with_extra(
-                proposal_payload(),
-                "testRefs",
-                json!([{"kind": "resource", "id": "github_pat_11AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "role": "tests"}]),
-            ),
+            "testRefs",
+            json!([{"kind": "resource", "id": github_pat, "role": "tests"}]),
         ),
         (
             "jwt-replay-ref-version",
-            with_extra(
-                proposal_payload(),
-                "replayRefs",
-                json!([{"kind": "replay", "id": "replay-module-proposal", "role": "replay", "versionId": jwt}]),
-            ),
+            "replayRefs",
+            json!([{"kind": "replay", "id": "replay-module-proposal", "role": "replay", "versionId": jwt}]),
         ),
     ] {
+        let payload = with_extra(proposal_payload(), field, value);
         let denied = fixture.record_error(label, payload).await;
         assert!(denied.contains("token-like"), "{label}: {denied}");
     }

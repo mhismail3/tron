@@ -376,13 +376,9 @@ fn reject_secret_like(field: &str, value: &str) -> Result<(), CapabilityError> {
 }
 
 fn reject_provider_visible_token_like(field: &str, value: &str) -> Result<(), CapabilityError> {
-    if value
-        .split(|character: char| !matches!(character, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '-' | '.'))
-        .any(|candidate| {
-            looks_like_github_token(candidate)
-                || looks_like_jwt(candidate)
-                || looks_like_aws_access_key(candidate)
-        })
+    if contains_github_token_like(value)
+        || contains_jwt_like(value)
+        || contains_aws_access_key_like(value)
     {
         return Err(invalid(format!(
             "{field} must not contain token-like material"
@@ -391,40 +387,62 @@ fn reject_provider_visible_token_like(field: &str, value: &str) -> Result<(), Ca
     Ok(())
 }
 
-fn looks_like_github_token(candidate: &str) -> bool {
-    let lowered = candidate.to_ascii_lowercase();
-    lowered.starts_with("github_pat_")
-        || lowered.starts_with("ghp_")
-        || lowered.starts_with("gho_")
-        || lowered.starts_with("ghu_")
-        || lowered.starts_with("ghs_")
-        || lowered.starts_with("ghr_")
+fn contains_github_token_like(value: &str) -> bool {
+    let lowered = value.to_ascii_lowercase();
+    let pat_prefix = "github_pat_";
+    let short_prefixes = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"];
+    token_like_run_after_prefix(&lowered, pat_prefix, 20)
+        || short_prefixes
+            .iter()
+            .any(|prefix| token_like_run_after_prefix(&lowered, prefix, 20))
 }
 
-fn looks_like_jwt(candidate: &str) -> bool {
-    let mut parts = candidate.split('.');
-    let (Some(header), Some(payload), Some(signature)) = (parts.next(), parts.next(), parts.next())
-    else {
-        return false;
-    };
-    if parts.next().is_some() || !header.starts_with("eyJ") {
-        return false;
-    }
-    [header, payload, signature].iter().all(|part| {
-        part.len() >= 8
-            && part
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+fn token_like_run_after_prefix(value: &str, prefix: &str, min_suffix_len: usize) -> bool {
+    value.match_indices(prefix).any(|(index, _)| {
+        let after_prefix = &value[index + prefix.len()..];
+        after_prefix
+            .bytes()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            .count()
+            >= min_suffix_len
     })
 }
 
-fn looks_like_aws_access_key(candidate: &str) -> bool {
-    let bytes = candidate.as_bytes();
-    bytes.len() == 20
-        && (candidate.starts_with("AKIA") || candidate.starts_with("ASIA"))
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+fn contains_jwt_like(value: &str) -> bool {
+    value.match_indices("eyJ").any(|(index, _)| {
+        let candidate = &value[index..];
+        let mut parts = candidate.splitn(3, '.');
+        let (Some(header), Some(payload), Some(signature_and_suffix)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return false;
+        };
+        if !is_base64url_part(header) || !is_base64url_part(payload) {
+            return false;
+        }
+        let signature_len = signature_and_suffix
+            .bytes()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            .count();
+        signature_len >= 8
+    })
+}
+
+fn is_base64url_part(part: &str) -> bool {
+    part.len() >= 8
+        && part
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn contains_aws_access_key_like(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.windows(20).any(|window| {
+        matches!(&window[..4], b"AKIA" | b"ASIA")
+            && window
+                .iter()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+    })
 }
 
 fn reject_prompt_like(field: &str, value: &str) -> Result<(), CapabilityError> {
