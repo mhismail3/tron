@@ -76,6 +76,13 @@ struct AgentCockpitActivityItem: Equatable, Identifiable, Sendable {
     var detail: String
     var timestamp: String?
     var systemImage: String
+    var status: String
+    var resourceKind: String
+    var authorityLabels: [String]
+    var touchedResources: [ModuleActivityResourceTouchDTO]
+    var rollbackStatus: ModuleActivityGateStatusDTO?
+    var quarantineStatus: ModuleActivityGateStatusDTO?
+    var runtimeAuthorizationStatus: ModuleActivityGateStatusDTO?
 }
 
 struct AgentCockpitRuntimeSurface: Equatable, Identifiable, Sendable {
@@ -129,6 +136,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var packages: [AgentCockpitPackageRow]
     var runtimeSurfaces: [AgentCockpitRuntimeSurface]
     var discovery: AgentCockpitDiscoveryOverview
+    var moduleActivity: ModuleActivityOverviewDTO?
     var activity: [AgentCockpitActivityItem]
     var currentRevision: UInt64?
     var nextRevision: UInt64?
@@ -150,6 +158,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
             packages: [],
             runtimeSurfaces: [],
             discovery: .empty,
+            moduleActivity: nil,
             activity: [],
             currentRevision: nil,
             nextRevision: nil
@@ -163,6 +172,7 @@ enum AgentCockpitProjection {
         resources: [EngineResourceDTO],
         runtimeSurfaces: [AgentCockpitRuntimeSurface] = [],
         discoveryReports: [EngineResourceDTO] = [],
+        moduleActivity: ModuleActivityOverviewDTO? = nil,
         connectionState: ConnectionState
     ) -> AgentCockpitOverview {
         let snapshotBody = snapshot.snapshot
@@ -195,7 +205,7 @@ enum AgentCockpitProjection {
                 }
                 return lhs.packageId < rhs.packageId
             }
-        let activity = activityItems(changes: snapshot.changes ?? [], packages: packages)
+        let activity = activityItems(moduleActivity: moduleActivity)
         let discovery = discoveryOverview(
             workers: workers,
             functions: functions,
@@ -220,6 +230,7 @@ enum AgentCockpitProjection {
             packages: packages,
             runtimeSurfaces: runtimeSurfaces.sorted { $0.surface.title < $1.surface.title },
             discovery: discovery,
+            moduleActivity: moduleActivity,
             activity: activity,
             currentRevision: snapshot.currentRevision,
             nextRevision: snapshot.nextRevision
@@ -522,42 +533,39 @@ enum AgentCockpitProjection {
         )
     }
 
-    private static func activityItems(
-        changes: [CatalogChangeDTO],
-        packages: [AgentCockpitPackageRow]
-    ) -> [AgentCockpitActivityItem] {
-        let catalogItems = changes.suffix(8).reversed().map { change in
+    private static func activityItems(moduleActivity: ModuleActivityOverviewDTO?) -> [AgentCockpitActivityItem] {
+        moduleActivity?.timeline.map { item in
             AgentCockpitActivityItem(
-                id: change.id ?? "\(change.subjectId ?? "catalog")-\(change.afterRevision ?? 0)",
-                title: title(for: change),
-                detail: [change.subjectKind, change.subjectId].compactMap { $0 }.joined(separator: " "),
-                timestamp: change.timestamp,
-                systemImage: image(for: change.subjectKind)
+                id: item.id,
+                title: item.title,
+                detail: item.detail,
+                timestamp: item.updatedAt.nilIfEmpty,
+                systemImage: image(forModuleStatus: item.status, resourceKind: item.resourceKind),
+                status: item.status,
+                resourceKind: item.resourceKind,
+                authorityLabels: item.authorityLabels,
+                touchedResources: item.touchedResources,
+                rollbackStatus: item.rollbackStatus,
+                quarantineStatus: item.quarantineStatus,
+                runtimeAuthorizationStatus: item.runtimeAuthorizationStatus
             )
-        }
-        let packageItems = packages.prefix(6).map { package in
-            AgentCockpitActivityItem(
-                id: "resource:\(package.resourceId)",
-                title: "\(package.kind.rawValue.replacingOccurrences(of: "_", with: " ")) \(package.lifecycle)",
-                detail: package.displayName,
-                timestamp: package.updatedAt,
-                systemImage: package.kind == .proposal ? "checkmark.seal" : "shippingbox"
-            )
-        }
-        return Array((packageItems + catalogItems).prefix(12))
+        } ?? []
     }
 
-    private static func title(for change: CatalogChangeDTO) -> String {
-        let kind = change.kind?.replacingOccurrences(of: "_", with: " ") ?? "catalog changed"
-        return kind.prefix(1).uppercased() + kind.dropFirst()
-    }
-
-    private static func image(for subjectKind: String?) -> String {
-        switch subjectKind {
-        case "worker": return "cpu"
-        case "function": return "function"
-        case "trigger", "trigger_type": return "bolt"
-        default: return "clock"
+    private static func image(forModuleStatus status: String, resourceKind: String) -> String {
+        switch normalized(status) {
+        case "blocked": return "exclamationmark.octagon"
+        case "waiting": return "hourglass"
+        case "active": return "bolt.circle"
+        case "ready": return "checkmark.seal"
+        default:
+            switch resourceKind {
+            case "module_runtime_state": return "bolt.circle"
+            case "module_lifecycle_state": return "switch.2"
+            case "module_dependency_request", "module_dependency_decision", "module_dependency_policy":
+                return "shippingbox.and.arrow.backward"
+            default: return "clock"
+            }
         }
     }
 

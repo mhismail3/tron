@@ -1632,6 +1632,7 @@ packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs	test
 packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
 packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+ModuleActivity.swift	implementation	ios_engine	P3MSA-INV-008	Phase 3 Slice 23H bounded module activity DTO retained under typed engine protocol ownership.
 packages/ios-app/Sources/Engine/Transport/Clients/TranscriptionClient.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
 packages/ios-app/Sources/Engine/Transport/Clients/WorkerLifecycleClient.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
 packages/ios-app/Sources/Session/Chat/Coordinators/ChatTranscriptionCoordinator.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.

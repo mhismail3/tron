@@ -50,6 +50,15 @@ final class WorkerLifecycleClient: EngineDomainClient {
         )
     }
 
+    func moduleActivityOverview(limit: UInt64 = 40) async throws -> ModuleActivityOverviewDTO {
+        _ = try requireTransport().requireConnection()
+
+        return try await invokeRead(
+            "module_activity::overview",
+            ModuleActivityOverviewRequestDTO(limit: limit)
+        )
+    }
+
     func proposePackageChange(
         manifest: [String: AnyCodable],
         summary: String,

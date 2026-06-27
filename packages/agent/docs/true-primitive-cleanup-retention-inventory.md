@@ -42,7 +42,7 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 795 |
+| implementation | 796 |
 | support | 385 |
 | test | 574 |
 | docs | 135 |
@@ -70,7 +70,7 @@ The TSV covers tracked and newly introduced files under:
 | `import_preview` | 6 |
 | `jobs` | 8 |
 | `ios` | 98 |
-| `ios_engine` | 138 |
+| `ios_engine` | 139 |
 | `ios_session` | 75 |
 | `ios_ui` | 140 |
 | `mac` | 76 |

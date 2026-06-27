@@ -190,8 +190,11 @@ struct AgentCockpitSheet: View {
 
     private var activityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let moduleActivity = viewModel.overview.moduleActivity {
+                ModuleActivitySummaryCard(activity: moduleActivity)
+            }
             if viewModel.overview.activity.isEmpty {
-                CockpitEmptyState(symbol: "clock", title: "No activity", detail: "Catalog and lifecycle changes will appear here.")
+                CockpitEmptyState(symbol: "clock", title: "No module activity", detail: "Module-plane activity records will appear here.")
             } else {
                 ForEach(viewModel.overview.activity) { item in
                     ActivityRow(item: item)
@@ -413,29 +416,114 @@ private struct ActivityRow: View {
     let item: AgentCockpitActivityItem
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: item.systemImage)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronTextSecondary)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: item.systemImage)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(item.detail)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(2)
-                if let timestamp = item.timestamp {
-                    Text(timestamp)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
+                    .foregroundStyle(statusColor)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(item.detail)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
+                    Text("\(item.resourceKind.replacingOccurrences(of: "_", with: " ")) · \(item.status)")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(statusColor)
+                    if let timestamp = item.timestamp {
+                        Text(timestamp)
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextMuted)
+                    }
                 }
+                Spacer()
             }
-            Spacer()
+            if !item.authorityLabels.isEmpty {
+                WrapRow(items: item.authorityLabels, tint: .tronInfo)
+            }
+            if !item.touchedResources.isEmpty {
+                WrapRow(
+                    items: item.touchedResources.map { "\($0.label) \($0.total)\($0.truncated ? "+" : "")" },
+                    tint: .tronCyan
+                )
+            }
+            gateRow
         }
         .padding(11)
         .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: false)
+    }
+
+    @ViewBuilder
+    private var gateRow: some View {
+        let gates = [item.rollbackStatus, item.quarantineStatus, item.runtimeAuthorizationStatus]
+            .compactMap { $0 }
+            .filter { $0.state != "not_declared" && $0.state != "clear" }
+        if !gates.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(gates, id: \.label) { gate in
+                    Label("\(gate.label): \(gate.state)", systemImage: gate.blocked ? "xmark.octagon" : gate.waiting ? "hourglass" : "checkmark.circle")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(gate.blocked ? .tronError : gate.waiting ? .tronWarning : .tronTextSecondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        switch AgentCockpitProjection.normalized(item.status) {
+        case "blocked": return .tronError
+        case "waiting": return .tronWarning
+        case "active": return .tronCyan
+        case "ready": return .tronInfo
+        default: return .tronTextSecondary
+        }
+    }
+}
+
+private struct ModuleActivitySummaryCard: View {
+    let activity: ModuleActivityOverviewDTO
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(activity.summary.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(activity.summary.detail)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+            HStack(spacing: 8) {
+                summaryMetric("Active", activity.summary.active, .tronCyan)
+                summaryMetric("Waiting", activity.summary.waiting, .tronWarning)
+                summaryMetric("Blocked", activity.summary.blocked, .tronError)
+                summaryMetric("Total", activity.summary.total, .tronTextSecondary)
+            }
+            if !activity.resources.isEmpty {
+                WrapRow(
+                    items: activity.resources.prefix(4).map { "\($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.total)" },
+                    tint: .tronInfo
+                )
+            }
+        }
+        .padding(13)
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private func summaryMetric(_ title: String, _ value: Int, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)")
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

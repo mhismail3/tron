@@ -29,6 +29,7 @@ final class AgentCockpitViewModel {
             let launchAttempts = try await repository.listResources(kind: .launchAttempt, lifecycle: nil, limit: 100)
             let runtimeSurfaceResources = try await repository.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
             let discoveryReports = try await repository.listResources(kind: .catalogDiscoveryReport, lifecycle: nil, limit: 25)
+            let moduleActivity = try await repository.moduleActivityOverview(limit: 40)
             let runtimeSurfaces = try await inspectRuntimeSurfaces(
                 runtimeSurfaceResources.resources,
                 repository: repository
@@ -47,6 +48,7 @@ final class AgentCockpitViewModel {
                 resources: resourceResults,
                 runtimeSurfaces: runtimeSurfaces,
                 discoveryReports: discoveryReports.resources,
+                moduleActivity: moduleActivity,
                 connectionState: connectionState
             )
             lastError = nil

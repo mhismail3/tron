@@ -34,7 +34,31 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.title == "Verified")
         #expect(overview.discovery.families.first?.id == "local.echo")
         #expect(overview.discovery.reports.first?.lifecycle == "passed")
-        #expect(overview.activity.contains { $0.title.contains("worker package proposal") })
+        #expect(overview.activity.isEmpty)
+    }
+
+    @Test("Projection renders server-owned module activity without catalog fallback")
+    func projectionRendersServerOwnedModuleActivity() {
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [
+                sampleResource(
+                    id: "worker_package_proposal:local.echo:1.0.0:invocation-1",
+                    kind: .proposal,
+                    lifecycle: "proposed"
+                )
+            ],
+            moduleActivity: sampleModuleActivityOverview(),
+            connectionState: .connected
+        )
+
+        #expect(overview.activity.count == 1)
+        #expect(overview.activity.first?.title == "Runtime envelope")
+        #expect(overview.activity.first?.status == "active")
+        #expect(overview.activity.first?.resourceKind == "module_runtime_state")
+        #expect(overview.activity.first?.authorityLabels.contains("grant redacted") == true)
+        #expect(overview.activity.first?.touchedResources.first?.label == "output refs")
+        #expect(overview.moduleActivity?.projection.rawPayloadsReturned == false)
     }
 
     @Test("Projection marks degraded worker/function health")
@@ -250,6 +274,63 @@ struct AgentCockpitStateTests {
             createdByInvocationId: nil,
             createdAt: nil,
             updatedAt: "2026-06-14T12:00:00Z"
+        )
+    }
+
+    private func sampleModuleActivityOverview() -> ModuleActivityOverviewDTO {
+        ModuleActivityOverviewDTO(
+            schemaVersion: "tron.module_activity.overview.v1",
+            operation: "module_activity_overview",
+            summary: ModuleActivitySummaryDTO(
+                total: 1,
+                active: 1,
+                waiting: 0,
+                blocked: 0,
+                ready: 0,
+                recorded: 0,
+                title: "Module work active",
+                detail: "1 module runtime activities are active."
+            ),
+            timeline: [
+                ModuleActivityItemDTO(
+                    id: "module_runtime_state:version-1",
+                    resourceId: "module_runtime_state:runtime-1",
+                    resourceKind: "module_runtime_state",
+                    status: "active",
+                    state: "running",
+                    title: "Runtime envelope",
+                    detail: "Server-owned projection",
+                    authorityLabels: ["grant redacted"],
+                    touchedResources: [
+                        ModuleActivityResourceTouchDTO(label: "output refs", total: 1, truncated: false)
+                    ],
+                    rollbackStatus: ModuleActivityGateStatusDTO(label: "Rollback", state: "not_declared", blocked: false, waiting: false),
+                    quarantineStatus: ModuleActivityGateStatusDTO(label: "Quarantine", state: "clear", blocked: false, waiting: false),
+                    runtimeAuthorizationStatus: ModuleActivityGateStatusDTO(label: "Runtime authorization", state: "allowed", blocked: false, waiting: false),
+                    updatedAt: "2026-06-20T12:00:00Z"
+                )
+            ],
+            blocked: [],
+            waiting: [],
+            resources: [
+                ModuleActivityResourceSummaryDTO(kind: "module_runtime_state", total: 1, active: 1, waiting: 0, blocked: 0)
+            ],
+            projection: ModuleActivityProjectionPolicyDTO(
+                allowlist: "module_activity_cockpit_metadata_redacted_v1",
+                serverOwnedTruth: true,
+                metadataOnly: true,
+                rawPayloadsReturned: false,
+                rawCommandsReturned: false,
+                rawLogsReturned: false,
+                fileContentsReturned: false,
+                absolutePathsReturned: false,
+                grantIdsReturned: false,
+                authorityIdsReturned: false,
+                traceIdsReturned: false,
+                invocationIdsReturned: false,
+                tokenLikeMaterialReturned: false,
+                boundedItems: true
+            )
         )
     }
 

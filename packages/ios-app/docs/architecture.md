@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-19 (Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-27 (Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -16,9 +16,11 @@ a diagnostics surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
 surfaces live worker lifecycle catalog entries, capability discovery families,
 schema/health gaps, durable `catalog_discovery_report` history,
 package/resource status, confirmation-backed lifecycle actions, activity, and
-active `ui_surface` resources without adding fixed product panels. Cockpit
-refresh failures render as degraded while preserving the last good server facts,
-and malformed catalog entries surface catalog decode degradation instead of
+active `ui_surface` resources without adding fixed product panels. The Activity
+tab renders the server-owned `module_activity::overview` projection instead of
+fabricating catalog/package activity locally. Cockpit refresh failures render as
+degraded while preserving the last good server facts, and malformed catalog
+entries surface catalog decode degradation instead of
 being silently omitted from counts or verified/no-catalog summaries. The app
 does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
@@ -66,9 +68,9 @@ and matching database/event/settings/dependency work.
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Servers diagnostics Runtime Cockpit row and sheet for catalog discovery,
-  worker lifecycle catalog/resource state, package actions, activity, and
-  dynamic runtime surfaces. The primary chat shell does not mount passive
-  worker-runtime diagnostics.
+  worker lifecycle catalog/resource state, package actions, server-owned module
+  activity, and dynamic runtime surfaces. The primary chat shell does not mount
+  passive worker-runtime diagnostics.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
@@ -122,7 +124,7 @@ New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector 
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
-Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 `AgentCockpitProjection` is also the boundary that turns partial or failed
@@ -268,9 +270,10 @@ for mounted chat sessions, `AppConnectionRepository` for connection state,
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
 `WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
-resource, catalog-discovery report, and worker lifecycle calls.
+resource, catalog-discovery report, module-activity overview, and worker
+lifecycle calls.
 `AgentCockpitProjection` remains a pure mapper from server-owned facts to UI
-rows; it does not own worker truth.
+rows; it does not own worker truth, module-activity truth, or redaction policy.
 `Support/Composition` is the production composition root allowed to wire those
 protocols to engine-owned clients.
 
@@ -378,6 +381,12 @@ report/stream evidence only; it does not execute discovered functions. Its
 Surfaces tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
+Its Activity tab renders `module_activity::overview` summaries from the server:
+active/waiting/blocked status, generic timeline entries, authority labels,
+touched-resource summaries, and rollback/quarantine/runtime-authorization gate
+state. iOS does not parse raw module resource payloads, invent activity states,
+own redaction policy, or mount fixed source-control, memory, process, subagent,
+notification, or skill panels.
 The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
 and shared `TronSegmentedControl` tabs rather than a native segmented picker.
 Empty state is allowed when no runtime surface is published; a hardcoded sample

@@ -24,6 +24,7 @@ struct AgentCockpitViewModelTests {
         repository.resourcesByKind[.catalogDiscoveryReport] = [
             Self.resource(id: "catalog_discovery_report:7:invocation-1", kind: .catalogDiscoveryReport, lifecycle: "passed")
         ]
+        repository.moduleActivity = Self.moduleActivityOverview()
         repository.inspections["ui_surface:surface-1"] = Self.surfaceInspection()
         let viewModel = AgentCockpitViewModel()
 
@@ -38,6 +39,10 @@ struct AgentCockpitViewModelTests {
         #expect(viewModel.overview.discovery.reports.first?.resourceId == "catalog_discovery_report:7:invocation-1")
         #expect(viewModel.overview.runtimeSurfaces.first?.surface.title == "Runtime")
         #expect(viewModel.overview.runtimeSurfaces.first?.resourceRef.kind == "ui_surface")
+        #expect(repository.moduleActivityOverviewCallCount == 1)
+        #expect(viewModel.overview.moduleActivity?.summary.active == 1)
+        #expect(viewModel.overview.activity.first?.title == "Active module runtime")
+        #expect(viewModel.overview.activity.first?.status == "active")
         #expect(viewModel.lastError == nil)
     }
 
@@ -264,6 +269,63 @@ struct AgentCockpitViewModelTests {
             )
         )
     }
+
+    fileprivate static func moduleActivityOverview() -> ModuleActivityOverviewDTO {
+        ModuleActivityOverviewDTO(
+            schemaVersion: "tron.module_activity.overview.v1",
+            operation: "module_activity_overview",
+            summary: ModuleActivitySummaryDTO(
+                total: 1,
+                active: 1,
+                waiting: 0,
+                blocked: 0,
+                ready: 0,
+                recorded: 0,
+                title: "Module work active",
+                detail: "1 module runtime activities are active."
+            ),
+            timeline: [
+                ModuleActivityItemDTO(
+                    id: "module_runtime_state:version-1",
+                    resourceId: "module_runtime_state:runtime-1",
+                    resourceKind: "module_runtime_state",
+                    status: "active",
+                    state: "running",
+                    title: "Active module runtime",
+                    detail: "Server-owned projection",
+                    authorityLabels: ["grant redacted", "derived runtime grant required"],
+                    touchedResources: [
+                        ModuleActivityResourceTouchDTO(label: "output refs", total: 1, truncated: false)
+                    ],
+                    rollbackStatus: ModuleActivityGateStatusDTO(label: "Rollback", state: "not_declared", blocked: false, waiting: false),
+                    quarantineStatus: ModuleActivityGateStatusDTO(label: "Quarantine", state: "clear", blocked: false, waiting: false),
+                    runtimeAuthorizationStatus: ModuleActivityGateStatusDTO(label: "Runtime authorization", state: "allowed", blocked: false, waiting: false),
+                    updatedAt: "2026-06-20T12:00:00Z"
+                )
+            ],
+            blocked: [],
+            waiting: [],
+            resources: [
+                ModuleActivityResourceSummaryDTO(kind: "module_runtime_state", total: 1, active: 1, waiting: 0, blocked: 0)
+            ],
+            projection: ModuleActivityProjectionPolicyDTO(
+                allowlist: "module_activity_cockpit_metadata_redacted_v1",
+                serverOwnedTruth: true,
+                metadataOnly: true,
+                rawPayloadsReturned: false,
+                rawCommandsReturned: false,
+                rawLogsReturned: false,
+                fileContentsReturned: false,
+                absolutePathsReturned: false,
+                grantIdsReturned: false,
+                authorityIdsReturned: false,
+                traceIdsReturned: false,
+                invocationIdsReturned: false,
+                tokenLikeMaterialReturned: false,
+                boundedItems: true
+            )
+        )
+    }
 }
 
 @MainActor
@@ -278,8 +340,10 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
     var resourcesByKind: [WorkerLifecycleResourceKind: [EngineResourceDTO]] = [:]
     var listErrorsByKind: [WorkerLifecycleResourceKind: Error] = [:]
     var inspections: [String: ResourceInspectResultDTO] = [:]
+    var moduleActivity = AgentCockpitViewModelTests.moduleActivityOverview()
 
     var overviewCallCount = 0
+    var moduleActivityOverviewCallCount = 0
     var listedKinds: [WorkerLifecycleResourceKind] = []
     var inspectCallIds: [String] = []
     var installedManifest: [String: AnyCodable]?
@@ -309,6 +373,11 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
     func inspectResource(_ resourceId: String) async throws -> ResourceInspectResultDTO {
         inspectCallIds.append(resourceId)
         return inspections[resourceId] ?? ResourceInspectResultDTO(inspection: nil)
+    }
+
+    func moduleActivityOverview(limit: UInt64) async throws -> ModuleActivityOverviewDTO {
+        moduleActivityOverviewCallCount += 1
+        return moduleActivity
     }
 
     func proposePackageChange(

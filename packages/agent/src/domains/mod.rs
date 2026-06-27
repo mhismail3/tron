@@ -11,7 +11,8 @@
 //! inspect-only module manifest registry records, inert module proposal
 //! authoring records, inert module validation report records, metadata-only
 //! module install review-gate records, metadata-only module dependency request
-//! and policy records, durable non-interactive jobs, read-only Git/worktree observation,
+//! and policy records, inspect-only generic module activity cockpit projection,
+//! durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
 //! records, inert procedural state provenance records, and the single model-facing
@@ -42,6 +43,7 @@
 //! | `module_dependencies` | Metadata-only module dependency request, decision, and policy activation records |
 //! | `module_lifecycle` | Metadata-only module enable/disable/quarantine/rollback state |
 //! | `module_runtime` | Supervised module runtime envelope records for enabled modules |
+//! | `module_activity` | Read-only generic module activity cockpit projection |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -164,8 +166,13 @@
 //! network, secrets, timeout, cancellation, shutdown, output-ref, and authority
 //! proof metadata while leaving package feature semantics outside this domain
 //! and without raw commands/logs/output, PTYs, browser automation, dependency
-//! restoration, package-manager use, network access, or physical install. New
-//! domain behavior must add a
+//! restoration, package-manager use, network access, or physical install.
+//! Module activity restoration is inspect-only cockpit aggregation over
+//! existing module-plane records: it derives active, waiting, and blocked state
+//! from current module resource facts and returns bounded metadata summaries
+//! only, without raw payloads, local paths, command/log output,
+//! grant/authority ids, trace/invocation ids, activation, install, dependency
+//! restore, package-manager use, or network access. New domain behavior must add a
 //! contract, deps narrowing, handler binding, tests, and README/domain-doc
 //! updates together.
 //!
@@ -194,6 +201,7 @@ pub mod media;
 pub mod memory;
 pub mod message;
 pub mod model;
+pub mod module_activity;
 pub mod module_authoring;
 pub mod module_dependencies;
 pub mod module_install;

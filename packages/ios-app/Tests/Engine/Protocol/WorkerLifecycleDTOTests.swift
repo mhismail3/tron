@@ -179,6 +179,75 @@ struct WorkerLifecycleDTOTests {
         #expect(result.resourceRefs?.first?.kind == WorkerLifecycleResourceKind.catalogDiscoveryReport.rawValue)
     }
 
+    @Test("Module activity overview decodes server-owned cockpit projection")
+    func moduleActivityOverviewDecodesServerProjection() throws {
+        let json = """
+        {
+          "schemaVersion": "tron.module_activity.overview.v1",
+          "operation": "module_activity_overview",
+          "summary": {
+            "total": 1,
+            "active": 1,
+            "waiting": 0,
+            "blocked": 0,
+            "ready": 0,
+            "recorded": 0,
+            "title": "Module work active",
+            "detail": "1 module runtime activities are active."
+          },
+          "timeline": [
+            {
+              "id": "module_runtime_state:version-1",
+              "resourceId": "module_runtime_state:runtime-1",
+              "resourceKind": "module_runtime_state",
+              "status": "active",
+              "state": "running",
+              "title": "Runtime envelope",
+              "detail": "Server-owned projection",
+              "authorityLabels": ["grant redacted"],
+              "touchedResources": [
+                {"label": "output refs", "total": 1, "truncated": false}
+              ],
+              "rollbackStatus": {"label": "Rollback", "state": "not_declared", "blocked": false, "waiting": false},
+              "quarantineStatus": {"label": "Quarantine", "state": "clear", "blocked": false, "waiting": false},
+              "runtimeAuthorizationStatus": {"label": "Runtime authorization", "state": "allowed", "blocked": false, "waiting": false},
+              "updatedAt": "2026-06-20T12:00:00Z"
+            }
+          ],
+          "blocked": [],
+          "waiting": [],
+          "resources": [
+            {"kind": "module_runtime_state", "total": 1, "active": 1, "waiting": 0, "blocked": 0}
+          ],
+          "projection": {
+            "allowlist": "module_activity_cockpit_metadata_redacted_v1",
+            "serverOwnedTruth": true,
+            "metadataOnly": true,
+            "rawPayloadsReturned": false,
+            "rawCommandsReturned": false,
+            "rawLogsReturned": false,
+            "fileContentsReturned": false,
+            "absolutePathsReturned": false,
+            "grantIdsReturned": false,
+            "authorityIdsReturned": false,
+            "traceIdsReturned": false,
+            "invocationIdsReturned": false,
+            "tokenLikeMaterialReturned": false,
+            "boundedItems": true
+          }
+        }
+        """
+
+        let overview = try JSONDecoder().decode(ModuleActivityOverviewDTO.self, from: Data(json.utf8))
+
+        #expect(overview.operation == "module_activity_overview")
+        #expect(overview.summary.active == 1)
+        #expect(overview.timeline.first?.status == "active")
+        #expect(overview.timeline.first?.authorityLabels == ["grant redacted"])
+        #expect(overview.projection.serverOwnedTruth == true)
+        #expect(overview.projection.rawPayloadsReturned == false)
+    }
+
     @Test("Resource inspection decodes package manifest payload")
     func resourceInspectionDecodesPackageManifestPayload() throws {
         let json = """

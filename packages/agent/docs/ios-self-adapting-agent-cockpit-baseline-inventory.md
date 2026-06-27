@@ -11,14 +11,14 @@ Self-Updating Worker Runtime Foundation artifacts.
 ## Retained Runtime Surfaces
 
 - `WorkerLifecycleClient` is a thin `/engine` client over existing catalog,
-  resource, and worker-lifecycle functions.
+  resource, module-activity overview, and worker-lifecycle functions.
 - `WorkerLifecycleRepository` is the SwiftUI/session boundary; concrete engine
   clients remain inside `Support/Composition`.
 - `AgentCockpitProjection` is the pure state mapper for worker catalog rows,
-  package resource rows, lifecycle actions, confirmations, activity, and
-  runtime surface rows. Malformed catalog entries surface as catalog decode
-  degradation instead of being silently omitted from counts or verification
-  summaries.
+  package resource rows, lifecycle actions, confirmations, server-owned module
+  activity, and runtime surface rows. Malformed catalog entries surface as
+  catalog decode degradation instead of being silently omitted from counts or
+  verification summaries.
 - `AgentCockpitViewModel` refreshes server facts, executes confirmed lifecycle
   actions, decodes active `ui_surface` resources, and preserves the last good
   overview with an explicit degraded refresh-failure status when a connected
