@@ -82,6 +82,9 @@ pub(super) fn authorize_with_grant(
     if is_module_install_invocation(invocation) {
         ensure_module_install_grant_is_explicit(grant)?;
     }
+    if is_module_dependencies_invocation(invocation) {
+        ensure_module_dependencies_grant_is_explicit(grant)?;
+    }
     if is_module_lifecycle_invocation(invocation) {
         ensure_module_lifecycle_grant_is_explicit(grant)?;
     }
@@ -211,6 +214,25 @@ fn ensure_module_install_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
     Ok(())
 }
 
+fn ensure_module_dependencies_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module dependency operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ensure_module_lifecycle_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
     for (label, items) in [
         (
@@ -312,6 +334,9 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "moduleValidationReportResourceId",
         "moduleInstallRequestResourceId",
         "moduleInstallDecisionResourceId",
+        "moduleDependencyRequestResourceId",
+        "moduleDependencyDecisionResourceId",
+        "moduleDependencyPolicyResourceId",
         "moduleLifecycleResourceId",
         "moduleRuntimeResourceId",
     ]
@@ -478,6 +503,27 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some(
+            "module_dependency_request_list"
+            | "module_dependency_request_inspect"
+            | "module_dependency_decision_list"
+            | "module_dependency_decision_inspect"
+            | "module_dependency_policy_list"
+            | "module_dependency_policy_inspect",
+        ) => {
+            push_unique(&mut scopes, "module_dependencies.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some(
+            "module_dependency_request_record"
+            | "module_dependency_decision_record"
+            | "module_dependency_policy_activate",
+        ) => {
+            push_unique(&mut scopes, "module_dependencies.read");
+            push_unique(&mut scopes, "module_dependencies.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("module_lifecycle_list" | "module_lifecycle_inspect") => {
             push_unique(&mut scopes, "module_lifecycle.read");
             push_unique(&mut scopes, "resource.read");
@@ -621,6 +667,21 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             | "module_install_decision_inspect",
         ) => vec!["module_install_request", "module_install_decision"],
         Some(
+            "module_dependency_request_record"
+            | "module_dependency_request_list"
+            | "module_dependency_request_inspect"
+            | "module_dependency_decision_record"
+            | "module_dependency_decision_list"
+            | "module_dependency_decision_inspect"
+            | "module_dependency_policy_activate"
+            | "module_dependency_policy_list"
+            | "module_dependency_policy_inspect",
+        ) => vec![
+            "module_dependency_request",
+            "module_dependency_decision",
+            "module_dependency_policy",
+        ],
+        Some(
             "module_lifecycle_request"
             | "module_lifecycle_decision"
             | "module_lifecycle_list"
@@ -680,6 +741,24 @@ fn is_module_install_invocation(invocation: &Invocation) -> bool {
                     | "module_install_decision_record"
                     | "module_install_decision_list"
                     | "module_install_decision_inspect"
+            )
+        )
+}
+
+fn is_module_dependencies_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "module_dependency_request_record"
+                    | "module_dependency_request_list"
+                    | "module_dependency_request_inspect"
+                    | "module_dependency_decision_record"
+                    | "module_dependency_decision_list"
+                    | "module_dependency_decision_inspect"
+                    | "module_dependency_policy_activate"
+                    | "module_dependency_policy_list"
+                    | "module_dependency_policy_inspect"
             )
         )
 }
@@ -781,6 +860,15 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("module_install_request_record") => push_unique(&mut kinds, "module_install_request"),
         Some("module_install_decision_record") => {
             push_unique(&mut kinds, "module_install_decision")
+        }
+        Some("module_dependency_request_record") => {
+            push_unique(&mut kinds, "module_dependency_request")
+        }
+        Some("module_dependency_decision_record") => {
+            push_unique(&mut kinds, "module_dependency_decision")
+        }
+        Some("module_dependency_policy_activate") => {
+            push_unique(&mut kinds, "module_dependency_policy")
         }
         Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
         Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),

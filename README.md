@@ -801,6 +801,34 @@ dependencies, run package managers, touch repo-managed skills, store raw paths,
 env values, secrets, logs, commands, code, file contents, raw grant/authority
 ids, or token-like material, access networks, add public `/engine` APIs, or add
 fixed iOS panels.
+`domains/module_dependencies` owns the Phase 3 Slice 23G implementation
+candidate for metadata-only dependency request, decision, and policy activation
+records. It records current-session/workspace `module_dependency_request`
+resources with schema `tron.resource.module_dependency_request.v1` and payload
+schema `tron.module_dependency_request.v1`, `module_dependency_decision`
+resources with schema `tron.resource.module_dependency_decision.v1` and payload
+schema `tron.module_dependency_decision.v1`, and `module_dependency_policy`
+resources with schema `tron.resource.module_dependency_policy.v1` and payload
+schema `tron.module_dependency_policy.v1`. `module_dependency_request_record`,
+`module_dependency_request_list`, `module_dependency_request_inspect`,
+`module_dependency_decision_record`, `module_dependency_decision_list`,
+`module_dependency_decision_inspect`, `module_dependency_policy_activate`,
+`module_dependency_policy_list`, and `module_dependency_policy_inspect` stay
+behind `capability::execute` with explicit `module_dependencies.read` /
+`module_dependencies.write` plus `resource.read` / `resource.write` authority,
+non-wildcard kind selectors, exact inspect selectors, exact request/decision
+link selectors for decision and policy writes, and `networkPolicy: none`.
+Requests store owner module linkage, dependency identity, rationale,
+security/license/runtime need, removal plan, risk class, bounded refs, Cargo.toml
+and Cargo.lock parity evidence, idempotency, trace/replay refs, and side-effect
+proof only. Decisions require denial evidence for rejected or high-risk denied
+outcomes, and policy activation requires an approved dependency decision. The
+candidate does not restore dependencies, run package managers, mutate
+`Cargo.toml` or `Cargo.lock`, install packages, execute runtime code, access
+networks, store raw paths/env/logs/commands/code/file contents, raw dependency
+artifacts, raw package-manager output, raw grant/authority ids, token-like
+material, or personal-info literals, add public `/engine` APIs, or add fixed
+iOS panels.
 `domains/module_lifecycle` owns the accepted Phase 3 Slice 23E metadata
 lifecycle state for install-candidate modules. It records
 `module_lifecycle_state` resources with schema
@@ -1138,6 +1166,15 @@ Current primitive operations:
 | `module_install_decision_record` | Slice 23D accepted operation that records one scoped `module_install_decision` resource for approved install-candidate or rejected decision evidence only after fresh scoped approval and derived authority checks, with denial evidence required for rejected/denied outcomes and no approval-evidence authority minting, physical install, activation, execution, dependency restore, package managers, network, raw local data, or public `/engine` expansion. |
 | `module_install_decision_list` | Slice 23D accepted operation that lists scoped `module_install_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with approval/denial metadata refs, lifecycle state, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
 | `module_install_decision_inspect` | Slice 23D accepted operation that inspects one scoped `module_install_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only approval freshness summary, denial evidence refs, lifecycle, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
+| `module_dependency_request_record` | Slice 23G implementation-candidate operation that records one scoped `module_dependency_request` resource for metadata-only dependency review, with owner/module linkage, dependency identity, rationale, security/license/runtime need, removal plan, risk class, Cargo.toml/Cargo.lock parity evidence, bounded refs, idempotency fingerprint, `networkPolicy: none`, and no package-manager execution, dependency restoration, manifest/lockfile mutation, raw dependency artifacts, raw local material, or network access. |
+| `module_dependency_request_list` | Slice 23G implementation-candidate operation that lists scoped `module_dependency_request` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, parity evidence summaries, `networkPolicy: none`, and no dependency restoration, package-manager, network, or workspace side effects. |
+| `module_dependency_request_inspect` | Slice 23G implementation-candidate operation that inspects one scoped `module_dependency_request` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only dependency review evidence without raw paths, env values, secrets, logs, commands, code, file contents, package-manager output, raw grant ids, raw authority ids, token-like material, or personal-info literals. |
+| `module_dependency_decision_record` | Slice 23G implementation-candidate operation that records one scoped `module_dependency_decision` resource after exact request selector authority, with approved-policy or rejected/denied decision evidence, high-risk denial evidence requirements, bounded refs, idempotency fingerprint, `networkPolicy: none`, and no approval-evidence authority minting, dependency restoration, package-manager execution, manifest/lockfile mutation, network, or raw local data. |
+| `module_dependency_decision_list` | Slice 23G implementation-candidate operation that lists scoped `module_dependency_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with request linkage, denial evidence summaries, `networkPolicy: none`, and no package-manager, network, install, or dependency side effects. |
+| `module_dependency_decision_inspect` | Slice 23G implementation-candidate operation that inspects one scoped `module_dependency_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only decision evidence without raw dependency artifacts, package-manager output, local paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
+| `module_dependency_policy_activate` | Slice 23G implementation-candidate operation that records one active scoped `module_dependency_policy` resource from an approved dependency decision after exact decision selector authority, carrying approved metadata policy evidence for later module-pack/runtime work without running package managers, restoring dependencies, mutating manifests or lockfiles, executing runtime code, or accessing networks. |
+| `module_dependency_policy_list` | Slice 23G implementation-candidate operation that lists scoped `module_dependency_policy` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with active policy metadata, request/decision linkage, `networkPolicy: none`, and no install, dependency restoration, package-manager, network, or workspace side effects. |
+| `module_dependency_policy_inspect` | Slice 23G implementation-candidate operation that inspects one scoped `module_dependency_policy` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning approved metadata policy evidence without raw paths, env values, secrets, logs, commands, code, file contents, raw artifacts, raw grant ids, raw authority ids, or token-like material. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -1195,7 +1232,8 @@ The accepted startup-registration baseline keeps only loop infrastructure domain
 `worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
 accepted Phase 3 module-plane additions through Slice 23F include `module_registry`,
 `module_authoring`, `module_validation`, `module_install`, `module_lifecycle`,
-and `module_runtime`;
+and `module_runtime`; Slice 23G adds pending-review `module_dependencies`
+metadata policy records;
 they remain provider-visible only as operation values
 under the single `capability::execute` primitive, not as public `/engine`
 expansion. The
@@ -1605,6 +1643,24 @@ package managers, touch repo-managed `packages/agent/skills`, access networks,
 store or project raw logs/commands/env/code/file contents/unsafe paths,
 token-like material, raw grant or authority ids, add public `/engine` APIs, or
 add fixed iOS panels.
+
+Phase 3 Slice 23G adds a pending-review module dependency request and policy
+activation candidate. The generic resource store registers
+`module_dependency_request`, `module_dependency_decision`, and
+`module_dependency_policy` resource schemas with payload schema versions
+`tron.module_dependency_request.v1`, `tron.module_dependency_decision.v1`, and
+`tron.module_dependency_policy.v1`. The dependency request, decision, and policy
+operations stay behind the single `capability::execute` primitive and require
+explicit module-dependencies/resource authority plus non-wildcard kind selectors;
+inspect requires exact `resource:<module_dependency_*_id>` selectors, decision
+writes require an exact request selector, and policy activation requires an
+exact approved decision selector. Policy activation records approved metadata
+for later module pack/runtime work only. It does not run package managers,
+restore dependencies, mutate `Cargo.toml` or `Cargo.lock`, install packages,
+execute code, access networks, store raw package-manager output, raw dependency
+artifacts, raw paths/env/logs/commands/code/file contents, token-like material,
+raw grant or authority ids, personal-info literals, add public `/engine` APIs,
+or add fixed iOS panels.
 
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
@@ -2251,7 +2307,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, pending-review `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

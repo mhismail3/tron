@@ -601,3 +601,58 @@ Acceptance validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml execute_model_schema --lib` | exit 0 | Provider-visible execute schema exposes bounded module-runtime operation values and fields. |
 | DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, ODA, and PERF invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, observability, and resource-governance inventories passed after the Slice 23F updates. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
+
+## Slice 23G Implementation Candidate: Module Dependency Request And Policy Activation
+
+Discovery thread `019f0838-0bbf-7662-b932-989aa5efa416` selected Slice 23G
+from accepted baseline
+`origin/main@5b632a024e9a957e2a2a19447f36416bdc7fda7f`
+(`docs: accept phase 3 slice 23f`). Implementation branch
+`codex/phase-3-slice-23g-module-dependency-policy` records the candidate.
+
+Implementation-candidate scope:
+
+- Moves `P3MSA-INV-007` from `planned` to `pending_review`; it is not
+  `current_baseline` until independent review and mainline integration accept
+  it.
+- Adds focused `domains/module_dependencies` custody for metadata-only
+  dependency request, decision, and approved policy activation records.
+- Registers `module_dependency_request`, `module_dependency_decision`, and
+  `module_dependency_policy` resource schemas with payload schema versions
+  `tron.module_dependency_request.v1`, `tron.module_dependency_decision.v1`,
+  and `tron.module_dependency_policy.v1`.
+- Adds provider-visible `capability::execute` operations
+  `module_dependency_request_record`, `module_dependency_request_list`,
+  `module_dependency_request_inspect`, `module_dependency_decision_record`,
+  `module_dependency_decision_list`, `module_dependency_decision_inspect`,
+  `module_dependency_policy_activate`, `module_dependency_policy_list`, and
+  `module_dependency_policy_inspect`.
+- Enforces explicit `module_dependencies.read` / `module_dependencies.write`
+  plus `resource.read` / `resource.write` authority, non-wildcard kind
+  selectors, exact inspect selectors, exact request selector authority for
+  decisions, exact approved decision selector authority for policy activation,
+  current session/workspace scope, and `networkPolicy: none`.
+- Stores owner/module linkage, dependency identity, rationale,
+  security/license/runtime need, removal plan, risk class, Cargo.toml/Cargo.lock
+  parity evidence, denial evidence, idempotency fingerprints, trace/replay refs,
+  bounded refs, side-effect proof, and redacted projections only.
+- Deliberately excludes package-manager execution, dependency restoration,
+  `Cargo.toml` or `Cargo.lock` mutation, physical package install, runtime code
+  execution, live network access, raw dependency artifacts, raw package-manager
+  output, raw paths/env/logs/commands/code/file contents, raw grant ids, raw
+  authority ids, token-like material, personal-info literals, public `/engine`
+  expansion, fixed native panels, production deploy/update behavior, and
+  repo-managed `packages/agent/skills`.
+
+Implementation-candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib module_dependencies -- --nocapture` | exit 0 | Module dependency schemas, record/list/inspect, idempotent replay, policy activation, unsafe payload denial, parity side-effect denial, denial evidence, exact selectors, and provider-safe projections passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib module_dependency -- --nocapture` | exit 0 | Module dependency resource registration and runtime grant derivation tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib execute_model_schema -- --nocapture` | exit 0 | Provider-visible execute schema exposes bounded module dependency operation values and fields. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | OpenAI provider execute guidance includes the new metadata-only module dependency operations and keeps `module_dependency_resolve` rejected. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23G source and tests. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check gate passed; existing provider/model/resource-store dead-code warnings remain. |
+| DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, ODA, PERF, and DSEMD invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, observability, resource-governance, and storage inventory gates passed after the Slice 23G updates. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, changed-path ignored-file scan, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
