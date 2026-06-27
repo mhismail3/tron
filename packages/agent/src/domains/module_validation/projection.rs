@@ -2,6 +2,8 @@ use serde_json::{Map, Value, json};
 
 use crate::engine::{EngineResource, EngineResourceVersion};
 
+use super::validation::contains_shell_command_like;
+
 const PROJECTION_STRING_BYTES: usize = 512;
 const PROJECTION_ID_BYTES: usize = 256;
 const PROJECTION_TIMESTAMP_BYTES: usize = 64;
@@ -205,11 +207,14 @@ fn projected_evidence(value: Option<&Value>) -> Value {
     match value {
         Some(Value::Object(map)) => {
             let mut projected = Map::new();
-            for key in [
-                "docs", "tests", "commands", "results", "failures", "trace", "replay",
-            ] {
+            for key in ["docs", "tests", "failures", "trace", "replay"] {
                 if let Some(child) = map.get(key) {
                     projected.insert(key.to_owned(), projected_refs(Some(child)));
+                }
+            }
+            for key in ["commands", "results"] {
+                if let Some(child) = map.get(key) {
+                    projected.insert(key.to_owned(), projected_command_result_refs(Some(child)));
                 }
             }
             Value::Object(projected)
@@ -251,7 +256,7 @@ fn projected_check_item(value: &Value) -> Value {
 fn projected_refs(value: Option<&Value>) -> Value {
     match value {
         Some(Value::Array(items)) => json!({
-            "items": items.iter().take(MAX_PROJECTED_REFS).map(projected_ref_item).collect::<Vec<_>>(),
+            "items": items.iter().take(MAX_PROJECTED_REFS).map(|item| projected_ref_item(item, false)).collect::<Vec<_>>(),
             "total": items.len(),
             "truncated": items.len() > MAX_PROJECTED_REFS
         }),
@@ -259,7 +264,18 @@ fn projected_refs(value: Option<&Value>) -> Value {
     }
 }
 
-fn projected_ref_item(value: &Value) -> Value {
+fn projected_command_result_refs(value: Option<&Value>) -> Value {
+    match value {
+        Some(Value::Array(items)) => json!({
+            "items": items.iter().take(MAX_PROJECTED_REFS).map(|item| projected_ref_item(item, true)).collect::<Vec<_>>(),
+            "total": items.len(),
+            "truncated": items.len() > MAX_PROJECTED_REFS
+        }),
+        _ => json!({"items": [], "total": 0, "truncated": false}),
+    }
+}
+
+fn projected_ref_item(value: &Value, redact_shell_text: bool) -> Value {
     let Value::Object(item) = value else {
         return Value::Null;
     };
@@ -275,12 +291,33 @@ fn projected_ref_item(value: &Value) -> Value {
         "preview",
         "summary",
     ] {
-        insert_projected_string(item, &mut projected, key, PROJECTION_STRING_BYTES);
+        if redact_shell_text && matches!(key, "preview" | "summary") {
+            insert_projected_command_result_text(item, &mut projected, key);
+        } else {
+            insert_projected_string(item, &mut projected, key, PROJECTION_STRING_BYTES);
+        }
     }
     if projected.is_empty() && !item.is_empty() {
         projected.insert("redacted".to_owned(), json!(true));
     }
     Value::Object(projected)
+}
+
+fn insert_projected_command_result_text(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+    key: &str,
+) {
+    if let Some(value) = source.get(key).and_then(Value::as_str) {
+        if contains_shell_command_like(value) {
+            target.insert(format!("{key}Redacted"), json!(true));
+        } else {
+            target.insert(
+                key.to_owned(),
+                projected_text(value, PROJECTION_STRING_BYTES),
+            );
+        }
+    }
 }
 
 fn projected_authority(value: Option<&Value>) -> Value {

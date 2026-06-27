@@ -72,12 +72,12 @@ pub(crate) async fn record_module_validation_report_value_at(
     )?;
     let doc_evidence = required_ref_array(payload, "docEvidence")?;
     let test_evidence = required_ref_array(payload, "testEvidence")?;
-    let command_refs = validate_ref_array(
+    let command_refs = validate_command_result_ref_array(
         "commandRefs",
         &optional_array(payload, "commandRefs")?.unwrap_or_default(),
         MAX_REFS,
     )?;
-    let result_refs = validate_ref_array(
+    let result_refs = validate_command_result_ref_array(
         "resultRefs",
         &optional_array(payload, "resultRefs")?.unwrap_or_default(),
         MAX_REFS,

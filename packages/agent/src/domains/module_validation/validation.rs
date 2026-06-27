@@ -123,6 +123,7 @@ pub(super) fn bounded_text(
     reject_secret_like(field, trimmed)?;
     reject_provider_visible_token_like(field, trimmed)?;
     reject_prompt_like(field, trimmed)?;
+    reject_shell_command_like(field, trimmed)?;
     Ok(trimmed.to_owned())
 }
 
@@ -230,6 +231,22 @@ pub(super) fn validate_ref_array(
     refs.iter()
         .map(|value| sanitize_ref_item(label, value))
         .collect()
+}
+
+pub(super) fn validate_command_result_ref_array(
+    label: &str,
+    refs: &[Value],
+    max_items: usize,
+) -> Result<Vec<Value>, CapabilityError> {
+    let refs = validate_ref_array(label, refs, max_items)?;
+    for item in &refs {
+        for key in ["preview", "summary"] {
+            if let Some(value) = item.get(key).and_then(Value::as_str) {
+                reject_shell_command_like(&format!("{label}.{key}"), value)?;
+            }
+        }
+    }
+    Ok(refs)
 }
 
 pub(super) fn validation_result(payload: &Value) -> Result<Value, CapabilityError> {
@@ -589,6 +606,112 @@ fn reject_prompt_like(field: &str, value: &str) -> Result<(), CapabilityError> {
     {
         return Err(invalid(format!(
             "{field} must not contain prompt-injection-like material"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn contains_shell_command_like(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    let tokens = lowered
+        .split_whitespace()
+        .map(|token| token.trim_matches(|character: char| matches!(character, '`' | '"' | '\'')))
+        .collect::<Vec<_>>();
+    let first_token = tokens.first().copied().unwrap_or_default();
+    let second_token = tokens.get(1).copied().unwrap_or_default();
+    if first_token.starts_with("scripts/tron") || first_token.starts_with("./") {
+        return true;
+    }
+    if command_token_pair_is_shell_like(first_token, second_token) {
+        return true;
+    }
+    [
+        " cargo test",
+        " cargo check",
+        " cargo clippy",
+        " cargo fmt",
+        " xcodebuild test",
+        " xcodegen generate",
+        " scripts/tron ",
+        " tron ci",
+        " tron dev",
+        " git status",
+        " git diff",
+        " git ls-files",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+        || lowered.contains(" && ")
+        || lowered.contains(" || ")
+        || lowered.contains("$(")
+        || lowered.contains('`')
+}
+
+fn command_token_pair_is_shell_like(first_token: &str, second_token: &str) -> bool {
+    if first_token.is_empty() || second_token.is_empty() {
+        return false;
+    }
+    if second_token.starts_with('-')
+        || second_token.starts_with("./")
+        || second_token.starts_with('/')
+        || second_token.contains('=')
+    {
+        return matches!(
+            first_token,
+            "cargo"
+                | "git"
+                | "xcodebuild"
+                | "xcodegen"
+                | "tron"
+                | "bash"
+                | "sh"
+                | "zsh"
+                | "python"
+                | "python3"
+                | "node"
+                | "npm"
+                | "pnpm"
+                | "yarn"
+                | "make"
+                | "swift"
+                | "swiftc"
+                | "rustc"
+                | "rustup"
+                | "docker"
+                | "brew"
+                | "curl"
+                | "wget"
+        );
+    }
+    matches!(
+        (first_token, second_token),
+        (
+            "cargo",
+            "test" | "check" | "clippy" | "fmt" | "build" | "run" | "doc" | "metadata"
+        ) | (
+            "git",
+            "status" | "diff" | "show" | "log" | "ls-files" | "grep" | "add" | "commit"
+        ) | ("xcodebuild", "test" | "build" | "clean")
+            | ("xcodegen", "generate")
+            | ("tron", "ci" | "dev" | "test" | "build")
+            | ("bash" | "sh" | "zsh", _)
+            | (
+                "python" | "python3" | "node" | "npm" | "pnpm" | "yarn" | "make",
+                _
+            )
+            | ("swift" | "swiftc" | "rustc" | "rustup", _)
+            | ("docker" | "brew" | "curl" | "wget", _)
+    )
+}
+
+fn reject_shell_command_like(field: &str, value: &str) -> Result<(), CapabilityError> {
+    if contains_shell_command_like(value) {
+        return Err(invalid(format!(
+            "{field} must not contain shell-command-like material"
         )));
     }
     Ok(())

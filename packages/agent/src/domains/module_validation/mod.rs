@@ -7,7 +7,10 @@
 //! `module_validation_inspect`. Reports are metadata-only, resource-backed, and
 //! intentionally non-installable/non-executable. They store supplied refs,
 //! fingerprints, parity checks, docs/tests evidence, command/result refs, and
-//! failure evidence without running commands or module code.
+//! failure evidence without running commands or module code. Command/result refs
+//! may carry deterministic identities, statuses, fingerprints, and bounded
+//! evidence summaries, but provider-visible preview/summary text is rejected or
+//! redacted when it looks like raw shell command text.
 //!
 //! ## Submodules
 //!
@@ -17,6 +20,7 @@
 //! | `contract` | Worker id, stream topic, scope, and schema constants |
 //! | `projection` | Bounded provider-safe validation report projections |
 //! | `service` | Timestamp-injected record/list/inspect behavior |
+//! | `shell_ref_tests` | Raw-shell ref denial and safe summary regressions |
 //! | `validation` | Text, ref, parity, evidence, idempotency, and unsafe-field checks |
 //! | `tests` | Schema, authority, replay, redaction, and side-effect regressions |
 //!
@@ -26,8 +30,8 @@
 //! physical module workspace directory, install dependencies, run commands,
 //! execute code, touch repo-managed `packages/agent/skills`, access networks,
 //! inject prompts, expose raw logs/commands/env/code/file contents, or leak
-//! rejected raw payload material through trace records. Later gates own install
-//! review, activation, execution, and UI.
+//! rejected raw payload material through trace records or bounded ref summaries.
+//! Later gates own install review, activation, execution, and UI.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -54,5 +58,7 @@ pub(crate) fn worker_module(
     )
 }
 
+#[cfg(test)]
+mod shell_ref_tests;
 #[cfg(test)]
 mod tests;

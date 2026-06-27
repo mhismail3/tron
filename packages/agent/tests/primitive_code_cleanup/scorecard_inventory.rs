@@ -98,6 +98,7 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
 
     let mut seen_paths = HashSet::new();
     let mut counts = HashMap::<&str, usize>::new();
+    let mut classifications = HashMap::<String, String>::new();
     let mut lines = file_inventory.lines();
     assert_eq!(
         lines.next(),
@@ -125,6 +126,7 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
             "inventory row must name owner, cleanup row, and reason: {line}"
         );
         *counts.entry(columns[1]).or_insert(0) += 1;
+        classifications.insert(columns[0].to_owned(), columns[1].to_owned());
         assert!(
             seen_paths.insert(columns[0].to_owned()),
             "duplicate file inventory row for {}",
@@ -139,6 +141,27 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
         assert!(
             seen_paths.contains(&path),
             "tracked file missing cleanup inventory classification: {path}"
+        );
+    }
+
+    for path in [
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs",
+        "packages/agent/src/domains/capability/module_validation_contract.rs",
+        "packages/agent/src/domains/capability/operations/module_validation.rs",
+        "packages/agent/src/domains/module_validation/authority.rs",
+        "packages/agent/src/domains/module_validation/contract.rs",
+        "packages/agent/src/domains/module_validation/mod.rs",
+        "packages/agent/src/domains/module_validation/projection.rs",
+        "packages/agent/src/domains/module_validation/service.rs",
+        "packages/agent/src/domains/module_validation/shell_ref_tests.rs",
+        "packages/agent/src/domains/module_validation/tests.rs",
+        "packages/agent/src/domains/module_validation/validation.rs",
+        "packages/agent/src/engine/durability/resources/module_validation_definitions.rs",
+    ] {
+        assert_eq!(
+            classifications.get(path).map(String::as_str),
+            Some("retain"),
+            "PCC inventory must retain Slice 23C path: {path}"
         );
     }
 

@@ -40,6 +40,7 @@ fn tracked_source_inventory_is_formalized() {
 
     let mut seen_paths = HashSet::new();
     let mut counts = std::collections::HashMap::<String, usize>::new();
+    let mut classifications = std::collections::HashMap::<String, String>::new();
     for line in lines {
         let columns: Vec<_> = line.split('\t').collect();
         assert_eq!(
@@ -65,6 +66,7 @@ fn tracked_source_inventory_is_formalized() {
             "duplicate TPC inventory row for {}",
             columns[0]
         );
+        classifications.insert(columns[0].to_owned(), columns[1].to_owned());
         *counts.entry(columns[1].to_owned()).or_default() += 1;
     }
 
@@ -79,6 +81,63 @@ fn tracked_source_inventory_is_formalized() {
         assert!(
             seen_paths.contains(&path),
             "tracked TPC source path missing retention classification: {path}"
+        );
+    }
+
+    for (path, expected_classification) in [
+        (
+            "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs",
+            "test",
+        ),
+        (
+            "packages/agent/src/domains/capability/module_validation_contract.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/capability/operations/module_validation.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/authority.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/contract.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/mod.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/projection.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/service.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/shell_ref_tests.rs",
+            "test",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/tests.rs",
+            "test",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/validation.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/engine/durability/resources/module_validation_definitions.rs",
+            "implementation",
+        ),
+    ] {
+        assert_eq!(
+            classifications.get(path).map(String::as_str),
+            Some(expected_classification),
+            "TPC inventory classification drifted for Slice 23C path: {path}"
         );
     }
 }
