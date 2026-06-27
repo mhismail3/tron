@@ -74,6 +74,7 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_runtime_inspect"
             | "module_runtime_cancel"
     );
+    let file_git_module_operation = is_file_git_module_operation(operation);
     let notification_push_requested = operation == "notification_send"
         && effective_args
             .get("pushRequested")
@@ -89,6 +90,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_dependencies_operation
         || module_lifecycle_operation
         || module_runtime_operation
+        || file_git_module_operation
     {
         vec![target_function_id.as_str().to_owned()]
     } else {
@@ -109,6 +111,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_dependencies_operation
         && !module_lifecycle_operation
         && !module_runtime_operation
+        && !file_git_module_operation
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     }
@@ -346,6 +349,40 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff"
+    ) {
+        allowed_authority_scopes.extend(["filesystem.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "filesystem_write" | "filesystem_edit" | "filesystem_apply_patch"
+    ) {
+        allowed_authority_scopes.extend([
+            "filesystem.read".to_owned(),
+            "filesystem.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "git_status" | "git_diff" | "git_branch_inventory"
+    ) {
+        allowed_authority_scopes.extend(["git.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "git_stage" | "git_unstage" | "git_commit" | "git_branch_start"
+    ) {
+        allowed_authority_scopes.extend([
+            "git.read".to_owned(),
+            "git.write".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "procedural_state_list" | "procedural_state_inspect"
     ) {
         allowed_authority_scopes.extend(["procedural.read".to_owned(), "resource.read".to_owned()]);
@@ -394,6 +431,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_dependencies_operation
         || module_lifecycle_operation
         || module_runtime_operation
+        || file_git_module_operation
     {
         Vec::new()
     } else {
@@ -520,6 +558,37 @@ pub(super) async fn derive_capability_runtime_grant(
         if operation == "module_runtime_request" {
             allowed_resource_kinds.push("module_lifecycle_state".to_owned());
         }
+    } else if matches!(
+        operation,
+        "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff"
+    ) {
+        allowed_resource_kinds.push("materialized_file".to_owned());
+    } else if matches!(
+        operation,
+        "filesystem_write" | "filesystem_edit" | "filesystem_apply_patch"
+    ) {
+        allowed_resource_kinds
+            .extend(["patch_proposal".to_owned(), "materialized_file".to_owned()]);
+    } else if matches!(
+        operation,
+        "git_status" | "git_diff" | "git_branch_inventory"
+    ) {
+        allowed_resource_kinds.extend([
+            "git_index_change".to_owned(),
+            "git_commit".to_owned(),
+            "git_branch_start".to_owned(),
+        ]);
+    } else if matches!(operation, "git_stage" | "git_unstage") {
+        allowed_resource_kinds.push("git_index_change".to_owned());
+    } else if operation == "git_commit" {
+        allowed_resource_kinds.push("git_commit".to_owned());
+    } else if operation == "git_branch_start" {
+        allowed_resource_kinds.push("git_branch_start".to_owned());
     } else if matches!(
         operation,
         "subagent_launch"
@@ -683,6 +752,28 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
         .get(field)
         .and_then(Value::as_str)
         .is_some_and(|item| !item.trim().is_empty())
+}
+
+fn is_file_git_module_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff"
+            | "filesystem_write"
+            | "filesystem_edit"
+            | "filesystem_apply_patch"
+            | "git_status"
+            | "git_diff"
+            | "git_branch_inventory"
+            | "git_stage"
+            | "git_unstage"
+            | "git_commit"
+            | "git_branch_start"
+    )
 }
 
 fn push_resource_selector_arg(selectors: &mut Vec<String>, args: &Value, field: &str) {

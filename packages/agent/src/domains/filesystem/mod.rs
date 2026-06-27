@@ -10,7 +10,10 @@
 //!
 //! The toolbox is not a legacy resurrection. It consumes existing engine
 //! primitives for authority roots, resources, idempotency, leases,
-//! compensation, streams, traces, and replay evidence.
+//! compensation, streams, traces, and replay evidence. Phase 3 Slice 24A
+//! declares the existing agent toolbox operations in the pending-review
+//! `file_git_module` manifest and derives exact filesystem/resource authority
+//! for them without adding new provider-visible tools.
 //!
 //! ## Submodules
 //!

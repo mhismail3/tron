@@ -37,6 +37,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
     for resource_id in [
         "module_manifest:module_registry",
         "module_manifest:capability",
+        "module_manifest:file_git_module",
     ] {
         let inspection = host
             .inspect_resource(resource_id)
@@ -132,6 +133,90 @@ async fn list_and_inspect_return_bounded_provider_safe_projections() {
         json!("validated")
     );
     assert_provider_projection_has_no_raw_sensitive_material(&inspected);
+}
+
+#[tokio::test]
+async fn file_git_module_manifest_projects_bounded_pending_review_metadata() {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let grant_id = derive_module_read_grant(
+        &host,
+        "file-git-module",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[MODULE_MANIFEST_KIND],
+        &[
+            "kind:module_manifest",
+            "resource:module_manifest:file_git_module",
+        ],
+        "none",
+    )
+    .await;
+
+    let inspect_invocation = module_invocation(
+        "file-git-module",
+        json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:file_git_module",
+            "maxItems": 1000
+        }),
+        grant_id,
+    );
+    let inspected = inspect_module_value(&host, &inspect_invocation, &inspect_invocation.payload)
+        .await
+        .expect("inspect file/git module");
+    let resource = &inspected["resource"];
+
+    assert_eq!(
+        resource["identity"]["moduleId"]["text"],
+        json!("file_git_module")
+    );
+    assert_eq!(resource["identity"]["kind"]["text"], json!("module_pack"));
+    assert_eq!(
+        resource["manifestLifecycle"]["state"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(
+        resource["manifestLifecycle"]["activation"]["text"],
+        json!("authority_mapped_module_pack")
+    );
+    assert_eq!(resource["capabilityDeclarations"]["total"], json!(16));
+    assert_eq!(resource["resourceDeclarations"]["total"], json!(5));
+    assert_eq!(resource["authorityNeeds"]["total"], json!(6));
+    assert_eq!(resource["capabilityDeclarations"]["maxItems"], json!(100));
+    assert_side_effects_are_absent(&inspected);
+    assert_provider_projection_has_no_raw_sensitive_material(&inspected);
+
+    let rendered = serde_json::to_string(&inspected).expect("serialize file/git projection");
+    for operation in [
+        "filesystem_read",
+        "filesystem_write",
+        "git_status",
+        "git_diff",
+        "git_branch_inventory",
+        "git_stage",
+        "git_unstage",
+        "git_commit",
+        "git_branch_start",
+    ] {
+        assert!(
+            rendered.contains(operation),
+            "missing operation {operation}"
+        );
+    }
+    for rejected in [
+        "git_checkout",
+        "git_merge",
+        "git_rebase",
+        "git_reset",
+        "git_stash",
+        "git_fetch",
+        "git_pull",
+        "git_push",
+    ] {
+        assert!(
+            !rendered.contains(rejected),
+            "leaked rejected operation {rejected}"
+        );
+    }
 }
 
 #[tokio::test]

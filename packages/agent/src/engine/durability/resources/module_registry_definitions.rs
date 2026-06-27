@@ -49,10 +49,14 @@ pub(super) fn module_registry_resource_type_definitions() -> Vec<RegisterResourc
 }
 
 pub(in crate::engine) fn builtin_module_manifest_resources() -> Vec<CreateResource> {
-    [module_registry_manifest(), capability_manifest()]
-        .into_iter()
-        .map(seed_resource)
-        .collect()
+    [
+        module_registry_manifest(),
+        capability_manifest(),
+        file_git_module_manifest(),
+    ]
+    .into_iter()
+    .map(seed_resource)
+    .collect()
 }
 
 fn module_manifest_schema() -> Value {
@@ -328,6 +332,149 @@ fn capability_manifest() -> Value {
             "activation": "core_primitive",
             "installable": false,
             "executable": true,
+            "networkPolicy": "none"
+        },
+        "redactionProof": redaction_proof()
+    })
+}
+
+fn file_git_module_manifest() -> Value {
+    json!({
+        "schemaVersion": MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION,
+        "identity": {
+            "moduleId": "file_git_module",
+            "name": "File And Source-Control Module Pack",
+            "kind": "module_pack",
+            "owner": "domains::filesystem+domains::git",
+            "summary": "Governed file and source-control workflow pack through capability::execute",
+            "version": "phase3-slice24a"
+        },
+        "capabilityDeclarations": [
+            {"operation": "filesystem_read", "effect": "read", "providerVisible": true, "description": "Read bounded UTF-8 file content under the trusted working-directory root"},
+            {"operation": "filesystem_list", "effect": "read", "providerVisible": true, "description": "List bounded directory entries under the trusted working-directory root"},
+            {"operation": "filesystem_find", "effect": "read", "providerVisible": true, "description": "Find bounded filesystem entries under the trusted working-directory root"},
+            {"operation": "filesystem_glob", "effect": "read", "providerVisible": true, "description": "Glob bounded filesystem entries under the trusted working-directory root"},
+            {"operation": "filesystem_search_text", "effect": "read", "providerVisible": true, "description": "Search bounded text matches under the trusted working-directory root"},
+            {"operation": "filesystem_diff", "effect": "read", "providerVisible": true, "description": "Preview bounded file diffs under the trusted working-directory root"},
+            {"operation": "filesystem_write", "effect": "write", "providerVisible": true, "description": "Create patch proposal evidence and optionally materialize one file with idempotency"},
+            {"operation": "filesystem_edit", "effect": "write", "providerVisible": true, "description": "Create exact-text patch proposal evidence and optionally materialize one file with idempotency"},
+            {"operation": "filesystem_apply_patch", "effect": "write", "providerVisible": true, "description": "Create patch proposal evidence and optionally materialize one file with idempotency"},
+            {"operation": "git_status", "effect": "read", "providerVisible": true, "description": "Read bounded repository status for the trusted working-directory repository"},
+            {"operation": "git_diff", "effect": "read", "providerVisible": true, "description": "Read bounded staged and unstaged diff evidence"},
+            {"operation": "git_branch_inventory", "effect": "read", "providerVisible": true, "description": "Read bounded local branch inventory evidence"},
+            {"operation": "git_stage", "effect": "write", "providerVisible": true, "description": "Stage one explicit relative path into the Git index with resource evidence"},
+            {"operation": "git_unstage", "effect": "write", "providerVisible": true, "description": "Unstage one explicit relative path from the Git index with resource evidence"},
+            {"operation": "git_commit", "effect": "write", "providerVisible": true, "description": "Create one guarded commit from the already-staged index with resource evidence"},
+            {"operation": "git_branch_start", "effect": "write", "providerVisible": true, "description": "Create and enter one local branch at expected HEAD with resource evidence"}
+        ],
+        "resourceDeclarations": [
+            {
+                "kind": "patch_proposal",
+                "schemaId": "tron.resource.patch_proposal.v1",
+                "payloadSchemaVersion": "tron.filesystem.patch_proposal.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "materialized_file",
+                "schemaId": "tron.resource.materialized_file.v1",
+                "payloadSchemaVersion": "tron.filesystem.materialized_file.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "git_index_change",
+                "schemaId": "tron.resource.git_index_change.v1",
+                "payloadSchemaVersion": "tron.git_index_change.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "git_commit",
+                "schemaId": "tron.resource.git_commit.v1",
+                "payloadSchemaVersion": "tron.git_commit.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "git_branch_start",
+                "schemaId": "tron.resource.git_branch_start.v1",
+                "payloadSchemaVersion": "tron.git_branch_start.v1",
+                "scope": "session"
+            }
+        ],
+        "authorityNeeds": [
+            {
+                "scope": "filesystem.read",
+                "purpose": "read bounded file and directory evidence under trusted working-directory file roots"
+            },
+            {
+                "scope": "filesystem.write",
+                "purpose": "write reviewed patch/materialized-file resource evidence under trusted working-directory file roots"
+            },
+            {
+                "scope": "git.read",
+                "purpose": "read bounded status, diff, and branch inventory evidence for the trusted working-directory repository"
+            },
+            {
+                "scope": "git.write",
+                "purpose": "mutate only selected Git index, commit, and branch-start boundaries"
+            },
+            {
+                "scope": "resource.read",
+                "purpose": "inspect existing evidence resources when operations link to prior resource state"
+            },
+            {
+                "scope": "resource.write",
+                "purpose": "record patch, materialized-file, index-change, commit, and branch-start evidence"
+            }
+        ],
+        "settingsDeclarations": [],
+        "dependencyIntents": [],
+        "validation": {
+            "status": "pending_review",
+            "checks": [
+                {
+                    "id": "single_model_surface",
+                    "status": "passed",
+                    "summary": "The pack declares existing capability::execute operations only"
+                },
+                {
+                    "id": "no_broad_git_expansion",
+                    "status": "passed",
+                    "summary": "Checkout, merge, rebase, reset, stash, fetch, pull, push, PR, and conflict workflows remain absent"
+                },
+                {
+                    "id": "bounded_redacted_evidence",
+                    "status": "implementation-candidate",
+                    "summary": "Provider projections expose bounded manifest metadata and resource refs without raw paths, commands, logs, code, secrets, grants, or authority IDs"
+                }
+            ],
+            "evidenceRefs": [
+                {
+                    "kind": "phase3_inventory",
+                    "ref": "P3MSA-INV-009"
+                }
+            ]
+        },
+        "provenance": {
+            "source": "source_backed_first_party",
+            "sourceRefs": [
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::filesystem"
+                },
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::git"
+                },
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::capability"
+                }
+            ]
+        },
+        "lifecycle": {
+            "state": "pending_review",
+            "activation": "authority_mapped_module_pack",
+            "installable": false,
+            "executable": false,
             "networkPolicy": "none"
         },
         "redactionProof": redaction_proof()

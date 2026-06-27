@@ -1,12 +1,14 @@
 //! Inspect-only module manifest registry.
 //!
 //! Phase 3 Slice 23A introduces a source-backed registry for first-party module
-//! identity and declarations. The provider-visible surface is limited to
-//! `capability::execute` operation values `module_list` and `module_inspect`.
-//! Both operations read `module_manifest` resources from the generic engine
-//! resource store, revalidate stored kind/schema/scope/payload shape, and
-//! return bounded projections without exposing raw manifests, local paths,
-//! commands, secrets, grants, authority ids, or token-like material.
+//! identity and declarations. Slice 24A adds a pending-review
+//! `file_git_module` manifest seed for the existing filesystem/Git operation
+//! pack. The provider-visible surface is limited to `capability::execute`
+//! operation values `module_list` and `module_inspect`. Both operations read
+//! `module_manifest` resources from the generic engine resource store,
+//! revalidate stored kind/schema/scope/payload shape, and return bounded
+//! projections without exposing raw manifests, local paths, commands, secrets,
+//! grants, authority ids, or token-like material.
 //!
 //! ## Submodules
 //!

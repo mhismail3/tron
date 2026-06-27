@@ -766,3 +766,63 @@ warnings remain; DRC still fails only on unchanged goals/web/tool-source entropy
 allow-list entries outside Slice 23H; SUWRF may fail at baseline only on
 unchanged `packages/agent/src/domains/program_execution`. Slice 23H changed none
 of those paths.
+
+## Implementation Candidate Slice 24A: File And Source-Control Module Pack Activation
+
+Discovery thread `019f0add-0e9d-7033-813d-6b727b004d05` selected Slice 24A
+with exact final status `implementation may start` from baseline
+`origin/main@bc3c05c86574a0bf6dc1124183ea23ea28f7d875`
+(`docs: accept phase 3 slice 23h`).
+
+Implementation branch:
+`codex/phase-3-slice-24a-file-git-module-pack`
+
+Implementation status:
+`implementation-candidate`, pending independent review.
+
+Baseline HEAD:
+`bc3c05c86574a0bf6dc1124183ea23ea28f7d875`
+(`docs: accept phase 3 slice 23h`)
+
+Candidate scope:
+
+- Adds the built-in pending-review `file_git_module` manifest seed alongside
+  the existing module-registry and capability manifest seeds.
+- Declares only existing `filesystem_*` and selected `git_*`
+  `capability::execute` operation values; no provider-visible tool, public
+  `/engine` method, native panel, dependency, network, deploy, or package
+  behavior is added.
+- Maps file/Git operations to explicit filesystem, Git, resource, and
+  trusted-working-directory authority. Runtime grants no longer inherit
+  `state.read`, `state.write`, or `agent_state` fallback for these operations.
+- Uses existing evidence resource kinds only: `patch_proposal`,
+  `materialized_file`, `git_index_change`, `git_commit`, and
+  `git_branch_start`.
+- Keeps provider-safe manifest projection bounded and redacted; raw local
+  paths, env values, secrets, commands/logs/code/file contents, raw grant ids,
+  raw authority ids, token-like material, personal-info literals, debug
+  payloads, package-manager output, and raw dependency artifacts stay out of
+  provider-visible projections.
+
+Rejected scope remains unchanged: arbitrary checkout, merge, rebase, reset,
+stash, fetch, pull, push, PR, conflict workflows, public `/engine` expansion,
+fixed old iOS panels, broad DTO resurrection, package-manager/network behavior,
+SQLite migration/table additions, repo-managed `packages/agent/skills`,
+production deploy/update behavior, and unrelated DRC/SUWRF/HRA cleanup.
+
+Candidate validation evidence so far:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | exit 0 | Rust source formatting applied before focused tests. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_registry --lib` | exit 0 | Module manifest seed/projection tests passed, including `file_git_module` bounded pending-review projection and provider-safety checks. |
+| `cargo test --manifest-path packages/agent/Cargo.toml file_git --lib` | exit 0 | Focused file/Git manifest, runtime-grant, and authorization tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml authorization --lib` | exit 0 | Authority selector tests passed, including exact file/Git authority and wildcard rejection. |
+| `cargo test --manifest-path packages/agent/Cargo.toml filesystem --lib` | exit 0 | Existing filesystem package semantics, patch/materialized-file evidence, idempotency, and bounded read/search/diff tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml git --lib` | exit 0 | Existing Git package semantics, index mutation, commit, branch-start, branch-inventory, resource evidence, idempotency, and broad-operation rejection tests passed. |
+
+Known unchanged caveats for this candidate: existing provider/model/resource-
+store dead-code warnings remain; DRC may fail on unchanged goals/web/tool-source
+UTC allow-list entries outside Slice 24A; SUWRF may fail at baseline only on
+unchanged `packages/agent/src/domains/program_execution`; exploratory HRA may
+still fail on broad pre-existing overbudget/gap findings outside Slice 24A.
