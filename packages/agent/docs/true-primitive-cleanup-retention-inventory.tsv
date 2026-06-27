@@ -1632,6 +1632,7 @@ packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs	test
 packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
 packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+ModuleActivity.swift	implementation	ios_engine	P3MSA-INV-008	Phase 3 Slice 23H bounded module activity DTO retained under typed engine protocol ownership.
 packages/ios-app/Sources/Engine/Transport/Clients/TranscriptionClient.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
 packages/ios-app/Sources/Engine/Transport/Clients/WorkerLifecycleClient.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
 packages/ios-app/Sources/Session/Chat/Coordinators/ChatTranscriptionCoordinator.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
@@ -1646,6 +1647,7 @@ packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	implementation	ios_ui	TPC-10/P3MSA-S23H	Phase 3 Slice 23H pending-review module activity cockpit views retained under UI ownership as a thin renderer of the server-owned projection.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	implementation	ios_ui	Phase2-Slice1	Agent cockpit discovery card and report views retained under UI ownership.
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
@@ -2000,3 +2002,8 @@ packages/agent/src/domains/module_dependencies/service.rs	implementation	module_
 packages/agent/src/domains/module_dependencies/tests.rs	test	test_harness	TPC-10/P3MSA-S23G	focused Slice 23G module dependency schema redaction authority parity denial exact selector idempotency and side-effect coverage
 packages/agent/src/domains/module_dependencies/validation.rs	implementation	module_dependencies	TPC-10/P3MSA-S23G	module dependency bounded ref text parity denial policy status and idempotency validation owner
 packages/agent/src/engine/durability/resources/module_dependencies_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23G	built-in module dependency request decision and policy resource schemas for metadata dependency policy records
+packages/agent/src/domains/module_activity/contract.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity read-only cockpit projection contract constants and schema owner
+packages/agent/src/domains/module_activity/mod.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity projection-only domain root and worker registration owner
+packages/agent/src/domains/module_activity/projection.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity bounded cockpit projection redaction and derived status owner
+packages/agent/src/domains/module_activity/service.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity inspect-only resource aggregation service owner
+packages/agent/src/domains/module_activity/tests.rs	test	test_harness	TPC-10/P3MSA-S23H	focused Slice 23H module activity redaction deterministic fixture state derivation and legacy-panel guard coverage

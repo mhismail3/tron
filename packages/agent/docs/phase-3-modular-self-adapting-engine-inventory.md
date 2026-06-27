@@ -115,6 +115,23 @@ token-like strings, or personal-info literals, add public `/engine` APIs, or
 add fixed native panels. It moves `P3MSA-INV-007` from `pending_review` to
 `current_baseline` after independent review acceptance and mainline integration.
 
+P3MSA-INV-008 is an implementation candidate for Slice 23H: Generic Autonomous
+Work Cockpit. The candidate adds the `module_activity` domain and
+system-visible `module_activity::overview` read projection for trusted engine
+clients. It aggregates existing module-plane resources only: manifests,
+proposals, validation reports, install requests/decisions, dependency
+requests/decisions/policies, lifecycle states, and runtime states. The server
+owns truth and redaction, derives active/waiting/blocked/ready/recorded states
+only from stored facts, and returns bounded activity summaries, authority
+labels, touched-resource summaries, and rollback/quarantine/runtime-
+authorization gate status for the existing Runtime Cockpit Activity tab. The
+candidate deliberately does not add provider-visible execute operations, public
+`/engine` APIs, fixed source-control/memory/process/subagent/notification/skill
+panels, client-owned server truth, fake activity, raw payload/log/path/command/
+grant/authority/trace/invocation output, install, activation, runtime
+execution, dependency restoration, package-manager behavior, or network access.
+It remains `pending_review` until independent review acceptance.
+
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.

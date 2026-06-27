@@ -42,9 +42,9 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 795 |
+| implementation | 801 |
 | support | 385 |
-| test | 574 |
+| test | 575 |
 | docs | 135 |
 | delete | 0 |
 
@@ -70,14 +70,15 @@ The TSV covers tracked and newly introduced files under:
 | `import_preview` | 6 |
 | `jobs` | 8 |
 | `ios` | 98 |
-| `ios_engine` | 138 |
+| `ios_engine` | 139 |
 | `ios_session` | 75 |
-| `ios_ui` | 140 |
+| `ios_ui` | 141 |
 | `mac` | 76 |
 | `media` | 6 |
 | `memory` | 10 |
 | `model_provider` | 78 |
 | `module_authoring` | 6 |
+| `module_activity` | 4 |
 | `module_dependencies` | 9 |
 | `module_registry` | 4 |
 | `module_install` | 11 |
@@ -105,7 +106,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 572 |
+| `test_harness` | 573 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

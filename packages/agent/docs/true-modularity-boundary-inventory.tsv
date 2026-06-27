@@ -969,6 +969,7 @@ packages/agent/src/domains/worker_lifecycle/resources.rs	rust	implementation	age
 packages/agent/src/shared/foundation/redaction.rs	rust	implementation	agent:shared-foundation	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	swift	generated-wire-dto	ios:engine	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift	swift	generated-wire-dto	ios:engine	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+ModuleActivity.swift	swift	generated-wire-dto	ios:engine	thin server-projection DTO for module_activity overview; no policy ownership or client-owned server truth
 packages/ios-app/Sources/Engine/Transport/Clients/TranscriptionClient.swift	swift	adapter	ios:engine	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Transport/Clients/WorkerLifecycleClient.swift	swift	adapter	ios:engine	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Chat/Coordinators/ChatTranscriptionCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
@@ -983,6 +984,7 @@ packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
@@ -1340,6 +1342,11 @@ packages/agent/src/domains/capability/operations/module_dependencies.rs	rust	ada
 packages/agent/src/domains/module_dependencies/authority.rs	rust	implementation	agent:module_dependencies	owner-private authority guards for module_dependencies.read module_dependencies.write resource scopes exact selectors and networkPolicy none
 packages/agent/src/domains/module_dependencies/contract.rs	rust	contract	agent:module_dependencies	module-dependencies worker id stream schema and authority constants; shared only inside module-dependencies capability and registration boundaries
 packages/agent/src/domains/module_dependencies/mod.rs	rust	facade	agent:module_dependencies	domain root owns module-dependencies docs and worker registration; behavior stays in owner modules
+packages/agent/src/domains/module_activity/contract.rs	rust	contract	agent:module_activity	module-activity read-only function id schema and system visibility stay inside module-activity registration boundaries
+packages/agent/src/domains/module_activity/mod.rs	rust	facade	agent:module_activity	domain root owns module-activity docs and worker registration for inspect-only cockpit projection
+packages/agent/src/domains/module_activity/projection.rs	rust	implementation	agent:module_activity	owner-private aggregation and redaction helpers derive bounded cockpit status from existing module-plane facts
+packages/agent/src/domains/module_activity/service.rs	rust	implementation	agent:module_activity	owner-private read service lists and inspects existing module-plane resources without writes or execution
+packages/agent/src/domains/module_activity/tests.rs	rust	test-support	agent:module_activity	test-only module activity aggregation redaction state derivation and legacy-panel guard coverage; production code must not depend on it
 packages/agent/src/domains/module_dependencies/payload_safety.rs	rust	implementation	agent:module_dependencies	owner-private unsafe-field path prompt command artifact output and token-like payload scanner for module dependency metadata
 packages/agent/src/domains/module_dependencies/projection.rs	rust	implementation	agent:module_dependencies	owner-private provider-safe module dependency request decision and policy summary/detail projection helpers; callers enter through authorized service methods
 packages/agent/src/domains/module_dependencies/records.rs	rust	implementation	agent:module_dependencies	owner-private metadata-only dependency request decision policy idempotency parity denial and side-effect proof builders

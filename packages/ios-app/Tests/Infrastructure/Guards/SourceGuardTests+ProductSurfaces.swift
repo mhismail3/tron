@@ -125,4 +125,36 @@ extension SourceGuardTests {
             }
         }
     }
+
+    @Test("Runtime cockpit has no fixed legacy product panels")
+    func testRuntimeCockpitHasNoFixedLegacyProductPanels() throws {
+        let iosRoot = iosAppRoot()
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("Source" + "Control" + "Panel", "fixed old source-control panel"),
+            ("Memory" + "Panel", "fixed old memory panel"),
+            ("Process" + "Panel", "fixed old process panel"),
+            ("Subagent" + "Panel", "fixed old subagent panel"),
+            ("Notification" + "Panel", "fixed old notification panel"),
+            ("Skill" + "Panel", "fixed old skill panel"),
+            ("Catalog and lifecycle changes will appear here", "client-fabricated activity empty state"),
+            ("worker package proposal", "client-fabricated package activity label"),
+        ]
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if isSourceGuardFile(url) { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
 }

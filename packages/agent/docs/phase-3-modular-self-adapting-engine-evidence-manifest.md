@@ -671,3 +671,64 @@ Known unchanged caveats: DRC still fails only on pre-existing goals/web/tool-sou
 wall-clock entropy allow-list entries, and SUWRF still fails only on the
 pre-existing `packages/agent/src/domains/program_execution` fixed-surface guard.
 Slice 23G changed none of those paths.
+
+## Implementation Candidate Slice 23H: Generic Autonomous Work Cockpit
+
+Discovery thread `019f088a-7148-78a1-b7a6-3ce4ae25d502` selected Slice 23H
+from accepted baseline
+`origin/main@07d99ce3d6ee83eae432be4ee4f7501c606db74b`
+(`docs: accept phase 3 slice 23g`). Implementation branch
+`codex/phase-3-slice-23h-generic-autonomous-work-cockpit` carries the
+candidate implementation.
+
+Status: `pending_review`.
+
+Implementation worker source thread:
+`019efe16-09d7-73d3-9708-6c6ba5bc6493`
+
+Implementation scope:
+
+- Adds focused `domains/module_activity` custody for the system-visible,
+  inspect-only `module_activity::overview` cockpit projection.
+- Aggregates existing resource-backed module-plane facts only: module
+  manifests, proposals, validation reports, install requests/decisions,
+  dependency requests/decisions/policies, lifecycle states, and runtime states.
+- Derives active, waiting, blocked, ready, and recorded statuses from stored
+  facts only, including runtime `running`, lifecycle quarantine/rollback,
+  pending-review install/dependency states, and rollback-readiness blockers.
+- Returns bounded active-work summary, generic activity timeline, authority
+  labels, touched-resource summaries, and rollback/quarantine/runtime-
+  authorization gate status with server-owned redaction policy.
+- Upgrades the existing Runtime Cockpit Activity tab to render the server DTO
+  through thin Swift models, without parsing raw resource payloads or fabricating
+  activity locally.
+- Adds source/static guards for no fixed old source-control, memory, process,
+  subagent, notification, skill, or package-proposal cockpit panels.
+
+Rejected scope remains unchanged: no provider-visible execute operation, public
+`/engine` API expansion, fixed old product panels, fake/client-owned activity,
+silent activation, install, dependency restoration, package-manager execution,
+untrusted/generated execution, PTY/browser automation defaults, live network
+access, raw command/stdout/stderr/log/file/path/env/secret/code exposure, raw
+grant ids, raw authority ids, trace/invocation ids, token-like material,
+personal-info literals, SQLite migration, production deploy/update behavior, or
+repo-managed `packages/agent/skills`.
+
+Candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_activity --no-default-features` | exit 0 | Module activity projection, safe redaction, state derivation, resource aggregation, and static legacy-panel guards passed. |
+| `cd packages/ios-app && xcodegen generate` | exit 0 | Xcode project regenerated after adding the ModuleActivity DTO file. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AgentCockpitStateTests -only-testing:TronMobileTests/AgentCockpitViewModelTests -only-testing:TronMobileTests/WorkerLifecycleDTOTests` | exit 0 | Focused cockpit state, view-model, and DTO Swift Testing suites passed. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` | exit 0 | Product-surface source guards passed, including the new no-fixed-legacy-cockpit-panel guard. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed after final source and docs edits. |
+| `CARGO_NET_OFFLINE=true cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Offline agent crate type-check passed with existing provider/model/resource-store dead-code warnings only. |
+| DESI, IARM, IOSAC, IOSTC, DSEMD, SACB, TMB, PCC, TPC, PPACD, SSARR, ODA, and PERF static suites | exit 0 | Documentation, iOS surface, storage, authority/security, modularity, cleanup, public protocol, readiness, observability, and resource-governance inventories passed after Slice 23H updates. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, tracked ignored-file scan, and `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, tracked ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
+
+Known unchanged caveats to carry into review if still present after final
+validation: existing provider/model/resource-store dead-code warnings; DRC may
+fail only on unchanged goals/web/tool-source entropy allow-list entries outside
+Slice 23H; SUWRF may fail at baseline only on unchanged
+`packages/agent/src/domains/program_execution`.
