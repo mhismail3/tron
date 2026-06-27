@@ -23,6 +23,10 @@ use crate::engine::{
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
+const TRACE_REDACTION_FINGERPRINT_ALGORITHM: &str = "sha256:tron.trace.redacted.v1";
+const AUTHORITY_GRANT_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.authority_grant_id.v1\0";
+const IDEMPOTENCY_KEY_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.idempotency_key.v1\0";
+
 pub(super) fn trace_list(
     invocation: &Invocation,
     deps: &Deps,
@@ -113,15 +117,30 @@ pub(super) fn started_trace_record(
     let provider = invocation
         .causal_context
         .runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE);
-    let (working_directory, working_directory_metadata) =
-        trace_working_directory_metadata(invocation);
+    let module_proposal_trace = is_module_proposal_operation(operation);
+    let (working_directory, working_directory_metadata) = if module_proposal_trace {
+        module_proposal_working_directory_metadata()
+    } else {
+        trace_working_directory_metadata(invocation)
+    };
     let vcs = working_directory.as_ref().and_then(|path| git_vcs(path));
-    let mut trace_metadata = json!({
-        "request": invocation.payload,
-        "requestHash": hash_json(&invocation.payload),
-        "modelId": model_id,
-        "provider": provider,
-    });
+    let mut trace_metadata = if module_proposal_trace {
+        let request = module_proposal_trace_request(operation);
+        json!({
+            "request": request.clone(),
+            "requestHash": hash_json(&request),
+            "rawRequestStored": false,
+            "modelId": model_id,
+            "provider": provider,
+        })
+    } else {
+        json!({
+            "request": invocation.payload,
+            "requestHash": hash_json(&invocation.payload),
+            "modelId": model_id,
+            "provider": provider,
+        })
+    };
     merge_json_object(&mut trace_metadata, working_directory_metadata);
     let record_json = agent_trace_json(
         invocation,
@@ -191,6 +210,26 @@ fn trace_working_directory_metadata(invocation: &Invocation) -> (Option<PathBuf>
     }
 }
 
+fn module_proposal_working_directory_metadata() -> (Option<PathBuf>, Value) {
+    (
+        None,
+        json!({
+            "workingDirectory": Value::Null,
+            "workingDirectoryRedacted": true,
+            "workingDirectoryRawStored": false
+        }),
+    )
+}
+
+fn module_proposal_trace_request(operation: &str) -> Value {
+    json!({
+        "operation": operation,
+        "projection": "module_proposal_trace_safe_request.v1",
+        "rawPayloadStored": false,
+        "metadataOnly": true
+    })
+}
+
 pub(super) fn complete_trace_record(
     record: &mut AgentTraceRecord,
     invocation: &Invocation,
@@ -250,6 +289,7 @@ fn agent_trace_json(
     files: Vec<Value>,
     extra_metadata: Value,
 ) -> Value {
+    let authority = trace_authority_metadata(invocation, operation);
     let mut tron_metadata = json!({
         "traceId": invocation.causal_context.trace_id.as_str(),
         "invocationId": invocation.id.as_str(),
@@ -265,13 +305,7 @@ fn agent_trace_json(
         "startedAt": timestamp,
         "completedAt": completed_at,
         "durationMs": duration_ms,
-        "authority": {
-            "actorId": invocation.causal_context.actor_id.as_str(),
-            "actorKind": format!("{:?}", invocation.causal_context.actor_kind),
-            "authorityGrantId": invocation.causal_context.authority_grant_id.as_str(),
-            "scopes": invocation.causal_context.authority_scopes,
-            "idempotencyKey": invocation.causal_context.idempotency_key
-        }
+        "authority": authority
     });
     merge_json_object(&mut tron_metadata, extra_metadata);
     json!({
@@ -288,6 +322,49 @@ fn agent_trace_json(
             TRON_TRACE_METADATA_KEY: tron_metadata
         }
     })
+}
+
+fn trace_authority_metadata(invocation: &Invocation, operation: &str) -> Value {
+    if is_module_proposal_operation(operation) {
+        return json!({
+            "actorId": invocation.causal_context.actor_id.as_str(),
+            "actorKind": format!("{:?}", invocation.causal_context.actor_kind),
+            "authorityGrantId": redacted_trace_scalar(
+                AUTHORITY_GRANT_FINGERPRINT_DOMAIN,
+                invocation.causal_context.authority_grant_id.as_str(),
+            ),
+            "scopes": invocation.causal_context.authority_scopes,
+            "idempotencyKey": invocation
+                .causal_context
+                .idempotency_key
+                .as_deref()
+                .map(|key| redacted_trace_scalar(IDEMPOTENCY_KEY_FINGERPRINT_DOMAIN, key))
+        });
+    }
+
+    json!({
+        "actorId": invocation.causal_context.actor_id.as_str(),
+        "actorKind": format!("{:?}", invocation.causal_context.actor_kind),
+        "authorityGrantId": invocation.causal_context.authority_grant_id.as_str(),
+        "scopes": invocation.causal_context.authority_scopes,
+        "idempotencyKey": invocation.causal_context.idempotency_key
+    })
+}
+
+fn redacted_trace_scalar(domain: &[u8], value: &str) -> Value {
+    json!({
+        "redacted": true,
+        "rawStored": false,
+        "fingerprintAlgorithm": TRACE_REDACTION_FINGERPRINT_ALGORITHM,
+        "fingerprint": hash_bytes_with_domain(domain, value.as_bytes())
+    })
+}
+
+fn is_module_proposal_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "module_proposal_record" | "module_proposal_list" | "module_proposal_inspect"
+    )
 }
 
 fn merge_tron_trace_metadata(record_json: &mut Value, extra: Value) {
@@ -410,6 +487,13 @@ fn hash_json(value: impl serde::Serialize) -> String {
 
 fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn hash_bytes_with_domain(domain: &[u8], bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
     hasher.update(bytes);
     format!("sha256:{:x}", hasher.finalize())
 }

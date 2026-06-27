@@ -8,8 +8,8 @@
 //! content-free repository tree snapshot records, durable import preview
 //! records, durable program execution metadata records, durable prompt artifact
 //! metadata records, durable system update diagnostic metadata records,
-//! inspect-only module manifest registry records, durable non-interactive jobs,
-//! read-only Git/worktree observation,
+//! inspect-only module manifest registry records, inert module proposal
+//! authoring records, durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
 //! records, inert procedural state provenance records, and the single model-facing
@@ -34,6 +34,7 @@
 //! | `prompt_artifacts` | Durable explicit prompt artifact metadata records |
 //! | `update_diagnostics` | Durable system update diagnostics metadata records |
 //! | `module_registry` | Inspect-only module identity/declaration manifest registry |
+//! | `module_authoring` | Inert bounded module proposal authoring records |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -122,8 +123,14 @@
 //! it stores first-party `module_manifest` resources and provider-safe
 //! list/inspect projections without module install, activation, execution,
 //! dependency resolution, network behavior, public `/engine` expansion, or
-//! native marketplace panels. New domain behavior must add a contract, deps
-//! narrowing, handler binding, tests, and README/domain-doc updates together.
+//! native marketplace panels. Module authoring restoration is inert
+//! resource-backed proposal custody: it stores bounded `module_proposal`
+//! metadata and refs in current session/workspace scope without physical
+//! module workspace directories, install, activation, execution, dependency
+//! restoration, network behavior, repo-managed skills, raw prompt/proposal
+//! bodies, or public `/engine` expansion. New domain behavior must add a
+//! contract, deps narrowing, handler binding, tests, and README/domain-doc
+//! updates together.
 //!
 //! ## Test Ownership
 //!
@@ -150,6 +157,7 @@ pub mod media;
 pub mod memory;
 pub mod message;
 pub mod model;
+pub mod module_authoring;
 pub mod module_registry;
 pub mod notifications;
 pub mod procedural;

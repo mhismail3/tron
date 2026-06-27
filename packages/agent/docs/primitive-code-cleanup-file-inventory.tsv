@@ -625,6 +625,7 @@ packages/agent/tests/primitive_engine_teardown/runtime_surfaces.rs	retain	rust t
 packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_engine_teardown/support.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/tests/primitive_module_proposal_trace.rs	retain	rust test	PCC-10/P3MSA-S23B	Implementation-candidate module proposal trace redaction regression test retained for provider-visible safe request projection coverage.
 packages/agent/tests/primitive_trace_execution.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_trace_execution_support/mod.rs	retain	rust test	SACB-10	Current primitive trace execution support split retained after SACB-10 closeout.
 packages/ios-app/Configuration/Base.xcconfig	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1959,6 +1960,16 @@ packages/agent/src/domains/module_registry/projection.rs	retain	module-registry 
 packages/agent/src/domains/module_registry/service.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module_list and module_inspect service owner retained.
 packages/agent/src/domains/module_registry/tests.rs	retain	module-registry test owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module manifest schema redaction authority and side-effect tests retained.
 packages/agent/src/engine/durability/resources/module_registry_definitions.rs	retain	resource definition owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A built-in module_manifest resource schema retained.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_authoring_tests.rs	retain	phase3 agent	PCC-10/P3MSA-S23B	Implementation-candidate module-authoring runtime grant regression tests retained for least-privilege authority coverage.
+packages/agent/src/domains/capability/operations/module_authoring.rs	retain	capability execute owner	PCC-10/P3MSA-S23B	Implementation-candidate execute adapter retained for module_proposal record list and inspect projections.
+packages/agent/src/domains/module_authoring/authority.rs	retain	module-authoring owner	PCC-10/P3MSA-S23B	Implementation-candidate module proposal authority guards retained for exact resource selectors current scope isolation and networkPolicy none.
+packages/agent/src/domains/module_authoring/contract.rs	retain	module-authoring owner	PCC-10/P3MSA-S23B	Implementation-candidate module-authoring worker contract constants retained for authority and lifecycle stream ownership.
+packages/agent/src/domains/module_authoring/mod.rs	retain	module-authoring owner	PCC-10/P3MSA-S23B	Implementation-candidate module-authoring domain facade and docs retained for inert proposal foundation.
+packages/agent/src/domains/module_authoring/projection.rs	retain	module-authoring owner	PCC-10/P3MSA-S23B	Implementation-candidate bounded provider-safe module proposal summary and detail projection owner retained.
+packages/agent/src/domains/module_authoring/service.rs	retain	module-authoring owner	PCC-10/P3MSA-S23B	Implementation-candidate resource-backed module_proposal record list and inspect service owner retained.
+packages/agent/src/domains/module_authoring/tests.rs	retain	module-authoring test owner	PCC-10/P3MSA-S23B	Implementation-candidate module proposal schema redaction unsafe payload authority lifecycle selector idempotency and side-effect tests retained.
+packages/agent/src/domains/module_authoring/validation.rs	retain	module-authoring owner	PCC-10/P3MSA-S23B	Implementation-candidate module proposal bounded ref unsafe field path prompt-injection token-like identity idempotency and text validation owner retained.
+packages/agent/src/engine/durability/resources/module_authoring_definitions.rs	retain	resource definition owner	PCC-10/P3MSA-S23B	Implementation-candidate built-in module_proposal resource schema retained.
 packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 modular self-adapting engine scorecard retained as active planning evidence with self-sufficient-agent-runtime-readiness classification.
 packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 evidence manifest retained with accepted Slice 23A status and validation boundary.
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md	retain	phase3 docs owner	PCC-10/P3MSA-S23A	Phase 3 narrative inventory retained for module-plane roadmap and SSARR classification.
