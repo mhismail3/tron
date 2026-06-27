@@ -17,8 +17,9 @@ surfaces live worker lifecycle catalog entries, capability discovery families,
 schema/health gaps, durable `catalog_discovery_report` history,
 package/resource status, confirmation-backed lifecycle actions, activity, and
 active `ui_surface` resources without adding fixed product panels. The Activity
-tab renders the server-owned `module_activity::overview` projection instead of
-fabricating catalog/package activity locally. Cockpit refresh failures render as
+tab renders the server-owned, invocation-scoped `module_activity::overview`
+projection instead of fabricating catalog/package activity locally. Cockpit
+refresh failures render as
 degraded while preserving the last good server facts, and malformed catalog
 entries surface catalog decode degradation instead of
 being silently omitted from counts or verified/no-catalog summaries. The app
@@ -124,7 +125,7 @@ New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector 
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
-Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> invocation-scoped module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 `AgentCockpitProjection` is also the boundary that turns partial or failed
@@ -381,12 +382,13 @@ report/stream evidence only; it does not execute discovered functions. Its
 Surfaces tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
-Its Activity tab renders `module_activity::overview` summaries from the server:
-active/waiting/blocked status, generic timeline entries, authority labels,
-touched-resource summaries, and rollback/quarantine/runtime-authorization gate
-state. iOS does not parse raw module resource payloads, invent activity states,
-own redaction policy, or mount fixed source-control, memory, process, subagent,
-notification, or skill panels.
+Its Activity tab renders invocation-scoped `module_activity::overview`
+summaries from the server: active/waiting/blocked status, generic timeline
+entries, authority labels, touched-resource summaries, and
+rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
+module resource payloads, invent activity states, own redaction policy, or
+mount fixed source-control, memory, process, subagent, notification, or skill
+panels.
 The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
 and shared `TronSegmentedControl` tabs rather than a native segmented picker.
 Empty state is allowed when no runtime surface is published; a hardcoded sample

@@ -389,7 +389,7 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
             "ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel",
             "AgentCockpitSheet(",
             "repository: dependencies.workerLifecycleRepository",
-            "sessionId: nil",
+            "sessionId: dependencies.sessionEventRepository.currentSessionId",
             "workspaceId: nil",
         ],
     );

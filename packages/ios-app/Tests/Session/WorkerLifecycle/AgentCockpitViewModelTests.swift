@@ -28,7 +28,12 @@ struct AgentCockpitViewModelTests {
         repository.inspections["ui_surface:surface-1"] = Self.surfaceInspection()
         let viewModel = AgentCockpitViewModel()
 
-        await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.refresh(
+            repository: repository,
+            sessionId: "test-session",
+            workspaceId: "test-workspace",
+            connectionState: .connected
+        )
 
         #expect(repository.overviewCallCount == 1)
         #expect(repository.listedKinds.contains(.package))
@@ -40,6 +45,8 @@ struct AgentCockpitViewModelTests {
         #expect(viewModel.overview.runtimeSurfaces.first?.surface.title == "Runtime")
         #expect(viewModel.overview.runtimeSurfaces.first?.resourceRef.kind == "ui_surface")
         #expect(repository.moduleActivityOverviewCallCount == 1)
+        #expect(repository.lastModuleActivitySessionId == "test-session")
+        #expect(repository.lastModuleActivityWorkspaceId == "test-workspace")
         #expect(viewModel.overview.moduleActivity?.summary.active == 1)
         #expect(viewModel.overview.activity.first?.title == "Active module runtime")
         #expect(viewModel.overview.activity.first?.status == "active")
@@ -75,10 +82,20 @@ struct AgentCockpitViewModelTests {
             hasMore: false
         )
         let viewModel = AgentCockpitViewModel()
-        await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.refresh(
+            repository: repository,
+            sessionId: "test-session",
+            workspaceId: "test-workspace",
+            connectionState: .connected
+        )
 
         repository.listErrorsByKind[.package] = MockWorkerLifecycleError.failure("package resource refresh failed")
-        await viewModel.refresh(repository: repository, connectionState: .connected)
+        await viewModel.refresh(
+            repository: repository,
+            sessionId: "test-session",
+            workspaceId: "test-workspace",
+            connectionState: .connected
+        )
 
         #expect(viewModel.overview.status.kind == .degraded)
         #expect(viewModel.overview.status.title == "Refresh Failed")
@@ -344,6 +361,8 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
 
     var overviewCallCount = 0
     var moduleActivityOverviewCallCount = 0
+    var lastModuleActivitySessionId: String?
+    var lastModuleActivityWorkspaceId: String?
     var listedKinds: [WorkerLifecycleResourceKind] = []
     var inspectCallIds: [String] = []
     var installedManifest: [String: AnyCodable]?
@@ -375,8 +394,14 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         return inspections[resourceId] ?? ResourceInspectResultDTO(inspection: nil)
     }
 
-    func moduleActivityOverview(limit: UInt64) async throws -> ModuleActivityOverviewDTO {
+    func moduleActivityOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> ModuleActivityOverviewDTO {
         moduleActivityOverviewCallCount += 1
+        lastModuleActivitySessionId = sessionId
+        lastModuleActivityWorkspaceId = workspaceId
         return moduleActivity
     }
 

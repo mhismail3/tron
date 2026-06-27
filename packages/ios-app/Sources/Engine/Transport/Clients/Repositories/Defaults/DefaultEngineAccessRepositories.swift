@@ -318,8 +318,16 @@ final class DefaultWorkerLifecycleRepository: WorkerLifecycleRepository {
         try await client.inspectResource(resourceId)
     }
 
-    func moduleActivityOverview(limit: UInt64) async throws -> ModuleActivityOverviewDTO {
-        try await client.moduleActivityOverview(limit: limit)
+    func moduleActivityOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> ModuleActivityOverviewDTO {
+        try await client.moduleActivityOverview(
+            limit: limit,
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
     }
 
     func proposePackageChange(

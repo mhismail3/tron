@@ -20,11 +20,25 @@ fn trace_id(value: &str) -> TraceId {
 }
 
 fn resource(kind: &str, lifecycle: &str) -> EngineResource {
+    resource_scoped(
+        kind,
+        lifecycle,
+        EngineResourceScope::Session("test-session".to_owned()),
+        "example",
+    )
+}
+
+fn resource_scoped(
+    kind: &str,
+    lifecycle: &str,
+    scope: EngineResourceScope,
+    suffix: &str,
+) -> EngineResource {
     EngineResource {
-        resource_id: format!("{kind}:example"),
+        resource_id: format!("{kind}:{suffix}"),
         kind: kind.to_owned(),
         schema_id: format!("schema:{kind}"),
-        scope: EngineResourceScope::Session("test-session".to_owned()),
+        scope,
         owner_worker_id: WorkerId::new("module_activity_test").expect("worker id"),
         owner_actor_id: ActorId::new("system:test").expect("actor id"),
         lifecycle: lifecycle.to_owned(),
@@ -35,6 +49,77 @@ fn resource(kind: &str, lifecycle: &str) -> EngineResource {
         created_at: fixed_time(),
         updated_at: fixed_time(),
     }
+}
+
+async fn create_runtime_resource(
+    engine_host: &crate::engine::EngineHostHandle,
+    runtime: &EngineResource,
+    label: &str,
+) {
+    engine_host
+        .create_resource(crate::engine::CreateResource {
+            resource_id: Some(runtime.resource_id.clone()),
+            kind: runtime.kind.clone(),
+            schema_id: Some(crate::engine::MODULE_RUNTIME_STATE_SCHEMA_ID.to_owned()),
+            scope: runtime.scope.clone(),
+            owner_worker_id: runtime.owner_worker_id.clone(),
+            owner_actor_id: runtime.owner_actor_id.clone(),
+            lifecycle: Some(runtime.lifecycle.clone()),
+            policy: json!({}),
+            initial_payload: Some(json!({
+                "schemaVersion": crate::engine::MODULE_RUNTIME_STATE_PAYLOAD_SCHEMA_VERSION,
+                "state": "running",
+                "runtimeRequestId": format!("runtime-request-{label}"),
+                "scope": {"kind": runtime.scope.kind(), "value": runtime.scope.value()},
+                "moduleLifecycle": {"kind": "module_lifecycle_state", "resourceId": "module_lifecycle_state:test"},
+                "runtime": {"label": label},
+                "supervision": {"state": "running"},
+                "inputRefs": [],
+                "outputArtifactRefs": [],
+                "evidenceRefs": [],
+                "traceRefs": [],
+                "replayRefs": [],
+                "authority": {
+                    "grantRedacted": true,
+                    "derivedRuntimeGrantRequired": true,
+                    "wildcardGrantsAllowed": false
+                },
+                "idempotency": {
+                    "fingerprint": format!("runtime-fingerprint-{label}"),
+                    "fingerprintAlgorithm": "test",
+                    "keyRedacted": true,
+                    "rawKeyStored": false
+                },
+                "sideEffectProof": {
+                    "supervisorEnvelopeOnly": true,
+                    "installPerformed": false,
+                    "activationPerformed": false,
+                    "dependencyRestorePerformed": false,
+                    "packageManagerUsed": false,
+                    "networkAccessPerformed": false,
+                    "repoManagedSkillsTouched": false,
+                    "physicalWorkspaceDirectoryCreated": false,
+                    "ptyAllocated": false,
+                    "browserAutomationPerformed": false,
+                    "rawCommandsStored": false,
+                    "rawLogsStored": false,
+                    "rawOutputStored": false,
+                    "secretsExposed": false,
+                    "fileContentsStored": false,
+                    "absolutePathsStored": false,
+                    "networkPolicy": "none"
+                },
+                "reason": "test runtime",
+                "createdAt": "2026-06-20T12:00:00Z",
+                "updatedAt": "2026-06-20T12:00:00Z",
+                "revision": 1
+            })),
+            locations: vec![],
+            trace_id: trace_id("module-activity-test-create-resource"),
+            invocation_id: None,
+        })
+        .await
+        .expect("create module resource");
 }
 
 fn version(resource: &EngineResource, payload: Value) -> EngineResourceVersion {
@@ -161,7 +246,7 @@ fn projection_redacts_sensitive_shapes_and_declares_policy() {
 }
 
 #[tokio::test]
-async fn overview_lists_module_resources_only() {
+async fn overview_lists_current_session_and_workspace_module_resources_only() {
     let engine_host = crate::engine::EngineHostHandle::new_in_memory().expect("host");
     let deps = Deps {
         engine_host: engine_host.clone(),
@@ -175,82 +260,65 @@ async fn overview_lists_module_resources_only() {
             crate::engine::AuthorityGrantId::new("engine-transport").expect("grant id"),
             trace_id("module-activity-test-invocation"),
         )
-        .with_scope(contract::READ_SCOPE),
+        .with_scope(contract::READ_SCOPE)
+        .with_session_id("test-session")
+        .with_workspace_id("test-workspace"),
     );
 
-    let runtime = resource(crate::engine::MODULE_RUNTIME_STATE_KIND, "running");
-    engine_host
-        .create_resource(crate::engine::CreateResource {
-            resource_id: Some(runtime.resource_id.clone()),
-            kind: runtime.kind.clone(),
-            schema_id: Some(crate::engine::MODULE_RUNTIME_STATE_SCHEMA_ID.to_owned()),
-            scope: runtime.scope.clone(),
-            owner_worker_id: runtime.owner_worker_id.clone(),
-            owner_actor_id: runtime.owner_actor_id.clone(),
-            lifecycle: Some(runtime.lifecycle.clone()),
-            policy: json!({}),
-            initial_payload: Some(json!({
-                "schemaVersion": crate::engine::MODULE_RUNTIME_STATE_PAYLOAD_SCHEMA_VERSION,
-                "state": "running",
-                "runtimeRequestId": "runtime-request",
-                "scope": {"kind": "session", "value": "test-session"},
-                "moduleLifecycle": {"kind": "module_lifecycle_state", "resourceId": "module_lifecycle_state:test"},
-                "runtime": {"label": "Activity runtime"},
-                "supervision": {"state": "running"},
-                "inputRefs": [],
-                "outputArtifactRefs": [],
-                "evidenceRefs": [],
-                "traceRefs": [],
-                "replayRefs": [],
-                "authority": {
-                    "grantRedacted": true,
-                    "derivedRuntimeGrantRequired": true,
-                    "wildcardGrantsAllowed": false
-                },
-                "idempotency": {
-                    "fingerprint": "runtime-fingerprint",
-                    "fingerprintAlgorithm": "test",
-                    "keyRedacted": true,
-                    "rawKeyStored": false
-                },
-                "sideEffectProof": {
-                    "supervisorEnvelopeOnly": true,
-                    "installPerformed": false,
-                    "activationPerformed": false,
-                    "dependencyRestorePerformed": false,
-                    "packageManagerUsed": false,
-                    "networkAccessPerformed": false,
-                    "repoManagedSkillsTouched": false,
-                    "physicalWorkspaceDirectoryCreated": false,
-                    "ptyAllocated": false,
-                    "browserAutomationPerformed": false,
-                    "rawCommandsStored": false,
-                    "rawLogsStored": false,
-                    "rawOutputStored": false,
-                    "secretsExposed": false,
-                    "fileContentsStored": false,
-                    "absolutePathsStored": false,
-                    "networkPolicy": "none"
-                },
-                "reason": "test runtime",
-                "createdAt": "2026-06-20T12:00:00Z",
-                "updatedAt": "2026-06-20T12:00:00Z"
-                ,
-                "revision": 1
-            })),
-            locations: vec![],
-            trace_id: trace_id("module-activity-test-create-resource"),
-            invocation_id: None,
-        })
-        .await
-        .expect("create module resource");
+    let session_runtime = resource_scoped(
+        crate::engine::MODULE_RUNTIME_STATE_KIND,
+        "running",
+        EngineResourceScope::Session("test-session".to_owned()),
+        "current-session",
+    );
+    let workspace_runtime = resource_scoped(
+        crate::engine::MODULE_RUNTIME_STATE_KIND,
+        "running",
+        EngineResourceScope::Workspace("test-workspace".to_owned()),
+        "current-workspace",
+    );
+    let other_session_runtime = resource_scoped(
+        crate::engine::MODULE_RUNTIME_STATE_KIND,
+        "running",
+        EngineResourceScope::Session("other-session".to_owned()),
+        "other-session",
+    );
+    let other_workspace_runtime = resource_scoped(
+        crate::engine::MODULE_RUNTIME_STATE_KIND,
+        "running",
+        EngineResourceScope::Workspace("other-workspace".to_owned()),
+        "other-workspace",
+    );
+    create_runtime_resource(&engine_host, &session_runtime, "Session activity").await;
+    create_runtime_resource(&engine_host, &workspace_runtime, "Workspace activity").await;
+    create_runtime_resource(
+        &engine_host,
+        &other_session_runtime,
+        "Other session activity",
+    )
+    .await;
+    create_runtime_resource(
+        &engine_host,
+        &other_workspace_runtime,
+        "Other workspace activity",
+    )
+    .await;
 
-    let value = service::overview_value(&deps, &invocation.payload)
+    let value = service::overview_value(&deps, &invocation)
         .await
         .expect("overview");
     assert_eq!(value["operation"], "module_activity_overview");
-    assert_eq!(value["summary"]["active"], 1);
-    assert_eq!(value["timeline"][0]["title"], "Activity runtime");
+    assert_eq!(value["summary"]["active"], 2);
+    let titles: Vec<&str> = value["timeline"]
+        .as_array()
+        .expect("timeline")
+        .iter()
+        .map(|item| item["title"].as_str().expect("title"))
+        .collect();
+    assert!(titles.contains(&"Session activity"));
+    assert!(titles.contains(&"Workspace activity"));
+    assert!(!titles.contains(&"Other session activity"));
+    assert!(!titles.contains(&"Other workspace activity"));
 
     let listed = engine_host
         .list_resources(ListResources {
@@ -261,7 +329,40 @@ async fn overview_lists_module_resources_only() {
         })
         .await
         .expect("list");
-    assert_eq!(listed.len(), 1);
+    assert_eq!(listed.len(), 4);
+}
+
+#[tokio::test]
+async fn overview_fails_closed_without_trusted_scope() {
+    let engine_host = crate::engine::EngineHostHandle::new_in_memory().expect("host");
+    let deps = Deps {
+        engine_host: engine_host.clone(),
+    };
+    let invocation = Invocation::new_sync(
+        FunctionId::new("module_activity::overview").expect("function id"),
+        json!({
+            "limit": 10,
+            "sessionId": "untrusted-payload-session",
+            "workspaceId": "untrusted-payload-workspace"
+        }),
+        crate::engine::CausalContext::new(
+            ActorId::new("system:test").expect("actor id"),
+            crate::engine::ActorKind::System,
+            crate::engine::AuthorityGrantId::new("engine-transport").expect("grant id"),
+            trace_id("module-activity-test-no-scope"),
+        )
+        .with_scope(contract::READ_SCOPE),
+    );
+
+    let error = service::overview_value(&deps, &invocation)
+        .await
+        .expect_err("overview must fail without trusted scope");
+    match error {
+        crate::shared::server::errors::CapabilityError::InvalidParams { message } => {
+            assert!(message.contains("trusted session or workspace context"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 #[test]

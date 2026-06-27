@@ -29,9 +29,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 100
-                },
-                "sessionId": {"type": "string"},
-                "workspaceId": {"type": "string"}
+                }
             }
         }))
         .response_schema(json!({

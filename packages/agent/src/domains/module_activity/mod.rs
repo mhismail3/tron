@@ -5,7 +5,9 @@
 //! clients. The projection deliberately stays above package semantics: status
 //! is derived from resource lifecycle and explicit metadata fields already
 //! stored by module registry, proposal, validation, install, dependency,
-//! lifecycle, and runtime domains.
+//! lifecycle, and runtime domains. Overview reads fail closed unless the
+//! invocation carries a trusted session or workspace causal context, and every
+//! listed resource is filtered and revalidated against those readable scopes.
 //!
 //! ## Submodules
 //!

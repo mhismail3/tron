@@ -874,9 +874,12 @@ contents, raw grant ids, or raw authority ids.
 `domains/module_activity` owns the Phase 3 Slice 23H implementation-candidate
 inspect-only autonomous-work cockpit projection. It exposes the system-visible
 `module_activity::overview` read function for trusted engine clients and
-aggregates existing resource-backed module-plane facts from manifests,
-proposals, validation reports, install requests/decisions, dependency
-requests/decisions/policies, lifecycle states, and runtime states. The
+aggregates current-session/workspace resource-backed module-plane facts from
+manifests, proposals, validation reports, install requests/decisions,
+dependency requests/decisions/policies, lifecycle states, and runtime states.
+The read derives scope only from trusted invocation causal context, fails closed
+without session/workspace context, and revalidates inspected resources against
+that scope. The
 projection derives active, waiting, blocked, ready, and recorded statuses only
 from stored facts, and returns bounded summaries for authority labels, touched
 resources, rollback/quarantine/runtime-authorization gates, and generic
@@ -1199,7 +1202,7 @@ Current primitive operations:
 | `module_runtime_list` | Slice 23F accepted operation that lists scoped `module_runtime_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, output artifact refs only, `networkPolicy: none`, and no execution side effects or raw runtime material. |
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
-| `module_activity::overview` | Slice 23H implementation-candidate system-visible pure-read function that returns a bounded Runtime Cockpit projection from existing module-plane resources, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
+| `module_activity::overview` | Slice 23H implementation-candidate system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
@@ -2393,9 +2396,10 @@ packages/ios-app/Sources/
   `catalog_discovery_report` history, package/resource status,
   redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, server-owned `module_activity::overview`
-  activity/work facts, and active `ui_surface` resources through generic engine
-  data using the standard liquid-glass sheet chrome and shared segmented tab
-  control. The Activity tab does not fabricate catalog/package activity locally
+  activity/work facts scoped by trusted invocation context, and active
+  `ui_surface` resources through generic engine data using the standard
+  liquid-glass sheet chrome and shared segmented tab control. The Activity tab
+  does not fabricate catalog/package activity locally
   and does not restore fixed source-control, memory, process, subagent,
   notification, or skill panels. Refresh failures render as a degraded
   cockpit status while preserving the last good server facts, and malformed
@@ -2460,7 +2464,7 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
-Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> invocation-scoped module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 The camera child sheet mounts before AVFoundation warm-up and uses the viewport

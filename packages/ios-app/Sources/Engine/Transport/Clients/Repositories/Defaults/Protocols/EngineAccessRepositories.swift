@@ -338,7 +338,11 @@ protocol WorkerLifecycleRepository: AnyObject {
 
     func inspectResource(_ resourceId: String) async throws -> ResourceInspectResultDTO
 
-    func moduleActivityOverview(limit: UInt64) async throws -> ModuleActivityOverviewDTO
+    func moduleActivityOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> ModuleActivityOverviewDTO
 
     func proposePackageChange(
         manifest: [String: AnyCodable],

@@ -235,7 +235,12 @@ struct AgentCockpitSheet: View {
     }
 
     private func refresh() async {
-        await viewModel.refresh(repository: repository, connectionState: connectionState)
+        await viewModel.refresh(
+            repository: repository,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            connectionState: connectionState
+        )
     }
 }
 

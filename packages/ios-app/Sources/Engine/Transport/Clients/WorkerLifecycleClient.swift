@@ -50,12 +50,17 @@ final class WorkerLifecycleClient: EngineDomainClient {
         )
     }
 
-    func moduleActivityOverview(limit: UInt64 = 40) async throws -> ModuleActivityOverviewDTO {
+    func moduleActivityOverview(
+        limit: UInt64 = 40,
+        sessionId: String? = nil,
+        workspaceId: String? = nil
+    ) async throws -> ModuleActivityOverviewDTO {
         _ = try requireTransport().requireConnection()
 
         return try await invokeRead(
             "module_activity::overview",
-            ModuleActivityOverviewRequestDTO(limit: limit)
+            ModuleActivityOverviewRequestDTO(limit: limit),
+            context: invocationContext(sessionId: sessionId, workspaceId: workspaceId)
         )
     }
 

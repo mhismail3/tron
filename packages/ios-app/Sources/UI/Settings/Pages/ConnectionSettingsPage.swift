@@ -48,7 +48,7 @@ struct ConnectionSettingsPage: View {
                 AgentCockpitSheet(
                     viewModel: agentCockpit,
                     repository: dependencies.workerLifecycleRepository,
-                    sessionId: nil,
+                    sessionId: dependencies.sessionEventRepository.currentSessionId,
                     workspaceId: nil,
                     connectionState: dependencies.connectionRepository.connectionState
                 )

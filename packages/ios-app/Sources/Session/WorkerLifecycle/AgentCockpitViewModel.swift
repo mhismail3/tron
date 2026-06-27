@@ -12,6 +12,8 @@ final class AgentCockpitViewModel {
 
     func refresh(
         repository: any WorkerLifecycleRepository,
+        sessionId: String?,
+        workspaceId: String?,
         connectionState: ConnectionState
     ) async {
         guard connectionState.isConnected else {
@@ -29,7 +31,11 @@ final class AgentCockpitViewModel {
             let launchAttempts = try await repository.listResources(kind: .launchAttempt, lifecycle: nil, limit: 100)
             let runtimeSurfaceResources = try await repository.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
             let discoveryReports = try await repository.listResources(kind: .catalogDiscoveryReport, lifecycle: nil, limit: 25)
-            let moduleActivity = try await repository.moduleActivityOverview(limit: 40)
+            let moduleActivity = try await repository.moduleActivityOverview(
+                limit: 40,
+                sessionId: sessionId,
+                workspaceId: workspaceId
+            )
             let runtimeSurfaces = try await inspectRuntimeSurfaces(
                 runtimeSurfaceResources.resources,
                 repository: repository
@@ -83,7 +89,12 @@ final class AgentCockpitViewModel {
                 workspaceId: workspaceId,
                 idempotencyKey: .userAction("catalogDiscovery.conformanceReport")
             )
-            await refresh(repository: repository, connectionState: connectionState)
+            await refresh(
+                repository: repository,
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                connectionState: connectionState
+            )
         } catch {
             lastError = error.localizedDescription
         }
@@ -108,7 +119,12 @@ final class AgentCockpitViewModel {
                 sessionId: sessionId,
                 workspaceId: workspaceId
             )
-            await refresh(repository: repository, connectionState: connectionState)
+            await refresh(
+                repository: repository,
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                connectionState: connectionState
+            )
         } catch {
             lastError = error.localizedDescription
         }
