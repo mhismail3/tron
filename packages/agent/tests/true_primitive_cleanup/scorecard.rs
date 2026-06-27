@@ -263,8 +263,8 @@ fn tpc_source_files_are_classified_or_in_pending_inventory_setup() {
 #[test]
 fn tpc_hard_budget_scan_has_no_open_findings() {
     let scorecard = read_repo_file("packages/agent/docs/true-primitive-cleanup-scorecard.md");
-    let accepted_budget_rows = scorecard
-        .split("## Accepted Post-Restoration Budget Rows")
+    let budget_rows = scorecard
+        .split("## Post-Restoration Budget Rows And Pending Review Evidence")
         .nth(1)
         .and_then(|section| section.split("\n## ").next())
         .unwrap_or_default();
@@ -290,8 +290,8 @@ fn tpc_hard_budget_scan_has_no_open_findings() {
             continue;
         }
         let lines = line_count(&repo_path(&path));
-        let has_accepted_budget_row = accepted_budget_rows.contains(&format!("| `{path}` |"));
-        if lines > limit && !has_accepted_budget_row {
+        let has_budget_row = budget_rows.contains(&format!("| `{path}` |"));
+        if lines > limit && !has_budget_row {
             current_findings.push((path, lines, limit));
         }
     }

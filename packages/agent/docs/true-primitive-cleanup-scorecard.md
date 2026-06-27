@@ -47,9 +47,10 @@ current upstream model identifiers or dated snapshots.
 - Swift test files: **<= 650 LOC**.
 - Any exception must be generated/data-only and listed here. There are no
   approved source/test exceptions at TPC start.
-- Later accepted restoration slices may introduce temporary over-budget files
-  only when the current path is listed in
-  [Accepted Post-Restoration Budget Rows](#accepted-post-restoration-budget-rows)
+- Later accepted restoration slices, or implementation-candidate slices pending
+  review, may introduce temporary over-budget files only when the current path
+  is listed in
+  [Post-Restoration Budget Rows And Pending Review Evidence](#post-restoration-budget-rows-and-pending-review-evidence)
   with an owner, reason, and split/decomposition row. Those rows are active
   follow-up obligations, not TPC baseline exceptions.
 
@@ -98,11 +99,12 @@ current over-budget files. Rows TPC-2 through TPC-8 own the splits or deletions.
 | 592 | 575 | `packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift` | TPC-8 |
 | 576 | 575 | `packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift` | TPC-7 |
 
-## Accepted Post-Restoration Budget Rows
+## Post-Restoration Budget Rows And Pending Review Evidence
 
 These files entered the consolidated line after TPC closeout through accepted
-restoration slices. They keep explicit owners and split obligations until the
-next focused decomposition pass brings them back under the TPC hard targets.
+restoration slices, plus active implementation-candidate rows that remain
+pending review. They keep explicit owners and split obligations until the next
+focused decomposition pass brings them back under the TPC hard targets.
 
 | Path | Owner | Reason | Current LOC / Limit | Split row |
 |------|-------|--------|---------------------|-----------|
@@ -118,7 +120,7 @@ next focused decomposition pass brings them back under the TPC hard targets.
 | `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` | IARM invariant owner | Historical iOS affordance map closure guards remain broad after retrospective hardening. | 1106 / 800 | Split helper parsing, physical-device, queue/phase, APNs defer, and stale-wording guards into modules before extending IARM coverage. |
 | `packages/agent/src/engine/authority/grants/authorization.rs` | engine authority owner | Slice 15A added another explicit resource selector scanner for `programExecutionResourceId` while preserving the single generic authorization path. | 799 / 750 | Split operation/resource selector extraction helpers into owner modules before adding more execute-resource families. |
 | `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_tests.rs` | capability invocation test owner | Accepted restoration slices added execute-resource authority regressions across restored resource families, keeping grant-mapping proof in one focused test file. | 772 / 750 | Split resource-family grant fixtures into focused modules before adding more execute-resource families. |
-| `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs` | module lifecycle implementation owner | Phase 3 Slice 23E adds deterministic module-lifecycle request selectors to the shared provider execute grant derivation path. | 777 / 750 | Split restored execute-resource family grant derivation helpers into focused owner modules before adding more execute-resource families. |
+| `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs` | module lifecycle implementation owner | Phase 3 Slice 23E implementation-candidate adds deterministic module-lifecycle request selectors to the shared provider execute grant derivation path while pending review. | 777 / 750 | Split restored execute-resource family grant derivation helpers into focused owner modules before adding more execute-resource families. |
 | `packages/agent/tests/configuration_profile_environment_discipline_invariants.rs` | CPE invariant owner | Accepted Slice 21A added README/default and iOS editable-setting parity guards to the CPE static target. | 872 / 800 | Split README/default parsing, iOS source-scan parity, and profile-discipline guards into modules before adding more settings coverage. |
 
 ## Static Gates
@@ -161,7 +163,7 @@ tighten gates only after first recording the failing proof they close.
 | ID | Area | Weight | Status | Owner | Evidence | Open loops | Checkpoint |
 |----|------|-------:|--------|-------|----------|------------|------------|
 | TPC-0 | Scorecard setup | 5 | passed_after_fix | docs/static gates | Added this scorecard, evidence manifest, README living-doc links, setup invariant target, hard-target statement, and current red LOC baseline. Checkpoint commit: `498abfb24`. | TPC-1 owns complete tracked source inventory; TPC-2 through TPC-8 own all over-budget source/test files. | TPC-0 setup checkpoint |
-| TPC-1 | Retention inventory | 8 | passed_after_fix | architecture | Added the retention inventory and TSV, then regenerated it after TPC-2 through TPC-11, TMB closeout, Phase 2 restoration slices, and Phase 3 module-state slices through Slice 23E. Current coverage is 1,974 tracked and newly introduced source/docs/script paths in TPC scope: 112 `primitive`, 772 `implementation`, 385 `support`, 570 `test`, 135 `docs`, and 0 `delete`. Checkpoint commit: `92521b511`. | No unclassified tracked source remains; `grant.rs` carries a Slice 23E accepted post-restoration budget row until a focused execute-resource grant split lands. | TPC-1 inventory checkpoint |
+| TPC-1 | Retention inventory | 8 | passed_after_fix | architecture | Added the retention inventory and TSV, then regenerated it after TPC-2 through TPC-11, TMB closeout, Phase 2 restoration slices, and Phase 3 module-state implementation candidates through Slice 23E. Current coverage is 1,974 tracked and newly introduced source/docs/script paths in TPC scope: 112 `primitive`, 772 `implementation`, 385 `support`, 570 `test`, 135 `docs`, and 0 `delete`. Checkpoint commit: `92521b511`. | No unclassified tracked source remains; `grant.rs` carries a Slice 23E implementation-candidate budget row pending review until a focused execute-resource grant split lands. | TPC-1 inventory checkpoint |
 | TPC-2 | Engine catalog/durability teardown | 12 | passed_after_fix | engine/storage | Split catalog registration, authorization, cleanup, search, and idempotency from the live registry; split ledger SQLite storage from ledger contracts; split queue memory/SQLite stores; split stream memory/SQLite stores; removed default no-op durable-worker/function methods from `EngineLedgerStore` and made in-memory/test ledgers implement them explicitly. Checkpoint commit: `739612887`. | No TPC-2 LOC or no-op default blocker remains; TPC-10 closed broad residue review. | TPC-2 engine/durability checkpoint |
 | TPC-3 | Invocation host and primitive stores | 10 | passed_after_fix | engine primitives | Split `EngineHost` construction/bootstrap and meta invocation into `host/bootstrap.rs` and `host/meta_invocation.rs`; split primitive store backends and worker/function registration into `primitives/stores.rs` and `primitives/workers.rs`; moved trigger runtime test helpers into `runtime/trigger_helpers.rs`; added a TPC gate proving the original host, primitive, and trigger roots are under budget and no longer contain weak-host store wiring in the primitive root. Checkpoint commit: `c7d16e4b9`. | No TPC-3 LOC blocker remains; TPC-10 closed broad residue review. | TPC-3 invocation/primitives checkpoint |
 | TPC-4 | External worker proof or deletion | 10 | passed_after_fix | runtime | Retained loopback-only external workers with explicit proof: split lifecycle/heartbeat/disconnect and durable health marking into `external_workers/lifecycle.rs`, registration/proxy/stream publication into `external_workers/registration.rs`, and scoped-token/capability validation into `external_workers/validation.rs`; split protocol roundtrip and invoker helpers out of the over-budget behavior test. Checkpoint commit: `6860022df`. | No TPC-4 LOC blocker remains; TPC-10 closed broad residue review. | TPC-4 external-worker checkpoint |

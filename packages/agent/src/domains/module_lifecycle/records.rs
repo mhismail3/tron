@@ -107,7 +107,7 @@ fn idempotency_evidence(idempotency_key: &str) -> Value {
     })
 }
 
-fn idempotency_fingerprint(idempotency_key: &str) -> String {
+pub(super) fn idempotency_fingerprint(idempotency_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(IDEMPOTENCY_FINGERPRINT_DOMAIN);
     hasher.update(idempotency_key.as_bytes());

@@ -370,6 +370,74 @@ async fn lifecycle_request_after_decision_records_fresh_pending_transition() {
 }
 
 #[tokio::test]
+async fn pending_same_action_with_different_idempotency_is_not_stale_replay() {
+    let fixture = Fixture::new("module-lifecycle-pending-idempotency").await;
+    let disable_payload = request_payload(&fixture.install_decision_id, "disable");
+    let first_request = request_module_lifecycle_value_at(
+        &fixture.deps,
+        &fixture.write_invocation("disable-pending", disable_payload.clone()),
+        &disable_payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("request pending lifecycle");
+    let first_version = first_request["moduleLifecycleVersionId"]
+        .as_str()
+        .expect("first pending version")
+        .to_owned();
+    assert_eq!(first_request["status"], json!("pending"));
+    assert_eq!(first_request["idempotentReplay"], json!(false));
+
+    let replay = request_module_lifecycle_value_at(
+        &fixture.deps,
+        &fixture.write_invocation("disable-pending", disable_payload.clone()),
+        &disable_payload,
+        default_operation_at() + Duration::seconds(1),
+    )
+    .await
+    .expect("same idempotency key replays pending lifecycle");
+    assert_eq!(replay["idempotentReplay"], json!(true));
+    assert_eq!(replay["moduleLifecycleVersionId"], json!(first_version));
+
+    let mut duplicate_payload = request_payload(&fixture.install_decision_id, "disable");
+    duplicate_payload["reason"] =
+        json!("A later request must not stale-replay the old pending transition.");
+    let denied = request_module_lifecycle_value_at(
+        &fixture.deps,
+        &fixture.write_invocation("disable-pending-fresh-key", duplicate_payload.clone()),
+        &duplicate_payload,
+        default_operation_at() + Duration::seconds(2),
+    )
+    .await
+    .expect_err("different idempotency key cannot replay same-action pending lifecycle")
+    .to_string();
+    assert!(
+        denied.contains("already has pending disable transition"),
+        "{denied}"
+    );
+
+    let inspected = inspect_module_lifecycle_value(
+        &fixture.deps,
+        &fixture.read_invocation(
+            "inspect-pending-idempotency",
+            json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
+        ),
+        &json!({"moduleLifecycleResourceId": fixture.lifecycle_id}),
+    )
+    .await
+    .expect("inspect pending lifecycle after denied duplicate");
+    assert_eq!(inspected["moduleLifecycle"]["lifecycle"], json!("pending"));
+    assert_eq!(
+        inspected["moduleLifecycle"]["resourceRefs"][0]["versionId"],
+        json!(first_version)
+    );
+    assert_eq!(
+        inspected["moduleLifecycle"]["moduleLifecycle"]["transition"]["reason"],
+        json!("Record a metadata-only module lifecycle transition.")
+    );
+}
+
+#[tokio::test]
 async fn rollback_requires_ready_proof_refs_and_prerequisite_candidate() {
     let fixture = Fixture::new("module-lifecycle-rollback").await;
     let denied = request_module_lifecycle_value_at(

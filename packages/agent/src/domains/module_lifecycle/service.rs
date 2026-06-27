@@ -16,8 +16,9 @@ use super::payload_safety::reject_unsafe_payload;
 use super::prerequisite::ensure_install_candidate_prerequisite;
 use super::projection::{inspected_module_lifecycle, module_lifecycle_summary};
 use super::records::{
-    ModuleLifecycleRecordInput, module_lifecycle_record, module_lifecycle_resource_id,
-    resource_policy, resource_ref, scope_ref, side_effect_proof, version_ref,
+    ModuleLifecycleRecordInput, idempotency_fingerprint, module_lifecycle_record,
+    module_lifecycle_resource_id, resource_policy, resource_ref, scope_ref, side_effect_proof,
+    version_ref,
 };
 use super::resource_store::{
     current_payload, engine_error, ensure_module_lifecycle_state, ensure_scope,
@@ -93,7 +94,15 @@ pub(crate) async fn request_module_lifecycle_value_at(
             .and_then(Value::as_str)
             .ok_or_else(|| invalid("module lifecycle state is missing action"))?;
         if existing.resource.lifecycle == "pending" {
-            if current_action == action {
+            let current_idempotency_fingerprint = current
+                .pointer("/idempotency/fingerprint")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    invalid("module lifecycle state is missing idempotency fingerprint")
+                })?;
+            if current_action == action
+                && current_idempotency_fingerprint == idempotency_fingerprint(&idempotency_key)
+            {
                 return Ok(json!({
                     "schemaVersion": MODULE_LIFECYCLE_STATE_SCHEMA_VERSION,
                     "operation": "module_lifecycle_request",
