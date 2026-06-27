@@ -253,12 +253,27 @@ Objective: add the policy gate that turns a validated module proposal into an
 install candidate only after explicit review, approval, authority, dependency,
 and rollback checks.
 
+Accepted Slice 23D closes `P3MSA-INV-004` as current baseline. It adds a
+focused `module_install` domain backed by generic `module_install_request` and
+`module_install_decision` resources, with provider-visible
+`module_install_request_record`, `module_install_request_list`,
+`module_install_request_inspect`, `module_install_decision_record`,
+`module_install_decision_list`, and `module_install_decision_inspect` execute
+operations. It keeps review-gate state scoped to the current session/workspace,
+stores bounded metadata/refs only, requires current-scope passed
+`module_validation_report` evidence with docs/tests and no-install/no-execution
+proof, integrates existing approval freshness checks, requires derived
+authority for decisions, emits metadata-only lifecycle states, and records
+denial evidence for rejected/denied outcomes. The gate does not install,
+activate, execute, restore dependencies, run package managers, access networks,
+touch repo-managed skills, or update production.
+
 Minimal shape:
 
 - install-request and install-decision resources;
 - approval integration with existing fail-closed approval checks;
 - dependency-policy linkage to Slice 22A guard;
-- explicit installed/quarantined/rejected lifecycle states;
+- explicit pending-review/install-candidate/rejected lifecycle states;
 - reasoned denial evidence.
 
 Out of scope:

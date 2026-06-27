@@ -79,6 +79,9 @@ pub(super) fn authorize_with_grant(
     if is_module_validation_invocation(invocation) {
         ensure_module_validation_grant_is_explicit(grant)?;
     }
+    if is_module_install_invocation(invocation) {
+        ensure_module_install_grant_is_explicit(grant)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -183,6 +186,25 @@ fn ensure_module_validation_grant_is_explicit(grant: &EngineGrant) -> Result<()>
     Ok(())
 }
 
+fn ensure_module_install_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module install operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ensure_resource_selectors(
     grant: &EngineGrant,
     invocation: &Invocation,
@@ -244,6 +266,8 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "moduleManifestResourceId",
         "moduleProposalResourceId",
         "moduleValidationReportResourceId",
+        "moduleInstallRequestResourceId",
+        "moduleInstallDecisionResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -393,6 +417,21 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some(
+            "module_install_request_list"
+            | "module_install_request_inspect"
+            | "module_install_decision_list"
+            | "module_install_decision_inspect",
+        ) => {
+            push_unique(&mut scopes, "module_install.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("module_install_request_record" | "module_install_decision_record") => {
+            push_unique(&mut scopes, "module_install.read");
+            push_unique(&mut scopes, "module_install.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("procedural_state_list" | "procedural_state_inspect") => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
@@ -508,6 +547,14 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             vec!["module_validation_report"]
         }
         Some(
+            "module_install_request_record"
+            | "module_install_request_list"
+            | "module_install_request_inspect"
+            | "module_install_decision_record"
+            | "module_install_decision_list"
+            | "module_install_decision_inspect",
+        ) => vec!["module_install_request", "module_install_decision"],
+        Some(
             "subagent_launch"
             | "subagent_status"
             | "subagent_result"
@@ -542,6 +589,21 @@ fn is_module_validation_invocation(invocation: &Invocation) -> bool {
             invocation.payload.get("operation").and_then(Value::as_str),
             Some(
                 "module_validation_record" | "module_validation_list" | "module_validation_inspect"
+            )
+        )
+}
+
+fn is_module_install_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "module_install_request_record"
+                    | "module_install_request_list"
+                    | "module_install_request_inspect"
+                    | "module_install_decision_record"
+                    | "module_install_decision_list"
+                    | "module_install_decision_inspect"
             )
         )
 }
@@ -614,6 +676,10 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("prompt_artifact_record") => push_unique(&mut kinds, "prompt_artifact"),
         Some("update_diagnostic_record") => push_unique(&mut kinds, "update_diagnostic_record"),
         Some("module_validation_record") => push_unique(&mut kinds, "module_validation_report"),
+        Some("module_install_request_record") => push_unique(&mut kinds, "module_install_request"),
+        Some("module_install_decision_record") => {
+            push_unique(&mut kinds, "module_install_decision")
+        }
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }
@@ -1278,6 +1344,136 @@ mod tests {
                 &test_invocation(json!({"operation": "module_validation_list"})),
             ) {
                 Ok(()) => panic!("module validation {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn module_install_request_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &["capability.execute", "module_install.read", "resource.read"],
+            &["module_install_request", "module_install_decision"],
+            &[
+                "kind:module_install_request",
+                "kind:module_install_decision",
+                "resource:module_install_request:first",
+            ],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "module_install_request_inspect",
+            "moduleInstallRequestResourceId": "module_install_request:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first request allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "module_install_request_inspect",
+            "moduleInstallRequestResourceId": "module_install_request:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind install request must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource module_install_request:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_install_requires_explicit_authority_and_resource_kinds() {
+        let function = test_execute_function();
+        let missing_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &["module_install_request", "module_install_decision"],
+            &[
+                "kind:module_install_request",
+                "kind:module_install_decision",
+            ],
+        );
+        let error = authorize_with_grant(
+            &missing_scope,
+            &function,
+            &test_invocation(json!({"operation": "module_install_request_list"})),
+        )
+        .expect_err("missing module install read authority denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority module_install.read"),
+            "{error}"
+        );
+
+        let wrong_kind = test_grant(
+            &["capability.execute", "module_install.read", "resource.read"],
+            &["module_install_request"],
+            &[
+                "kind:module_install_request",
+                "kind:module_install_decision",
+            ],
+        );
+        let error = authorize_with_grant(
+            &wrong_kind,
+            &function,
+            &test_invocation(json!({"operation": "module_install_request_list"})),
+        )
+        .expect_err("missing module install decision resource kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind module_install_decision"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_install_rejects_wildcard_authority_kinds_and_selectors() {
+        let function = test_execute_function();
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "module_install.read", "resource.read"],
+                    &["module_install_request", "module_install_decision"],
+                    &[
+                        "kind:module_install_request",
+                        "kind:module_install_decision",
+                    ],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &["capability.execute", "module_install.read", "resource.read"],
+                    &["*", "module_install_request", "module_install_decision"],
+                    &[
+                        "kind:module_install_request",
+                        "kind:module_install_decision",
+                    ],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &["capability.execute", "module_install.read", "resource.read"],
+                    &["module_install_request", "module_install_decision"],
+                    &[
+                        "*",
+                        "kind:module_install_request",
+                        "kind:module_install_decision",
+                    ],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "module_install_request_list"})),
+            ) {
+                Ok(()) => panic!("module install {name} wildcard grant must be denied"),
                 Err(error) => error.to_string(),
             };
             assert!(error.contains(expected), "{error}");

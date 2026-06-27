@@ -166,6 +166,14 @@ pub const MODULE_PROPOSAL_SCHEMA_ID: &str = "tron.resource.module_proposal.v1";
 pub const MODULE_VALIDATION_REPORT_KIND: &str = "module_validation_report";
 /// Built-in module validation report resource schema id.
 pub const MODULE_VALIDATION_REPORT_SCHEMA_ID: &str = "tron.resource.module_validation_report.v1";
+/// Built-in metadata-only module install review request resource kind.
+pub const MODULE_INSTALL_REQUEST_KIND: &str = "module_install_request";
+/// Built-in metadata-only module install review request resource schema id.
+pub const MODULE_INSTALL_REQUEST_SCHEMA_ID: &str = "tron.resource.module_install_request.v1";
+/// Built-in metadata-only module install decision resource kind.
+pub const MODULE_INSTALL_DECISION_KIND: &str = "module_install_decision";
+/// Built-in metadata-only module install decision resource schema id.
+pub const MODULE_INSTALL_DECISION_SCHEMA_ID: &str = "tron.resource.module_install_decision.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

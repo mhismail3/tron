@@ -60,12 +60,20 @@
 //! execution proof without running commands or module code, storing raw logs,
 //! commands, env values, code, or file contents, touching repo-managed skills,
 //! resolving dependencies, accessing networks, installing, or activating.
+//! Module-install operations are metadata-only review-gate operations: they
+//! record, list, and inspect `module_install_request` and
+//! `module_install_decision` resources linked to passed validation reports,
+//! approval freshness evidence, dependency policy refs, and rollback proof
+//! refs without installing, enabling, executing, restoring dependencies,
+//! running package managers, touching repo-managed skills, or accessing
+//! networks.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
+//! | `module_install_contract` | Module-install review request schema fields |
 //! | `module_validation_contract` | Module-validation request schema fields |
 //! | `operations` | Direct primitive operation implementations |
 //! | `scheduler_contract` | Schedule-specific request schema fields |
@@ -97,6 +105,7 @@ pub(crate) mod contract;
 mod import_history_contract;
 mod import_preview_contract;
 mod media_contract;
+mod module_install_contract;
 mod module_validation_contract;
 mod operations;
 mod program_execution_contract;

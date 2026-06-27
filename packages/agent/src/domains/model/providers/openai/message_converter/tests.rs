@@ -545,6 +545,17 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("required docs/tests evidence"));
     assert!(result.contains("raw logs/commands/env/code/file contents"));
     assert!(result.contains("without install, activation, execution, dependency resolution"));
+    assert!(result.contains("module_install_request_record"));
+    assert!(result.contains("module_install_request_list"));
+    assert!(result.contains("module_install_request_inspect"));
+    assert!(result.contains("module_install_decision_record"));
+    assert!(result.contains("module_install_decision_list"));
+    assert!(result.contains("module_install_decision_inspect"));
+    assert!(result.contains("module_install_request"));
+    assert!(result.contains("module_install_decision"));
+    assert!(result.contains("metadata-only review gate resources"));
+    assert!(result.contains("approval freshness evidence"));
+    assert!(result.contains("approval evidence minting authority"));
     assert!(result.contains("procedural_state_list"));
     assert!(result.contains("procedural_state_inspect"));
     assert!(result.contains("skill/rule/hook/procedure provenance evidence"));
@@ -591,7 +602,7 @@ fn clarification_includes_capability_execution_guidance() {
         "autonomous_execute",
         "trigger_register",
         "package_install",
-        "module_install",
+        "module_install_physical",
         "module_activate",
         "module_execute",
         "module_validation_execute",

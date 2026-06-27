@@ -39,6 +39,15 @@ pub(super) async fn derive_capability_runtime_grant(
         operation,
         "module_validation_record" | "module_validation_list" | "module_validation_inspect"
     );
+    let module_install_operation = matches!(
+        operation,
+        "module_install_request_record"
+            | "module_install_request_list"
+            | "module_install_request_inspect"
+            | "module_install_decision_record"
+            | "module_install_decision_list"
+            | "module_install_decision_inspect"
+    );
     let notification_push_requested = operation == "notification_send"
         && effective_args
             .get("pushRequested")
@@ -50,6 +59,7 @@ pub(super) async fn derive_capability_runtime_grant(
     let mut allowed_capabilities = if module_registry_read_operation
         || module_authoring_operation
         || module_validation_operation
+        || module_install_operation
     {
         vec![target_function_id.as_str().to_owned()]
     } else {
@@ -66,6 +76,7 @@ pub(super) async fn derive_capability_runtime_grant(
     if !module_registry_read_operation
         && !module_authoring_operation
         && !module_validation_operation
+        && !module_install_operation
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     }
@@ -228,6 +239,25 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "module_install_request_list"
+            | "module_install_request_inspect"
+            | "module_install_decision_list"
+            | "module_install_decision_inspect"
+    ) {
+        allowed_authority_scopes
+            .extend(["module_install.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "module_install_request_record" | "module_install_decision_record"
+    ) {
+        allowed_authority_scopes.extend([
+            "module_install.read".to_owned(),
+            "module_install.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "procedural_state_list" | "procedural_state_inspect"
     ) {
         allowed_authority_scopes.extend(["procedural.read".to_owned(), "resource.read".to_owned()]);
@@ -272,6 +302,7 @@ pub(super) async fn derive_capability_runtime_grant(
     let mut allowed_resource_kinds = if module_registry_read_operation
         || module_authoring_operation
         || module_validation_operation
+        || module_install_operation
     {
         Vec::new()
     } else {
@@ -351,6 +382,19 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.push("module_validation_report".to_owned());
     } else if matches!(
         operation,
+        "module_install_request_record"
+            | "module_install_request_list"
+            | "module_install_request_inspect"
+            | "module_install_decision_record"
+            | "module_install_decision_list"
+            | "module_install_decision_inspect"
+    ) {
+        allowed_resource_kinds.extend([
+            "module_install_request".to_owned(),
+            "module_install_decision".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "subagent_launch"
             | "subagent_status"
             | "subagent_result"
@@ -390,101 +434,10 @@ pub(super) async fn derive_capability_runtime_grant(
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect::<Vec<_>>();
-    if matches!(operation, "media_inspect" | "media_archive")
-        && let Some(resource_id) = effective_args
-            .get("mediaResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "import_history_inspect"
-        && let Some(resource_id) = effective_args
-            .get("importHistoryResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "repository_tree_inspect"
-        && let Some(resource_id) = effective_args
-            .get("repositoryTreeResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "import_preview_inspect"
-        && let Some(resource_id) = effective_args
-            .get("importPreviewResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "program_execution_inspect"
-        && let Some(resource_id) = effective_args
-            .get("programExecutionResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "prompt_artifact_inspect"
-        && let Some(resource_id) = effective_args
-            .get("promptArtifactResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "update_diagnostic_inspect"
-        && let Some(resource_id) = effective_args
-            .get("updateDiagnosticResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "memory_query_inspect"
-        && let Some(resource_id) = effective_args
-            .get("queryResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "memory_decision_inspect"
-        && let Some(resource_id) = effective_args
-            .get("decisionResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "module_inspect"
-        && let Some(resource_id) = effective_args
-            .get("moduleManifestResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "module_proposal_inspect"
-        && let Some(resource_id) = effective_args
-            .get("moduleProposalResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
-    }
-    if operation == "module_validation_inspect"
-        && let Some(resource_id) = effective_args
-            .get("moduleValidationReportResourceId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-    {
-        resource_selectors.push(format!("resource:{resource_id}"));
+    for (operations, field) in exact_resource_selector_fields() {
+        if operations.contains(&operation) {
+            push_resource_selector_arg(&mut resource_selectors, effective_args, field);
+        }
     }
     if matches!(
         operation,
@@ -597,6 +550,51 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
         .get(field)
         .and_then(Value::as_str)
         .is_some_and(|item| !item.trim().is_empty())
+}
+
+fn push_resource_selector_arg(selectors: &mut Vec<String>, args: &Value, field: &str) {
+    if let Some(resource_id) = args
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        selectors.push(format!("resource:{resource_id}"));
+    }
+}
+
+fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'static str)] {
+    &[
+        (&["media_inspect", "media_archive"], "mediaResourceId"),
+        (&["import_history_inspect"], "importHistoryResourceId"),
+        (&["repository_tree_inspect"], "repositoryTreeResourceId"),
+        (&["import_preview_inspect"], "importPreviewResourceId"),
+        (&["program_execution_inspect"], "programExecutionResourceId"),
+        (&["prompt_artifact_inspect"], "promptArtifactResourceId"),
+        (&["update_diagnostic_inspect"], "updateDiagnosticResourceId"),
+        (&["memory_query_inspect"], "queryResourceId"),
+        (&["memory_decision_inspect"], "decisionResourceId"),
+        (&["module_inspect"], "moduleManifestResourceId"),
+        (&["module_proposal_inspect"], "moduleProposalResourceId"),
+        (
+            &["module_validation_inspect"],
+            "moduleValidationReportResourceId",
+        ),
+        (
+            &["module_install_request_record"],
+            "moduleValidationReportResourceId",
+        ),
+        (
+            &[
+                "module_install_request_inspect",
+                "module_install_decision_record",
+            ],
+            "moduleInstallRequestResourceId",
+        ),
+        (
+            &["module_install_decision_inspect"],
+            "moduleInstallDecisionResourceId",
+        ),
+    ]
 }
 
 fn procedural_kind(args: &Value) -> Option<&'static str> {
