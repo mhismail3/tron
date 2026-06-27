@@ -9,7 +9,8 @@
 //! records, durable program execution metadata records, durable prompt artifact
 //! metadata records, durable system update diagnostic metadata records,
 //! inspect-only module manifest registry records, inert module proposal
-//! authoring records, inert module validation report records, durable non-interactive jobs, read-only Git/worktree observation,
+//! authoring records, inert module validation report records, metadata-only
+//! module install review-gate records, durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
 //! records, inert procedural state provenance records, and the single model-facing
@@ -36,6 +37,7 @@
 //! | `module_registry` | Inspect-only module identity/declaration manifest registry |
 //! | `module_authoring` | Inert bounded module proposal authoring records |
 //! | `module_validation` | Inert bounded module contract validation reports |
+//! | `module_install` | Metadata-only module review approval and install-candidate gate |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -136,7 +138,13 @@
 //! no-install/no-execution proof without running commands or module code,
 //! storing raw logs/commands/env/code/file contents, activating modules,
 //! resolving dependencies, touching repo-managed skills, accessing networks, or
-//! expanding public `/engine`. New domain behavior must add a
+//! expanding public `/engine`. Module install restoration is metadata-only
+//! review-gate custody: it stores current-scope install requests and decisions
+//! linked to passed validation reports, approval freshness evidence, dependency
+//! policy refs, and rollback proof refs without physical install, activation,
+//! execution, dependency restoration, package-manager use, network access,
+//! repo-managed skills, raw logs/commands/env/code/file contents, or approval
+//! evidence minting authority. New domain behavior must add a
 //! contract, deps narrowing, handler binding, tests, and README/domain-doc
 //! updates together.
 //!
@@ -166,6 +174,7 @@ pub mod memory;
 pub mod message;
 pub mod model;
 pub mod module_authoring;
+pub mod module_install;
 pub mod module_registry;
 pub mod module_validation;
 pub mod notifications;

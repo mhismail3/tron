@@ -353,3 +353,73 @@ Deferred scope remains unchanged: review/install gates,
 enable/disable/quarantine/rollback, runtime supervisor, dependency policy
 execution, generic autonomous-work cockpit, and feature-pack migration remain
 later Phase 3 slices.
+
+## Implementation Candidate Slice 23D: Module Review Approval And Install Gate
+
+Discovery thread `019f071a-01e7-79a0-b98c-99b945f05aeb` selected Slice 23D
+with exact final status `implementation may start` from baseline
+`origin/main@7c4ec8519394109ddef107aa5891d4875e5b14de`
+(`docs: accept phase 3 slice 23c`).
+
+Implementation branch:
+`codex/phase-3-slice-23d-module-review-approval-install-gate`
+
+Implementation thread:
+`019efe16-09d7-73d3-9708-6c6ba5bc6493`
+
+Baseline HEAD:
+`7c4ec8519394109ddef107aa5891d4875e5b14de`
+(`docs: accept phase 3 slice 23c`)
+
+Candidate scope:
+
+- Moves `P3MSA-INV-004` from `planned` to `pending_review` for this
+  implementation branch until independent acceptance.
+- Adds focused `domains/module_install` custody for scoped, inert
+  `module_install_request` and `module_install_decision` resources using the
+  existing generic resource store, not a new SQLite table.
+- Registers resource schemas `tron.resource.module_install_request.v1` and
+  `tron.resource.module_install_decision.v1`, with payload schema versions
+  `tron.module_install_request.v1` and `tron.module_install_decision.v1`.
+- Adds provider-visible `capability::execute` operation values
+  `module_install_request_record`, `module_install_request_list`,
+  `module_install_request_inspect`, `module_install_decision_record`,
+  `module_install_decision_list`, and `module_install_decision_inspect`.
+- Enforces explicit `module_install.read` / `module_install.write` plus
+  `resource.read` / `resource.write` authority for record operations,
+  read-only authority for list/inspect, non-wildcard
+  `kind:module_install_request` and `kind:module_install_decision` selectors,
+  exact inspect `resource:<id>` selectors, and `networkPolicy: none`.
+- Requires a current-scope, current-version, passed `module_validation_report`
+  prerequisite with bounded module refs, docs/tests evidence, and explicit
+  no-install/no-execution proof before storing a review request.
+- Requires fresh scoped approval, explicit derived authority, request/report
+  revalidation, and denial evidence for rejected/denied decisions before
+  storing decision metadata.
+- Stores dependency policy linkage and rollback proof only as bounded metadata
+  refs/status fields, with metadata lifecycle states such as `pending_review`,
+  `install_candidate`, `rejected`, `superseded`, and `archived`.
+- Deliberately excludes physical install, activation, execution, dependency
+  restoration, package managers, network access, production update/deploy
+  behavior, repo-managed `packages/agent/skills`, public `/engine` expansion,
+  fixed iOS panels, raw logs/commands/env/code/file contents/unsafe paths, raw
+  grant/authority ids, token-like material, and approval evidence minting
+  authority by itself.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23D source and tests. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check gate passed; existing provider/model dead-code warnings remained unchanged. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib module_install -- --nocapture` | exit 0 | Module install resource schemas, record/list/inspect, idempotent replay, lifecycle events, approval denials, validation prerequisite denials, unsafe payload denial, exact inspect selectors, runtime grants, engine authorization, and bounded projections passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib module_install_runtime_grants -- --nocapture` | exit 0 | Capability runtime grant derivation keeps explicit module-install/resource authority, exact selectors, `networkPolicy: none`, and no inherited `agent_state`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib execute_schema_exposes -- --nocapture` | exit 0 | Provider-visible execute schema exposes only bounded module-install operation values and fields. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | OpenAI message-converter guidance documents metadata-only install gate constraints. |
+| DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, and ODA invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, and observability inventories passed after the Slice 23D updates. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Hygiene, ignored-file, and no repo-managed-skills gates passed after final source edits. |
+
+Deferred scope remains unchanged: physical install, enable/disable/quarantine/
+rollback, runtime supervisor, dependency policy activation, generic
+autonomous-work cockpit, and feature-pack migration remain later Phase 3
+slices.

@@ -129,6 +129,28 @@ debug/chain-of-thought material before storage/projection. Re-review accepted
 the implementation after the inventory/evidence refresh and raw-shell ref
 hardening.
 
+P3MSA-INV-004 is pending review for implementation-candidate Slice 23D: Module
+Review Approval And Install Gate. The candidate adds inert
+`domains/module_install` custody for scoped `module_install_request` and
+`module_install_decision` resources using the generic resource store,
+provider-visible
+`module_install_request_record`, `module_install_request_list`,
+`module_install_request_inspect`, `module_install_decision_record`,
+`module_install_decision_list`, and `module_install_decision_inspect` execute
+operation values, explicit module-install/resource read-write grants for
+record, read-only grants for list/inspect, exact request/decision inspect
+selectors, validation-report prerequisite revalidation, dependency policy
+metadata refs/status, rollback proof refs/readiness, approval freshness checks,
+derived-authority proof, denial evidence, idempotency fingerprints, lifecycle
+stream evidence, and explicit no-install/no-execution proof. It does not
+install or activate modules, restore dependencies, use package managers, execute
+code, access networks, touch repo-managed skills, expand public `/engine`, add
+fixed native panels, or introduce a new SQLite table. Record, list, and inspect
+reject unsafe payload fields, unsafe paths, raw logs/commands/env/code/file
+contents, prompt-like/debug material, credential-like strings, token-like
+provider-visible metadata, raw grant ids, and raw authority ids before storage
+or projection.
+
 ## Slice Families
 
 ### Module Plane Foundation

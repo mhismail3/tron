@@ -774,6 +774,32 @@ commands, env values, code, file contents, unsafe paths, raw grant/authority
 ids, token-like provider-visible metadata, install or activate modules, restore
 dependencies, use package managers, touch repo-managed `packages/agent/skills`,
 access networks, add public `/engine` APIs, or add fixed iOS panels.
+`domains/module_install` owns the Phase 3 Slice 23D metadata-only review gate
+from passed validation evidence to install-candidate decision state. It records
+current-session/workspace `module_install_request` resources with schema
+`tron.resource.module_install_request.v1` and payload schema
+`tron.module_install_request.v1`, plus `module_install_decision` resources with
+schema `tron.resource.module_install_decision.v1` and payload schema
+`tron.module_install_decision.v1`. `module_install_request_record`,
+`module_install_request_list`, `module_install_request_inspect`,
+`module_install_decision_record`, `module_install_decision_list`, and
+`module_install_decision_inspect` stay behind `capability::execute` with
+explicit `module_install.read` / `module_install.write` plus `resource.read` /
+`resource.write` authority, non-wildcard `kind:module_install_request` and
+`kind:module_install_decision` selectors, exact inspect selectors, and
+`networkPolicy: none`. Requests require a current-scope passed
+`module_validation_report` with current-version revalidation, docs/tests
+evidence, and explicit no-install/no-execution proof. Decisions fail closed
+unless approval evidence is fresh, approved, scoped to the request/action/risk/
+selectors, and paired with derived authority; approval evidence by itself does
+not mint authority. Dependency policy and rollback proof are bounded metadata
+refs only, and lifecycle states such as `pending_review`, `install_candidate`,
+`rejected`, `superseded`, and `archived` are metadata gate states, not physical
+install state. The install gate does not install, activate, execute, restore
+dependencies, run package managers, touch repo-managed skills, store raw paths,
+env values, secrets, logs, commands, code, file contents, raw grant/authority
+ids, or token-like material, access networks, add public `/engine` APIs, or add
+fixed iOS panels.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -1063,6 +1089,12 @@ Current primitive operations:
 | `module_validation_record` | Accepted Slice 23C operation that records one scoped `module_validation_report` resource for bounded module contract validation evidence only, with module/proposal refs, manifest/resource/provider parity checks, required docs/tests evidence, deterministic command/result refs, failure evidence, trace/replay refs, idempotency fingerprint, lifecycle, `networkPolicy: none`, and explicit no-install/no-execution proof without running commands or module code, raw logs/commands/env/code/file contents, unsafe paths, package managers, dependency restore, repo-managed skills, raw grant/authority ids, token-like material, install, activation, network, or public `/engine` expansion. |
 | `module_validation_list` | Accepted Slice 23C operation that lists scoped `module_validation_report` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, command execution, dependency resolution, package-manager, network, or workspace-directory side effects. |
 | `module_validation_inspect` | Accepted Slice 23C operation that inspects one scoped `module_validation_report` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only validation identity, subject refs, parity/evidence counts and bounded refs, lifecycle, status/checks, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without unsafe paths, env values, secrets, raw logs, raw commands, token-like material, code, file contents, raw grant ids, raw authority ids, or personal-info literals. |
+| `module_install_request_record` | Slice 23D pending-review operation that records one scoped `module_install_request` resource for metadata-only review promotion from a passed current-scope validation report, with dependency policy metadata refs/status, rollback proof refs/readiness, lifecycle `pending_review`, trace/replay fingerprints, idempotency fingerprint, `networkPolicy: none`, and explicit no-install/no-execution proof without physical install, activation, execution, dependency restore, package managers, raw paths/env/logs/commands/code/file contents, raw grant/authority ids, token-like material, repo-managed skills, network, or public `/engine` expansion. |
+| `module_install_request_list` | Slice 23D pending-review operation that lists scoped `module_install_request` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, dependency/rollback metadata statuses, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
+| `module_install_request_inspect` | Slice 23D pending-review operation that inspects one scoped `module_install_request` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only request identity, validation-report ref, dependency/rollback refs, lifecycle, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
+| `module_install_decision_record` | Slice 23D pending-review operation that records one scoped `module_install_decision` resource for approved install-candidate or rejected decision evidence only after fresh scoped approval and derived authority checks, with denial evidence required for rejected/denied outcomes and no approval-evidence authority minting, physical install, activation, execution, dependency restore, package managers, network, raw local data, or public `/engine` expansion. |
+| `module_install_decision_list` | Slice 23D pending-review operation that lists scoped `module_install_decision` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with approval/denial metadata refs, lifecycle state, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
+| `module_install_decision_inspect` | Slice 23D pending-review operation that inspects one scoped `module_install_decision` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only approval freshness summary, denial evidence refs, lifecycle, trace/replay fingerprints, idempotency fingerprint, and no-install/no-execution proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, or token-like material. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
@@ -1491,6 +1523,31 @@ or authority ids, write rejected raw validation payloads into provider-visible
 trace metadata, install or activate modules, restore dependencies, use package
 managers, touch repo-managed `packages/agent/skills`, access networks, add
 public `/engine` APIs, or add fixed iOS panels.
+
+Phase 3 Slice 23D adds a pending-review implementation candidate for the
+module review approval and install gate foundation. The generic resource store
+registers `module_install_request` with resource schema
+`tron.resource.module_install_request.v1` and payload schema version
+`tron.module_install_request.v1`, and `module_install_decision` with resource
+schema `tron.resource.module_install_decision.v1` and payload schema version
+`tron.module_install_decision.v1`. Install request and decision
+operations stay behind the single `capability::execute` primitive and require
+explicit module-install/resource authority plus non-wildcard
+`kind:module_install_request` and `kind:module_install_decision` selectors;
+inspect also requires exact `resource:<module_install_request_id>` or
+`resource:<module_install_decision_id>` selectors through engine
+authorization. Requests are current-session/workspace scoped and require a
+current-version, current-scope, passed `module_validation_report` with bounded
+module refs, docs/tests evidence, and explicit no-install/no-execution proof.
+Decisions revalidate the request and validation report, require fresh scoped
+approval plus derived authority, require denial evidence for rejected/denied
+outcomes, and record only metadata lifecycle states such as `pending_review`,
+`install_candidate`, `rejected`, `superseded`, and `archived`. This foundation
+does not install or activate modules, execute code, restore dependencies, use
+package managers, touch repo-managed `packages/agent/skills`, access networks,
+store or project raw logs/commands/env/code/file contents/unsafe paths,
+token-like material, raw grant or authority ids, add public `/engine` APIs, or
+add fixed iOS panels.
 
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
