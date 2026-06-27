@@ -8,7 +8,9 @@
 //! paths, creates one guarded single-parent commit from the already-staged
 //! index, and creates one local branch at the expected `HEAD` before moving the
 //! symbolic `HEAD` through a guarded ref/OID check in the existing
-//! `capability::execute` primitive.
+//! `capability::execute` primitive. Phase 3 Slice 24A declares these existing
+//! operations in the pending-review `file_git_module` manifest and maps them to
+//! exact Git/resource/file-root authority without broad state fallback.
 //!
 //! ## Submodules
 //!

@@ -82,6 +82,11 @@
 //! labels, timeout/cancel/shutdown metadata, and provider-safe output refs only,
 //! without raw commands/logs/output, PTYs, browser automation, dependency
 //! restoration, package-manager use, network access, or physical install.
+//! File/Git module-pack activation is metadata and authority only: the existing
+//! `filesystem_*` and selected `git_*` operation values remain inside this
+//! primitive, but derived grants use exact filesystem/Git/resource scopes,
+//! trusted working-directory roots, and existing evidence resource kinds
+//! instead of `agent_state` fallback or new provider-visible tools.
 //!
 //! ## Submodules
 //!

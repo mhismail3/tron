@@ -91,6 +91,9 @@ pub(super) fn authorize_with_grant(
     if is_module_runtime_invocation(invocation) {
         ensure_module_runtime_grant_is_explicit(grant)?;
     }
+    if is_file_git_module_invocation(invocation) {
+        ensure_file_git_module_grant_is_explicit(grant)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -264,6 +267,26 @@ fn ensure_module_runtime_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
         if items.iter().any(|item| item == "*") {
             return Err(EngineError::PolicyViolation(format!(
                 "authority grant {} cannot use wildcard {label} for module runtime operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_file_git_module_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+        ("file roots", grant.file_roots.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for file/git module-pack operations",
                 grant.grant_id
             )));
         }
@@ -544,6 +567,32 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some(
+            "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff",
+        ) => {
+            push_unique(&mut scopes, "filesystem.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("filesystem_write" | "filesystem_edit" | "filesystem_apply_patch") => {
+            push_unique(&mut scopes, "filesystem.read");
+            push_unique(&mut scopes, "filesystem.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some("git_status" | "git_diff" | "git_branch_inventory") => {
+            push_unique(&mut scopes, "git.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("git_stage" | "git_unstage" | "git_commit" | "git_branch_start") => {
+            push_unique(&mut scopes, "git.read");
+            push_unique(&mut scopes, "git.write");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("procedural_state_list" | "procedural_state_inspect") => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
@@ -692,6 +741,23 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             vec!["module_runtime_state"]
         }
         Some(
+            "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff",
+        ) => vec!["materialized_file"],
+        Some("filesystem_write" | "filesystem_edit" | "filesystem_apply_patch") => {
+            vec!["patch_proposal", "materialized_file"]
+        }
+        Some("git_status" | "git_diff" | "git_branch_inventory") => {
+            vec!["git_index_change", "git_commit", "git_branch_start"]
+        }
+        Some("git_stage" | "git_unstage") => vec!["git_index_change"],
+        Some("git_commit") => vec!["git_commit"],
+        Some("git_branch_start") => vec!["git_branch_start"],
+        Some(
             "subagent_launch"
             | "subagent_status"
             | "subagent_result"
@@ -789,6 +855,37 @@ fn is_module_runtime_invocation(invocation: &Invocation) -> bool {
         )
 }
 
+fn is_file_git_module_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && invocation
+            .payload
+            .get("operation")
+            .and_then(Value::as_str)
+            .is_some_and(is_file_git_module_operation)
+}
+
+fn is_file_git_module_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff"
+            | "filesystem_write"
+            | "filesystem_edit"
+            | "filesystem_apply_patch"
+            | "git_status"
+            | "git_diff"
+            | "git_branch_inventory"
+            | "git_stage"
+            | "git_unstage"
+            | "git_commit"
+            | "git_branch_start"
+    )
+}
+
 fn worker_package_list_kind(invocation: &Invocation) -> Option<&'static str> {
     match invocation
         .payload
@@ -872,6 +969,13 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         }
         Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
         Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),
+        Some("filesystem_write" | "filesystem_edit" | "filesystem_apply_patch") => {
+            push_unique(&mut kinds, "patch_proposal");
+            push_unique(&mut kinds, "materialized_file");
+        }
+        Some("git_stage" | "git_unstage") => push_unique(&mut kinds, "git_index_change"),
+        Some("git_commit") => push_unique(&mut kinds, "git_commit"),
+        Some("git_branch_start") => push_unique(&mut kinds, "git_branch_start"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }
@@ -946,6 +1050,13 @@ fn capability_execute_requires_working_directory(invocation: &Invocation) -> boo
                         | "filesystem_write"
                         | "filesystem_edit"
                         | "filesystem_apply_patch"
+                        | "git_status"
+                        | "git_diff"
+                        | "git_branch_inventory"
+                        | "git_stage"
+                        | "git_unstage"
+                        | "git_commit"
+                        | "git_branch_start"
                         | "process_run"
                         | "job_start"
                 )
@@ -1798,6 +1909,210 @@ mod tests {
         }
     }
 
+    #[test]
+    fn file_git_module_operations_require_exact_authority_and_resource_kinds() {
+        let function = test_execute_function();
+        let filesystem_read_grant = test_grant(
+            &["capability.execute", "filesystem.read", "resource.read"],
+            &["materialized_file"],
+            &["kind:materialized_file"],
+        );
+        authorize_with_grant(
+            &filesystem_read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "filesystem_read",
+                "path": "note.txt"
+            })),
+        )
+        .expect("filesystem read exact grant accepted");
+
+        let filesystem_write_grant = test_grant(
+            &[
+                "capability.execute",
+                "filesystem.read",
+                "filesystem.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["patch_proposal", "materialized_file"],
+            &["kind:patch_proposal", "kind:materialized_file"],
+        );
+        authorize_with_grant(
+            &filesystem_write_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "filesystem_write",
+                "path": "note.txt",
+                "content": "bounded content",
+                "commit": true,
+                "idempotencyKey": "filesystem-write-authorization"
+            })),
+        )
+        .expect("filesystem write exact grant accepted");
+
+        let missing_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &["materialized_file"],
+            &["kind:materialized_file"],
+        );
+        let error = authorize_with_grant(
+            &missing_scope,
+            &function,
+            &test_invocation(json!({
+                "operation": "filesystem_read",
+                "path": "note.txt"
+            })),
+        )
+        .expect_err("missing filesystem read authority denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority filesystem.read"),
+            "{error}"
+        );
+
+        let missing_kind = test_grant(
+            &[
+                "capability.execute",
+                "filesystem.read",
+                "filesystem.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["patch_proposal"],
+            &["kind:patch_proposal"],
+        );
+        let error = authorize_with_grant(
+            &missing_kind,
+            &function,
+            &test_invocation(json!({
+                "operation": "filesystem_write",
+                "path": "note.txt",
+                "content": "bounded content",
+                "commit": true,
+                "idempotencyKey": "filesystem-write-missing-kind"
+            })),
+        )
+        .expect_err("missing materialized file resource kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind materialized_file"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn git_module_operations_require_exact_authority_and_reject_wildcards() {
+        let function = test_execute_function();
+        let git_status_grant = test_grant(
+            &["capability.execute", "git.read", "resource.read"],
+            &["git_index_change", "git_commit", "git_branch_start"],
+            &[
+                "kind:git_index_change",
+                "kind:git_commit",
+                "kind:git_branch_start",
+            ],
+        );
+        authorize_with_grant(
+            &git_status_grant,
+            &function,
+            &test_invocation(json!({"operation": "git_status"})),
+        )
+        .expect("git read exact grant accepted");
+
+        let git_stage_grant = test_grant(
+            &[
+                "capability.execute",
+                "git.read",
+                "git.write",
+                "resource.write",
+            ],
+            &["git_index_change"],
+            &["kind:git_index_change"],
+        );
+        authorize_with_grant(
+            &git_stage_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "git_stage",
+                "path": "note.txt",
+                "expectedHead": "0123456789012345678901234567890123456789",
+                "reason": "Stage one reviewed path.",
+                "idempotencyKey": "git-stage-authorization"
+            })),
+        )
+        .expect("git stage exact grant accepted");
+
+        for (name, mut grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "git.read", "resource.read"],
+                    &["git_index_change", "git_commit", "git_branch_start"],
+                    &[
+                        "kind:git_index_change",
+                        "kind:git_commit",
+                        "kind:git_branch_start",
+                    ],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &["capability.execute", "git.read", "resource.read"],
+                    &["*", "git_index_change", "git_commit", "git_branch_start"],
+                    &[
+                        "kind:git_index_change",
+                        "kind:git_commit",
+                        "kind:git_branch_start",
+                    ],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &["capability.execute", "git.read", "resource.read"],
+                    &["git_index_change", "git_commit", "git_branch_start"],
+                    &[
+                        "*",
+                        "kind:git_index_change",
+                        "kind:git_commit",
+                        "kind:git_branch_start",
+                    ],
+                ),
+                "wildcard resource selectors",
+            ),
+            (
+                "file root",
+                test_grant(
+                    &["capability.execute", "git.read", "resource.read"],
+                    &["git_index_change", "git_commit", "git_branch_start"],
+                    &[
+                        "kind:git_index_change",
+                        "kind:git_commit",
+                        "kind:git_branch_start",
+                    ],
+                ),
+                "wildcard file roots",
+            ),
+        ] {
+            if name == "file root" {
+                grant.file_roots = vec!["*".to_owned()];
+            }
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "git_status"})),
+            ) {
+                Ok(()) => panic!("git {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
     fn test_grant(
         authority_scopes: &[&str],
         resource_kinds: &[&str],
@@ -1861,6 +2176,7 @@ mod tests {
         .with_scope("capability.execute")
         .with_scope("update_diagnostics.read")
         .with_scope("resource.read")
+        .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp")
         .with_session_id("session-update-diagnostic-selector")
         .with_workspace_id("workspace-update-diagnostic-selector");
         Invocation {

@@ -424,23 +424,32 @@ provider-visible execute operation.
 
 ### Slice 24A: File And Source-Control Module Pack Activation
 
-Objective: migrate or wrap existing filesystem and git foundations behind a
+Status: implementation-candidate, pending independent review.
+
+Objective: declare existing filesystem and git foundations as a governed
 module-owned workflow that supports reviewable file/git work without expanding
-core.
+core or adding provider-visible tools.
 
 Minimal shape:
 
-- module manifest for file/source-control pack;
-- authority mapping for file and git operations;
-- patch/diff/resource review evidence;
-- optional native review surface only after generic cockpit insufficiency is
-  proven.
+- pending-review `file_git_module` manifest seed for the selected existing
+  `filesystem_*` and `git_*` operation values;
+- exact authority mapping for file and git operations through
+  `capability::execute` runtime grants, trusted working-directory roots, and
+  existing resource kinds;
+- patch/materialized-file, Git index-change, commit, and branch-start resource
+  evidence remains package-owned and bounded;
+- optional native review surface remains deferred until generic cockpit
+  insufficiency is proven.
 
 Out of scope:
 
 - arbitrary checkout, merge, rebase, reset, stash, fetch, pull, push, PR
-  submission, or conflict resolution unless discovery selects a narrower
-  sub-slice.
+  submission, or conflict resolution unless a later slice selects a narrower
+  sub-slice;
+- new public `/engine` methods, new provider-visible tools, package-manager or
+  network behavior, raw path/env/secret/command/log/code/file-content exposure,
+  and repo-managed `packages/agent/skills`.
 
 ### Slice 24B: Jobs And Program Execution Module Pack Activation
 
