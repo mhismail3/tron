@@ -106,6 +106,27 @@ status, and ref metadata reject exact and embedded token-like material before
 storage/projection. Rejected module proposal execute payloads are redacted in
 provider-visible traces before service validation can fail them.
 
+P3MSA-INV-003 is pending independent review after Slice 23C implementation:
+Module Contract Test Harness. The implementation candidate adds inert
+`domains/module_validation` custody for scoped `module_validation_report`
+resources using the generic resource store, provider-visible
+`module_validation_record`, `module_validation_list`, and
+`module_validation_inspect` execute operation values, explicit
+module-validation/resource read-write grants for record, read-only grants for
+list/inspect, exact validation-report inspect selectors, bounded
+module/proposal refs, manifest/resource/provider parity checks, required
+docs/tests evidence refs, deterministic command identity/result refs, failure
+evidence refs, idempotency fingerprints, lifecycle stream evidence, validation
+status/check summaries, and explicit no-install/no-execution proof. It does
+not execute commands or module code, restore dependencies, use package
+managers, store raw logs/commands/env/code/file contents/unsafe paths, touch
+repo-managed skills, expand public `/engine`, add fixed native panels, or
+introduce a new SQLite table. Record, list, and inspect reject unsafe payload
+fields, unsafe paths, prompt-injection-like strings, credential-like strings,
+token-like provider-visible metadata, raw grant ids, raw authority ids, and raw
+debug/chain-of-thought material before storage/projection. Status remains
+`pending_review` until independent review acceptance.
+
 ## Slice Families
 
 ### Module Plane Foundation

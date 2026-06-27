@@ -162,6 +162,10 @@ pub const MODULE_MANIFEST_SCHEMA_ID: &str = "tron.resource.module_manifest.v1";
 pub const MODULE_PROPOSAL_KIND: &str = "module_proposal";
 /// Built-in module authoring proposal resource schema id.
 pub const MODULE_PROPOSAL_SCHEMA_ID: &str = "tron.resource.module_proposal.v1";
+/// Built-in module validation report resource kind.
+pub const MODULE_VALIDATION_REPORT_KIND: &str = "module_validation_report";
+/// Built-in module validation report resource schema id.
+pub const MODULE_VALIDATION_REPORT_SCHEMA_ID: &str = "tron.resource.module_validation_report.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

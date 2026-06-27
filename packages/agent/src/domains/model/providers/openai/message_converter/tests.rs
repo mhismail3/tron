@@ -538,6 +538,12 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("module_list"));
     assert!(result.contains("module_inspect"));
     assert!(result.contains("module manifest identity"));
+    assert!(result.contains("module_validation_record"));
+    assert!(result.contains("module_validation_list"));
+    assert!(result.contains("module_validation_inspect"));
+    assert!(result.contains("module_validation_report"));
+    assert!(result.contains("required docs/tests evidence"));
+    assert!(result.contains("raw logs/commands/env/code/file contents"));
     assert!(result.contains("without install, activation, execution, dependency resolution"));
     assert!(result.contains("procedural_state_list"));
     assert!(result.contains("procedural_state_inspect"));
@@ -588,6 +594,7 @@ fn clarification_includes_capability_execution_guidance() {
         "module_install",
         "module_activate",
         "module_execute",
+        "module_validation_execute",
         "module_dependency_resolve",
     ] {
         assert!(

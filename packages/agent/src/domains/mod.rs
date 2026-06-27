@@ -9,7 +9,7 @@
 //! records, durable program execution metadata records, durable prompt artifact
 //! metadata records, durable system update diagnostic metadata records,
 //! inspect-only module manifest registry records, inert module proposal
-//! authoring records, durable non-interactive jobs, read-only Git/worktree observation,
+//! authoring records, inert module validation report records, durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
 //! records, inert procedural state provenance records, and the single model-facing
@@ -35,6 +35,7 @@
 //! | `update_diagnostics` | Durable system update diagnostics metadata records |
 //! | `module_registry` | Inspect-only module identity/declaration manifest registry |
 //! | `module_authoring` | Inert bounded module proposal authoring records |
+//! | `module_validation` | Inert bounded module contract validation reports |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -128,7 +129,14 @@
 //! metadata and refs in current session/workspace scope without physical
 //! module workspace directories, install, activation, execution, dependency
 //! restoration, network behavior, repo-managed skills, raw prompt/proposal
-//! bodies, or public `/engine` expansion. New domain behavior must add a
+//! bodies, or public `/engine` expansion. Module validation restoration is
+//! inert contract-test evidence custody: it stores bounded
+//! `module_validation_report` metadata, refs, parity checks, docs/tests
+//! evidence, command/result refs, failure evidence, trace/replay refs, and
+//! no-install/no-execution proof without running commands or module code,
+//! storing raw logs/commands/env/code/file contents, activating modules,
+//! resolving dependencies, touching repo-managed skills, accessing networks, or
+//! expanding public `/engine`. New domain behavior must add a
 //! contract, deps narrowing, handler binding, tests, and README/domain-doc
 //! updates together.
 //!
@@ -159,6 +167,7 @@ pub mod message;
 pub mod model;
 pub mod module_authoring;
 pub mod module_registry;
+pub mod module_validation;
 pub mod notifications;
 pub mod procedural;
 pub mod program_execution;

@@ -76,6 +76,9 @@ pub(super) fn authorize_with_grant(
     if is_module_authoring_invocation(invocation) {
         ensure_module_authoring_grant_is_explicit(grant)?;
     }
+    if is_module_validation_invocation(invocation) {
+        ensure_module_validation_grant_is_explicit(grant)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -161,6 +164,25 @@ fn ensure_module_authoring_grant_is_explicit(grant: &EngineGrant) -> Result<()> 
     Ok(())
 }
 
+fn ensure_module_validation_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for module validation operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn ensure_resource_selectors(
     grant: &EngineGrant,
     invocation: &Invocation,
@@ -221,6 +243,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "decisionResourceId",
         "moduleManifestResourceId",
         "moduleProposalResourceId",
+        "moduleValidationReportResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -360,6 +383,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some("module_validation_list" | "module_validation_inspect") => {
+            push_unique(&mut scopes, "module_validation.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("module_validation_record") => {
+            push_unique(&mut scopes, "module_validation.read");
+            push_unique(&mut scopes, "module_validation.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("procedural_state_list" | "procedural_state_inspect") => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
@@ -470,6 +503,11 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             vec!["module_proposal"]
         }
         Some(
+            "module_validation_record" | "module_validation_list" | "module_validation_inspect",
+        ) => {
+            vec!["module_validation_report"]
+        }
+        Some(
             "subagent_launch"
             | "subagent_status"
             | "subagent_result"
@@ -495,6 +533,16 @@ fn is_module_authoring_invocation(invocation: &Invocation) -> bool {
         && matches!(
             invocation.payload.get("operation").and_then(Value::as_str),
             Some("module_proposal_record" | "module_proposal_list" | "module_proposal_inspect")
+        )
+}
+
+fn is_module_validation_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "module_validation_record" | "module_validation_list" | "module_validation_inspect"
+            )
         )
 }
 
@@ -565,6 +613,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("program_execution_record") => push_unique(&mut kinds, "program_execution_record"),
         Some("prompt_artifact_record") => push_unique(&mut kinds, "prompt_artifact"),
         Some("update_diagnostic_record") => push_unique(&mut kinds, "update_diagnostic_record"),
+        Some("module_validation_record") => push_unique(&mut kinds, "module_validation_report"),
         Some("subagent_launch") => push_unique(&mut kinds, "subagent_task"),
         _ => {}
     }
@@ -1100,6 +1149,135 @@ mod tests {
                 &test_invocation(json!({"operation": "module_proposal_list"})),
             ) {
                 Ok(()) => panic!("module proposal {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn module_validation_report_resource_id_is_selector_enforced() {
+        let grant = test_grant(
+            &[
+                "capability.execute",
+                "module_validation.read",
+                "resource.read",
+            ],
+            &["module_validation_report"],
+            &[
+                "kind:module_validation_report",
+                "resource:module_validation_report:first",
+            ],
+        );
+        let function = test_execute_function();
+
+        let allowed = test_invocation(json!({
+            "operation": "module_validation_inspect",
+            "moduleValidationReportResourceId": "module_validation_report:first"
+        }));
+        authorize_with_grant(&grant, &function, &allowed).expect("first report allowed");
+
+        let denied = test_invocation(json!({
+            "operation": "module_validation_inspect",
+            "moduleValidationReportResourceId": "module_validation_report:second"
+        }));
+        let error = authorize_with_grant(&grant, &function, &denied)
+            .expect_err("second same-kind validation report must be selector denied")
+            .to_string();
+        assert!(
+            error.contains("does not allow resource module_validation_report:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_validation_report_requires_explicit_authority_and_resource_kind() {
+        let function = test_execute_function();
+        let missing_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &["module_validation_report"],
+            &["kind:module_validation_report"],
+        );
+        let error = authorize_with_grant(
+            &missing_scope,
+            &function,
+            &test_invocation(json!({"operation": "module_validation_list"})),
+        )
+        .expect_err("missing module validation read authority denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority module_validation.read"),
+            "{error}"
+        );
+
+        let wrong_kind = test_grant(
+            &[
+                "capability.execute",
+                "module_validation.read",
+                "resource.read",
+            ],
+            &["module_proposal"],
+            &["kind:module_validation_report"],
+        );
+        let error = authorize_with_grant(
+            &wrong_kind,
+            &function,
+            &test_invocation(json!({"operation": "module_validation_list"})),
+        )
+        .expect_err("missing module validation report resource kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind module_validation_report"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn module_validation_report_rejects_wildcard_authority_kinds_and_selectors() {
+        let function = test_execute_function();
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "module_validation.read", "resource.read"],
+                    &["module_validation_report"],
+                    &["kind:module_validation_report"],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_validation.read",
+                        "resource.read",
+                    ],
+                    &["*", "module_validation_report"],
+                    &["kind:module_validation_report"],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "module_validation.read",
+                        "resource.read",
+                    ],
+                    &["module_validation_report"],
+                    &["*", "kind:module_validation_report"],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "module_validation_list"})),
+            ) {
+                Ok(()) => panic!("module validation {name} wildcard grant must be denied"),
                 Err(error) => error.to_string(),
             };
             assert!(error.contains(expected), "{error}");
