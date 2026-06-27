@@ -39,6 +39,7 @@
 		0D9C68EB2DE7390DA9C2BE4D /* SessionEventForkableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18E5948DAA8F6C18C952974 /* SessionEventForkableTests.swift */; };
 		0E1C4CECD529279CB8268E44 /* AgentCockpitViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E3B35E010936377EFBFFAAB /* AgentCockpitViewModelTests.swift */; };
 		0E36CF89B472E9DCFB56F73E /* ModelPickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94F6E81352DD1C3B3E77DA8 /* ModelPickerState.swift */; };
+		0E4D40FC6FCC470F056BD25B /* AgentCockpitModuleActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8566C2D210E3E355640134 /* AgentCockpitModuleActivityViews.swift */; };
 		0EAE2E1657A550667D881952 /* FileInfoProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3F9F9B06ADB6ECB5B6B96F /* FileInfoProperties.swift */; };
 		0F18FE100072897771EB2F10 /* UIUpdateQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 572E5BA36778840AF7B866CB /* UIUpdateQueueTests.swift */; };
 		0F558A11B6837D4A9242802E /* OAuthLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6F2B7355D51790CBD115F7A /* OAuthLoginSheet.swift */; };
@@ -863,6 +864,7 @@
 		3CF91A42FA41A7B4DCE8F447 /* IPadSheetPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadSheetPresentationTests.swift; sourceTree = "<group>"; };
 		3D1AC1332F26898E7F84D44C /* SystemEventView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEventView.swift; sourceTree = "<group>"; };
 		3E0FEE0E5D2097A297FC448F /* ProviderApiKeyAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderApiKeyAlert.swift; sourceTree = "<group>"; };
+		3E8566C2D210E3E355640134 /* AgentCockpitModuleActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCockpitModuleActivityViews.swift; sourceTree = "<group>"; };
 		3EEA161BEAAAE770740F7DDC /* CapabilityInvocationTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationTypes.swift; sourceTree = "<group>"; };
 		3F2A332D7535ECAC29456FC7 /* NetworkDiagnosticsFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiagnosticsFormatter.swift; sourceTree = "<group>"; };
 		3F3424657419D364EBAAB725 /* String+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Extensions.swift"; sourceTree = "<group>"; };
@@ -2401,6 +2403,7 @@
 			isa = PBXGroup;
 			children = (
 				C4D0C744E30481B0A821C4FF /* AgentCockpitDiscoveryViews.swift */,
+				3E8566C2D210E3E355640134 /* AgentCockpitModuleActivityViews.swift */,
 				9289DCD629177B5099A7F7AE /* AgentCockpitViews.swift */,
 			);
 			path = AgentCockpit;
@@ -3546,6 +3549,7 @@
 				6F17F8504D7F343591B59557 /* AgentClientProtocol.swift in Sources */,
 				6A935C63F9C91FC8906EAEFD /* AgentCockpitDiscoveryState.swift in Sources */,
 				1705A7C7E42FF9CE9CF06EBF /* AgentCockpitDiscoveryViews.swift in Sources */,
+				0E4D40FC6FCC470F056BD25B /* AgentCockpitModuleActivityViews.swift in Sources */,
 				96BE8B5A2F333C2172BBD7CF /* AgentCockpitState.swift in Sources */,
 				2D6B7580E05D2B97737EB6E4 /* AgentCockpitViewModel.swift in Sources */,
 				20F1055371E5CE9A5DC75CB5 /* AgentCockpitViews.swift in Sources */,

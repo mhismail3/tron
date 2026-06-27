@@ -389,6 +389,9 @@ rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
 module resource payloads, invent activity states, own redaction policy, or
 mount fixed source-control, memory, process, subagent, notification, or skill
 panels.
+`UI/AgentCockpit/AgentCockpitModuleActivityViews.swift` owns the Activity tab's
+bounded summary card so the root cockpit sheet remains only the tab shell and
+shared row composition.
 The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
 and shared `TronSegmentedControl` tabs rather than a native segmented picker.
 Empty state is allowed when no runtime surface is published; a hardcoded sample
