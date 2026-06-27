@@ -360,7 +360,7 @@ independent re-review accepted the branch and mainline integration promoted it.
 Objective: turn the Slice 22A dependency guard into a governed dependency
 request path for modules.
 
-Pending-review implementation candidate: Slice 23G adds a focused
+Slice 23G is accepted current baseline for `P3MSA-INV-007`. It adds a focused
 `module_dependencies` domain with generic resource-store-backed
 `module_dependency_request`, `module_dependency_decision`, and
 `module_dependency_policy` resources. Provider-visible access stays behind
@@ -374,7 +374,7 @@ security/license/runtime need, removal plan, risk class, bounded refs,
 Cargo.toml/Cargo.lock parity evidence, idempotency fingerprints, trace/replay
 refs, side-effect proof, and `networkPolicy: none`. Decisions carry approved
 policy or denial evidence, and policy activation makes only approved metadata
-policy available for later module pack/runtime work. The candidate keeps
+policy available for later module pack/runtime work. The accepted slice keeps
 package-manager execution, dependency restoration, manifest/lockfile mutation,
 runtime execution, raw artifacts/output/local material, network access, public
 `/engine` expansion, and fixed native panels out of scope.

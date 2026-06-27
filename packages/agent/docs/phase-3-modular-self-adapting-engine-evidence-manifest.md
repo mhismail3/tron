@@ -602,19 +602,27 @@ Acceptance validation evidence:
 | DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, ODA, and PERF invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, observability, and resource-governance inventories passed after the Slice 23F updates. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
 
-## Slice 23G Implementation Candidate: Module Dependency Request And Policy Activation
+## Accepted Slice 23G: Module Dependency Request And Policy Activation
 
 Discovery thread `019f0838-0bbf-7662-b932-989aa5efa416` selected Slice 23G
 from accepted baseline
 `origin/main@5b632a024e9a957e2a2a19447f36416bdc7fda7f`
 (`docs: accept phase 3 slice 23f`). Implementation branch
-`codex/phase-3-slice-23g-module-dependency-policy` records the candidate.
+`codex/phase-3-slice-23g-module-dependency-policy` implemented the accepted
+slice.
 
-Implementation-candidate scope:
+- Implementation thread `019f083e-5694-79c1-aac4-47c1b0587bf0` completed exact
+  final status `implementation complete` at commit
+  `897392c4a95ee27c7cf31168ef1d764b2c5a787f`.
+- Independent review thread `019f0868-2675-7741-8b27-aaa1999e93df` returned
+  exact verdict `slice accepted`.
+- Mainline merge commit:
+  `0140a5c523732a64cb980c9a3dd12ceafb43a80b`.
 
-- Moves `P3MSA-INV-007` from `planned` to `pending_review`; it is not
-  `current_baseline` until independent review and mainline integration accept
-  it.
+Accepted scope:
+
+- Moves `P3MSA-INV-007` from `pending_review` to `current_baseline` after
+  independent review acceptance and mainline integration.
 - Adds focused `domains/module_dependencies` custody for metadata-only
   dependency request, decision, and approved policy activation records.
 - Registers `module_dependency_request`, `module_dependency_decision`, and
@@ -644,7 +652,7 @@ Implementation-candidate scope:
   expansion, fixed native panels, production deploy/update behavior, and
   repo-managed `packages/agent/skills`.
 
-Implementation-candidate validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -655,4 +663,11 @@ Implementation-candidate validation evidence:
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23G source and tests. |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check gate passed; existing provider/model/resource-store dead-code warnings remain. |
 | DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, ODA, PERF, and DSEMD invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, observability, resource-governance, and storage inventory gates passed after the Slice 23G updates. |
+| Independent review thread `019f0868-2675-7741-8b27-aaa1999e93df` | exact verdict `slice accepted` | Review verified `5b632a024e9a957e2a2a19447f36416bdc7fda7f..897392c4a95ee27c7cf31168ef1d764b2c5a787f`, branch/head cleanliness, baseline ancestry, metadata-only dependency governance scope, provider-safe projections, no package-manager/network side effects, and docs/evidence pending-review posture before acceptance. |
+| Mainline merge `0140a5c523732a64cb980c9a3dd12ceafb43a80b` plus closeout validation from `main` | exit 0 | Accepted Slice 23G implementation and review evidence were merged into `main`; focused Rust, execute-schema, provider-guidance, static inventory, formatting, and type-check validation passed from the integrated branch. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, changed-path ignored-file scan, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
+
+Known unchanged caveats: DRC still fails only on pre-existing goals/web/tool-source
+wall-clock entropy allow-list entries, and SUWRF still fails only on the
+pre-existing `packages/agent/src/domains/program_execution` fixed-surface guard.
+Slice 23G changed none of those paths.

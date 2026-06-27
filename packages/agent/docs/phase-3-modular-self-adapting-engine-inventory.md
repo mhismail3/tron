@@ -95,11 +95,11 @@ side effects. It moves `P3MSA-INV-006` from `pending_review` to
 `current_baseline` after independent re-review acceptance and mainline
 integration.
 
-P3MSA-INV-007 is pending review for Slice 23G: Module Dependency Request And
-Policy Activation. The implementation candidate adds the `module_dependencies`
+P3MSA-INV-007 is current baseline after accepted Slice 23G: Module Dependency
+Request And Policy Activation. The accepted slice adds the `module_dependencies`
 domain and generic resource-store-backed `module_dependency_request`,
 `module_dependency_decision`, and `module_dependency_policy` resources for
-metadata-only dependency governance. The candidate keeps provider-visible access
+metadata-only dependency governance. The accepted slice keeps provider-visible access
 behind `capability::execute` operation values, requires explicit
 `module_dependencies.read` / `module_dependencies.write` plus resource
 authority, rejects wildcard selectors, requires exact request/decision/policy
@@ -112,8 +112,8 @@ restore dependencies, mutate `Cargo.toml` or `Cargo.lock`, install packages,
 execute runtime code, access networks, store raw dependency artifacts,
 package-manager output, raw local material, raw grant ids, raw authority ids,
 token-like strings, or personal-info literals, add public `/engine` APIs, or
-add fixed native panels. The row remains `pending_review` until independent
-review and mainline integration accept it.
+add fixed native panels. It moves `P3MSA-INV-007` from `pending_review` to
+`current_baseline` after independent review acceptance and mainline integration.
 
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
