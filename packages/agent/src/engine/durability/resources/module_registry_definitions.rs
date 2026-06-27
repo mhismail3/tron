@@ -588,7 +588,7 @@ fn jobs_program_execution_module_manifest() -> Value {
         "settingsDeclarations": [],
         "dependencyIntents": [],
         "validation": {
-            "status": "validated",
+            "status": "pending_review",
             "checks": [
                 {
                     "id": "single_model_surface",
@@ -597,7 +597,7 @@ fn jobs_program_execution_module_manifest() -> Value {
                 },
                 {
                     "id": "bounded_output_custody",
-                    "status": "passed",
+                    "status": "implementation-candidate",
                     "summary": "Provider-visible results expose refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata only"
                 },
                 {
@@ -635,10 +635,10 @@ fn jobs_program_execution_module_manifest() -> Value {
             ]
         },
         "lifecycle": {
-            "state": "validated",
+            "state": "pending_review",
             "activation": "authority_mapped_module_pack",
             "installable": false,
-            "executable": true,
+            "executable": false,
             "networkPolicy": "none"
         },
         "redactionProof": redaction_proof()

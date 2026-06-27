@@ -143,6 +143,225 @@ async fn module_program_execution_start_status_cleanup_are_ref_only_provider_saf
     assert_trace_records_are_redacted(&fixture.ctx, &fixture.session_id);
 }
 
+#[tokio::test]
+async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_without_mutation() {
+    if !sandbox_available() {
+        return;
+    }
+
+    let ctx = make_test_context();
+    let root = tempdir().expect("working directory");
+    let fixture = Fixture::new(
+        &ctx,
+        root.path(),
+        "module-program-execution-binding",
+        "module-runtime-request-a",
+    )
+    .await;
+
+    let runtime_request_a = "module-runtime-request-a";
+    let runtime_request_b = "module-runtime-request-b";
+    let runtime_a = fixture.runtime_resource_id_for(runtime_request_a);
+    let runtime_b = fixture.runtime_resource_id_for(runtime_request_b);
+    let start_grant = fixture.start_grant_for(&[&runtime_a, &runtime_b]).await;
+    let start_a = fixture
+        .start_module_program(
+            "start-a",
+            start_grant.clone(),
+            runtime_request_a,
+            "printf binding-a",
+            "module-program-execution-binding-a",
+        )
+        .await;
+    let start_b = fixture
+        .start_module_program(
+            "start-b",
+            start_grant,
+            runtime_request_b,
+            "printf binding-b",
+            "module-program-execution-binding-b",
+        )
+        .await;
+    let job_a = job_resource_id_from_start(&start_a);
+    let job_b = job_resource_id_from_start(&start_b);
+
+    let status_a = fixture.wait_for_terminal_status(&runtime_a, &job_a).await;
+    let status_b = fixture.wait_for_terminal_status(&runtime_b, &job_b).await;
+    let runtime_a_version_before = runtime_version_id_from_status(&status_a);
+    let job_b_version_before = job_version_id_from_status(&status_b);
+
+    let mismatch_read_grant = fixture
+        .followup_grant(
+            "mismatch-read",
+            &[&runtime_a],
+            &[&job_b],
+            FollowupAccess::Read,
+        )
+        .await;
+    let status_error = fixture
+        .invoke_error_with_grant(
+            "mismatch-status",
+            mismatch_read_grant,
+            json!({
+                "operation": "module_program_execution_status",
+                "moduleRuntimeResourceId": runtime_a,
+                "jobResourceId": job_b
+            }),
+        )
+        .await;
+    assert!(
+        status_error.contains("runtime/job binding mismatch"),
+        "{status_error}"
+    );
+
+    let mismatch_cleanup_grant = fixture
+        .followup_grant(
+            "mismatch-cleanup",
+            &[&runtime_a],
+            &[&job_b],
+            FollowupAccess::Write,
+        )
+        .await;
+    let cleanup_error = fixture
+        .invoke_error_with_grant(
+            "mismatch-cleanup",
+            mismatch_cleanup_grant,
+            json!({
+                "operation": "module_program_execution_cleanup",
+                "moduleRuntimeResourceId": runtime_a,
+                "expectedModuleRuntimeVersionId": runtime_a_version_before,
+                "jobResourceId": job_b,
+                "expectedJobVersionId": job_b_version_before,
+                "reason": "Attempt mismatched cleanup.",
+                "idempotencyKey": "module-program-execution-mismatch-cleanup"
+            }),
+        )
+        .await;
+    assert!(
+        cleanup_error.contains("runtime/job binding mismatch"),
+        "{cleanup_error}"
+    );
+    assert_eq!(
+        current_resource_version(&fixture, &runtime_a).await,
+        runtime_a_version_before
+    );
+    assert_eq!(
+        current_resource_version(&fixture, &job_b).await,
+        job_b_version_before
+    );
+
+    let runtime_request_c = "module-runtime-request-c";
+    let runtime_request_d = "module-runtime-request-d";
+    let runtime_c = fixture.runtime_resource_id_for(runtime_request_c);
+    let runtime_d = fixture.runtime_resource_id_for(runtime_request_d);
+    let running_start_grant = fixture.start_grant_for(&[&runtime_c, &runtime_d]).await;
+    let start_c = fixture
+        .start_module_program(
+            "start-c",
+            running_start_grant.clone(),
+            runtime_request_c,
+            "sleep 5",
+            "module-program-execution-binding-c",
+        )
+        .await;
+    let start_d = fixture
+        .start_module_program(
+            "start-d",
+            running_start_grant,
+            runtime_request_d,
+            "sleep 5",
+            "module-program-execution-binding-d",
+        )
+        .await;
+    let job_c = job_resource_id_from_start(&start_c);
+    let job_d = job_resource_id_from_start(&start_d);
+    let runtime_c_version_before =
+        start_details(&start_c)["moduleRuntime"]["moduleRuntimeVersionId"]
+            .as_str()
+            .expect("runtime c version id")
+            .to_owned();
+    let job_d_version_before = start_details(&start_d)["job"]["job"]["jobVersionId"]
+        .as_str()
+        .expect("job d version id")
+        .to_owned();
+
+    let mismatch_cancel_grant = fixture
+        .followup_grant(
+            "mismatch-cancel",
+            &[&runtime_c],
+            &[&job_d],
+            FollowupAccess::Write,
+        )
+        .await;
+    let cancel_error = fixture
+        .invoke_error_with_grant(
+            "mismatch-cancel",
+            mismatch_cancel_grant,
+            json!({
+                "operation": "module_program_execution_cancel",
+                "moduleRuntimeResourceId": runtime_c,
+                "expectedModuleRuntimeVersionId": runtime_c_version_before,
+                "jobResourceId": job_d,
+                "reason": "Attempt mismatched cancel.",
+                "idempotencyKey": "module-program-execution-mismatch-cancel"
+            }),
+        )
+        .await;
+    assert!(
+        cancel_error.contains("runtime/job binding mismatch"),
+        "{cancel_error}"
+    );
+    assert_eq!(
+        current_resource_version(&fixture, &runtime_c).await,
+        runtime_c_version_before
+    );
+    assert_eq!(
+        current_resource_version(&fixture, &job_d).await,
+        job_d_version_before
+    );
+
+    let cleanup_grant = fixture
+        .followup_grant(
+            "cleanup-running-test-jobs",
+            &[&runtime_c, &runtime_d],
+            &[&job_c, &job_d],
+            FollowupAccess::Write,
+        )
+        .await;
+    for (key, runtime_resource_id, runtime_version_id, job_resource_id) in [
+        (
+            "cancel-c",
+            runtime_c.as_str(),
+            runtime_c_version_before.as_str(),
+            job_c.as_str(),
+        ),
+        (
+            "cancel-d",
+            runtime_d.as_str(),
+            start_details(&start_d)["moduleRuntime"]["moduleRuntimeVersionId"]
+                .as_str()
+                .expect("runtime d version id"),
+            job_d.as_str(),
+        ),
+    ] {
+        let _ = fixture
+            .invoke_with_grant(
+                key,
+                cleanup_grant.clone(),
+                None,
+                json!({
+                    "operation": "module_program_execution_cancel",
+                    "moduleRuntimeResourceId": runtime_resource_id,
+                    "expectedModuleRuntimeVersionId": runtime_version_id,
+                    "jobResourceId": job_resource_id,
+                    "reason": "Cancel long-running test job.",
+                    "idempotencyKey": format!("module-program-execution-{key}")
+                }),
+            )
+            .await;
+    }
+}
+
 struct Fixture<'a> {
     ctx: &'a ServerRuntimeContext,
     root: &'a Path,
@@ -181,8 +400,26 @@ impl<'a> Fixture<'a> {
     }
 
     async fn start_grant(&self) -> AuthorityGrantId {
+        self.start_grant_for(&[&self.runtime_resource_id]).await
+    }
+
+    async fn start_grant_for(&self, runtime_resource_ids: &[&str]) -> AuthorityGrantId {
+        let mut selectors = vec![
+            "kind:module_runtime_state".to_owned(),
+            "kind:module_lifecycle_state".to_owned(),
+            "kind:program_execution_record".to_owned(),
+            "kind:job_process".to_owned(),
+            "kind:execution_output".to_owned(),
+            format!("resource:{}", self.lifecycle_id),
+        ];
+        selectors.extend(
+            runtime_resource_ids
+                .iter()
+                .map(|resource_id| format!("resource:{resource_id}")),
+        );
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         self.derive_grant(
-            "start",
+            &format!("start-{}", short_fingerprint(runtime_resource_ids)),
             &[
                 "capability.execute",
                 "module_runtime.read",
@@ -201,15 +438,7 @@ impl<'a> Fixture<'a> {
                 "job_process",
                 "execution_output",
             ],
-            &[
-                "kind:module_runtime_state",
-                "kind:module_lifecycle_state",
-                "kind:program_execution_record",
-                "kind:job_process",
-                "kind:execution_output",
-                &format!("resource:{}", self.lifecycle_id),
-                &format!("resource:{}", self.runtime_resource_id),
-            ],
+            &selector_refs,
         )
         .await
     }
@@ -219,29 +448,14 @@ impl<'a> Fixture<'a> {
         runtime_resource_id: &str,
         job_resource_id: &str,
     ) -> AuthorityGrantId {
-        self.derive_grant(
-            "status",
-            &[
-                "capability.execute",
-                "module_runtime.read",
-                "program_execution.read",
-                "jobs.read",
-                "resource.read",
-            ],
-            &[
-                "module_runtime_state",
-                "program_execution_record",
-                "job_process",
-                "execution_output",
-            ],
-            &[
-                "kind:module_runtime_state",
-                "kind:program_execution_record",
-                "kind:job_process",
-                "kind:execution_output",
-                &format!("resource:{runtime_resource_id}"),
-                &format!("resource:{job_resource_id}"),
-            ],
+        self.followup_grant(
+            &format!(
+                "status-{}",
+                short_fingerprint(&[runtime_resource_id, job_resource_id])
+            ),
+            &[runtime_resource_id],
+            &[job_resource_id],
+            FollowupAccess::Read,
         )
         .await
     }
@@ -251,32 +465,92 @@ impl<'a> Fixture<'a> {
         runtime_resource_id: &str,
         job_resource_id: &str,
     ) -> AuthorityGrantId {
+        self.followup_grant(
+            &format!(
+                "cleanup-{}",
+                short_fingerprint(&[runtime_resource_id, job_resource_id])
+            ),
+            &[runtime_resource_id],
+            &[job_resource_id],
+            FollowupAccess::Write,
+        )
+        .await
+    }
+
+    async fn followup_grant(
+        &self,
+        suffix: &str,
+        runtime_resource_ids: &[&str],
+        job_resource_ids: &[&str],
+        access: FollowupAccess,
+    ) -> AuthorityGrantId {
+        let mut scopes = vec![
+            "capability.execute",
+            "module_runtime.read",
+            "program_execution.read",
+            "jobs.read",
+            "resource.read",
+        ];
+        if access == FollowupAccess::Write {
+            scopes.extend(["module_runtime.write", "jobs.write", "resource.write"]);
+        }
+        let mut selectors = vec![
+            "kind:module_runtime_state".to_owned(),
+            "kind:program_execution_record".to_owned(),
+            "kind:job_process".to_owned(),
+            "kind:execution_output".to_owned(),
+        ];
+        selectors.extend(
+            runtime_resource_ids
+                .iter()
+                .map(|resource_id| format!("resource:{resource_id}")),
+        );
+        selectors.extend(
+            job_resource_ids
+                .iter()
+                .map(|resource_id| format!("resource:{resource_id}")),
+        );
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         self.derive_grant(
-            "cleanup",
-            &[
-                "capability.execute",
-                "module_runtime.read",
-                "module_runtime.write",
-                "program_execution.read",
-                "jobs.read",
-                "jobs.write",
-                "resource.read",
-                "resource.write",
-            ],
+            suffix,
+            &scopes,
             &[
                 "module_runtime_state",
                 "program_execution_record",
                 "job_process",
                 "execution_output",
             ],
-            &[
-                "kind:module_runtime_state",
-                "kind:program_execution_record",
-                "kind:job_process",
-                "kind:execution_output",
-                &format!("resource:{runtime_resource_id}"),
-                &format!("resource:{job_resource_id}"),
-            ],
+            &selector_refs,
+        )
+        .await
+    }
+
+    async fn start_module_program(
+        &self,
+        key: &str,
+        grant_id: AuthorityGrantId,
+        runtime_request_id: &str,
+        command: &str,
+        idempotency_key: &str,
+    ) -> Value {
+        self.invoke_with_grant(
+            key,
+            grant_id,
+            Some(idempotency_key),
+            json!({
+                "operation": "module_program_execution_start",
+                "moduleLifecycleResourceId": self.lifecycle_id,
+                "runtimeRequestId": runtime_request_id,
+                "command": command,
+                "runtimeId": "runtime.shell",
+                "languageId": "language.shell",
+                "programFingerprint": format!("sha256:{runtime_request_id}"),
+                "networkPolicy": "none",
+                "reason": "Run one delegated module job.",
+                "timeoutMs": 10000,
+                "maxOutputBytes": 1000,
+                "idempotencyKey": idempotency_key
+            }),
         )
         .await
     }
@@ -332,6 +606,28 @@ impl<'a> Fixture<'a> {
             result.error
         );
         result.value.expect("invoke value")
+    }
+
+    async fn invoke_error_with_grant(
+        &self,
+        key: &str,
+        grant_id: AuthorityGrantId,
+        payload: Value,
+    ) -> String {
+        let result = self
+            .ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("capability::execute").unwrap(),
+                payload,
+                self.context(key, grant_id, None),
+            ))
+            .await;
+        result.error.expect("expected invocation error").to_string()
+    }
+
+    fn runtime_resource_id_for(&self, runtime_request_id: &str) -> String {
+        runtime_resource_id(&self.session_id, &self.lifecycle_id, runtime_request_id)
     }
 
     async fn derive_grant(
@@ -419,6 +715,12 @@ impl<'a> Fixture<'a> {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FollowupAccess {
+    Read,
+    Write,
+}
+
 async fn seed_enabled_lifecycle(ctx: &ServerRuntimeContext, session_id: &str, lifecycle_id: &str) {
     ctx.engine_host
         .create_resource(CreateResource {
@@ -477,6 +779,53 @@ fn lifecycle_payload(lifecycle_id: &str) -> Value {
 
 fn module_details(result: &Value) -> &Value {
     &result["details"]["moduleProgramExecution"]
+}
+
+fn start_details(result: &Value) -> &Value {
+    module_details(result)
+}
+
+fn job_resource_id_from_start(result: &Value) -> String {
+    start_details(result)["job"]["job"]["jobResourceId"]
+        .as_str()
+        .expect("job resource id")
+        .to_owned()
+}
+
+fn job_version_id_from_status(result: &Value) -> String {
+    module_details(result)["job"]["job"]["jobVersionId"]
+        .as_str()
+        .expect("job version id")
+        .to_owned()
+}
+
+fn runtime_version_id_from_status(result: &Value) -> String {
+    module_details(result)["moduleRuntime"]["moduleRuntime"]["versionId"]
+        .as_str()
+        .expect("runtime version id")
+        .to_owned()
+}
+
+async fn current_resource_version(fixture: &Fixture<'_>, resource_id: &str) -> String {
+    fixture
+        .ctx
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect resource")
+        .expect("resource exists")
+        .resource
+        .current_version_id
+        .expect("current version id")
+}
+
+fn short_fingerprint(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update(b"\0");
+    }
+    hex::encode(hasher.finalize())[..12].to_owned()
 }
 
 fn assert_trace_records_are_redacted(ctx: &ServerRuntimeContext, session_id: &str) {

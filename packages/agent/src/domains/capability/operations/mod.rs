@@ -3,7 +3,10 @@
 //! `capability::execute` is the only model-facing tool on this branch. It
 //! performs one direct host primitive operation, records trace evidence, rejects
 //! bootstrap grants, requires least-privilege authority, and keeps delegated
-//! operations bound to trusted runtime context.
+//! operations bound to trusted runtime context. Module-owned program-execution
+//! follow-ups must also prove the inspected module runtime's delegated job ref
+//! matches the requested job resource before status, cancellation, or cleanup
+//! can read or mutate job state.
 
 use std::time::Instant;
 

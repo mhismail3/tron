@@ -57,7 +57,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
 }
 
 #[tokio::test]
-async fn jobs_program_execution_module_manifest_projects_ref_only_activation_metadata() {
+async fn jobs_program_execution_module_manifest_projects_ref_only_pending_review_metadata() {
     let host = EngineHostHandle::new_in_memory().expect("engine host");
     let grant_id = derive_module_read_grant(
         &host,
@@ -93,13 +93,17 @@ async fn jobs_program_execution_module_manifest_projects_ref_only_activation_met
     assert_eq!(resource["identity"]["kind"]["text"], json!("module_pack"));
     assert_eq!(
         resource["manifestLifecycle"]["state"]["text"],
-        json!("validated")
+        json!("pending_review")
     );
     assert_eq!(
         resource["manifestLifecycle"]["activation"]["text"],
         json!("authority_mapped_module_pack")
     );
-    assert_eq!(resource["manifestLifecycle"]["executable"], json!(true));
+    assert_eq!(resource["manifestLifecycle"]["executable"], json!(false));
+    assert_eq!(
+        resource["validation"]["status"]["text"],
+        json!("pending_review")
+    );
     assert_eq!(resource["capabilityDeclarations"]["total"], json!(4));
     assert_eq!(resource["resourceDeclarations"]["total"], json!(5));
     assert_eq!(resource["authorityNeeds"]["total"], json!(8));

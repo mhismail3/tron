@@ -161,21 +161,9 @@ pub(super) async fn module_program_execution_status(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_runtime_deps = module_runtime::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
-    let runtime = module_runtime::service::inspect_module_runtime_value(
-        &module_runtime_deps,
-        invocation,
-        &invocation.payload,
-    )
-    .await?;
-    let job = redacted_job_status(
-        invocation,
-        deps,
-        required_str(&invocation.payload, "jobResourceId")?,
-    )
-    .await?;
+    let job_resource_id = required_str(&invocation.payload, "jobResourceId")?;
+    let runtime = inspect_bound_runtime(invocation, deps, job_resource_id).await?;
+    let job = redacted_job_status(invocation, deps, job_resource_id).await?;
     let status = job["status"].as_str().unwrap_or("unknown");
     Ok(result(
         "Module program execution status inspected.",
@@ -196,6 +184,8 @@ pub(super) async fn module_program_execution_cancel(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
+    let job_resource_id = required_str(&invocation.payload, "jobResourceId")?;
+    inspect_bound_runtime(invocation, deps, job_resource_id).await?;
     let cancel = jobs::service::cancel_job_value(
         &deps.engine_host,
         jobs::runtime(),
@@ -204,7 +194,6 @@ pub(super) async fn module_program_execution_cancel(
         &invocation.payload,
     )
     .await?;
-    let job_resource_id = required_str(&invocation.payload, "jobResourceId")?;
     let job = redacted_job_status(invocation, deps, job_resource_id).await?;
     let module_runtime_deps = module_runtime::Deps {
         engine_host: deps.engine_host.clone(),
@@ -259,6 +248,8 @@ pub(super) async fn module_program_execution_cleanup(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
+    let job_resource_id = required_str(&invocation.payload, "jobResourceId")?;
+    inspect_bound_runtime(invocation, deps, job_resource_id).await?;
     let cleanup = jobs::service::cleanup_job_resource_value(
         &deps.engine_host,
         jobs::runtime(),
@@ -267,12 +258,7 @@ pub(super) async fn module_program_execution_cleanup(
         &invocation.payload,
     )
     .await?;
-    let job = redacted_job_status(
-        invocation,
-        deps,
-        required_str(&invocation.payload, "jobResourceId")?,
-    )
-    .await?;
+    let job = redacted_job_status(invocation, deps, job_resource_id).await?;
     let module_runtime_deps = module_runtime::Deps {
         engine_host: deps.engine_host.clone(),
     };
@@ -407,6 +393,44 @@ async fn redacted_job_status(
         &json!({"jobResourceId": job_resource_id}),
     )
     .await
+}
+
+async fn inspect_bound_runtime(
+    invocation: &Invocation,
+    deps: &Deps,
+    job_resource_id: &str,
+) -> Result<Value, CapabilityError> {
+    let module_runtime_deps = module_runtime::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let runtime = module_runtime::service::inspect_module_runtime_value(
+        &module_runtime_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    ensure_runtime_job_binding(&runtime, job_resource_id)?;
+    Ok(runtime)
+}
+
+fn ensure_runtime_job_binding(
+    runtime: &Value,
+    requested_job_resource_id: &str,
+) -> Result<(), CapabilityError> {
+    let bound_job_resource_id = runtime
+        .pointer("/moduleRuntime/moduleRuntime/supervision/job/jobRef/resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            invalid(
+                "module program execution runtime has no delegated job binding for requested job",
+            )
+        })?;
+    if bound_job_resource_id == requested_job_resource_id {
+        return Ok(());
+    }
+    Err(invalid(format!(
+        "module program execution runtime/job binding mismatch: runtime is bound to {bound_job_resource_id}, requested {requested_job_resource_id}"
+    )))
 }
 
 fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
