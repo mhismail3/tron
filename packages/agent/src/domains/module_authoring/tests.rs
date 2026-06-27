@@ -546,6 +546,99 @@ async fn proposal_identity_rejects_provider_visible_token_like_material() {
 }
 
 #[tokio::test]
+async fn proposal_metadata_tokens_reject_provider_visible_token_like_material() {
+    let fixture = Fixture::new("module-proposal-token-metadata").await;
+    let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJtb2R1bGUifQ.c2lnbmF0dXJl";
+
+    for (label, payload) in [
+        (
+            "github-pat-proposal-id",
+            with_extra(
+                proposal_payload(),
+                "proposalId",
+                json!("github_pat_11AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            ),
+        ),
+        (
+            "jwt-validation-status",
+            with_extra(proposal_payload(), "validationStatus", json!(jwt)),
+        ),
+        (
+            "aws-source-ref-id",
+            with_extra(
+                proposal_payload(),
+                "sourceRefs",
+                json!([{"kind": "resource", "resourceId": "AKIAIOSFODNN7EXAMPLE", "role": "source"}]),
+            ),
+        ),
+        (
+            "github-test-ref-id",
+            with_extra(
+                proposal_payload(),
+                "testRefs",
+                json!([{"kind": "resource", "id": "github_pat_11AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "role": "tests"}]),
+            ),
+        ),
+        (
+            "jwt-replay-ref-version",
+            with_extra(
+                proposal_payload(),
+                "replayRefs",
+                json!([{"kind": "replay", "id": "replay-module-proposal", "role": "replay", "versionId": jwt}]),
+            ),
+        ),
+    ] {
+        let denied = fixture.record_error(label, payload).await;
+        assert!(denied.contains("token-like"), "{label}: {denied}");
+    }
+
+    let resources = fixture
+        .deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(MODULE_PROPOSAL_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list resources after denied metadata");
+    assert!(
+        resources.is_empty(),
+        "token-like projected metadata must be rejected before storage"
+    );
+}
+
+#[tokio::test]
+async fn proposal_metadata_tokens_allow_ordinary_ids_and_prose() {
+    let fixture = Fixture::new("module-proposal-safe-metadata").await;
+    let recorded = fixture
+        .record(
+            "safe-metadata-create",
+            json!({
+                "proposalId": "proposal-2026.06:module_authoring_v1",
+                "title": "Module Authoring Workspace",
+                "summary": "Ordinary prose about token budgets, validation states, and GitHub workflow labels.",
+                "sourceRefs": [{"kind": "repository_tree_snapshot", "resourceId": "repository_tree_snapshot:source_2026.06", "role": "source"}],
+                "docRefs": [{"kind": "prompt_artifact", "resourceId": "prompt_artifact:doc_2026.06", "role": "docs", "versionId": "version.2026_06"}],
+                "testRefs": [{"kind": "prompt_artifact", "id": "prompt_artifact:test_2026.06", "role": "tests"}],
+                "validationStatus": "review_pending-v1"
+            }),
+        )
+        .await;
+    assert_eq!(recorded["status"], json!("draft"));
+    assert_eq!(
+        recorded["proposal"]["proposalId"],
+        json!("proposal-2026.06:module_authoring_v1")
+    );
+    assert_eq!(
+        recorded["proposal"]["validation"]["status"],
+        json!("review_pending-v1")
+    );
+    assert_eq!(recorded["proposal"]["sourceRefCount"], json!(1));
+}
+
+#[tokio::test]
 async fn proposal_inspect_requires_exact_resource_selector() {
     let fixture = Fixture::new("module-proposal-selector").await;
     let recorded = fixture.record("selector-create", proposal_payload()).await;

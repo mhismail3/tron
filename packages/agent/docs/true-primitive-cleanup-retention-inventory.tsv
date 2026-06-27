@@ -635,6 +635,7 @@ packages/agent/tests/primitive_engine_teardown/runtime_surfaces.rs	test	test_har
 packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_engine_teardown/support.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/primitive_module_proposal_trace.rs	test	test_harness	TPC-10/P3MSA-S23B	focused Slice 23B module proposal trace redaction coverage for rejected unsafe payload and token-like sentinel leakage
 packages/agent/tests/primitive_trace_execution.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_trace_execution_support/mod.rs	test	test_harness	SACB-10	shared primitive trace execution fixture split from the integration test target
 packages/agent/tests/true_primitive_cleanup/engine_durability.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage

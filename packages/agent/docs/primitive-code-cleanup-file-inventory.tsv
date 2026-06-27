@@ -625,6 +625,7 @@ packages/agent/tests/primitive_engine_teardown/runtime_surfaces.rs	retain	rust t
 packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_engine_teardown/support.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/tests/primitive_module_proposal_trace.rs	retain	rust test	PCC-10/P3MSA-S23B	Implementation-candidate module proposal trace redaction regression test retained for provider-visible safe request projection coverage.
 packages/agent/tests/primitive_trace_execution.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_trace_execution_support/mod.rs	retain	rust test	SACB-10	Current primitive trace execution support split retained after SACB-10 closeout.
 packages/ios-app/Configuration/Base.xcconfig	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

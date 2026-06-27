@@ -126,6 +126,16 @@ pub(super) fn bounded_token(
     Ok(trimmed.to_owned())
 }
 
+pub(super) fn bounded_provider_visible_token(
+    field: &str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<String, CapabilityError> {
+    let trimmed = bounded_token(field, value, max_bytes)?;
+    reject_provider_visible_token_like(field, &trimmed)?;
+    Ok(trimmed)
+}
+
 pub(super) fn idempotency_key(
     invocation: &Invocation,
     payload: &Value,
@@ -188,7 +198,7 @@ pub(super) fn validate_ref_array(
 
 pub(super) fn validation_placeholder(payload: &Value) -> Result<Value, CapabilityError> {
     let status = optional_string(payload, "validationStatus")?
-        .map(|value| bounded_token("validationStatus", &value, TOKEN_MAX_BYTES))
+        .map(|value| bounded_provider_visible_token("validationStatus", &value, TOKEN_MAX_BYTES))
         .transpose()?
         .unwrap_or_else(|| "not_validated".to_owned());
     Ok(json!({
@@ -214,29 +224,49 @@ fn sanitize_ref_item(label: &str, value: &Value) -> Result<Value, CapabilityErro
     let mut sanitized = Map::new();
     sanitized.insert(
         "kind".to_owned(),
-        json!(bounded_token("ref.kind", kind, TOKEN_MAX_BYTES)?),
+        json!(bounded_provider_visible_token(
+            "ref.kind",
+            kind,
+            TOKEN_MAX_BYTES
+        )?),
     );
     if item.get("resourceId").is_some() {
         sanitized.insert(
             "resourceId".to_owned(),
-            json!(bounded_token("ref.resourceId", id, TOKEN_MAX_BYTES)?),
+            json!(bounded_provider_visible_token(
+                "ref.resourceId",
+                id,
+                TOKEN_MAX_BYTES
+            )?),
         );
     } else {
         sanitized.insert(
             "id".to_owned(),
-            json!(bounded_token("ref.id", id, TOKEN_MAX_BYTES)?),
+            json!(bounded_provider_visible_token(
+                "ref.id",
+                id,
+                TOKEN_MAX_BYTES
+            )?),
         );
     }
     if let Some(role) = item.get("role").and_then(Value::as_str) {
         sanitized.insert(
             "role".to_owned(),
-            json!(bounded_token("ref.role", role, TOKEN_MAX_BYTES)?),
+            json!(bounded_provider_visible_token(
+                "ref.role",
+                role,
+                TOKEN_MAX_BYTES
+            )?),
         );
     }
     if let Some(version_id) = item.get("versionId").and_then(Value::as_str) {
         sanitized.insert(
             "versionId".to_owned(),
-            json!(bounded_token("ref.versionId", version_id, TOKEN_MAX_BYTES)?),
+            json!(bounded_provider_visible_token(
+                "ref.versionId",
+                version_id,
+                TOKEN_MAX_BYTES
+            )?),
         );
     }
     if item.keys().any(|key| {

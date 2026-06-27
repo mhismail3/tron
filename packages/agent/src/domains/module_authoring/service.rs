@@ -33,10 +33,10 @@ pub(crate) async fn record_module_proposal_value_at(
     ensure_write_authority(deps, invocation, "module_proposal_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
-    let proposal_id = optional_string(payload, "proposalId")?
-        .map(|value| bounded_token("proposalId", &value, PROPOSAL_ID_MAX_BYTES))
-        .transpose()?
+    let proposal_id_input = optional_string(payload, "proposalId")?
         .unwrap_or_else(|| invocation.id.as_str().to_owned());
+    let proposal_id =
+        bounded_provider_visible_token("proposalId", &proposal_id_input, PROPOSAL_ID_MAX_BYTES)?;
     let state = lifecycle_state(payload)?;
     let title = bounded_text(
         "title",
@@ -406,7 +406,7 @@ fn validate_module_proposal_resource_id(value: &str) -> Result<(), CapabilityErr
             "moduleProposalResourceId has unsupported resource kind",
         ));
     }
-    bounded_token("moduleProposalResourceId", value, TOKEN_MAX_BYTES).map(|_| ())
+    bounded_provider_visible_token("moduleProposalResourceId", value, TOKEN_MAX_BYTES).map(|_| ())
 }
 
 async fn publish_lifecycle_event(
