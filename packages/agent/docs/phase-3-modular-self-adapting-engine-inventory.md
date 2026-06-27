@@ -151,8 +151,8 @@ contents, prompt-like/debug material, credential-like strings, token-like
 provider-visible metadata, raw grant ids, and raw authority ids before storage
 or projection.
 
-P3MSA-INV-005 is pending review after Slice 23E implementation-candidate:
-Module Enable Disable Quarantine And Rollback. The candidate adds focused
+P3MSA-INV-005 is the accepted current baseline after Slice 23E: Module Enable
+Disable Quarantine And Rollback. The accepted slice adds focused
 `domains/module_lifecycle` custody for scoped `module_lifecycle_state`
 resources using the generic resource store, provider-visible
 `module_lifecycle_request`, `module_lifecycle_decision`,

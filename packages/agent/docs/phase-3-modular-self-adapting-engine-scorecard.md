@@ -288,8 +288,8 @@ Out of scope:
 Objective: make module activation reversible and auditable before any module
 executes meaningful work.
 
-Implementation-candidate status: Slice 23E adds focused `module_lifecycle`
-metadata state custody for install-candidate modules. It records
+Accepted status: Slice 23E adds focused `module_lifecycle` metadata state
+custody for install-candidate modules. It records
 `module_lifecycle_state` resources for enable, disable, quarantine, and
 rollback transitions through provider-visible `capability::execute` operations
 `module_lifecycle_request`, `module_lifecycle_decision`,
@@ -299,9 +299,9 @@ requires explicit `module_lifecycle.read` / `module_lifecycle.write` plus
 selectors, exact lifecycle inspect/decision selectors, current-version
 freshness, current-scope `module_install_decision` prerequisite revalidation,
 fresh approval checks, bounded rollback proof refs/readiness, and
-`networkPolicy: none`. It deliberately remains pending review and does not
-install, activate, execute, restore dependencies, run package managers, touch
-repo-managed skills, expand public `/engine`, or add fixed iOS UI.
+`networkPolicy: none`. It deliberately does not install, activate, execute,
+restore dependencies, run package managers, touch repo-managed skills, expand
+public `/engine`, or add fixed iOS UI.
 
 Minimal shape:
 

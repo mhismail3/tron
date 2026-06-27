@@ -447,16 +447,45 @@ rollback, runtime supervisor, dependency policy activation, generic
 autonomous-work cockpit, and feature-pack migration remain later Phase 3
 slices.
 
-## Implementation-Candidate Slice 23E: Module Enable Disable Quarantine And Rollback
+## Accepted Slice 23E: Module Enable Disable Quarantine And Rollback
 
 Discovery thread `019f077d-8f6d-71c1-9ede-fd3117d8f66d` selected Slice 23E
-with exact final status `implementation may start`. Implementation branch
-`codex/phase-3-slice-23e-module-lifecycle` starts from accepted baseline
+with exact final status `implementation may start` from accepted baseline
 `origin/main@04834b9cb4d5dc10e7ee63bf5deec384a1aa4147`
-(`docs: accept phase 3 slice 23d`).
+(`docs: accept phase 3 slice 23d`). Implementation branch
+`codex/phase-3-slice-23e-module-lifecycle` was implemented, independently
+reviewed, fixed, re-reviewed, accepted, and merged to `main`.
 
-Implementation-candidate scope:
+Accepted coordination:
 
+- Implementation thread `019f0783-4b9a-7982-9422-04ba4a80891a` completed exact
+  final status `implementation complete` at commit
+  `813f6720d3d310d80903ede280d35ef31df9865b`.
+- Independent review thread `019f07b1-c07a-7843-a1ea-c8f1245206a4` returned
+  exact verdict `changes required`.
+- Fix thread `019f07b5-edfd-7533-b404-c041a55a42a4` added missing SACB
+  lifecycle inventory coverage at commit
+  `1721c25de4a1ad6fff015328f736716cd17260c7`.
+- Re-review thread `019f07ba-f817-7e61-93b4-8764605dd4cf` returned exact
+  verdict `changes required`.
+- Fix thread `019f07be-aebb-7512-a0eb-76aebd334566` removed stale successful
+  follow-up lifecycle request behavior at commit
+  `db55addee0e66f0b0d56b1d84ce98e3d158f6f71`.
+- Re-review thread `019f07c8-c606-7cd2-af32-9458ff09b9ce` returned exact
+  verdict `changes required`.
+- Fix thread `019f07cf-2365-7cb0-af84-1c7d51f4f66a` denied stale pending
+  same-action replay unless idempotency fingerprints match, and reworded TPC
+  pending-review budget evidence, at commit
+  `7493385ba62f200686d28b8d1d93cffbb043908a`.
+- Independent re-review thread `019f07de-082b-7db2-8f17-277e96f194bf`
+  returned exact verdict `slice accepted`.
+- Mainline merge commit:
+  `0e1cad057324cb7a6463a8e1d03f92b9a5c65916`.
+
+Accepted scope:
+
+- Moves `P3MSA-INV-005` from `pending_review` to `current_baseline` after
+  independent re-review acceptance.
 - Adds focused `domains/module_lifecycle` custody, separate from
   `module_install`, `module_validation`, `module_registry`, and
   `worker_lifecycle`.
@@ -475,6 +504,8 @@ Implementation-candidate scope:
 - Requires fresh scoped approval and derived authority for lifecycle decisions;
   approval evidence alone is not authority.
 - Stores rollback proof refs/readiness and bounded audit refs only.
+- Adds current-version-guarded follow-up lifecycle requests for decided states
+  and exact idempotency-fingerprint replay for pending same-action requests.
 - Adds fail-closed disabled/quarantined/rolled-back runtime authorization
   metadata that later runtime execution can consult without executing modules
   in this slice.
@@ -486,21 +517,21 @@ Implementation-candidate scope:
   payloads, hidden chain-of-thought, and approval evidence minting authority by
   itself.
 
-Validation evidence while pending review:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23E source and tests after the lifecycle request selector fix. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23E source, tests, and closeout docs. |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check gate passed; existing provider/model/resource-store dead-code warnings remain. |
-| `cargo test --manifest-path packages/agent/Cargo.toml module_lifecycle -- --nocapture` | exit 0 | Module lifecycle resource schema, request/decision/inspect, projection redaction, rollback proof denial, install-candidate prerequisite denial, exact selector denial, disabled runtime fail-closed denial, and lifecycle runtime-grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_lifecycle -- --nocapture` | exit 0 | Module lifecycle resource schema, request/decision/inspect, projection redaction, rollback proof denial, install-candidate prerequisite denial, exact selector denial, disabled runtime fail-closed denial, follow-up transition, exact pending replay, stale replay denial, and lifecycle runtime-grant tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib execute_schema_exposes -- --nocapture` | exit 0 | Provider-visible execute schema exposes bounded module-lifecycle operation values and fields. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | TMB passed with refreshed module-lifecycle ownership and resource-kernel classifications. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC passed with Slice 23E implementation-candidate file classifications. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC passed after updating the retention inventory summary and recording the temporary post-restoration budget row for `grant.rs`. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB passed with lifecycle authority, payload-safety, projection, service, resource, and grant test classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC passed with Slice 23E accepted file classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC passed after updating the retention inventory summary and accepting the temporary post-restoration budget row for `grant.rs`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB passed with lifecycle authority, payload-safety, projection, service, resource, `records.rs`, `resource_store.rs`, `validation.rs`, and grant test classifications. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | PMBD passed with provider-visible lifecycle operation boundary rows. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | PPACD passed with lifecycle execute contract/operation rows. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed with Phase 3 scorecard, inventory, evidence, and pending-review wording. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed with Phase 3 scorecard, inventory, evidence, and accepted Slice 23E wording. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | SSARR passed; Slice 23E remains metadata lifecycle state custody, not runtime completion. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture` | exit 0 | ODA passed after Slice 23E evidence and audit metadata updates. |
-| `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
