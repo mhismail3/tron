@@ -87,7 +87,7 @@ SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry
 foundation evidence, not successor runtime execution completion proof.
 
-P3MSA-INV-002 is current baseline after accepted Slice 23B: Module Authoring
+P3MSA-INV-002 remains accepted baseline after Slice 23B: Module Authoring
 Workspace Foundation. The accepted slice adds inert `domains/module_authoring`
 custody for scoped
 `module_proposal` resources using the generic resource store, provider-visible
@@ -106,8 +106,8 @@ status, and ref metadata reject exact and embedded token-like material before
 storage/projection. Rejected module proposal execute payloads are redacted in
 provider-visible traces before service validation can fail them.
 
-P3MSA-INV-003 is pending independent review after Slice 23C implementation:
-Module Contract Test Harness. The implementation candidate adds inert
+P3MSA-INV-003 is current baseline after accepted Slice 23C: Module Contract
+Test Harness. The accepted slice adds inert
 `domains/module_validation` custody for scoped `module_validation_report`
 resources using the generic resource store, provider-visible
 `module_validation_record`, `module_validation_list`, and
@@ -122,10 +122,12 @@ not execute commands or module code, restore dependencies, use package
 managers, store raw logs/commands/env/code/file contents/unsafe paths, touch
 repo-managed skills, expand public `/engine`, add fixed native panels, or
 introduce a new SQLite table. Record, list, and inspect reject unsafe payload
-fields, unsafe paths, prompt-injection-like strings, credential-like strings,
-token-like provider-visible metadata, raw grant ids, raw authority ids, and raw
-debug/chain-of-thought material before storage/projection. Status remains
-`pending_review` until independent review acceptance.
+fields, unsafe paths, raw shell command-like command/result preview or summary
+text, prompt-injection-like strings, credential-like strings, token-like
+provider-visible metadata, raw grant ids, raw authority ids, and raw
+debug/chain-of-thought material before storage/projection. Re-review accepted
+the implementation after the inventory/evidence refresh and raw-shell ref
+hardening.
 
 ## Slice Families
 

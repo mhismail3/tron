@@ -219,8 +219,8 @@ Objective: define how a module proves that its manifest, docs, tests, resource
 schemas, provider projections, and authority declarations are internally
 consistent before it can be installed or enabled.
 
-Implementation-candidate Slice 23C moves `P3MSA-INV-003` to `pending_review`.
-It adds a focused `module_validation` domain backed by generic
+Accepted Slice 23C closes `P3MSA-INV-003` as current baseline. It adds a
+focused `module_validation` domain backed by generic
 `module_validation_report` resources, with provider-visible
 `module_validation_record`, `module_validation_list`, and
 `module_validation_inspect` execute operations. It keeps validation evidence
@@ -228,8 +228,10 @@ scoped to the current session/workspace, stores bounded metadata/refs/checks
 only, fingerprints idempotency and runtime refs, emits
 `module_validation.lifecycle`, and proves no install, activation, execution,
 command execution, dependency restore, package-manager, network, physical
-workspace directory, or repo-managed skills side effects. Independent review
-must accept the implementation before this row becomes current baseline.
+workspace directory, or repo-managed skills side effects. Review/fix loops
+refreshed SACB/TMB/PCC/TPC inventories and hardened provider-visible
+command/result ref previews and summaries against raw shell command text before
+independent acceptance.
 
 Minimal shape:
 

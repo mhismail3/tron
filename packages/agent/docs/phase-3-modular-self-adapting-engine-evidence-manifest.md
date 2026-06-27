@@ -254,7 +254,7 @@ gates, enable/disable/quarantine/rollback, runtime supervisor, dependency
 policy execution, generic autonomous-work cockpit, and feature-pack migration
 remain later Phase 3 slices.
 
-## Implementation-Candidate Slice 23C: Module Contract Test Harness
+## Accepted Slice 23C: Module Contract Test Harness
 
 Discovery thread `019f0697-83fb-7ff2-b985-8f807ecb97b8` selected Slice 23C
 with exact final status `implementation may start` from baseline
@@ -264,17 +264,38 @@ with exact final status `implementation may start` from baseline
 Implementation branch:
 `codex/phase-3-slice-23c-module-contract-test-harness`
 
-Implementation status:
-`implementation-candidate` / `pending_review`
+Implementation thread:
+`019f069c-814e-7453-8563-a463c05499b3`
+
+Independent review thread:
+`019f06cf-4f80-7fe0-9193-6b145826df59`
+
+Focused fix thread:
+`019f06d7-f5fb-76a0-abb0-f869f7961d3f`
+
+Independent re-review thread:
+`019f0707-388d-7e43-9c45-3d9657e8586d`
 
 Baseline HEAD:
 `db560823c3737eed01fdae63425b24a9cf53c0de`
 (`docs: accept phase 3 slice 23b`)
 
-Implementation-candidate scope:
+Accepted implementation commit:
+`d2ba314b145c09f70c23ff3774b0075e52949f40`
+(`feat: add module validation report harness`)
 
-- Moves `P3MSA-INV-003` from `planned` to `pending_review` until independent
-  review acceptance.
+Accepted fix commit:
+`a661175984dce70cdb8c974ddc691794c9df0d90`
+(`fix: harden module validation evidence refs`)
+
+Mainline merge commit:
+`6e74b641f815de86f71a0c82798b1a2889f01d1a`
+(`merge: integrate phase 3 slice 23c branch`)
+
+Accepted scope:
+
+- Moves `P3MSA-INV-003` from `pending_review` to `current_baseline` after
+  independent re-review accepted the module contract test harness foundation.
 - Adds focused `domains/module_validation` custody for scoped, inert
   `module_validation_report` resources using the existing generic resource
   store, not a new SQLite table.
@@ -325,6 +346,8 @@ Validation evidence:
 | `git diff --check` | exit 0 | Whitespace check passed. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were present. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| Independent review thread `019f06cf-4f80-7fe0-9193-6b145826df59` | exact verdict `changes required` | Review found stale SACB/TMB/PCC/TPC inventories and evidence manifest entries, and found raw shell command text could be stored/projected through module validation command/result ref preview and summary fields. |
+| Independent re-review thread `019f0707-388d-7e43-9c45-3d9657e8586d` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline and implementation ancestry, full and fix diffs, raw-shell ref hardening, refreshed inventory counts, accepted scope, focused validation, hygiene checks, and no repo-managed skills. |
 
 Deferred scope remains unchanged: review/install gates,
 enable/disable/quarantine/rollback, runtime supervisor, dependency policy
