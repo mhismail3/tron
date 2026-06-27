@@ -84,15 +84,16 @@ not install or execute modules, restore dependencies, add repo-managed skills,
 expand public `/engine`, add fixed native panels, or introduce a new SQLite
 table.
 
-P3MSA-INV-006 has an implementation candidate after Slice 23F: Module Runtime
-Execution Supervisor. The candidate adds the `module_runtime` domain and
+P3MSA-INV-006 is current baseline after accepted Slice 23F: Module Runtime
+Execution Supervisor. The accepted slice adds the `module_runtime` domain and
 `module_runtime_state` resource kind/schema for enabled-lifecycle-guarded
 supervisor envelopes with bounded refs, timeout/cancel/shutdown metadata,
 trace-safe request projection, exact runtime/lifecycle selectors, and no raw
 commands/logs/output, PTY, browser automation, dependency restore, package
 manager, network, direct provider-visible job surface, or physical install
-side effects. It remains `pending_review` until independent review accepts and
-mainline integration promotes it to `current_baseline`.
+side effects. It moves `P3MSA-INV-006` from `pending_review` to
+`current_baseline` after independent re-review acceptance and mainline
+integration.
 
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry

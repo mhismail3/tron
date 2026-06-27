@@ -339,7 +339,7 @@ Out of scope:
 - language-specific interpreter restoration without module ownership;
 - live network unless a module declares and is granted it.
 
-Slice 23F has an implementation candidate for `P3MSA-INV-006`. It adds the
+Slice 23F is accepted current baseline for `P3MSA-INV-006`. It adds the
 `module_runtime` domain, `module_runtime_state` resource schema, and
 `module_runtime_request`, `module_runtime_list`, `module_runtime_inspect`, and
 `module_runtime_cancel` execute operation values. Runtime requests require an
@@ -352,8 +352,8 @@ physically install modules, activate packages, restore dependencies, run
 package managers, allocate PTYs, perform browser automation, access networks,
 expose jobs directly as the provider-visible module surface, or store raw
 commands, logs, stdout/stderr, code, file contents, paths, env values, secrets,
-raw grant ids, or raw authority ids. The row remains `pending_review` until an
-independent review accepts the branch and mainline integration promotes it.
+raw grant ids, or raw authority ids. The row is `current_baseline` after
+independent re-review accepted the branch and mainline integration promoted it.
 
 ### Slice 23G: Module Dependency Request And Policy Activation
 

@@ -536,17 +536,32 @@ Acceptance validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture` | exit 0 | ODA passed after Slice 23E evidence and audit metadata updates. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git diff --cached --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |
 
-## Implementation Candidate Slice 23F: Module Runtime Execution Supervisor
+## Accepted Slice 23F: Module Runtime Execution Supervisor
 
 Discovery thread `019f07ef-8331-7ea1-9f48-e444219a7733` selected Slice 23F
 from accepted baseline
 `origin/main@c18b5413235c7de8ebefc012251c3f9ca03e69e9`
 (`docs: accept phase 3 slice 23e`). Implementation branch
-`codex/phase-3-slice-23f-module-runtime-supervisor` implements the candidate
-and leaves `P3MSA-INV-006` in `pending_review` until independent review and
-mainline integration accept it.
+`codex/phase-3-slice-23f-module-runtime-supervisor` implemented the accepted
+slice.
 
-Candidate scope:
+- Implementation thread `019f07f4-ffb5-7d22-a6f2-93662eca0bcb` completed exact
+  final status `implementation complete` at commit
+  `d12f33152dca7749967d267e2f5c332216e4cdb4`.
+- Independent review thread `019f0819-7503-71a1-8e79-268fd208d698` returned
+  exact verdict `changes required`.
+- Fix thread `019f081f-ba81-77c3-accf-580ec53600f5` reworded the README from
+  pre-acceptance wording to pending-review / implementation-candidate wording
+  at commit `f3480f632bc0d5f64f0f50ad4d1fe2cd35eee42a`.
+- Independent re-review thread `019f0825-2a68-7c61-9704-4866e0250138`
+  returned exact verdict `slice accepted`.
+- Mainline merge commit:
+  `8f30c0d4f3a852ad67f04d43f511b5eae0d40b63`.
+
+Accepted scope:
+
+- Moves `P3MSA-INV-006` from `pending_review` to `current_baseline` after
+  independent re-review acceptance.
 
 - Adds focused `domains/module_runtime` custody for generic supervised runtime
   envelope metadata, separate from module feature semantics and separate from
@@ -576,7 +591,7 @@ Candidate scope:
   production deploy/update behavior, repo-managed `packages/agent/skills`,
   public `/engine` expansion, and fixed native panels.
 
-Implementation validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
