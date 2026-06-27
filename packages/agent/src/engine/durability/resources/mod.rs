@@ -27,6 +27,7 @@ mod media_definitions;
 mod memory_definitions;
 mod module_authoring_definitions;
 mod module_install_definitions;
+mod module_lifecycle_definitions;
 mod module_registry_definitions;
 mod module_validation_definitions;
 mod notification_definitions;
@@ -50,6 +51,7 @@ pub(crate) use module_authoring_definitions::MODULE_PROPOSAL_PAYLOAD_SCHEMA_VERS
 pub(crate) use module_install_definitions::{
     MODULE_INSTALL_DECISION_PAYLOAD_SCHEMA_VERSION, MODULE_INSTALL_REQUEST_PAYLOAD_SCHEMA_VERSION,
 };
+pub(crate) use module_lifecycle_definitions::MODULE_LIFECYCLE_STATE_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_registry_definitions::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
 pub(in crate::engine) use module_registry_definitions::builtin_module_manifest_resources;
 pub(crate) use module_validation_definitions::MODULE_VALIDATION_REPORT_PAYLOAD_SCHEMA_VERSION;

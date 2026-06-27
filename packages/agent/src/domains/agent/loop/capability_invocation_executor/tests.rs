@@ -26,6 +26,8 @@ mod grant_import_preview_tests;
 mod grant_module_authoring_tests;
 #[path = "grant_module_install_tests.rs"]
 mod grant_module_install_tests;
+#[path = "grant_module_lifecycle_tests.rs"]
+mod grant_module_lifecycle_tests;
 #[path = "grant_module_validation_tests.rs"]
 mod grant_module_validation_tests;
 #[path = "grant_notification_device_tests.rs"]

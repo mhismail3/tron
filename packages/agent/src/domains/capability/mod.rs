@@ -67,6 +67,11 @@
 //! refs without installing, enabling, executing, restoring dependencies,
 //! running package managers, touching repo-managed skills, or accessing
 //! networks.
+//! Module-lifecycle operations are metadata-only state operations: they
+//! request/decide/list/inspect enable, disable, quarantine, and rollback
+//! lifecycle records for install-candidate modules without installing,
+//! activating, executing, restoring dependencies, running package managers,
+//! touching repo-managed skills, or accessing networks.
 //!
 //! ## Submodules
 //!
@@ -106,6 +111,7 @@ mod import_history_contract;
 mod import_preview_contract;
 mod media_contract;
 mod module_install_contract;
+mod module_lifecycle_contract;
 mod module_validation_contract;
 mod operations;
 mod program_execution_contract;

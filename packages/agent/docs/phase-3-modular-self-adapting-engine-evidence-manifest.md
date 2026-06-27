@@ -446,3 +446,61 @@ Deferred scope remains unchanged: physical install, enable/disable/quarantine/
 rollback, runtime supervisor, dependency policy activation, generic
 autonomous-work cockpit, and feature-pack migration remain later Phase 3
 slices.
+
+## Implementation-Candidate Slice 23E: Module Enable Disable Quarantine And Rollback
+
+Discovery thread `019f077d-8f6d-71c1-9ede-fd3117d8f66d` selected Slice 23E
+with exact final status `implementation may start`. Implementation branch
+`codex/phase-3-slice-23e-module-lifecycle` starts from accepted baseline
+`origin/main@04834b9cb4d5dc10e7ee63bf5deec384a1aa4147`
+(`docs: accept phase 3 slice 23d`).
+
+Implementation-candidate scope:
+
+- Adds focused `domains/module_lifecycle` custody, separate from
+  `module_install`, `module_validation`, `module_registry`, and
+  `worker_lifecycle`.
+- Registers `module_lifecycle_state` resource schema
+  `tron.resource.module_lifecycle_state.v1` with payload schema
+  `tron.module_lifecycle_state.v1`.
+- Adds provider-visible `capability::execute` operations
+  `module_lifecycle_request`, `module_lifecycle_decision`,
+  `module_lifecycle_list`, and `module_lifecycle_inspect`.
+- Enforces explicit `module_lifecycle.read` / `module_lifecycle.write` plus
+  `resource.read` / `resource.write` authority, non-wildcard
+  `kind:module_lifecycle_state` selectors, exact lifecycle inspect/decision
+  `resource:<id>` selectors, and `networkPolicy: none`.
+- Requires current-scope, current-version `module_install_decision` resources
+  in `install_candidate` state before lifecycle mutation.
+- Requires fresh scoped approval and derived authority for lifecycle decisions;
+  approval evidence alone is not authority.
+- Stores rollback proof refs/readiness and bounded audit refs only.
+- Adds fail-closed disabled/quarantined/rolled-back runtime authorization
+  metadata that later runtime execution can consult without executing modules
+  in this slice.
+- Deliberately excludes physical install, activation, runtime execution,
+  dependency restoration, package managers, network access, production
+  deploy/update behavior, repo-managed `packages/agent/skills`, public
+  `/engine` expansion, fixed iOS panels, raw logs/commands/env/code/file
+  contents/unsafe paths, raw grant/authority ids, token-like material, debug
+  payloads, hidden chain-of-thought, and approval evidence minting authority by
+  itself.
+
+Validation evidence while pending review:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed for Slice 23E source and tests after the lifecycle request selector fix. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check gate passed; existing provider/model/resource-store dead-code warnings remain. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_lifecycle -- --nocapture` | exit 0 | Module lifecycle resource schema, request/decision/inspect, projection redaction, rollback proof denial, install-candidate prerequisite denial, exact selector denial, disabled runtime fail-closed denial, and lifecycle runtime-grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib execute_schema_exposes -- --nocapture` | exit 0 | Provider-visible execute schema exposes bounded module-lifecycle operation values and fields. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | TMB passed with refreshed module-lifecycle ownership and resource-kernel classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC passed with Slice 23E implementation-candidate file classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC passed after updating the retention inventory summary and recording the temporary post-restoration budget row for `grant.rs`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB passed with lifecycle authority, payload-safety, projection, service, resource, and grant test classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants -- --nocapture` | exit 0 | PMBD passed with provider-visible lifecycle operation boundary rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | PPACD passed with lifecycle execute contract/operation rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed with Phase 3 scorecard, inventory, evidence, and pending-review wording. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | SSARR passed; Slice 23E remains metadata lifecycle state custody, not runtime completion. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture` | exit 0 | ODA passed after Slice 23E evidence and audit metadata updates. |
+| `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Personal-info, whitespace, ignored-file, and no repo-managed-skills gates passed after final source/docs edits. |

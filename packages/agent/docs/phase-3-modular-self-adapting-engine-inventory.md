@@ -151,6 +151,27 @@ contents, prompt-like/debug material, credential-like strings, token-like
 provider-visible metadata, raw grant ids, and raw authority ids before storage
 or projection.
 
+P3MSA-INV-005 is pending review after Slice 23E implementation-candidate:
+Module Enable Disable Quarantine And Rollback. The candidate adds focused
+`domains/module_lifecycle` custody for scoped `module_lifecycle_state`
+resources using the generic resource store, provider-visible
+`module_lifecycle_request`, `module_lifecycle_decision`,
+`module_lifecycle_list`, and `module_lifecycle_inspect` execute operation
+values, explicit module-lifecycle/resource grants, exact lifecycle
+inspect/decision selectors, current-version lifecycle freshness guards,
+current-scope `module_install_decision` prerequisite revalidation, bounded
+rollback proof refs/readiness, fresh approval checks, derived-authority proof,
+idempotency fingerprints, lifecycle stream evidence, explicit
+no-install/no-execution/no-activation proof, and fail-closed disabled/
+quarantined runtime authorization metadata. It does not install or activate
+modules, restore dependencies, use package managers, execute code, access
+networks, touch repo-managed skills, expand public `/engine`, add fixed native
+panels, or introduce a new SQLite table. Request, decision, list, and inspect
+reject unsafe payload fields, unsafe paths, raw logs/commands/env/code/file
+contents, prompt-like/debug material, credential-like strings, token-like
+provider-visible metadata, raw grant ids, and raw authority ids before storage
+or projection.
+
 ## Slice Families
 
 ### Module Plane Foundation
