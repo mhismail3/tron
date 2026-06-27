@@ -354,7 +354,7 @@ enable/disable/quarantine/rollback, runtime supervisor, dependency policy
 execution, generic autonomous-work cockpit, and feature-pack migration remain
 later Phase 3 slices.
 
-## Implementation Candidate Slice 23D: Module Review Approval And Install Gate
+## Accepted Slice 23D: Module Review Approval And Install Gate
 
 Discovery thread `019f071a-01e7-79a0-b98c-99b945f05aeb` selected Slice 23D
 with exact final status `implementation may start` from baseline
@@ -365,16 +365,37 @@ Implementation branch:
 `codex/phase-3-slice-23d-module-review-approval-install-gate`
 
 Implementation thread:
-`019efe16-09d7-73d3-9708-6c6ba5bc6493`
+`019f071f-c70a-7bc1-9634-1877509c3659`
+
+Independent review thread:
+`019f0751-eb41-75a0-859d-4a5cd8d62505`
+
+Focused fix thread:
+`019f075b-646f-7b61-989a-8a2a396cb7db`
+
+Independent re-review thread:
+`019f076f-2ab2-72d2-9e72-d6f0a15778d8`
 
 Baseline HEAD:
 `7c4ec8519394109ddef107aa5891d4875e5b14de`
 (`docs: accept phase 3 slice 23c`)
 
-Candidate scope:
+Accepted implementation commit:
+`7beea4cf3210d03ab747ed123cad4b239596693a`
+(`feat: add module install approval gate`)
 
-- Moves `P3MSA-INV-004` from `planned` to `pending_review` for this
-  implementation branch until independent acceptance.
+Accepted fix commit:
+`96a5c1dd9e6b60e6545873c8789bf3858a440618`
+(`fix: prepare slice 23d install gate for review`)
+
+Mainline merge commit:
+`5545265b893db1702c4dd7864867eb056f9fd3fc`
+(`merge: integrate phase 3 slice 23d branch`)
+
+Accepted scope:
+
+- Moves `P3MSA-INV-004` from `pending_review` to `current_baseline` after
+  independent re-review accepted the module review approval and install gate.
 - Adds focused `domains/module_install` custody for scoped, inert
   `module_install_request` and `module_install_decision` resources using the
   existing generic resource store, not a new SQLite table.
@@ -418,6 +439,8 @@ Validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | OpenAI message-converter guidance documents metadata-only install gate constraints. |
 | DESI, SACB, TMB, PCC, TPC, PMBD, PPACD, SSARR, and ODA invariant suites | exit 0 | Documentation, authority/security, modularity, cleanup, provider/model, public protocol, readiness, and observability inventories passed after the Slice 23D updates. |
 | `scripts/personal-info-guard.sh`, `git diff --check`, `git ls-files -ci --exclude-standard`, `test ! -e packages/agent/skills` | exit 0 | Hygiene, ignored-file, and no repo-managed-skills gates passed after final source edits. |
+| Independent review thread `019f0751-eb41-75a0-859d-4a5cd8d62505` | exact verdict `changes required` | Review found pre-acceptance docs marked Slice 23D as accepted/current baseline and cleanup static gates failed for over-budget `module_install` source files. |
+| Independent re-review thread `019f076f-2ab2-72d2-9e72-d6f0a15778d8` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline/implementation/fix ancestry, full and fix diffs, pending-review wording before acceptance, hard-budget refactor without exception rows, accepted scope, focused validation, hygiene checks, and no repo-managed skills. |
 
 Deferred scope remains unchanged: physical install, enable/disable/quarantine/
 rollback, runtime supervisor, dependency policy activation, generic

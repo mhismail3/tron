@@ -253,8 +253,7 @@ Objective: add the policy gate that turns a validated module proposal into an
 install candidate only after explicit review, approval, authority, dependency,
 and rollback checks.
 
-Implementation-candidate Slice 23D keeps `P3MSA-INV-004` pending independent
-review before it can become current baseline. It adds a focused
+Accepted Slice 23D closes `P3MSA-INV-004` as current baseline. It adds a focused
 `module_install` domain backed by generic `module_install_request` and
 `module_install_decision` resources, with provider-visible
 `module_install_request_record`, `module_install_request_list`,
