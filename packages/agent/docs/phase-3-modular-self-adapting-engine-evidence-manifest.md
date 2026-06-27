@@ -373,8 +373,8 @@ Baseline HEAD:
 
 Candidate scope:
 
-- Moves `P3MSA-INV-004` from `planned` to `current_baseline` for this
-  implementation branch.
+- Moves `P3MSA-INV-004` from `planned` to `pending_review` for this
+  implementation branch until independent acceptance.
 - Adds focused `domains/module_install` custody for scoped, inert
   `module_install_request` and `module_install_decision` resources using the
   existing generic resource store, not a new SQLite table.

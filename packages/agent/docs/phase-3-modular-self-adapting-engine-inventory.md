@@ -129,10 +129,11 @@ debug/chain-of-thought material before storage/projection. Re-review accepted
 the implementation after the inventory/evidence refresh and raw-shell ref
 hardening.
 
-P3MSA-INV-004 is current baseline after accepted Slice 23D: Module Review
-Approval And Install Gate. The accepted slice adds inert `domains/module_install`
-custody for scoped `module_install_request` and `module_install_decision`
-resources using the generic resource store, provider-visible
+P3MSA-INV-004 is pending review for implementation-candidate Slice 23D: Module
+Review Approval And Install Gate. The candidate adds inert
+`domains/module_install` custody for scoped `module_install_request` and
+`module_install_decision` resources using the generic resource store,
+provider-visible
 `module_install_request_record`, `module_install_request_list`,
 `module_install_request_inspect`, `module_install_decision_record`,
 `module_install_decision_list`, and `module_install_decision_inspect` execute

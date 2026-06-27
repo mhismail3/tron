@@ -42,7 +42,7 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 753 |
+| implementation | 758 |
 | support | 385 |
 | test | 568 |
 | docs | 135 |
@@ -79,7 +79,7 @@ The TSV covers tracked and newly introduced files under:
 | `model_provider` | 78 |
 | `module_authoring` | 6 |
 | `module_registry` | 4 |
-| `module_install` | 6 |
+| `module_install` | 11 |
 | `module_validation` | 6 |
 | `notifications` | 7 |
 | `platform` | 2 |

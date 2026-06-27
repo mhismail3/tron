@@ -12,11 +12,16 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `approval_gate` | Approval freshness and module-install decision authority checks |
 //! | `authority` | Module-install/resource grant and selector checks |
 //! | `contract` | Worker id, stream topic, scope, and schema constants |
+//! | `payload_safety` | Unsafe-field, path, prompt, command, and token-like payload denial |
+//! | `prerequisite` | Current-scope passed `module_validation_report` prerequisite checks |
 //! | `projection` | Bounded provider-safe request and decision projections |
+//! | `records` | Metadata-only request/decision payload, idempotency, and proof builders |
+//! | `resource_store` | Resource inspection, lifecycle stream, and kind/schema helpers |
 //! | `service` | Timestamp-injected record/list/inspect behavior |
-//! | `validation` | Text, ref, approval, prerequisite, lifecycle, and unsafe-field checks |
+//! | `validation` | Text, ref, approval, lifecycle, and bounded metadata checks |
 //! | `tests` | Schema, authority, replay, approval, prerequisite, and redaction regressions |
 //!
 //! # INVARIANT: install candidates are metadata gate state only
@@ -30,9 +35,14 @@
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+mod approval_gate;
 mod authority;
 pub(crate) mod contract;
+mod payload_safety;
+mod prerequisite;
 mod projection;
+mod records;
+mod resource_store;
 pub(crate) mod service;
 mod validation;
 
