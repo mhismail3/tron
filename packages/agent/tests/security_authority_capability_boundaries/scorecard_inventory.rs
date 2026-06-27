@@ -66,7 +66,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Inventory",
-        "Status: SACB campaign `complete`; 962 security boundary rows inventoried and",
+        "Status: SACB campaign `complete`; 975 security boundary rows inventoried and",
         "## Boundary Classes",
         "`public_transport`",
         "`authority_grant`",
@@ -192,6 +192,19 @@ fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
         "packages/agent/src/engine/authority/grants/derivation.rs",
         "packages/agent/src/engine/authority/grants/policy_hash.rs",
         "packages/agent/src/domains/capability/operations/filesystem.rs",
+        "packages/agent/tests/true_primitive_cleanup/inventory.rs",
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs",
+        "packages/agent/src/domains/capability/module_validation_contract.rs",
+        "packages/agent/src/domains/capability/operations/module_validation.rs",
+        "packages/agent/src/domains/module_validation/authority.rs",
+        "packages/agent/src/domains/module_validation/contract.rs",
+        "packages/agent/src/domains/module_validation/mod.rs",
+        "packages/agent/src/domains/module_validation/projection.rs",
+        "packages/agent/src/domains/module_validation/service.rs",
+        "packages/agent/src/domains/module_validation/shell_ref_tests.rs",
+        "packages/agent/src/domains/module_validation/tests.rs",
+        "packages/agent/src/domains/module_validation/validation.rs",
+        "packages/agent/src/engine/durability/resources/module_validation_definitions.rs",
     ] {
         assert!(
             by_path.contains_key(required),

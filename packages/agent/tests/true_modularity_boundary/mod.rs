@@ -157,6 +157,65 @@ fn boundary_inventory_covers_tracked_sources() {
         missing.join("\n")
     );
 
+    for (path, expected_class) in [
+        (
+            "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs",
+            "test-support",
+        ),
+        (
+            "packages/agent/src/domains/capability/module_validation_contract.rs",
+            "contract",
+        ),
+        (
+            "packages/agent/src/domains/capability/operations/module_validation.rs",
+            "adapter",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/authority.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/contract.rs",
+            "contract",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/mod.rs",
+            "facade",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/projection.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/service.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/shell_ref_tests.rs",
+            "test-support",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/tests.rs",
+            "test-support",
+        ),
+        (
+            "packages/agent/src/domains/module_validation/validation.rs",
+            "implementation",
+        ),
+        (
+            "packages/agent/src/engine/durability/resources/module_validation_definitions.rs",
+            "implementation",
+        ),
+    ] {
+        let columns = rows
+            .get(path)
+            .unwrap_or_else(|| panic!("TMB inventory missing Slice 23C row: {path}"));
+        assert_eq!(
+            columns[2], expected_class,
+            "TMB inventory row for {path} must keep the Slice 23C class"
+        );
+    }
+
     let allowed_classes: BTreeSet<&str> = [
         "facade",
         "contract",

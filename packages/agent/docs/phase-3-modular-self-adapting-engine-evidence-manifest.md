@@ -253,3 +253,80 @@ Deferred scope remains unchanged: validation report resources, review/install
 gates, enable/disable/quarantine/rollback, runtime supervisor, dependency
 policy execution, generic autonomous-work cockpit, and feature-pack migration
 remain later Phase 3 slices.
+
+## Implementation-Candidate Slice 23C: Module Contract Test Harness
+
+Discovery thread `019f0697-83fb-7ff2-b985-8f807ecb97b8` selected Slice 23C
+with exact final status `implementation may start` from baseline
+`origin/main@db560823c3737eed01fdae63425b24a9cf53c0de`
+(`docs: accept phase 3 slice 23b`).
+
+Implementation branch:
+`codex/phase-3-slice-23c-module-contract-test-harness`
+
+Implementation status:
+`implementation-candidate` / `pending_review`
+
+Baseline HEAD:
+`db560823c3737eed01fdae63425b24a9cf53c0de`
+(`docs: accept phase 3 slice 23b`)
+
+Implementation-candidate scope:
+
+- Moves `P3MSA-INV-003` from `planned` to `pending_review` until independent
+  review acceptance.
+- Adds focused `domains/module_validation` custody for scoped, inert
+  `module_validation_report` resources using the existing generic resource
+  store, not a new SQLite table.
+- Registers resource schema `tron.resource.module_validation_report.v1` and
+  payload schema version `tron.module_validation_report.v1`.
+- Adds provider-visible `capability::execute` operation values
+  `module_validation_record`, `module_validation_list`, and
+  `module_validation_inspect`.
+- Enforces explicit `module_validation.read` / `module_validation.write` plus
+  `resource.read` / `resource.write` authority for record, read-only authority
+  for list/inspect, `kind:module_validation_report` selectors, exact inspect
+  `resource:<id>` selectors, and `networkPolicy: none`.
+- Stores bounded module/proposal refs, manifest/resource/provider projection
+  parity checks, required docs/tests evidence refs, deterministic command
+  identity/result refs with non-shell summaries/fingerprints, failure evidence
+  refs, validation status/check summaries, lifecycle state, fingerprinted
+  idempotency/runtime refs, and explicit no-install/no-execution proof.
+- Rejects unsafe read/write payload fields, unsafe paths, raw logs, raw
+  commands, raw shell command-like command/result preview or summary text, raw
+  env values, raw code, raw file contents, package/dependency install requests,
+  raw grant/authority ids, prompt-injection-like material, credential-like
+  strings, and exact or embedded token-like provider-visible metadata before
+  storage/projection.
+- Deliberately excludes module install, activation, execution, command
+  execution, dependency restoration, package managers, physical module
+  workspace directories, repo-managed `packages/agent/skills`, public
+  `/engine` expansion, fixed iOS panels, and production deploy/update behavior.
+
+Validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Formatting gate passed after the raw-shell ref hardening and focused shell-ref regression split. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Type-check gate passed with existing provider/model dead-code warnings only. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_validation -- --nocapture` | exit 0 | Module validation report registration, record/list/inspect, idempotent replay, lifecycle stream evidence, failed validation evidence retention, required docs/tests evidence, exact inspect selectors, unsafe read/write payload denial, token-like metadata denial, raw shell command preview/summary denial, safe ordinary evidence summaries, bounded projections, runtime grant scoping, and engine authorization tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets -- --nocapture` | exit 0 | Provider-visible execute schema exposes the module-validation operation values while retaining the primitive operation boundary. |
+| `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance -- --nocapture` | exit 0 | OpenAI message-converter guidance includes module-validation metadata-only/no-execution wording. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | Phase 3 scorecard/evidence/inventory documentation structure remains consistent. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants` | exit 0 | SACB static gate passed with the refreshed 975-row authority/security inventory covering the Slice 23C module-validation paths. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants` | exit 0 | TMB static gate passed with the refreshed 1,290-row modularity inventory and Slice 23C classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants` | exit 0 | PMBD static gate passed for provider/model boundary discipline. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants` | exit 0 | PPACD static gate passed; no public `/engine` expansion was introduced. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants` | exit 0 | PCC static gate passed with the refreshed 1,987-row primitive cleanup inventory and Slice 23C retain classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants` | exit 0 | TPC static gate passed with the refreshed 1,942-row retention inventory and Slice 23C classifications. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants` | exit 0 | SSARR static gate passed; successor-runtime claims remain documentation-only. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants` | exit 0 | ODA static gate passed for bounded diagnostics/auditability boundaries. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info literal guard passed. |
+| `git diff --check` | exit 0 | Whitespace check passed. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files were present. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+
+Deferred scope remains unchanged: review/install gates,
+enable/disable/quarantine/rollback, runtime supervisor, dependency policy
+execution, generic autonomous-work cockpit, and feature-pack migration remain
+later Phase 3 slices.

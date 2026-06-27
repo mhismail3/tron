@@ -53,12 +53,20 @@
 //! dependency restoration, network behavior, repo-managed skills, raw prompt
 //! bodies, or raw proposal bodies; their trace records use a redacted
 //! request/authority projection before module-authoring validation runs.
+//! Module-validation operations are inert resource-backed operations: they
+//! record, list, and inspect bounded `module_validation_report` evidence with
+//! module/proposal refs, parity checks, docs/tests evidence, command/result
+//! refs, failure evidence, trace/replay refs, lifecycle, and no-install/no-
+//! execution proof without running commands or module code, storing raw logs,
+//! commands, env values, code, or file contents, touching repo-managed skills,
+//! resolving dependencies, accessing networks, installing, or activating.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
+//! | `module_validation_contract` | Module-validation request schema fields |
 //! | `operations` | Direct primitive operation implementations |
 //! | `scheduler_contract` | Schedule-specific request schema fields |
 //!
@@ -80,14 +88,16 @@
 //! remain pure metadata inspection or resource-backed report creation. Replay
 //! manifest reads deliberately bypass trace insertion so the exported manifest
 //! is not changed by the read. Module-registry reads deliberately stay inside
-//! `capability::execute`; module-authoring proposal records deliberately stay
-//! inert, resource-backed, and trace-safe before unsafe payload rejection.
-//! Neither expands the public `/engine` protocol.
+//! `capability::execute`; module-authoring proposal records and
+//! module-validation reports deliberately stay inert, resource-backed, and
+//! trace-safe before unsafe payload rejection. None expands the public
+//! `/engine` protocol.
 
 pub(crate) mod contract;
 mod import_history_contract;
 mod import_preview_contract;
 mod media_contract;
+mod module_validation_contract;
 mod operations;
 mod program_execution_contract;
 mod prompt_artifacts_contract;
