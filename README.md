@@ -1247,12 +1247,13 @@ The accepted startup-registration baseline keeps only loop infrastructure domain
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`, `media`,
 `worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
-accepted Phase 3 module-plane additions through Slice 23H include `module_registry`,
+accepted Phase 3 module-plane additions through Slice 23G include `module_registry`,
 `module_authoring`, `module_validation`, `module_install`, `module_lifecycle`,
-`module_runtime`, `module_dependencies` metadata policy records, and the
-system-visible inspect-only `module_activity` cockpit projection; provider-visible
-module-plane operations remain operation values under the single
-`capability::execute` primitive, not public `/engine` expansion. The
+`module_runtime`, and `module_dependencies` metadata policy records. Slice 23H
+adds the pending-review implementation-candidate system-visible inspect-only
+`module_activity` cockpit projection; provider-visible module-plane operations
+remain operation values under the single `capability::execute` primitive, not
+public `/engine` expansion. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
