@@ -767,7 +767,7 @@ allow-list entries outside Slice 23H; SUWRF may fail at baseline only on
 unchanged `packages/agent/src/domains/program_execution`. Slice 23H changed none
 of those paths.
 
-## Implementation Candidate Slice 24A: File And Source-Control Module Pack Activation
+## Accepted Slice 24A: File And Source-Control Module Pack Activation
 
 Discovery thread `019f0add-0e9d-7033-813d-6b727b004d05` selected Slice 24A
 with exact final status `implementation may start` from baseline
@@ -778,16 +778,29 @@ Implementation branch:
 `codex/phase-3-slice-24a-file-git-module-pack`
 
 Implementation status:
-`implementation-candidate`, pending independent review.
+`accepted`, current baseline after independent re-review and mainline
+integration.
 
 Baseline HEAD:
 `bc3c05c86574a0bf6dc1124183ea23ea28f7d875`
 (`docs: accept phase 3 slice 23h`)
 
-Candidate scope:
+Implementation commit:
+`b48be46f58a45ba3d10af80d5206179d8718510a`
+(`feat: activate file git module pack metadata`)
 
-- Adds the built-in pending-review `file_git_module` manifest seed alongside
-  the existing module-registry and capability manifest seeds.
+Fix 1 commit:
+`7c97170118d843dae6ed199ce0dde84a8b542688`
+(`fix: classify file git grant inventory`)
+
+Mainline merge commit:
+`3cf9e428c4fdd25471a20fd7bc2f6ddf2ece549d`
+
+Accepted scope:
+
+- Adds the built-in `file_git_module` manifest seed alongside the existing
+  module-registry and capability manifest seeds; the module manifest lifecycle
+  remains `pending_review` for later native review/activation work.
 - Declares only existing `filesystem_*` and selected `git_*`
   `capability::execute` operation values; no provider-visible tool, public
   `/engine` method, native panel, dependency, network, deploy, or package
@@ -810,7 +823,7 @@ fixed old iOS panels, broad DTO resurrection, package-manager/network behavior,
 SQLite migration/table additions, repo-managed `packages/agent/skills`,
 production deploy/update behavior, and unrelated DRC/SUWRF/HRA cleanup.
 
-Candidate validation evidence so far:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -820,8 +833,12 @@ Candidate validation evidence so far:
 | `cargo test --manifest-path packages/agent/Cargo.toml authorization --lib` | exit 0 | Authority selector tests passed, including exact file/Git authority and wildcard rejection. |
 | `cargo test --manifest-path packages/agent/Cargo.toml filesystem --lib` | exit 0 | Existing filesystem package semantics, patch/materialized-file evidence, idempotency, and bounded read/search/diff tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml git --lib` | exit 0 | Existing Git package semantics, index mutation, commit, branch-start, branch-inventory, resource evidence, idempotency, and broad-operation rejection tests passed. |
+| Independent review thread `019f0af6-3ac4-7d10-aa12-b18158d53b86` | exact verdict `changes required` | Review found missing PCC/SACB/TPC inventory coverage for `grant_file_git_tests.rs`; implementation branch/head and clean worktree were verified. |
+| Fix 1 thread `019f0afc-8bb4-79a0-8412-1714522a4044` | exact final status `fix ready for review` | Fix 1 added the missing PCC/SACB/TPC rows and directly related TPC generated count sync without source behavior, README, provider surface, or file/Git authority changes. |
+| Independent Fix 1 re-review thread `019f0b00-4574-74e0-b747-25aba76955cb` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline/implementation/fix ancestry, full and fix diffs, inventory coverage, exact file/Git selectors, no `agent_state` fallback, pending-review wording before acceptance, focused validation, hygiene checks, and no repo-managed skills. |
+| Mainline merge `3cf9e428c4fdd25471a20fd7bc2f6ddf2ece549d` plus closeout validation from `main` | exit 0 | Accepted Slice 24A implementation, fix, and re-review evidence were merged into `main`; focused Rust, static inventory, formatting, type-check, and hygiene validation passed from the integrated branch. |
 
-Known unchanged caveats for this candidate: existing provider/model/resource-
+Known unchanged caveats: existing provider/model/resource-
 store dead-code warnings remain; DRC may fail on unchanged goals/web/tool-source
 UTC allow-list entries outside Slice 24A; SUWRF may fail at baseline only on
 unchanged `packages/agent/src/domains/program_execution`; exploratory HRA may

@@ -133,14 +133,15 @@ execution, dependency restoration, package-manager behavior, or network access.
 It moves `P3MSA-INV-008` from `pending_review` to `current_baseline` after
 independent re-review acceptance and mainline integration.
 
-P3MSA-INV-009 is the Slice 24A implementation candidate: File And
-Source-Control Module Pack Activation. It adds a pending-review
-`file_git_module` manifest seed for the existing filesystem and Git operation
-pack, keeps provider-visible access behind the single `capability::execute`
-primitive, and maps selected file/Git operations to exact filesystem, Git,
-resource, and trusted-working-directory authority without `agent_state`
-fallback or wildcard selectors. The candidate declares only existing operation
-values: `filesystem_read`, `filesystem_list`, `filesystem_find`,
+P3MSA-INV-009 is accepted baseline after Slice 24A: File And Source-Control
+Module Pack Activation. The accepted slice adds a `file_git_module` manifest
+seed with manifest lifecycle `pending_review` for the existing filesystem and
+Git operation pack, keeps provider-visible access behind the single
+`capability::execute` primitive, and maps selected file/Git operations to exact
+filesystem, Git, resource, and
+trusted-working-directory authority without `agent_state` fallback or wildcard
+selectors. The accepted slice declares only existing operation values:
+`filesystem_read`, `filesystem_list`, `filesystem_find`,
 `filesystem_glob`, `filesystem_search_text`, `filesystem_diff`,
 `filesystem_write`, `filesystem_edit`, `filesystem_apply_patch`, `git_status`,
 `git_diff`, `git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`,
@@ -148,8 +149,9 @@ and `git_branch_start`. It reuses existing evidence resource kinds:
 `patch_proposal`, `materialized_file`, `git_index_change`, `git_commit`, and
 `git_branch_start`. Native review UI remains deferred, and broad Git workflows
 such as checkout, merge, rebase, reset, stash, fetch, pull, push, PR, and
-conflict handling remain rejected until separately selected. It keeps
-`P3MSA-INV-009` at `pending_review` until independent review acceptance.
+conflict handling remain rejected until separately selected. It moves
+`P3MSA-INV-009` from `pending_review` to `current_baseline` after independent
+re-review acceptance and mainline integration.
 
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted inspect-only module-registry

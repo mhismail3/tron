@@ -424,7 +424,7 @@ provider-visible execute operation.
 
 ### Slice 24A: File And Source-Control Module Pack Activation
 
-Status: implementation-candidate, pending independent review.
+Status: accepted, current baseline.
 
 Objective: declare existing filesystem and git foundations as a governed
 module-owned workflow that supports reviewable file/git work without expanding
@@ -432,8 +432,9 @@ core or adding provider-visible tools.
 
 Minimal shape:
 
-- pending-review `file_git_module` manifest seed for the selected existing
-  `filesystem_*` and `git_*` operation values;
+- accepted Slice 24A `file_git_module` manifest seed, with module lifecycle
+  `pending_review`, for the selected existing `filesystem_*` and `git_*`
+  operation values;
 - exact authority mapping for file and git operations through
   `capability::execute` runtime grants, trusted working-directory roots, and
   existing resource kinds;

@@ -721,7 +721,7 @@ toolbox. Agent operations resolve only from trusted working-directory metadata,
 deny traversal and symlink escapes, bound read/search/diff output, omit binary
 content bodies, return provider-visible paths relative to the authorized root,
 and record mutating previews/commits as patch proposal and materialized-file
-resources. Phase 3 Slice 24A declares those existing operations in the
+resources. Accepted Phase 3 Slice 24A declares those existing operations in the
 pending-review `file_git_module` manifest and derives exact
 `filesystem.read` / `filesystem.write` plus resource authority without adding a
 new provider-visible tool.
@@ -740,9 +740,9 @@ identity, capability/resource declarations, authority needs, settings and
 dependency intents, validation, provenance, lifecycle, and redaction proof
 without raw manifests, local paths, commands, env values, secrets, grant ids,
 network access, install, activation, dependency resolution, or execution.
-Slice 24A also seeds a pending-review `file_git_module` manifest that declares
-only existing filesystem/Git execute operations, their evidence resource kinds,
-and their exact authority needs.
+Accepted Slice 24A also seeds a `file_git_module` manifest with module
+lifecycle `pending_review`; it declares only existing filesystem/Git execute
+operations, their evidence resource kinds, and their exact authority needs.
 `domains/module_authoring` owns the accepted Phase 3 Slice 23B foundation for
 inert module proposals. It records current-session/workspace
 `module_proposal` resources with schema `tron.resource.module_proposal.v1` and
@@ -1702,8 +1702,9 @@ inventory evidence without branch mutation or remote access.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `git_status`, `git_diff`,
 `git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, and
-`git_branch_start`. Phase 3 Slice 24A declares those operation values in the
-pending-review `file_git_module` manifest and maps them to exact `git.read` /
+`git_branch_start`. Accepted Phase 3 Slice 24A declares those operation values
+in the pending-review `file_git_module` manifest and maps them to exact
+`git.read` /
 `git.write`, resource, and trusted working-directory authority without
 `agent_state` fallback or wildcard selectors. The implementation resolves only relative paths under
 trusted working-directory metadata, rejects path traversal and worktree-root
