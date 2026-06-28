@@ -1023,6 +1023,250 @@ async fn procedural_activation_request_and_decision_are_review_metadata_only() {
     }
 }
 
+#[tokio::test]
+async fn procedural_activation_decision_must_match_requested_action() {
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    let session_id = "procedural-action-binding-session";
+    let workspace_id = "workspace-procedural-action-binding";
+    let procedural_record_id = "procedural_record:hook:action-binding";
+    let request_resource_id = create_activation_request_for_decision_test(
+        &handle,
+        "action-binding",
+        "deactivate",
+        procedural_record_id,
+        session_id,
+        workspace_id,
+    )
+    .await;
+    let decision_grant = activation_decision_grant_for_request(
+        &handle,
+        "action-binding",
+        &request_resource_id,
+        procedural_record_id,
+    )
+    .await;
+    let decision_invocation = procedural_read_invocation(
+        "action-binding-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": request_resource_id,
+            "activationDecisionId": "action-binding-decision",
+            "decision": "approve_rollback",
+            "reason": "Rollback proof exists, but the request asked for deactivation.",
+            "idempotencyKey": "action-binding-decision",
+            "rollbackProofRefs": [{"resourceId": "rollback:action-binding"}]
+        }),
+        decision_grant,
+        session_id,
+        workspace_id,
+    );
+
+    assert_denied_contains!(
+        record_activation_decision_value_at(
+            &handle,
+            &decision_invocation,
+            &decision_invocation.payload,
+            fixed_procedural_recorded_at(),
+        ),
+        "decision action rollback does not match activation request requestedAction deactivate",
+        "mismatched decision action denied"
+    );
+}
+
+#[tokio::test]
+async fn rollback_and_deactivation_approvals_require_matching_proof_refs() {
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    let session_id = "procedural-proof-required-session";
+    let workspace_id = "workspace-procedural-proof-required";
+
+    let rollback_record_id = "procedural_record:hook:rollback-proof";
+    let rollback_request_id = create_activation_request_for_decision_test(
+        &handle,
+        "rollback-proof",
+        "rollback",
+        rollback_record_id,
+        session_id,
+        workspace_id,
+    )
+    .await;
+    let rollback_grant = activation_decision_grant_for_request(
+        &handle,
+        "rollback-proof",
+        &rollback_request_id,
+        rollback_record_id,
+    )
+    .await;
+    let rollback_invocation = procedural_read_invocation(
+        "rollback-proof-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": rollback_request_id,
+            "activationDecisionId": "rollback-proof-decision",
+            "decision": "approve_rollback",
+            "reason": "Rollback approval must carry rollback proof refs.",
+            "idempotencyKey": "rollback-proof-decision"
+        }),
+        rollback_grant,
+        session_id,
+        workspace_id,
+    );
+    assert_denied_contains!(
+        record_activation_decision_value_at(
+            &handle,
+            &rollback_invocation,
+            &rollback_invocation.payload,
+            fixed_procedural_recorded_at(),
+        ),
+        "rollbackProofRefs are required for approve_rollback",
+        "rollback proof refs required"
+    );
+
+    let deactivation_record_id = "procedural_record:hook:deactivation-proof";
+    let deactivation_request_id = create_activation_request_for_decision_test(
+        &handle,
+        "deactivation-proof",
+        "deactivate",
+        deactivation_record_id,
+        session_id,
+        workspace_id,
+    )
+    .await;
+    let deactivation_grant = activation_decision_grant_for_request(
+        &handle,
+        "deactivation-proof",
+        &deactivation_request_id,
+        deactivation_record_id,
+    )
+    .await;
+    let deactivation_invocation = procedural_read_invocation(
+        "deactivation-proof-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": deactivation_request_id,
+            "activationDecisionId": "deactivation-proof-decision",
+            "decision": "approve_deactivation",
+            "reason": "Deactivation approval must carry deactivation proof refs.",
+            "idempotencyKey": "deactivation-proof-decision",
+            "deactivationProofRefs": []
+        }),
+        deactivation_grant,
+        session_id,
+        workspace_id,
+    );
+    assert_denied_contains!(
+        record_activation_decision_value_at(
+            &handle,
+            &deactivation_invocation,
+            &deactivation_invocation.payload,
+            fixed_procedural_recorded_at(),
+        ),
+        "deactivationProofRefs are required for approve_deactivation",
+        "deactivation proof refs required"
+    );
+}
+
+async fn create_activation_request_for_decision_test(
+    handle: &crate::engine::EngineHostHandle,
+    suffix: &str,
+    requested_action: &str,
+    procedural_record_id: &str,
+    session_id: &str,
+    workspace_id: &str,
+) -> String {
+    create_procedural_record(
+        handle,
+        procedural_record_id,
+        EngineResourceScope::Session(session_id.to_owned()),
+        procedural_payload("hook", suffix, "candidate"),
+        "candidate",
+    )
+    .await;
+
+    let request_grant = derived_procedural_read_grant(
+        handle,
+        &format!("{suffix}-request"),
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[PROCEDURAL_RECORD_KIND, PROCEDURAL_ACTIVATION_REQUEST_KIND],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "proceduralKind:hook",
+            &format!("resource:{procedural_record_id}"),
+        ],
+        "none",
+    )
+    .await;
+    let request_invocation = procedural_read_invocation(
+        &format!("{suffix}-request"),
+        json!({
+            "operation": "procedural_activation_request_record",
+            "proceduralKind": "hook",
+            "proceduralRecordResourceId": procedural_record_id,
+            "activationRequestId": format!("{suffix}-request"),
+            "requestedAction": requested_action,
+            "idempotencyKey": format!("{suffix}-request"),
+            "validationEvidenceRefs": [{"resourceId": format!("validation:{suffix}")}],
+            "triggerDeclarations": [{"kind": "manual", "summary": "review gate"}]
+        }),
+        request_grant,
+        session_id,
+        workspace_id,
+    );
+    let request = record_activation_request_value_at(
+        handle,
+        &request_invocation,
+        &request_invocation.payload,
+        fixed_procedural_recorded_at(),
+    )
+    .await
+    .expect("record activation request fixture");
+    request["proceduralActivationRequestResourceId"]
+        .as_str()
+        .expect("request resource id")
+        .to_owned()
+}
+
+async fn activation_decision_grant_for_request(
+    handle: &crate::engine::EngineHostHandle,
+    suffix: &str,
+    request_resource_id: &str,
+    procedural_record_id: &str,
+) -> AuthorityGrantId {
+    derived_procedural_read_grant(
+        handle,
+        &format!("{suffix}-decision"),
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[
+            PROCEDURAL_RECORD_KIND,
+            PROCEDURAL_ACTIVATION_REQUEST_KIND,
+            PROCEDURAL_ACTIVATION_DECISION_KIND,
+        ],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "kind:procedural_activation_decision",
+            "proceduralKind:hook",
+            &format!("resource:{procedural_record_id}"),
+            &format!("resource:{request_resource_id}"),
+        ],
+        "none",
+    )
+    .await
+}
+
 async fn derived_procedural_read_grant(
     handle: &crate::engine::EngineHostHandle,
     suffix: &str,

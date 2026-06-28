@@ -21,7 +21,9 @@
 //! Procedural records and activation decisions are custody/review evidence
 //! only. This domain must not register triggers, inject prompt context, fire
 //! hooks, execute tools, start workers/jobs/processes, install packages, learn
-//! behavior, or merge results into conversation state.
+//! behavior, or merge results into conversation state. Decision evidence must
+//! match the stored request action, and rollback/deactivation approvals must
+//! carry the corresponding proof refs.
 
 mod projection;
 pub(crate) mod service;

@@ -535,7 +535,12 @@ pub(crate) async fn record_activation_decision_value_at(
     let scope = record_scope(invocation, payload)?;
     ensure_scope_matches(&request, &scope, operation)?;
     ensure_scope_matches(&procedural, &scope, operation)?;
+    let requested_action = activation_request_requested_action(&request, operation)?;
     let decision = activation_decision(payload)?;
+    ensure_decision_matches_requested_action(&decision, &requested_action)?;
+    let rollback_proof_refs = decision_proof_ref_array(&decision, payload, "rollbackProofRefs")?;
+    let deactivation_proof_refs =
+        decision_proof_ref_array(&decision, payload, "deactivationProofRefs")?;
     let state = activation_decision_state(&decision);
     let decision_id = bounded_token(
         "activationDecisionId",
@@ -593,8 +598,8 @@ pub(crate) async fn record_activation_decision_value_at(
             "deactivationRecorded": matches!(state, "deactivated"),
             "rollbackProofRequired": matches!(state, "rollback_required")
         },
-        "rollbackProofRefs": safe_ref_array(payload, "rollbackProofRefs")?,
-        "deactivationProofRefs": safe_ref_array(payload, "deactivationProofRefs")?,
+        "rollbackProofRefs": rollback_proof_refs,
+        "deactivationProofRefs": deactivation_proof_refs,
         "traceRefs": safe_ref_array(payload, "traceRefs")?,
         "replayRefs": safe_ref_array(payload, "replayRefs")?,
         "boundedRefs": safe_ref_array(payload, "boundedRefs")?,
@@ -1763,6 +1768,60 @@ fn activation_decision(payload: &Value) -> Result<String, CapabilityError> {
         _ => Err(invalid(
             "decision must be approve_activation, deny_activation, approve_deactivation, or approve_rollback",
         )),
+    }
+}
+
+fn activation_request_requested_action(
+    request: &EngineResourceInspection,
+    operation: &str,
+) -> Result<String, CapabilityError> {
+    let (_, payload) = current_payload(request, operation)?;
+    let requested_action = payload
+        .get("requestedAction")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("activation request is missing requestedAction"))?;
+    match requested_action {
+        "activate" | "deactivate" | "rollback" => Ok(requested_action.to_owned()),
+        _ => Err(invalid(
+            "activation request requestedAction must be activate, deactivate, or rollback",
+        )),
+    }
+}
+
+fn ensure_decision_matches_requested_action(
+    decision: &str,
+    requested_action: &str,
+) -> Result<(), CapabilityError> {
+    let decision_action = match decision {
+        "approve_activation" | "deny_activation" => "activate",
+        "approve_deactivation" => "deactivate",
+        "approve_rollback" => "rollback",
+        _ => return Err(invalid("unsupported procedural activation decision")),
+    };
+    if decision_action == requested_action {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "decision action {decision_action} does not match activation request requestedAction {requested_action}"
+        )))
+    }
+}
+
+fn decision_proof_ref_array(
+    decision: &str,
+    payload: &Value,
+    field: &str,
+) -> Result<Value, CapabilityError> {
+    let refs = safe_ref_array(payload, field)?;
+    let required = matches!(
+        (decision, field),
+        ("approve_rollback", "rollbackProofRefs")
+            | ("approve_deactivation", "deactivationProofRefs")
+    );
+    if required && refs.as_array().is_none_or(Vec::is_empty) {
+        Err(invalid(format!("{field} are required for {decision}")))
+    } else {
+        Ok(refs)
     }
 }
 

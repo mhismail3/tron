@@ -42,7 +42,7 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 805 |
+| implementation | 806 |
 | support | 385 |
 | test | 578 |
 | docs | 135 |
@@ -94,7 +94,7 @@ The TSV covers tracked and newly introduced files under:
 | `program_execution` | 6 |
 | `prompt_artifacts` | 6 |
 | `repository_tree` | 6 |
-| `resource_kernel` | 19 |
+| `resource_kernel` | 20 |
 | `rust_crate` | 2 |
 | `scheduler` | 7 |
 | `scripts` | 22 |
