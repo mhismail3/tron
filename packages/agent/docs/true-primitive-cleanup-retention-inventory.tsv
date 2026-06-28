@@ -2015,6 +2015,9 @@ packages/agent/src/domains/module_activity/mod.rs	implementation	module_activity
 packages/agent/src/domains/module_activity/projection.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity bounded cockpit projection redaction and derived status owner
 packages/agent/src/domains/module_activity/service.rs	implementation	module_activity	TPC-10/P3MSA-S23H	module activity inspect-only resource aggregation service owner
 packages/agent/src/domains/module_activity/tests.rs	test	test_harness	TPC-10/P3MSA-S23H	focused Slice 23H module activity redaction deterministic fixture state derivation and legacy-panel guard coverage
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_web_research_tests.rs	test	test_harness	TPC-10/P3MSA-INV-014	focused Slice 24F web research grant exact selector and networkPolicy none coverage
+packages/agent/src/domains/capability/operations/web_research.rs	implementation	capability_execute	TPC-10/P3MSA-INV-014	provider execute adapter for metadata-only web research request review source record list and inspect operations
+packages/agent/src/domains/capability/web_research_contract.rs	implementation	capability_execute	TPC-10/P3MSA-INV-014	web research capability operation schema and provider-visible contract constants
 packages/agent/src/domains/web_research/authority.rs	implementation	web_research	TPC-10/P3MSA-INV-014	web research exact authority and networkPolicy none guard owner
 packages/agent/src/domains/web_research/contract.rs	implementation	web_research	TPC-10/P3MSA-INV-014	web research worker id stream schema and authority constants owner
 packages/agent/src/domains/web_research/mod.rs	implementation	web_research	TPC-10/P3MSA-INV-014	web research metadata-only domain root and worker registration owner

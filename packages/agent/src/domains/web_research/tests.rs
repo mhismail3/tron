@@ -528,6 +528,73 @@ async fn unsafe_payloads_network_policy_and_missing_exact_selectors_are_rejected
     assert!(review_without_selector.contains("exact resource:"));
 }
 
+#[tokio::test]
+async fn list_operations_reject_unsupported_and_oversized_lifecycle_states() {
+    let fixture = Fixture::new("web-research-list-lifecycle").await;
+    let unsupported = json!({"lifecycleState": "ready_for_browser"});
+    let oversized = json!({"lifecycleState": "x".repeat(300)});
+
+    let error = list_request_value(
+        &fixture.deps,
+        &fixture.read_invocation("request-list-unsupported", unsupported.clone()),
+        &unsupported,
+    )
+    .await
+    .expect_err("unsupported request lifecycle rejected")
+    .to_string();
+    assert!(error.contains("unsupported web research lifecycle ready_for_browser"));
+
+    let error = list_review_value(
+        &fixture.deps,
+        &fixture.read_invocation("review-list-unsupported", unsupported.clone()),
+        &unsupported,
+    )
+    .await
+    .expect_err("unsupported review lifecycle rejected")
+    .to_string();
+    assert!(error.contains("unsupported web research lifecycle ready_for_browser"));
+
+    let error = list_source_value(
+        &fixture.deps,
+        &fixture.read_invocation("source-list-unsupported", unsupported.clone()),
+        &unsupported,
+    )
+    .await
+    .expect_err("unsupported source lifecycle rejected")
+    .to_string();
+    assert!(error.contains("unsupported web research lifecycle ready_for_browser"));
+
+    let error = list_request_value(
+        &fixture.deps,
+        &fixture.read_invocation("request-list-oversized", oversized.clone()),
+        &oversized,
+    )
+    .await
+    .expect_err("oversized request lifecycle rejected")
+    .to_string();
+    assert!(error.contains("lifecycleState must be a bounded non-wildcard token"));
+
+    let error = list_review_value(
+        &fixture.deps,
+        &fixture.read_invocation("review-list-oversized", oversized.clone()),
+        &oversized,
+    )
+    .await
+    .expect_err("oversized review lifecycle rejected")
+    .to_string();
+    assert!(error.contains("lifecycleState must be a bounded non-wildcard token"));
+
+    let error = list_source_value(
+        &fixture.deps,
+        &fixture.read_invocation("source-list-oversized", oversized.clone()),
+        &oversized,
+    )
+    .await
+    .expect_err("oversized source lifecycle rejected")
+    .to_string();
+    assert!(error.contains("lifecycleState must be a bounded non-wildcard token"));
+}
+
 async fn derive_grant(
     deps: &Deps,
     label: &str,

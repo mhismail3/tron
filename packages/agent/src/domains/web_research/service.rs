@@ -146,7 +146,6 @@ pub(crate) async fn list_request_value(
         payload,
         "web_research_request_list",
         WEB_RESEARCH_REQUEST_KIND,
-        "pending_review",
         request_summary,
         "requests",
     )
@@ -294,7 +293,6 @@ pub(crate) async fn list_review_value(
         payload,
         "web_research_review_list",
         WEB_RESEARCH_REVIEW_KIND,
-        "pending_review",
         reviewed_summary,
         "reviews",
     )
@@ -481,7 +479,6 @@ pub(crate) async fn list_source_value(
         payload,
         "web_research_source_list",
         WEB_RESEARCH_SOURCE_KIND,
-        "available",
         source_summary,
         "sources",
     )
@@ -573,7 +570,6 @@ async fn list_values(
     payload: &Value,
     operation: &str,
     kind: &str,
-    default_lifecycle: &str,
     summarize: fn(
         &crate::engine::EngineResource,
         &crate::engine::EngineResourceVersion,
@@ -588,8 +584,12 @@ async fn list_values(
         .map(|value| usize::try_from(value).unwrap_or(LIST_LIMIT_MAX))
         .unwrap_or(LIST_LIMIT_DEFAULT)
         .min(LIST_LIMIT_MAX);
-    let lifecycle =
-        optional_string(payload, "lifecycleState")?.unwrap_or_else(|| default_lifecycle.to_owned());
+    let lifecycle = match kind {
+        WEB_RESEARCH_REQUEST_KIND => request_lifecycle_state(payload)?,
+        WEB_RESEARCH_REVIEW_KIND => review_lifecycle_state(payload)?,
+        WEB_RESEARCH_SOURCE_KIND => source_lifecycle_state(payload)?,
+        _ => return Err(invalid("unsupported web research kind")),
+    };
     let resources = deps
         .engine_host
         .list_resources(ListResources {

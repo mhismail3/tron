@@ -655,6 +655,51 @@ fn clarification_includes_capability_execution_guidance() {
 }
 
 #[test]
+fn clarification_describes_web_research_metadata_only_contract() {
+    let result = generate_capability_instruction_text(&[]);
+
+    for required in [
+        "web_research_request_record",
+        "web_research_request_list",
+        "web_research_request_inspect",
+        "web_research_review_record",
+        "web_research_review_list",
+        "web_research_review_inspect",
+        "web_research_source_record",
+        "web_research_source_list",
+        "web_research_source_inspect",
+        "metadata-only web research custody",
+        "bounded summaries, policy labels, source refs, citation refs, robots evidence refs, dependency-request refs, trace/replay refs, idempotency fingerprints",
+        "exact linked resource selectors",
+        "networkPolicy: none",
+        "without search, crawl, browser automation, login/cookie reuse, raw HTML/page dumps, browser logs, cookies",
+        "web_research_request_record requires title and questionSummary",
+        "web_research_review_record requires webResearchRequestResourceId and reviewSummary",
+        "web_research_source_record requires request or review linkage plus artifactKind, title, and summary",
+        "all web research record operations require stable idempotencyKey, bounded summaries and refs only, exact selectors for linked writes, and networkPolicy none",
+    ] {
+        assert!(
+            result.contains(required),
+            "web research guidance missing {required:?}"
+        );
+    }
+
+    for forbidden in [
+        "web_search",
+        "web_sitemap_traverse",
+        "browser_open",
+        "browser_click",
+        "web_crawl",
+        "web_login",
+    ] {
+        assert!(
+            !result.contains(forbidden),
+            "web research must not expose broad browser/search operation {forbidden:?}"
+        );
+    }
+}
+
+#[test]
 fn clarification_describes_delegated_subagent_module_pack_contract() {
     let result = generate_capability_instruction_text(&[]);
 

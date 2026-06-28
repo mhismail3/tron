@@ -159,8 +159,9 @@ fn lifecycle_state(
     allowed: &[&str],
 ) -> Result<String, CapabilityError> {
     let state = optional_string(payload, "lifecycleState")?.unwrap_or_else(|| default.to_owned());
+    let state = bounded_token("lifecycleState", &state, TOKEN_MAX_BYTES)?;
     if allowed.contains(&state.as_str()) {
-        bounded_token("lifecycleState", &state, TOKEN_MAX_BYTES)
+        Ok(state)
     } else {
         Err(invalid(format!(
             "unsupported web research lifecycle {state}"
