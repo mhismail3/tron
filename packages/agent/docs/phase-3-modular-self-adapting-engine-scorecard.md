@@ -454,12 +454,15 @@ Out of scope:
 
 ### Slice 24B: Jobs And Program Execution Module Pack Activation
 
+Status: accepted, current baseline.
+
 Objective: connect durable jobs and program-execution metadata to a real
 module-owned execution path with sandboxed runtime policy.
 
-Implementation candidate scope:
+Accepted scope:
 
-- pending-review `jobs_program_execution_module` manifest declaring only
+- accepted Slice 24B pending-review `jobs_program_execution_module` manifest
+  declaring only
   `module_program_execution_start`, `module_program_execution_status`,
   `module_program_execution_cancel`, and `module_program_execution_cleanup`;
 - module-owned runtime envelope that delegates non-interactive process work to

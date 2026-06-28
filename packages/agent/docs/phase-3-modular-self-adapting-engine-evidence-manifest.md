@@ -844,7 +844,7 @@ UTC allow-list entries outside Slice 24A; SUWRF may fail at baseline only on
 unchanged `packages/agent/src/domains/program_execution`; exploratory HRA may
 still fail on broad pre-existing overbudget/gap findings outside Slice 24A.
 
-## Implementation Candidate Slice 24B: Jobs And Program Execution Module Pack Activation
+## Accepted Slice 24B: Jobs And Program Execution Module Pack Activation
 
 Discovery thread `019f0b12-18b2-7960-8dde-eb3b1fd4b70c` selected Slice 24B
 with exact final status `implementation may start` from baseline
@@ -855,17 +855,36 @@ Implementation branch:
 `codex/phase-3-slice-24b-jobs-program-execution-module-pack`
 
 Implementation status:
-`pending_review`, implementation candidate awaiting independent review.
+`accepted`, current baseline after independent Fix 2 re-review and mainline
+integration.
 
 Baseline HEAD:
 `4da793f69daaa879325fd99b769fc56657c771f1`
 (`docs: accept phase 3 slice 24a`)
 
-Candidate scope:
+Implementation commit:
+`fc7b9ddc0d7a638fd43942b42e8ee67d203f4764`
+(`feat: activate jobs program execution module pack`)
+
+Fix 1 commit:
+`430b4bb4f80b46e515d36fdcdbfd5310a0fbedf1`
+(`fix: bind module execution jobs to runtimes`)
+
+Fix 2 commit:
+`51f084690a42b255c49affc4d70c5ac3557dc07e`
+(`fix: mark slice 24b evidence pending review`)
+
+Mainline merge commit:
+`93ba5543fd36de4da7c9002c8832efb31e7b4cd7`
+(`merge: phase 3 slice 24b jobs program execution module pack`)
+
+Accepted scope:
 
 - Adds the built-in `jobs_program_execution_module` manifest seed with
   validation status `pending_review`, lifecycle state `pending_review`, and
-  activation mode `authority_mapped_module_pack`.
+  activation mode `authority_mapped_module_pack`; those manifest fields remain
+  pending-review for later activation policy while this slice is accepted as the
+  current baseline module-pack declaration.
 - Declares only `module_program_execution_start`,
   `module_program_execution_status`, `module_program_execution_cancel`, and
   `module_program_execution_cleanup` through the existing
@@ -891,7 +910,7 @@ fixed jobs/process cockpit panels, SQLite migrations, repo-managed
 `packages/agent/skills`, production deploy/update behavior, and unrelated
 DRC/SUWRF cleanup.
 
-Candidate validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -911,6 +930,12 @@ Candidate validation evidence:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants desi_inventory_is_structured_and_covers_required_surfaces` | exit 0 | DESI docs/evidence inventory passed for Slice 24B scorecard, inventory, and evidence updates. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants csd_inventory_rows_are_structured_and_cover_marker_files` and `production_rust_tokio_spawns_have_explicit_ownership` | exit 0 | CSD coverage and Rust spawn ownership guards passed; Slice 24B delegates process supervision to the existing jobs runtime. |
 | Touched-file DRC entropy scan | reviewed | New module-program-execution production path adds no `Utc::now`, `SystemTime::now`, `Instant::now`, `thread_rng`, or random source; matches were limited to existing jobs/authorization time use and a test timestamp. |
+| Independent review thread `019f0b5f-31c4-7c11-a9a2-f7f7f47a6d8a` | exact verdict `changes required` | Review found the runtime/job binding gap for follow-up module operations plus premature Slice 24B manifest/docs acceptance wording. |
+| Fix 1 thread `019f0b62-e625-7910-b197-11ed852b79d7` | exact final status `fix ready for review` | Fix 1 bound status/cancel/cleanup to the selected module runtime's delegated job ref before status returns or mutations, added mismatch/no-mutation coverage, and restored pending-review README/manifest posture. |
+| Independent Fix 1 re-review thread `019f0b7d-7260-73e1-98df-34cf01c70538` | exact verdict `changes required` | Re-review verified the runtime/job binding fix but found stale validated wording in Phase 3 evidence docs. |
+| Fix 2 thread `019f0b81-6d0f-75d0-9409-af7ef2883543` | exact final status `fix ready for review` | Fix 2 reworded Phase 3 evidence, inventory, scorecard, and SSARR rows so Slice 24B stayed pending-review / implementation-candidate until independent acceptance. |
+| Independent Fix 2 re-review thread `019f0b85-746e-7f02-9b92-c1498d1e75bd` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline/implementation/fix ancestry, runtime/job binding, docs posture, focused Rust tests, static documentation/provider/protocol guards, hygiene checks, and no repo-managed skills. |
+| Mainline merge `93ba5543fd36de4da7c9002c8832efb31e7b4cd7` plus closeout validation from `main` | exit 0 | Accepted Slice 24B implementation, fixes, and re-review evidence were merged into `main`; focused Rust, static inventory, formatting, type-check, and hygiene validation passed from the integrated branch. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
 | `git diff --check` and `git ls-files -ci --exclude-standard` | exit 0 | No whitespace errors and no tracked ignored files were reported before staging. |

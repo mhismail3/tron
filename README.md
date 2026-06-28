@@ -743,9 +743,9 @@ network access, install, activation, dependency resolution, or execution.
 Accepted Slice 24A also seeds a `file_git_module` manifest with module
 lifecycle `pending_review`; it declares only existing filesystem/Git execute
 operations, their evidence resource kinds, and their exact authority needs.
-Slice 24B adds the pending-review `jobs_program_execution_module` manifest for
-the module-owned jobs/program-execution pack. It declares implementation-candidate
-evidence for only
+Accepted Slice 24B adds the pending-review `jobs_program_execution_module`
+manifest for the module-owned jobs/program-execution pack. It declares accepted
+baseline evidence for only
 `module_program_execution_start`, `module_program_execution_status`,
 `module_program_execution_cancel`, and `module_program_execution_cleanup`,
 maps them to exact module-runtime, module-lifecycle, program-execution, jobs,
@@ -1614,8 +1614,8 @@ The generic resource store registers `module_manifest` with resource schema
 `tron.resource.module_manifest.v1` and payload schema version
 `tron.module_manifest.v1`; bootstrap seeding creates narrow first-party
 metadata for the registry, capability domain, and the pending-review
-`file_git_module` operation pack plus the pending-review Slice 24B
-`jobs_program_execution_module` implementation-candidate pack without converting Phase 2 domains into
+`file_git_module` operation pack plus the accepted Slice 24B pending-review
+`jobs_program_execution_module` pack without converting Phase 2 domains into
 separate provider-visible tools. `module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard
 `module_registry.read` and `resource.read` authority, `module_manifest`
