@@ -1,6 +1,6 @@
 //! Subagent task execute operation adapter.
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::{Deps, ok_result};
 use crate::engine::Invocation;
@@ -66,15 +66,37 @@ pub(super) async fn subagent_launch(
     let subagent_deps = crate::domains::subagents::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let value = crate::domains::subagents::execution::launch_subagent_value(
+    let plan = crate::domains::subagents::execution::plan_subagent_launch_value(
         &subagent_deps,
         invocation,
         &invocation.payload,
     )
     .await?;
+    let value = match plan {
+        crate::domains::subagents::execution::SubagentLaunchPlan::Replay(value) => value,
+        crate::domains::subagents::execution::SubagentLaunchPlan::StartModuleProgram(
+            module_payload,
+        ) => {
+            let module_invocation = invocation_with_payload(invocation, module_payload);
+            let module_start = super::module_program_execution::module_program_execution_start(
+                &module_invocation,
+                deps,
+                chrono::Utc::now(),
+            )
+            .await?;
+            let module_details = module_program_details(&module_start, "subagent_launch")?;
+            crate::domains::subagents::execution::launch_subagent_value(
+                &subagent_deps,
+                invocation,
+                &invocation.payload,
+                module_details,
+            )
+            .await?
+        }
+    };
     Ok(ok_result(
         format!(
-            "Launched subagent lifecycle {}.",
+            "Launched delegated subagent lifecycle {}.",
             value["subagentTaskResourceId"]
                 .as_str()
                 .unwrap_or("subagent_task")
@@ -100,6 +122,25 @@ pub(super) async fn subagent_status(
         &invocation.payload,
     )
     .await?;
+    let followup = crate::domains::subagents::execution::delegated_module_followup_payload(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+        "subagent_status",
+    )
+    .await?;
+    let module_invocation = invocation_with_payload(
+        invocation,
+        with_operation(followup, "module_program_execution_status"),
+    );
+    let module_status =
+        super::module_program_execution::module_program_execution_status(&module_invocation, deps)
+            .await?;
+    let module_details = module_program_details(&module_status, "subagent_status")?;
+    let value = crate::domains::subagents::execution::status_subagent_from_module_value(
+        value,
+        module_details,
+    );
     Ok(ok_result(
         format!(
             "Subagent status {}.",
@@ -120,10 +161,26 @@ pub(super) async fn subagent_result(
     let subagent_deps = crate::domains::subagents::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let value = crate::domains::subagents::execution::result_subagent_value(
+    let followup = crate::domains::subagents::execution::delegated_module_followup_payload(
         &subagent_deps,
         invocation,
         &invocation.payload,
+        "subagent_result",
+    )
+    .await?;
+    let module_invocation = invocation_with_payload(
+        invocation,
+        with_operation(followup, "module_program_execution_status"),
+    );
+    let module_status =
+        super::module_program_execution::module_program_execution_status(&module_invocation, deps)
+            .await?;
+    let module_details = module_program_details(&module_status, "subagent_result")?;
+    let value = crate::domains::subagents::execution::result_subagent_from_module_value(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+        module_details,
     )
     .await?;
     Ok(ok_result(
@@ -146,6 +203,23 @@ pub(super) async fn subagent_cancel(
     let subagent_deps = crate::domains::subagents::Deps {
         engine_host: deps.engine_host.clone(),
     };
+    let followup = crate::domains::subagents::execution::delegated_module_followup_payload(
+        &subagent_deps,
+        invocation,
+        &invocation.payload,
+        "subagent_cancel",
+    )
+    .await?;
+    let module_invocation = invocation_with_payload(
+        invocation,
+        with_operation(followup, "module_program_execution_cancel"),
+    );
+    let _module_cancel = super::module_program_execution::module_program_execution_cancel(
+        &module_invocation,
+        deps,
+        chrono::Utc::now(),
+    )
+    .await?;
     let value = crate::domains::subagents::execution::cancel_subagent_value(
         &subagent_deps,
         invocation,
@@ -163,4 +237,28 @@ pub(super) async fn subagent_cancel(
             "subagentTasks": value
         }),
     ))
+}
+
+fn invocation_with_payload(invocation: &Invocation, payload: Value) -> Invocation {
+    let mut delegated = invocation.clone();
+    delegated.payload = payload;
+    delegated
+}
+
+fn with_operation(mut payload: Value, operation: &str) -> Value {
+    payload["operation"] = json!(operation);
+    payload
+}
+
+fn module_program_details<'a>(
+    result: &'a CapabilityResult,
+    operation: &str,
+) -> Result<&'a Value, CapabilityError> {
+    result
+        .details
+        .as_ref()
+        .and_then(|details| details.get("moduleProgramExecution"))
+        .ok_or_else(|| CapabilityError::Internal {
+            message: format!("{operation} delegated module operation omitted details"),
+        })
 }

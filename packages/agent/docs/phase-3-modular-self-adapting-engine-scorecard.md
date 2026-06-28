@@ -490,6 +490,13 @@ Out of scope:
 Objective: turn subagent task lifecycle records into real delegated work only
 through enabled worker/module packages.
 
+Implementation status: `implementation-candidate` / `pending_review` on branch
+`codex/p3msa-inv-011-subagent-delegation-module-pack`. Candidate scope activates
+only the accepted jobs/program-execution module pack path with explicit
+`workerKind: module_program_execution`, `modulePackId: jobs_program_execution`,
+bounded handoff refs, delegated runtime/job/program refs, and reviewable
+merge-proposal results.
+
 Minimal shape:
 
 - child-task launch contract;

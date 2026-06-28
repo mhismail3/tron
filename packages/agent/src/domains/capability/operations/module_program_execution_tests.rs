@@ -362,6 +362,117 @@ async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_
     }
 }
 
+#[tokio::test]
+async fn subagent_launch_activates_accepted_module_pack_with_reviewable_result_refs() {
+    if !sandbox_available() {
+        return;
+    }
+
+    let ctx = make_test_context();
+    let root = tempdir().expect("working directory");
+    let fixture = Fixture::new(
+        &ctx,
+        root.path(),
+        "subagent-module-pack",
+        "subagent-runtime-request-1",
+    )
+    .await;
+    let subagent_grant = fixture.subagent_grant(&fixture.runtime_resource_id).await;
+    let launch = fixture
+        .invoke_with_grant(
+            "subagent-launch",
+            subagent_grant.clone(),
+            Some("subagent-launch-key"),
+            json!({
+                "operation": "subagent_launch",
+                "taskId": "subagent-task-alpha",
+                "objectiveSummary": "Run a bounded delegated module task.",
+                "promptSummary": "Return summary-only merge proposal evidence.",
+                "modelPolicy": "accepted_jobs_program_execution_v1",
+                "workerKind": "module_program_execution",
+                "modulePackId": "jobs_program_execution",
+                "moduleLifecycleResourceId": fixture.lifecycle_id,
+                "runtimeRequestId": fixture.runtime_request_id,
+                "command": "printf subagent-module-output",
+                "runtimeId": "runtime.shell",
+                "languageId": "language.shell",
+                "programFingerprint": "sha256:subagent-module-program",
+                "networkPolicy": "none",
+                "handoffRefs": [{"kind": "fingerprint", "id": "subagent-handoff"}],
+                "timeoutMs": 5000,
+                "maxOutputBytes": 1000,
+                "idempotencyKey": "subagent-launch-key"
+            }),
+        )
+        .await;
+    let launch_details = &launch["details"]["subagentTasks"];
+    assert_eq!(launch_details["status"], json!("running"));
+    assert_eq!(
+        launch_details["delegation"]["moduleRuntimeRef"]["kind"],
+        json!("module_runtime_state")
+    );
+    assert_eq!(
+        launch_details["delegation"]["jobRef"]["kind"],
+        json!("job_process")
+    );
+    assert_eq!(launch_details["execution"]["resultMerged"], json!(false));
+    assert_no_provider_leaks("subagent launch", launch_details);
+
+    let subagent_task_resource_id = launch_details["subagentTaskResourceId"]
+        .as_str()
+        .expect("subagent task id")
+        .to_owned();
+    let runtime_resource_id = launch_details["delegation"]["moduleRuntimeResourceId"]
+        .as_str()
+        .expect("runtime id")
+        .to_owned();
+    let job_resource_id = launch_details["delegation"]["jobResourceId"]
+        .as_str()
+        .expect("job id")
+        .to_owned();
+
+    let mut terminal_result = None;
+    for index in 0..100 {
+        let result = fixture
+            .invoke_with_grant(
+                &format!("subagent-result-{index}"),
+                subagent_grant.clone(),
+                None,
+                json!({
+                    "operation": "subagent_result",
+                    "subagentTaskResourceId": subagent_task_resource_id
+                }),
+            )
+            .await;
+        let details = &result["details"]["subagentTasks"];
+        if details["status"] == json!("completed") {
+            terminal_result = Some(result);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let result = terminal_result.expect("subagent result completed");
+    let result_details = &result["details"]["subagentTasks"];
+    assert_eq!(result_details["result"]["kind"], json!("merge_proposal"));
+    assert_eq!(
+        result_details["result"]["mergeProposal"]["reviewRequired"],
+        json!(true)
+    );
+    assert_eq!(
+        result_details["projection"]["parentConversationMutated"],
+        json!(false)
+    );
+    assert_eq!(
+        result_details["result"]["mergeProposal"]["jobRef"]["resourceId"],
+        json!(job_resource_id)
+    );
+    assert_eq!(
+        result_details["result"]["mergeProposal"]["moduleRuntimeRef"]["resourceId"],
+        json!(runtime_resource_id)
+    );
+    assert_no_provider_leaks("subagent result", result_details);
+}
+
 struct Fixture<'a> {
     ctx: &'a ServerRuntimeContext,
     root: &'a Path,
@@ -473,6 +584,46 @@ impl<'a> Fixture<'a> {
             &[runtime_resource_id],
             &[job_resource_id],
             FollowupAccess::Write,
+        )
+        .await
+    }
+
+    async fn subagent_grant(&self, runtime_resource_id: &str) -> AuthorityGrantId {
+        let selectors = [
+            "kind:subagent_task".to_owned(),
+            "kind:module_runtime_state".to_owned(),
+            "kind:module_lifecycle_state".to_owned(),
+            "kind:program_execution_record".to_owned(),
+            "kind:job_process".to_owned(),
+            "kind:execution_output".to_owned(),
+            format!("resource:{}", self.lifecycle_id),
+            format!("resource:{runtime_resource_id}"),
+        ];
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        self.derive_grant(
+            &format!("subagent-{}", short_fingerprint(&[runtime_resource_id])),
+            &[
+                "capability.execute",
+                "subagents.read",
+                "subagents.write",
+                "module_runtime.read",
+                "module_runtime.write",
+                "program_execution.read",
+                "program_execution.write",
+                "jobs.read",
+                "jobs.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &[
+                "subagent_task",
+                "module_runtime_state",
+                "module_lifecycle_state",
+                "program_execution_record",
+                "job_process",
+                "execution_output",
+            ],
+            &selector_refs,
         )
         .await
     }
@@ -688,6 +839,8 @@ impl<'a> Fixture<'a> {
         .with_scope("capability.execute")
         .with_scope("module_runtime.read")
         .with_scope("module_runtime.write")
+        .with_scope("subagents.read")
+        .with_scope("subagents.write")
         .with_scope("program_execution.read")
         .with_scope("program_execution.write")
         .with_scope("jobs.read")

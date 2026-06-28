@@ -947,3 +947,57 @@ entries outside Slice 24B; SUWRF may still report unchanged baseline risk in
 pre-existing marker-source inventory backlog outside the touched Slice 24B
 files; exploratory HRA tracked-file coverage still reports the unrelated
 pre-existing `grant_file_git_tests.rs` missing row.
+
+## P3MSA-INV-011 Implementation Candidate: Slice 24C Subagent Delegation Module Pack Activation
+
+Status: `implementation-candidate` / `pending_review`.
+
+Baseline:
+`83c7080a8be5b52be00c304803d85d5aa504e9b8`
+(`docs: accept phase 3 slice 24b`)
+
+Implementation branch:
+`codex/p3msa-inv-011-subagent-delegation-module-pack`
+
+Candidate scope:
+
+- Extends provider-visible `subagent_launch`, `subagent_status`,
+  `subagent_result`, and `subagent_cancel` through the existing
+  `capability::execute` primitive only.
+- Keeps `subagent_task` as the durable parent causality anchor while activating
+  only the accepted jobs/program-execution module pack path.
+- Requires explicit `modelPolicy: accepted_jobs_program_execution_v1`,
+  `workerKind: module_program_execution`, `modulePackId:
+  jobs_program_execution`, bounded objective/prompt summaries, summary-only
+  `handoffRefs`, one-running-task-per-scope concurrency, exact
+  `kind:subagent_task` selectors, exact module lifecycle/runtime selectors via
+  the reused module runtime path, and `networkPolicy: none`.
+- Stores delegated `module_runtime_state`, `program_execution_record`, and
+  `job_process` refs on the subagent task; status/result/cancel follow the
+  delegated module-runtime/job binding through `module_program_execution_*`.
+- Returns reviewable merge-proposal refs with `parentConversationMutated:
+  false`; no parent conversation mutation or raw result merge is performed.
+
+Rejected scope remains unchanged: hidden autonomous spawning, unbounded
+prompt/context transfer, raw prompts/results/tool logs, local paths, raw
+authority/grant ids, direct parent-state mutation, public `/engine` expansion,
+wildcard selectors, broad grants, inherited `agent_state`, old native subagent
+panels, new SQLite migrations, package-manager/network side effects,
+repo-managed `packages/agent/skills`, and production deploy/update behavior.
+
+Candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/model/resource-store dead-code warnings were emitted. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Agent crate formatting passed after the Slice 24C candidate edits. |
+| `cargo test --manifest-path packages/agent/Cargo.toml subagent --lib` | exit 0 | 26 focused subagent tests passed, including delegated launch refs, explicit selection rejection, bounded handoff rejection, idempotency, cancellation, scope, authority, and non-goal guards. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_program_execution --lib` | exit 0 | 6 focused module-program-execution tests passed, including the new subagent launch/result integration through the accepted module pack plus existing runtime/job binding and provider-safety regressions. |
+| PCC/TPC/TMB/SACB/DESI inventory gates | exit 0 | Primitive cleanup, true primitive cleanup, true modularity, security-authority, and documentation evidence inventory gates passed for the touched source/docs/tests. |
+| PMBD/PPACD/CSD/ODA/PERF/SSARR/SUWRF static gates | exit 0 | Provider-model, public-protocol, concurrency scheduling, observability, performance, SSARR predecessor, and self-updating worker inventory/resource gates passed for the touched surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants` | expected baseline failure | 16 DRC tests passed; `replay_critical_entropy_is_allow_listed` still fails only on the unchanged goals/web/tool_sources UTC allow-list baseline listed in the handoff. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; DRC baseline entropy allow-list failures and SUWRF baseline
+findings under unchanged `packages/agent/src/domains/program_execution` remain
+outside this Slice 24C candidate unless touched by review.
