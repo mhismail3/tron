@@ -1135,9 +1135,9 @@ warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
 unchanged goals/web/tool-source UTC allow-list entries, and SUWRF has unchanged
 `packages/agent/src/domains/program_execution` residue outside Slice 24E.
 
-## Implementation Candidate Slice 24F: Web Browser And Research Module Pack
+## Accepted Slice 24F: Web Browser And Research Module Pack
 
-Status: implementation candidate pending independent review.
+Status: accepted baseline after Fix 1 re-review and mainline integration.
 
 Slice 24F (`P3MSA-INV-014`) adds a new `domains/web_research` owner for
 metadata-only web research custody. It records `web_research_request`,
@@ -1146,7 +1146,7 @@ request/review/source record/list/inspect operation values through the existing
 `capability::execute` primitive. It also seeds a pending-review
 `web_research_module` manifest through the split manifest-file pattern.
 
-The candidate requires `web_research.read`, `web_research.write`, and
+The accepted slice requires `web_research.read`, `web_research.write`, and
 `resource.read`/`resource.write` scopes, exact `kind:web_research_*`
 selectors, exact `resource:<id>` selectors for inspect and linked writes, and
 `networkPolicy: none`. Records and projections are bounded summaries,
@@ -1160,7 +1160,7 @@ dependency restoration, network-enabled runtime defaults, public `/engine`
 expansion, fixed native research UI, repo-managed `packages/agent/skills`, and
 production deploy/update behavior.
 
-Implementation-candidate validation evidence:
+Accepted validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1178,6 +1178,11 @@ Implementation-candidate validation evidence:
 | `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed for unstaged and staged diffs. |
 | Tracked ignored-file scan and `test ! -e packages/agent/skills` | exit 0 | No tracked ignored files were reported, and repo-managed `packages/agent/skills` remains absent. |
 | Discovery thread `019f0d3b-3b61-7bf2-a8db-630e7214d45e` | exact final status `implementation may start` | Discovery selected Slice 24F from accepted Slice 24E baseline and rejected broad browser automation, login/cookie reuse without authority, unbounded crawl/search, raw dumps/logs, network-enabled runtime defaults, dependency restoration, package-manager execution, fixed native panels, public `/engine` expansion, and production deploy behavior. |
+| Implementation thread `019f0d3e-d5f2-74c2-a7c1-8ee2004acddd` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24f-web-research-module-pack` at `f8bc92c08c27c8a44317db5c1b9c9cd7832c3b56` (`feat: add web research module pack`). |
+| Independent review thread `019f0d71-de55-7a00-92d1-616954a4f99c` | exact verdict `changes required` | Review required TPC retention inventory coverage, web research provider-guidance regression assertions, and bounded lifecycle-state validation for list projections. |
+| Fix 1 thread `019f0d7a-a081-7d93-8ed8-5b5150bad44b` | exact final status `fix ready for review` | Added `55fc1b0a5ed2124dfebee0077296c82b71ac109b` (`fix: tighten web research review findings`). |
+| Fix 1 re-review thread `019f0d8a-a460-7ff0-b381-edc6bf740cb3` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline/implementation/fix ancestry, full and fix diffs, TPC retention coverage, provider guidance assertions, lifecycle-state rejection behavior, provider-safe metadata-only scope, focused validation, hygiene checks, known caveats, and no repo-managed skills. |
+| Mainline merge `839c602f9a2384ef0b616011fcb9e3485978e5f9` plus closeout validation from `main` | exit 0 | Accepted Slice 24F implementation and fix were merged into `main`; focused Rust, static inventory, formatting, type-check, personal-info, whitespace, ignored-file, and no-managed-skills validation passed from the integrated branch before push. |
 
 Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; DRC may fail on unchanged goals/web/tool-source entropy

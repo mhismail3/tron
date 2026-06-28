@@ -399,15 +399,15 @@ triggers, inject prompt context, learn behavior automatically, execute generated
 or runtime code, restore dependencies, run package managers, access networks,
 add SQLite migrations, add public `/engine` methods, or add fixed native UI.
 
-## Current Implementation Candidate
+## Accepted Slice 24F: Web Browser And Research Module Pack
 
-Slice 24F (`P3MSA-INV-014`) is an implementation candidate pending independent
-review. It adds a new `domains/web_research` owner and a pending-review
-`web_research_module` manifest seed for metadata-only web research custody,
-without mutating the existing `web` source-provenance domain into a crawler or
-browser.
+Slice 24F (`P3MSA-INV-014`) is accepted baseline after independent Fix 1
+re-review and mainline integration. It adds a new `domains/web_research` owner
+and a pending-review `web_research_module` manifest seed for metadata-only web
+research custody, without mutating the existing `web` source-provenance domain
+into a crawler or browser.
 
-The candidate records `web_research_request`, `web_research_review`, and
+The accepted slice records `web_research_request`, `web_research_review`, and
 `web_research_source` resources through provider-visible
 `capability::execute` record/list/inspect operation values. The records store
 bounded summaries, policy labels, source refs, citation refs, robots evidence
@@ -418,7 +418,7 @@ engine authorization require exact `web_research.read` /
 selectors, exact `resource:<id>` selectors for inspect and linked review/source
 writes, and `networkPolicy: none`.
 
-The candidate deliberately does not add search provider integration, crawling,
+The accepted slice deliberately does not add search provider integration, crawling,
 sitemap traversal, browser automation, login/cookie reuse, raw HTML/page dumps,
 raw browser logs, package-manager or dependency restoration behavior,
 network-enabled runtime defaults, public `/engine` expansion, fixed native UI,
