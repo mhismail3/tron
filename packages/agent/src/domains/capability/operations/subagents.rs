@@ -77,7 +77,8 @@ pub(super) async fn subagent_launch(
         crate::domains::subagents::execution::SubagentLaunchPlan::StartModuleProgram(
             module_payload,
         ) => {
-            let module_invocation = invocation_with_payload(invocation, module_payload);
+            let module_invocation =
+                invocation_with_module_start_payload(invocation, module_payload);
             let module_start = super::module_program_execution::module_program_execution_start(
                 &module_invocation,
                 deps,
@@ -132,6 +133,12 @@ pub(super) async fn subagent_status(
     let module_invocation = invocation_with_payload(
         invocation,
         with_operation(followup, "module_program_execution_status"),
+        &[
+            "module_runtime.read",
+            "program_execution.read",
+            "jobs.read",
+            "resource.read",
+        ],
     );
     let module_status =
         super::module_program_execution::module_program_execution_status(&module_invocation, deps)
@@ -171,6 +178,12 @@ pub(super) async fn subagent_result(
     let module_invocation = invocation_with_payload(
         invocation,
         with_operation(followup, "module_program_execution_status"),
+        &[
+            "module_runtime.read",
+            "program_execution.read",
+            "jobs.read",
+            "resource.read",
+        ],
     );
     let module_status =
         super::module_program_execution::module_program_execution_status(&module_invocation, deps)
@@ -213,6 +226,15 @@ pub(super) async fn subagent_cancel(
     let module_invocation = invocation_with_payload(
         invocation,
         with_operation(followup, "module_program_execution_cancel"),
+        &[
+            "module_runtime.read",
+            "module_runtime.write",
+            "program_execution.read",
+            "jobs.read",
+            "jobs.write",
+            "resource.read",
+            "resource.write",
+        ],
     );
     let _module_cancel = super::module_program_execution::module_program_execution_cancel(
         &module_invocation,
@@ -239,9 +261,36 @@ pub(super) async fn subagent_cancel(
     ))
 }
 
-fn invocation_with_payload(invocation: &Invocation, payload: Value) -> Invocation {
+fn invocation_with_module_start_payload(invocation: &Invocation, payload: Value) -> Invocation {
+    invocation_with_payload(
+        invocation,
+        payload,
+        &[
+            "module_runtime.read",
+            "module_runtime.write",
+            "program_execution.read",
+            "program_execution.write",
+            "jobs.read",
+            "jobs.write",
+            "resource.read",
+            "resource.write",
+        ],
+    )
+}
+
+fn invocation_with_payload(invocation: &Invocation, payload: Value, scopes: &[&str]) -> Invocation {
     let mut delegated = invocation.clone();
+    if let Some(idempotency_key) = payload.get("idempotencyKey").and_then(Value::as_str) {
+        delegated.causal_context = delegated
+            .causal_context
+            .with_idempotency_key(idempotency_key.to_owned());
+    }
     delegated.payload = payload;
+    for scope in scopes {
+        if !delegated.causal_context.has_scope(scope) {
+            delegated.causal_context = delegated.causal_context.with_scope(*scope);
+        }
+    }
     delegated
 }
 

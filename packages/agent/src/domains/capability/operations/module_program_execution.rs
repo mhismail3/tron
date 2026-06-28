@@ -30,25 +30,20 @@ pub(super) async fn module_program_execution_start(
         engine_host: deps.engine_host.clone(),
     };
     let runtime_payload = runtime_request_payload(&invocation.payload, operation_at)?;
+    let runtime_invocation = invocation_with_payload_idempotency(invocation, &runtime_payload);
     let runtime = module_runtime::service::request_module_runtime_value_at(
         &module_runtime_deps,
-        invocation,
+        &runtime_invocation,
         &runtime_payload,
         operation_at,
     )
     .await?;
     if runtime["idempotentReplay"].as_bool().unwrap_or(false) {
+        let replay = replayed_start_details(invocation, deps, &runtime).await?;
         return Ok(result(
             "Module program execution start replayed.",
             "module_program_execution_start",
-            json!({
-                "schemaVersion": SCHEMA_VERSION,
-                "operation": "module_program_execution_start",
-                "status": runtime.get("status").and_then(Value::as_str).unwrap_or("running"),
-                "idempotentReplay": true,
-                "moduleRuntime": runtime,
-                "providerSafety": provider_safety_proof()
-            }),
+            replay,
         ));
     }
 
@@ -155,6 +150,48 @@ pub(super) async fn module_program_execution_start(
             "providerSafety": provider_safety_proof()
         }),
     ))
+}
+
+async fn replayed_start_details(
+    invocation: &Invocation,
+    deps: &Deps,
+    runtime: &Value,
+) -> Result<Value, CapabilityError> {
+    let job_ref = replay_job_ref(runtime)?;
+    let program_ref = replay_program_execution_ref(runtime)?;
+    let job_resource_id = job_ref
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            invalid("module program execution replay missing delegated job resource id")
+        })?;
+    let redacted_job = redacted_job_status(invocation, deps, job_resource_id).await?;
+    Ok(json!({
+                "schemaVersion": SCHEMA_VERSION,
+                "operation": "module_program_execution_start",
+                "status": runtime.get("status").and_then(Value::as_str).unwrap_or("running"),
+                "idempotentReplay": true,
+                "moduleRuntime": runtime,
+                "programExecution": replay_program_execution_record(&program_ref)?,
+                "job": redacted_job,
+                "resourceRefs": [
+                    runtime_resource_ref(runtime)?,
+                    program_ref,
+                    job_ref
+                ],
+                "providerSafety": provider_safety_proof()
+    }))
+}
+
+fn invocation_with_payload_idempotency(invocation: &Invocation, payload: &Value) -> Invocation {
+    let Some(idempotency_key) = payload.get("idempotencyKey").and_then(Value::as_str) else {
+        return invocation.clone();
+    };
+    let mut delegated = invocation.clone();
+    delegated.causal_context = delegated
+        .causal_context
+        .with_idempotency_key(idempotency_key.to_owned());
+    delegated
 }
 
 pub(super) async fn module_program_execution_status(
@@ -536,6 +573,46 @@ fn runtime_program_execution_ref(value: &Value) -> Result<Value, CapabilityError
         "resourceId": runtime_resource_id(value)?,
         "versionId": value.get("moduleRuntimeVersionId").and_then(Value::as_str).unwrap_or("unknown"),
         "role": "module_runtime_state"
+    }))
+}
+
+fn replay_job_ref(runtime: &Value) -> Result<Value, CapabilityError> {
+    runtime
+        .pointer("/moduleRuntime/supervision/job/jobRef")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| {
+            invalid("module program execution replay found runtime without delegated job binding")
+        })
+}
+
+fn replay_program_execution_ref(runtime: &Value) -> Result<Value, CapabilityError> {
+    runtime
+        .pointer("/moduleRuntime/supervision/programExecution/metadataOnlyRecordRef")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| {
+            invalid("module program execution replay found runtime without program execution ref")
+        })
+}
+
+fn replay_program_execution_record(value: &Value) -> Result<Value, CapabilityError> {
+    Ok(json!({
+        "programExecutionResourceId": value
+            .get("resourceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("program execution replay ref omitted resource id"))?,
+        "programExecutionVersionId": value
+            .get("versionId")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        "status": value.get("status").and_then(Value::as_str).unwrap_or("active"),
+        "resourceRefs": [value.clone()],
+        "projection": {
+            "replayedFromModuleRuntime": true,
+            "rawCodeReturned": false,
+            "rawIoReturned": false
+        }
     }))
 }
 

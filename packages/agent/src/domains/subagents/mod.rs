@@ -25,7 +25,11 @@
 //! result merging. The only activated path is the accepted
 //! jobs/program-execution module pack selected by exact payload fields and exact
 //! resource selectors. Completion is surfaced as merge-proposal evidence for
-//! review, not as hidden parent-state mutation.
+//! review, not as hidden parent-state mutation. Delegated launch and follow-up
+//! grants must include exact module runtime, job, program-execution, lifecycle,
+//! and subagent-task selectors without `agent_state` fallback. Launch replay
+//! must recover the same delegated runtime/job/program refs from module
+//! supervision metadata before creating the parent task, or fail closed.
 
 #![allow(dead_code)]
 

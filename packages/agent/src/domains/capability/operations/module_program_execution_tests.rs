@@ -32,11 +32,12 @@ async fn module_program_execution_start_status_cleanup_are_ref_only_provider_saf
         "module-runtime-request-1",
     )
     .await;
+    let start_grant = fixture.start_grant().await;
 
     let start = fixture
         .invoke_with_grant(
             "start",
-            fixture.start_grant().await,
+            start_grant.clone(),
             Some("module-program-execution-start"),
             json!({
                 "operation": "module_program_execution_start",
@@ -79,6 +80,42 @@ async fn module_program_execution_start_status_cleanup_are_ref_only_provider_saf
         .as_str()
         .expect("program execution resource id")
         .to_owned();
+    let replay = fixture
+        .invoke_with_grant(
+            "start-replay",
+            start_grant,
+            Some("module-program-execution-start-replay-call"),
+            json!({
+                "operation": "module_program_execution_start",
+                "moduleLifecycleResourceId": fixture.lifecycle_id,
+                "runtimeRequestId": fixture.runtime_request_id,
+                "command": "printf slice24b-output",
+                "runtimeId": "runtime.shell",
+                "languageId": "language.shell",
+                "programFingerprint": "sha256:program-execution-fingerprint",
+                "networkPolicy": "none",
+                "reason": "Run one delegated module job.",
+                "timeoutMs": 5000,
+                "maxOutputBytes": 1000,
+                "idempotencyKey": "module-program-execution-start"
+            }),
+        )
+        .await;
+    let replay_details = module_details(&replay);
+    assert_eq!(replay_details["idempotentReplay"], json!(true));
+    assert_eq!(
+        replay_details["moduleRuntime"]["moduleRuntimeResourceId"],
+        json!(runtime_resource_id)
+    );
+    assert_eq!(
+        replay_details["job"]["job"]["jobResourceId"],
+        json!(job_resource_id)
+    );
+    assert_eq!(
+        replay_details["programExecution"]["programExecutionResourceId"],
+        json!(program_resource_id)
+    );
+    assert_no_provider_leaks("start replay result", replay_details);
     let program_payload = fixture
         .ctx
         .engine_host
@@ -471,6 +508,100 @@ async fn subagent_launch_activates_accepted_module_pack_with_reviewable_result_r
         json!(runtime_resource_id)
     );
     assert_no_provider_leaks("subagent result", result_details);
+}
+
+#[tokio::test]
+async fn subagent_launch_partial_replay_recovers_existing_delegated_job_refs() {
+    if !sandbox_available() {
+        return;
+    }
+
+    let ctx = make_test_context();
+    let root = tempdir().expect("working directory");
+    let fixture = Fixture::new(
+        &ctx,
+        root.path(),
+        "subagent-partial-replay",
+        "subagent-partial-runtime-request",
+    )
+    .await;
+    let partial_start = fixture
+        .invoke_with_grant(
+            "partial-delegated-start",
+            fixture.start_grant().await,
+            Some("partial-delegated-start-call"),
+            json!({
+                "operation": "module_program_execution_start",
+                "moduleLifecycleResourceId": fixture.lifecycle_id,
+                "runtimeRequestId": fixture.runtime_request_id,
+                "command": "printf subagent-partial-replay",
+                "runtimeId": "runtime.shell",
+                "languageId": "language.shell",
+                "programFingerprint": format!("sha256:{}", fixture.runtime_request_id),
+                "networkPolicy": "none",
+                "reason": "Recover a delegated module task after parent persistence failed.",
+                "timeoutMs": 5000,
+                "maxOutputBytes": 1000,
+                "idempotencyKey": "subagent-partial-replay-key"
+            }),
+        )
+        .await;
+    let partial_details = module_details(&partial_start);
+    let partial_runtime_id = partial_details["moduleRuntime"]["moduleRuntimeResourceId"]
+        .as_str()
+        .expect("partial runtime id")
+        .to_owned();
+    let partial_job_id = partial_details["job"]["job"]["jobResourceId"]
+        .as_str()
+        .expect("partial job id")
+        .to_owned();
+    let partial_program_id = partial_details["programExecution"]["programExecutionResourceId"]
+        .as_str()
+        .expect("partial program id")
+        .to_owned();
+
+    let launch = fixture
+        .invoke_with_grant(
+            "subagent-partial-replay-launch",
+            fixture.subagent_grant(&fixture.runtime_resource_id).await,
+            Some("subagent-partial-replay-key"),
+            json!({
+                "operation": "subagent_launch",
+                "taskId": "subagent-partial-task",
+                "objectiveSummary": "Recover a delegated module task after parent persistence failed.",
+                "promptSummary": "Return summary-only merge proposal evidence.",
+                "modelPolicy": "accepted_jobs_program_execution_v1",
+                "workerKind": "module_program_execution",
+                "modulePackId": "jobs_program_execution",
+                "moduleLifecycleResourceId": fixture.lifecycle_id,
+                "runtimeRequestId": fixture.runtime_request_id,
+                "command": "printf subagent-partial-replay",
+                "runtimeId": "runtime.shell",
+                "languageId": "language.shell",
+                "programFingerprint": format!("sha256:{}", fixture.runtime_request_id),
+                "networkPolicy": "none",
+                "timeoutMs": 5000,
+                "maxOutputBytes": 1000,
+                "idempotencyKey": "subagent-partial-replay-key"
+            }),
+        )
+        .await;
+    let launch_details = &launch["details"]["subagentTasks"];
+    assert_eq!(launch_details["status"], json!("running"));
+    assert_eq!(
+        launch_details["delegation"]["moduleRuntimeResourceId"],
+        json!(partial_runtime_id)
+    );
+    assert_eq!(
+        launch_details["delegation"]["jobResourceId"],
+        json!(partial_job_id)
+    );
+    assert_eq!(
+        launch_details["delegation"]["programExecutionResourceId"],
+        json!(partial_program_id)
+    );
+    assert_eq!(launch_details["idempotentReplay"], json!(false));
+    assert_no_provider_leaks("subagent partial replay launch", launch_details);
 }
 
 struct Fixture<'a> {
