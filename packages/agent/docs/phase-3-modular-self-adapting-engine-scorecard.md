@@ -678,6 +678,37 @@ diagnostics payloads, package-manager behavior, installer/restart/update
 commands, production deploy behavior, native fixed panels, public `/engine`
 expansion, network behavior, and repo-managed skills remain out of scope.
 
+### Slice 24I: Fixed Old iOS Product Panels
+
+Objective: close `P3MSA-INV-017` as an explicit rejected-shape/static-guard
+slice so old native product panels do not return without stable module
+contracts and a product decision.
+
+Minimal shape:
+
+- source guards for old fixed approval and work panels alongside existing
+  fixed source-control, memory, process, subagent, notification, and skill
+  panel sentinels;
+- Phase 3 inventory/evidence wording that keeps generic cockpit first and
+  server-owned module facts authoritative;
+- no runtime, DTO, public API, package, dependency, device, storage, or native
+  UI implementation.
+
+Out of scope:
+
+- native approval UI;
+- work dashboards;
+- source-control, process, subagent, notification, skill, memory, inbox,
+  source, or local activity panels;
+- client-owned truth, fake activity, broad DTO resurrection, public `/engine`
+  expansion, package-manager/network behavior, physical-device work, SQLite
+  migrations, and repo-managed skills.
+
+Slice 24I records the rejection of fixed old iOS product panels as static
+evidence only. Future workflow-specific review surfaces remain deferred until
+their backend module contracts exist and generic cockpit rendering proves
+insufficient.
+
 ## Execution Protocol
 
 Every Phase 3 slice follows this thread sequence:

@@ -482,6 +482,27 @@ projections remain bounded and omit raw import payloads, raw repository
 contents, file contents, unsafe paths, endpoints, commands, packages, grants,
 authority ids, and token-like material.
 
+## Rejected Shape Slice 24I: Fixed Old iOS Product Panels
+
+Slice 24I (`P3MSA-INV-017`) is a rejected-shape closeout and static-guard
+hardening slice. It keeps the user-control surface rule unchanged: the generic
+Runtime Cockpit renders server-owned module facts first, and workflow-specific
+native panels require stable module contracts plus a product decision that
+generic rendering is insufficient.
+
+The slice records explicit absence of old fixed source-control, memory,
+process, approval, work, subagent, notification, and skill panels. The iOS
+source guard now names approval and work panel sentinels directly, including
+old work dashboard wording, while preserving the existing fabricated-activity
+and other fixed-panel checks.
+
+The rejected shape remains forbidden: no approval panel, work panel, work
+dashboard, process panel, source-control panel, subagent panel, notification
+panel, skill panel, memory panel, fake local inbox/activity/source surface,
+client-owned server truth, public `/engine` expansion, broad DTO resurrection,
+package-manager/network behavior, physical-device work, SQLite migration, or
+repo-managed `packages/agent/skills` belongs to this slice.
+
 ## Review Rules
 
 Review workers must:

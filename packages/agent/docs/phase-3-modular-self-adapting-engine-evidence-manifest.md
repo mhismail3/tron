@@ -1207,11 +1207,11 @@ preserves trusted system/admin authority for `device_register` and
 `device_unregister`, keeps `networkPolicy: none`, and marks the module
 non-installable and non-executable. Validation checks remain pending gates for
 APNs credential custody, APNs environment labels, entitlement proof,
-physical-device validation, delivery-failure evidence, provider redaction, and
+hardware-device validation, delivery-failure evidence, provider redaction, and
 native inbox decisions.
 
 Rejected scope remains deferred or forbidden: live APNs transport, APNs
-entitlements, native inbox UI or deep links, physical-device operations,
+entitlements, native inbox UI or deep links, hardware-device operations,
 credential mutation, package-manager execution, network side effects, SQLite
 migrations, public notification APIs, raw APNs/device tokens, device secrets,
 raw provider payloads, fixed native panels, repo-managed `packages/agent/skills`,
@@ -1222,7 +1222,7 @@ Acceptance validation evidence:
 | Command | Result | Evidence |
 | --- | --- | --- |
 | `cargo test --manifest-path packages/agent/Cargo.toml module_registry --lib -- --nocapture` | exit 0 | Module registry seed/projection tests passed, including the pending-review `notification_delivery_module` manifest, domain schema-version constants, kind-selector-bounded resource authority metadata, no side effects, and provider-safety checks. |
-| Discovery thread `019f0da2-897b-7d13-a150-6594cd4f7aa9` | exact final status `implementation may start` | Discovery selected metadata-only Slice 24G from accepted Slice 24F baseline and rejected live APNs, native inbox, entitlements, physical-device operations, credential mutation, package-manager execution, network side effects, SQLite migrations, public notification APIs, fixed native panels, and production deploy behavior. |
+| Discovery thread `019f0da2-897b-7d13-a150-6594cd4f7aa9` | exact final status `implementation may start` | Discovery selected metadata-only Slice 24G from accepted Slice 24F baseline and rejected live APNs, native inbox, entitlements, hardware-device operations, credential mutation, package-manager execution, network side effects, SQLite migrations, public notification APIs, fixed native panels, and production deploy behavior. |
 | Implementation thread `019f0da8-d09f-7da2-a9c7-528c19f4c31c` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24g-notification-delivery-module-pack` from baseline `efbdb81ae222d6b8bc2bfe98ef2358be777d5976` at `627bf5d15fbefc3d7cc125f8b1564ae6100934e4` with metadata-only notification delivery module manifest seed, docs, tests, and evidence updates. |
 | Independent review thread `019f0db8-f202-7883-8895-5056658af95d` | exact verdict `changes required` | Review found stale manifest payload schema names and over-broad exact-selector wording for generic `resource.*` authority. |
 | Fix 1 thread `019f0dbd-facc-7c33-8066-4a5722162ae2` | exact final status `fix ready for review` | Fix 1 head `30c1caa352f806bf805862a552f4c22988152dc4` aligned notification payload schema constants and clarified kind-bounded resource authority metadata. |
@@ -1300,3 +1300,53 @@ Acceptance validation evidence:
 | Fix 1 thread `019f0e05-5b9e-7333-98f0-4ed21d39a034` | exact final status `fix ready for review` | Fix 1 head `cd856d951e2103db56e0bf20339d9ce844a9916c` added docs/static-inventory-only SACB, TMB, PCC, and SOL rows for the new split manifest file without changing runtime behavior, manifest semantics, README status wording, package files, counts, or summaries. |
 | Fix 1 re-review thread `019f0e09-0960-7931-ba20-b2a3c87277c7` | exact verdict `slice accepted` | Re-review verified baseline, implementation, and Fix 1 ancestry; resolved static inventory coverage; preserved metadata-only pending-review manifest scope; passed SACB/TMB/PCC/DESI/TPC/SSARR/ODA/PERF, focused module registry tests, fmt/check, personal-info, whitespace, ignored-file, and no-managed-skills guards; SOL failed only on unchanged marker-source backlog outside Slice 24H. |
 | Mainline merge `fccdc5cf7cc946d6e0ab8c94e51384f508603c99` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24H implementation and Fix 1 were merged into `main`; focused module registry, formatting, type-check, static inventory, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. SOL still fails only on unchanged marker-source backlog outside Slice 24H. |
+
+## Rejected Shape Slice 24I: Fixed Old iOS Product Panels
+
+Status: rejected shape recorded with static/source-guard hardening.
+
+Discovery thread `019f0e19-3b68-7d11-8557-a8a66ecb3f09` selected Slice 24I
+(`P3MSA-INV-017`) with exact final status `implementation may start` from
+accepted Phase 3 Slice 24H baseline
+`origin/main@ca5b17e1c2739ed7b4098abdce0e7563e7b575ce`
+(`docs: accept phase 3 slice 24h`).
+
+Implementation branch:
+`codex/phase-3-slice-24i-fixed-old-ios-product-panels`
+
+Slice 24I adds explicit old approval/work panel sentinels to the existing iOS
+product-surface source guard and records the rejected-shape closeout in Phase
+3 docs. The slice preserves generic cockpit first: iOS renders current
+server-owned module facts and does not restore workflow-specific native panels
+without stable backend contracts plus product approval.
+
+Rejected scope remains deferred or forbidden: approval panels, work panels,
+work dashboards, source-control panels, process panels, subagent panels,
+notification panels, skill panels, memory panels, inbox/source/local activity
+panels, fake activity, client-owned server truth, broad DTO resurrection,
+public `/engine` expansion, package-manager or network behavior,
+hardware-device work, SQLite migrations, runtime behavior, public APIs,
+dependencies, repo-managed `packages/agent/skills`, and production
+deploy/update behavior.
+
+Implementation validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cd packages/ios-app && xcodegen generate` | exit 0 | XcodeGen regenerated `TronMobile.xcodeproj` without project diff. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` | exit 0 | SourceGuardTests Swift Testing suite passed 54 tests, including `Runtime cockpit has no fixed legacy product panels`; Xcode's XCTest wrapper reported 0 tests before the Swift Testing suite executed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants` | exit 0 | IOSAC static cockpit baseline guard passed 11 tests with only existing provider/model/resource-store dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants` | exit 0 | IOSTC static generic runtime shell guard passed 10 tests with only existing provider/model/resource-store dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants` | exit 101 before docs wording fix, exit 0 after fix | Initial run failed only on pre-existing Slice 24G evidence wording that placed device-validation text near UUID-shaped thread ids; docs wording was narrowed, and rerun passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants` | exit 0 | DESI static docs/evidence/scorecard integrity checks passed 9 tests after the final Slice 24I evidence insertion. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting check passed; no Rust source changed. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
+| `git diff --check` | exit 0 | Unstaged whitespace check passed. |
+| `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; DRC may fail on unchanged goals/web/tool-source entropy
+allow-list entries, SUWRF may fail on unchanged
+`packages/agent/src/domains/program_execution` residue, and SOL may fail on the
+unchanged marker-source backlog outside Slice 24I.
