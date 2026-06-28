@@ -34,6 +34,7 @@ mod module_lifecycle_definitions;
 mod module_registry_definitions;
 mod module_registry_memory_manifest;
 mod module_registry_procedural_manifest;
+mod module_registry_web_research_manifest;
 mod module_runtime_definitions;
 mod module_validation_definitions;
 mod notification_definitions;
@@ -51,6 +52,7 @@ mod update_diagnostics_definitions;
 mod validation;
 mod versions;
 mod web_definitions;
+mod web_research_definitions;
 
 pub use definitions::builtin_resource_type_definitions;
 pub(crate) use module_authoring_definitions::MODULE_PROPOSAL_PAYLOAD_SCHEMA_VERSION;
@@ -70,3 +72,7 @@ pub(crate) use module_validation_definitions::MODULE_VALIDATION_REPORT_PAYLOAD_S
 pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore};
 pub use types::*;
 pub(crate) use ui_surface::validate_ui_surface_payload;
+pub(crate) use web_research_definitions::{
+    WEB_RESEARCH_REQUEST_PAYLOAD_SCHEMA_VERSION, WEB_RESEARCH_REVIEW_PAYLOAD_SCHEMA_VERSION,
+    WEB_RESEARCH_SOURCE_PAYLOAD_SCHEMA_VERSION,
+};

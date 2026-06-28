@@ -50,6 +50,8 @@ mod grant_repository_tree_tests;
 mod grant_tests;
 #[path = "grant_update_diagnostics_tests.rs"]
 mod grant_update_diagnostics_tests;
+#[path = "grant_web_research_tests.rs"]
+mod grant_web_research_tests;
 
 fn empty_surface() -> ResolvedPrimitiveSurface {
     ResolvedPrimitiveSurface {

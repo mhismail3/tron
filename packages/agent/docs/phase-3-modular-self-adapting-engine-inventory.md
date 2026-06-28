@@ -401,10 +401,28 @@ add SQLite migrations, add public `/engine` methods, or add fixed native UI.
 
 ## Current Implementation Candidate
 
-Slice 24F (`P3MSA-INV-014`) is the next planned discovery target. It must keep
-web, browser, and research behavior module-owned, explicitly authorized, bounded
-by source/citation/cookie custody evidence, and separate from core product logic
-or broad browser automation defaults.
+Slice 24F (`P3MSA-INV-014`) is an implementation candidate pending independent
+review. It adds a new `domains/web_research` owner and a pending-review
+`web_research_module` manifest seed for metadata-only web research custody,
+without mutating the existing `web` source-provenance domain into a crawler or
+browser.
+
+The candidate records `web_research_request`, `web_research_review`, and
+`web_research_source` resources through provider-visible
+`capability::execute` record/list/inspect operation values. The records store
+bounded summaries, policy labels, source refs, citation refs, robots evidence
+refs, dependency-request refs, trace/replay refs, current-scope linkage,
+side-effect proof, and idempotency fingerprints only. Runtime grants and
+engine authorization require exact `web_research.read` /
+`web_research.write` plus resource scopes, exact `kind:web_research_*`
+selectors, exact `resource:<id>` selectors for inspect and linked review/source
+writes, and `networkPolicy: none`.
+
+The candidate deliberately does not add search provider integration, crawling,
+sitemap traversal, browser automation, login/cookie reuse, raw HTML/page dumps,
+raw browser logs, package-manager or dependency restoration behavior,
+network-enabled runtime defaults, public `/engine` expansion, fixed native UI,
+repo-managed `packages/agent/skills`, or production deploy/update behavior.
 
 ## Review Rules
 

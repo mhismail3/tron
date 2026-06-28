@@ -205,6 +205,18 @@ pub const MODULE_LIFECYCLE_STATE_SCHEMA_ID: &str = "tron.resource.module_lifecyc
 pub const MODULE_RUNTIME_STATE_KIND: &str = "module_runtime_state";
 /// Built-in supervised module runtime state resource schema id.
 pub const MODULE_RUNTIME_STATE_SCHEMA_ID: &str = "tron.resource.module_runtime_state.v1";
+/// Built-in metadata-only web research request resource kind.
+pub const WEB_RESEARCH_REQUEST_KIND: &str = "web_research_request";
+/// Built-in metadata-only web research request resource schema id.
+pub const WEB_RESEARCH_REQUEST_SCHEMA_ID: &str = "tron.resource.web_research_request.v1";
+/// Built-in metadata-only web research review resource kind.
+pub const WEB_RESEARCH_REVIEW_KIND: &str = "web_research_review";
+/// Built-in metadata-only web research review resource schema id.
+pub const WEB_RESEARCH_REVIEW_SCHEMA_ID: &str = "tron.resource.web_research_review.v1";
+/// Built-in bounded web research source/citation artifact resource kind.
+pub const WEB_RESEARCH_SOURCE_KIND: &str = "web_research_source";
+/// Built-in bounded web research source/citation artifact resource schema id.
+pub const WEB_RESEARCH_SOURCE_SCHEMA_ID: &str = "tron.resource.web_research_source.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

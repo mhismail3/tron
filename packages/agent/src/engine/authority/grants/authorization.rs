@@ -86,6 +86,9 @@ pub(super) fn authorize_with_grant(
     if is_module_dependencies_invocation(invocation) {
         ensure_module_dependencies_grant_is_explicit(grant)?;
     }
+    if is_web_research_invocation(invocation) {
+        ensure_web_research_grant_is_explicit(grant)?;
+    }
     if is_module_lifecycle_invocation(invocation) {
         ensure_module_lifecycle_grant_is_explicit(grant)?;
     }
@@ -245,6 +248,25 @@ fn ensure_module_dependencies_grant_is_explicit(grant: &EngineGrant) -> Result<(
         if items.iter().any(|item| item == "*") {
             return Err(EngineError::PolicyViolation(format!(
                 "authority grant {} cannot use wildcard {label} for module dependency operations",
+                grant.grant_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_web_research_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
+    for (label, items) in [
+        (
+            "authority scopes",
+            grant.allowed_authority_scopes.as_slice(),
+        ),
+        ("resource kinds", grant.allowed_resource_kinds.as_slice()),
+        ("resource selectors", grant.resource_selectors.as_slice()),
+    ] {
+        if items.iter().any(|item| item == "*") {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot use wildcard {label} for web research operations",
                 grant.grant_id
             )));
         }
@@ -598,6 +620,9 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "moduleDependencyRequestResourceId",
         "moduleDependencyDecisionResourceId",
         "moduleDependencyPolicyResourceId",
+        "webResearchRequestResourceId",
+        "webResearchReviewResourceId",
+        "webResearchSourceResourceId",
         "moduleLifecycleResourceId",
         "moduleRuntimeResourceId",
         "proceduralRecordResourceId",
@@ -814,6 +839,27 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         ) => {
             push_unique(&mut scopes, "module_dependencies.read");
             push_unique(&mut scopes, "module_dependencies.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some(
+            "web_research_request_list"
+            | "web_research_request_inspect"
+            | "web_research_review_list"
+            | "web_research_review_inspect"
+            | "web_research_source_list"
+            | "web_research_source_inspect",
+        ) => {
+            push_unique(&mut scopes, "web_research.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some(
+            "web_research_request_record"
+            | "web_research_review_record"
+            | "web_research_source_record",
+        ) => {
+            push_unique(&mut scopes, "web_research.read");
+            push_unique(&mut scopes, "web_research.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
@@ -1048,6 +1094,21 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             "module_dependency_policy",
         ],
         Some(
+            "web_research_request_record"
+            | "web_research_request_list"
+            | "web_research_request_inspect"
+            | "web_research_review_record"
+            | "web_research_review_list"
+            | "web_research_review_inspect"
+            | "web_research_source_record"
+            | "web_research_source_list"
+            | "web_research_source_inspect",
+        ) => vec![
+            "web_research_request",
+            "web_research_review",
+            "web_research_source",
+        ],
+        Some(
             "module_lifecycle_request"
             | "module_lifecycle_decision"
             | "module_lifecycle_list"
@@ -1175,6 +1236,24 @@ fn is_module_dependencies_invocation(invocation: &Invocation) -> bool {
                     | "module_dependency_policy_activate"
                     | "module_dependency_policy_list"
                     | "module_dependency_policy_inspect"
+            )
+        )
+}
+
+fn is_web_research_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "web_research_request_record"
+                    | "web_research_request_list"
+                    | "web_research_request_inspect"
+                    | "web_research_review_record"
+                    | "web_research_review_list"
+                    | "web_research_review_inspect"
+                    | "web_research_source_record"
+                    | "web_research_source_list"
+                    | "web_research_source_inspect"
             )
         )
 }
