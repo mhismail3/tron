@@ -770,7 +770,7 @@ validation, delivery-failure evidence, provider redaction, and native inbox
 product decisions. It does not enable APNs transport, native inbox UI,
 entitlements, public notification APIs, provider payload leakage, or network
 behavior.
-Phase 3 Slice 24H implementation-candidate state also seeds a pending-review
+Accepted Phase 3 Slice 24H also seeds a pending-review
 `import_update_module` manifest for existing `import_history_record`,
 `repository_tree_snapshot`, `import_preview`, and `update_diagnostic_record`
 resource foundations. It declares only existing import-history,
@@ -1700,8 +1700,8 @@ metadata for the registry, capability domain, the pending-review
 `memory_engine_module` pack, and the accepted Slice 24E pending-review
 `procedural_module` pack, plus the accepted Slice 24F
 pending-review `web_research_module` pack, plus the accepted Slice 24G
-pending-review `notification_delivery_module` pack, plus the Slice 24H
-implementation-candidate pending-review `import_update_module` pack
+pending-review `notification_delivery_module` pack, plus the accepted Slice 24H
+pending-review `import_update_module` pack
 without converting Phase 2 domains into separate provider-visible tools.
 `module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard

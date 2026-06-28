@@ -660,7 +660,7 @@ Out of scope:
 - installer/restart commands;
 - native fixed panels without stable contracts.
 
-Implementation-candidate Slice 24H records a pending-review
+Accepted Slice 24H records a pending-review
 `import_update_module` manifest only. It covers existing
 `import_history_record`, `repository_tree_snapshot`, `import_preview`, and
 `update_diagnostic_record` resource foundations and existing import-history,
@@ -670,7 +670,7 @@ metadata, keeps `networkPolicy: none`, `installable: false`, and
 `executable: false`, and preserves validation gates for approval, rollback,
 future action contracts, bounded payload custody, and provider redaction.
 
-Pending acceptance gates remain actual import execution proposal resources,
+Future activation gates remain actual import execution proposal resources,
 repository tree action resources, update action/rollback execution, native
 import/update UI, live update checks, and approved repository mutation
 workflows. Import execution, repository mutation, raw tree dumps, raw

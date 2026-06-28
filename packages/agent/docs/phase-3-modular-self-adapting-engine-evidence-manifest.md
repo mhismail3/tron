@@ -1239,9 +1239,10 @@ entries, SOL still fails on the unchanged marker-source backlog, and SUWRF still
 fails on unchanged `packages/agent/src/domains/program_execution` residue
 outside Slice 24G.
 
-## Implementation Candidate Slice 24H: Import Repository And Update Module Pack
+## Accepted Slice 24H: Import Repository And Update Module Pack
 
-Status: implementation candidate pending independent review.
+Status: accepted baseline after independent Fix 1 re-review and mainline
+integration.
 
 Discovery thread `019f0de8-2128-76c0-8bd0-f93e72678ece` selected Slice 24H
 (`P3MSA-INV-016`) with exact final status `implementation may start` from
@@ -1252,7 +1253,7 @@ Implementation branch:
 `codex/phase-3-slice-24h-import-update-module-pack`
 
 Implementation thread:
-`019efe16-09d7-73d3-9708-6c6ba5bc6493`
+`019f0dec-1bce-76f0-8300-7a8a970c069d`
 
 Slice 24H adds a pending-review `import_update_module` manifest through the
 split manifest-file pattern. It records module metadata only for existing
@@ -1261,7 +1262,7 @@ split manifest-file pattern. It records module metadata only for existing
 repository-tree, import-preview, and update-diagnostic record/list/inspect
 execute operations.
 
-The candidate manifest declares domain/resource authority needs bounded to the
+The accepted manifest declares domain/resource authority needs bounded to the
 existing resource kinds and their kind-prefixed selectors, keeps
 `networkPolicy: none`, and marks the module non-installable and non-executable.
 Validation checks remain pending gates for approval, rollback, future action
@@ -1275,7 +1276,7 @@ native fixed panels, repo-managed `packages/agent/skills`, local path leakage,
 raw packages/endpoints/commands, grants, authority ids, and token-like
 material.
 
-Implementation validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1294,3 +1295,8 @@ Implementation validation evidence:
 | `git diff --check` | exit 0 | Unstaged diff whitespace check passed. |
 | `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+| Implementation thread `019f0dec-1bce-76f0-8300-7a8a970c069d` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24h-import-update-module-pack` from baseline `964b9aced48772ceb67f8991b6ef6bdc6103a417` at `5f2f14e6af95f69cbbb4e1e2d2ce378f82b03e2a` with metadata-only import/update module manifest seed, registry wiring, docs, tests, and evidence updates. |
+| Independent review thread `019f0dff-73e7-7c73-9b29-4582a1270e78` | exact verdict `changes required` | Review verified the metadata-only manifest scope and found missing SACB, TMB, PCC, and SOL static inventory rows for the split `module_registry_import_update_manifest.rs` source. |
+| Fix 1 thread `019f0e05-5b9e-7333-98f0-4ed21d39a034` | exact final status `fix ready for review` | Fix 1 head `cd856d951e2103db56e0bf20339d9ce844a9916c` added docs/static-inventory-only SACB, TMB, PCC, and SOL rows for the new split manifest file without changing runtime behavior, manifest semantics, README status wording, package files, counts, or summaries. |
+| Fix 1 re-review thread `019f0e09-0960-7931-ba20-b2a3c87277c7` | exact verdict `slice accepted` | Re-review verified baseline, implementation, and Fix 1 ancestry; resolved static inventory coverage; preserved metadata-only pending-review manifest scope; passed SACB/TMB/PCC/DESI/TPC/SSARR/ODA/PERF, focused module registry tests, fmt/check, personal-info, whitespace, ignored-file, and no-managed-skills guards; SOL failed only on unchanged marker-source backlog outside Slice 24H. |
+| Mainline merge `fccdc5cf7cc946d6e0ab8c94e51384f508603c99` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24H implementation and Fix 1 were merged into `main`; focused module registry, formatting, type-check, static inventory, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. SOL still fails only on unchanged marker-source backlog outside Slice 24H. |
