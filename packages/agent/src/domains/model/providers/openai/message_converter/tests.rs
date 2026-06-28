@@ -531,10 +531,10 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("subagent_status"));
     assert!(result.contains("subagent_result"));
     assert!(result.contains("subagent_cancel"));
-    assert!(result.contains("modelPolicy: bounded_placeholder_v1"));
+    assert!(result.contains("modelPolicy: accepted_jobs_program_execution_v1"));
     assert!(result.contains("subagent_task_list"));
     assert!(result.contains("subagent_task_inspect"));
-    assert!(result.contains("bounded-placeholder subagent lifecycle records"));
+    assert!(result.contains("delegated module-program-execution work"));
     assert!(result.contains("module_list"));
     assert!(result.contains("module_inspect"));
     assert!(result.contains("module manifest identity"));
@@ -632,6 +632,42 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("Put operation fields at the top level"));
     assert!(result.contains("Except for read-only `replay_manifest`"));
     assert!(result.contains("When authority is unavailable"));
+}
+
+#[test]
+fn clarification_describes_delegated_subagent_module_pack_contract() {
+    let result = generate_capability_instruction_text(&[]);
+
+    for required in [
+        "scoped delegated module-program-execution work",
+        "accepted `jobs_program_execution` module pack",
+        "bounded summaries/refs/fingerprints/trace/replay refs only",
+        "networkPolicy: none",
+        "modelPolicy: accepted_jobs_program_execution_v1",
+        "workerKind: module_program_execution",
+        "modulePackId: jobs_program_execution",
+        "bounded summary-only `handoffRefs`",
+        "both `resource:<subagent_task_id>` and `kind:subagent_task` selectors",
+        "delegated `moduleRuntimeResourceId`/`jobResourceId` binding",
+        "`parentConversationMutated: false` merge proposal refs",
+        "without raw prompts/results/tool logs/local paths/secrets/provider-visible grant IDs/authority IDs/hidden chain-of-thought/raw job payloads/package-manager output or silent parent-state mutation",
+    ] {
+        assert!(
+            result.contains(required),
+            "delegated subagent guidance missing {required:?}"
+        );
+    }
+
+    for forbidden in [
+        "modelPolicy: bounded_placeholder_v1",
+        "bounded-placeholder subagent lifecycle records",
+        "no worker/job/process/tool/network/package/result-merge side effects",
+    ] {
+        assert!(
+            !result.contains(forbidden),
+            "stale placeholder subagent guidance still present: {forbidden:?}"
+        );
+    }
 }
 
 #[test]

@@ -970,8 +970,9 @@ Candidate scope:
   `workerKind: module_program_execution`, `modulePackId:
   jobs_program_execution`, bounded objective/prompt summaries, summary-only
   `handoffRefs`, one-running-task-per-scope concurrency, exact
-  `kind:subagent_task` selectors, exact module lifecycle/runtime selectors via
-  the reused module runtime path, and `networkPolicy: none`.
+  `resource:<subagent_task_id>` selectors plus the `kind:subagent_task` task
+  kind selector, exact module lifecycle/runtime selectors via the reused module
+  runtime path, and `networkPolicy: none`.
 - Stores delegated `module_runtime_state`, `program_execution_record`, and
   `job_process` refs on the subagent task; status/result/cancel follow the
   delegated module-runtime/job binding through `module_program_execution_*`.

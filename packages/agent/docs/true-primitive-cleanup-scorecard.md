@@ -109,7 +109,7 @@ targets.
 
 | Path | Owner | Reason | Current LOC / Limit | Split row |
 |------|-------|--------|---------------------|-----------|
-| `packages/agent/src/domains/jobs/service.rs` | jobs owner | Durable jobs lifecycle service restored for Phase 2 Slice 5A. | 988 / 750 | Split reconciliation, finalization, cleanup, and output-retention helpers into owner modules before expanding jobs behavior. |
+| `packages/agent/src/domains/jobs/service.rs` | jobs owner | Durable jobs lifecycle service restored for Phase 2 Slice 5A. | 1175 / 750 | Split reconciliation, finalization, cleanup, and output-retention helpers into owner modules before expanding jobs behavior. |
 | `packages/agent/src/domains/jobs/tests.rs` | jobs test owner | Jobs lifecycle regression coverage restored for Phase 2 Slice 5A. | 986 / 800 | Split lifecycle, output, timeout, reconciliation, and fail-closed tests into focused modules before adding coverage. |
 | `packages/agent/tests/baseline_pre_restoration_closure_invariants.rs` | restoration static gate owner | Phase 2 baseline closure gate now covers Slice 6B/6C/6D docs, provider exposure, resource evidence, and non-goal source-control guards. | 913 / 800 | Split baseline documentation inventory checks from provider/resource/source-control guards before adding more restoration slices. |
 | `packages/agent/src/domains/git/service.rs` | git owner | Git evidence service restored for Slice 6A and reused by Slice 6B index mutation, Slice 6C commit, and Slice 6D branch-start preflight/evidence including locked symbolic-HEAD movement. | 1461 / 750 | Split path/repository discovery, status summaries, diff/bounded-output helpers, staged-index tree helpers, and ref command helpers into owner modules before expanding source-control behavior. |
