@@ -530,6 +530,30 @@ expansion, fallback/shim decoding path, client-owned truth, SQLite migration,
 package-manager/network behavior, production deploy/update behavior, or
 repo-managed `packages/agent/skills` belongs to this slice.
 
+## Implementation Candidate Rejected Shape Slice 24K: Speculative Dependency Restoration
+
+Slice 24K (`P3MSA-INV-019`) is an implementation-candidate rejected-shape
+containment slice pending independent review. It keeps removed dependencies
+absent unless a selected module owns the request and the accepted
+`P3MSA-INV-007` dependency governance path approves it.
+
+The candidate strengthens the primitive cleanup dependency guard so the removed
+dependency catalog remains source-backed by the feature index and accepted
+Phase 2 Slice 22A evidence, while Phase 3 reappearance requires an approved
+`module_dependency_request`, approved `module_dependency_policy`, module owner
+rationale, risk class, tests, removal path, and `Cargo.toml` / `Cargo.lock`
+parity evidence. The guard denies direct manifest or lockfile reappearance of
+removed dependency names without that approved module rationale.
+
+The rejected shape remains forbidden during `pending_review`: no speculative
+dependency restoration, no runtime dependency restoration, no `portable-pty`,
+interpreter, embedding/vector, browser automation, APNs transport, signing, or
+rendering package return, no package-manager execution, no manifest or
+lockfile mutation, no network install, no raw dependency artifacts, no
+package-manager output, no public `/engine` expansion, no fixed native panel,
+no repo-managed `packages/agent/skills`, no production deploy/update behavior,
+and no dependencies are restored.
+
 ## Review Rules
 
 Review workers must:
