@@ -50,11 +50,8 @@ pub(super) async fn memory_inspect(
 ) -> Result<CapabilityResult, CapabilityError> {
     let record =
         service::inspect_memory_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    let resource_id = record["resource"]["resourceId"]
-        .as_str()
-        .unwrap_or("unknown");
     Ok(ok_result(
-        format!("Memory record inspected with redacted payload: {resource_id}."),
+        "Memory record inspected with redacted payload.".to_owned(),
         json!({
             "primitiveOperation": "memory_inspect",
             "status": "ok",
@@ -91,11 +88,8 @@ pub(super) async fn memory_query_inspect(
     let query =
         service::inspect_memory_query_value(&deps.engine_host, invocation, &invocation.payload)
             .await?;
-    let resource_id = query["resource"]["resourceId"]
-        .as_str()
-        .unwrap_or("unknown");
     Ok(ok_result(
-        format!("Memory query evidence inspected with redacted payload: {resource_id}."),
+        "Memory query evidence inspected with redacted payload.".to_owned(),
         json!({
             "primitiveOperation": "memory_query_inspect",
             "status": "ok",
@@ -132,11 +126,8 @@ pub(super) async fn memory_decision_inspect(
     let decision =
         service::inspect_memory_decision_value(&deps.engine_host, invocation, &invocation.payload)
             .await?;
-    let resource_id = decision["resource"]["resourceId"]
-        .as_str()
-        .unwrap_or("unknown");
     Ok(ok_result(
-        format!("Memory decision evidence inspected with redacted payload: {resource_id}."),
+        "Memory decision evidence inspected with redacted payload.".to_owned(),
         json!({
             "primitiveOperation": "memory_decision_inspect",
             "status": "ok",

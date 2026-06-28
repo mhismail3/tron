@@ -544,7 +544,7 @@ async fn capability_execute_memory_query_decision_reads_require_memory_resource_
     assert!(matches!(
         denied_query_kind.error,
         Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow resource kind memory_query")
+            if message.contains("requires explicit kind:memory_query selector")
     ));
 
     let missing_decision_selector_grant = derive_bootstrap_grant(
@@ -584,7 +584,47 @@ async fn capability_execute_memory_query_decision_reads_require_memory_resource_
     assert!(matches!(
         denied_decision_selector.error,
         Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow new resource kind memory_decision")
+            if message.contains("requires explicit kind:memory_decision selector")
+    ));
+
+    let wildcard_memory_grant = derive_bootstrap_grant(
+        &handle,
+        "execute-memory-query-wildcard",
+        json!({
+            "allowedCapabilities": ["capability::execute"],
+            "allowedNamespaces": ["capability"],
+            "allowedAuthorityScopes": ["*", "capability.execute", "memory.read", "resource.read"],
+            "allowedResourceKinds": ["memory_query"],
+            "resourceSelectors": ["kind:memory_query"],
+            "fileRoots": ["*"],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "budget": {"remainingInvocations": 5},
+            "provenance": {"source": "execute-memory-query-wildcard-test"}
+        }),
+    )
+    .await;
+    assert_eq!(wildcard_memory_grant.error, None);
+
+    let denied_wildcard = handle
+        .invoke(host_invocation(
+            "capability::execute",
+            json!({"operation": "memory_query_list"}),
+            CausalContext::new(
+                actor("agent:session-a"),
+                ActorKind::Agent,
+                grant("execute-memory-query-wildcard"),
+                trace("execute-memory-query-wildcard-denied"),
+            )
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a")
+            .with_idempotency_key("execute-memory-query-wildcard-denied"),
+        ))
+        .await;
+    assert!(matches!(
+        denied_wildcard.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("cannot use wildcard authority scopes for memory module-pack operations")
     ));
 
     let scoped_query_grant = derive_bootstrap_grant(
@@ -627,7 +667,7 @@ async fn capability_execute_memory_query_decision_reads_require_memory_resource_
     assert!(matches!(
         denied_query_resource.error,
         Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow resource memory_query:denied")
+            if message.contains("requires exact selector for queryResourceId resource memory_query:denied")
     ));
 
     let scoped_decision_grant = derive_bootstrap_grant(
@@ -670,8 +710,32 @@ async fn capability_execute_memory_query_decision_reads_require_memory_resource_
     assert!(matches!(
         denied_decision_resource.error,
         Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow resource memory_decision:denied")
+            if message.contains("requires exact selector for decisionResourceId resource memory_decision:denied")
     ));
+
+    let scoped_record_grant = derive_bootstrap_grant(
+        &handle,
+        "execute-memory-record-scoped",
+        json!({
+            "allowedCapabilities": ["capability::execute"],
+            "allowedNamespaces": ["capability"],
+            "allowedAuthorityScopes": ["capability.execute", "memory.read", "resource.read"],
+            "allowedResourceKinds": ["memory_record", "memory_policy", "memory_engine"],
+            "resourceSelectors": [
+                "kind:memory_record",
+                "resource:memory_record:authorized",
+                "kind:memory_policy",
+                "kind:memory_engine"
+            ],
+            "fileRoots": ["*"],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "budget": {"remainingInvocations": 5},
+            "provenance": {"source": "execute-memory-record-scoped-test"}
+        }),
+    )
+    .await;
+    assert_eq!(scoped_record_grant.error, None);
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -680,6 +744,24 @@ async fn capability_execute_memory_query_decision_reads_require_memory_resource_
     );
 
     for (operation, extra_payload, grant_id, trace_id) in [
+        (
+            "memory_status",
+            json!({}),
+            "execute-memory-record-scoped",
+            "execute-memory-status-accepted",
+        ),
+        (
+            "memory_list",
+            json!({}),
+            "execute-memory-record-scoped",
+            "execute-memory-list-accepted",
+        ),
+        (
+            "memory_inspect",
+            json!({"recordResourceId": "memory_record:authorized"}),
+            "execute-memory-record-scoped",
+            "execute-memory-inspect-accepted",
+        ),
         (
             "memory_query_list",
             json!({}),
@@ -724,5 +806,5 @@ async fn capability_execute_memory_query_decision_reads_require_memory_resource_
             .await;
         assert_eq!(accepted.error, None, "{operation} should be authorized");
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert_eq!(calls.load(Ordering::SeqCst), 7);
 }

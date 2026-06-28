@@ -1709,13 +1709,15 @@ packages/agent/src/domains/memory/contract.rs	implementation	memory	Phase2-Slice
 packages/agent/src/domains/memory/errors.rs	implementation	memory	Phase2-Slice3	Memory error helpers retained for fail-closed disabled or malformed policy behavior.
 packages/agent/src/domains/memory/handlers.rs	implementation	memory	Phase2-Slice3	Memory handlers retained as narrow domain invocation bindings.
 packages/agent/src/domains/memory/migration.rs	implementation	memory	Phase2-Slice3	Memory migration helpers retained for redacted export/import envelopes without embedding/index engines.
-packages/agent/src/domains/memory/prompt_trace.rs	implementation	memory	Phase2-Slice3	Memory prompt-trace helper retained for provider-safe audit context without hidden body content.
-packages/agent/src/domains/memory/query_decision.rs	implementation	memory	Phase2-Slice18A	Memory query/decision evidence helper retained for metadata-only audit records without retrieval, ranking, summarization, or prompt inclusion.
-packages/agent/src/domains/memory/query_decision_validation.rs	implementation	memory	Phase2-Slice18A	Memory query/decision validation helper retained for bounded metadata-only evidence and raw prompt body payload path secret rejection.
+packages/agent/src/domains/memory/prompt_trace.rs	implementation	memory	Phase2-Slice3	Memory prompt-trace helper retained for provider-safe audit context with policy-enabled bounded previews and without hidden body content.
+packages/agent/src/domains/memory/query_decision.rs	implementation	memory	Phase3-Slice24D	Memory query/decision evidence helper retained for deterministic preview-backed retrieval, prompt-inclusion proof, retention policy evidence, and no automatic retention.
+packages/agent/src/domains/memory/query_decision_validation.rs	implementation	memory	Phase2-Slice18A	Memory query/decision validation helper retained for bounded evidence and raw prompt body payload path secret rejection.
+packages/agent/src/domains/memory/retrieval.rs	implementation	memory	Phase3-Slice24D	Memory retrieval helper retained for deterministic resource-backed ranking over redacted previews without embeddings, vector stores, generated summaries, or a second memory subsystem.
+packages/agent/src/domains/memory/retention.rs	implementation	memory	Phase3-Slice24D	Memory retention helper retained for explicit policy evidence and hard-delete or automatic-retention denial.
 packages/agent/src/domains/memory/schema_tests.rs	test	test_harness	Phase2-Slice3	Memory schema alignment tests retained to prevent resource contract drift.
 packages/agent/src/domains/memory/service.rs	implementation	memory	Phase2-Slice3	Memory service retained for resource-backed policy, record lifecycle, and migration operations.
-packages/agent/src/domains/memory/support.rs	implementation	memory	Phase2-Slice3	Memory support helpers retained for parsing, redaction, resource refs, and stream publication.
-packages/agent/src/domains/memory/tests.rs	test	test_harness	Phase2-Slice3	Memory focused tests retained for disabled mode, record lifecycle, redaction, prompt trace, and migration coverage.
+packages/agent/src/domains/memory/support.rs	implementation	memory	Phase3-Slice24D	Memory support helpers retained for parsing, provider-safe redaction, resource refs, and stream publication.
+packages/agent/src/domains/memory/tests.rs	test	test_harness	Phase3-Slice24D	Memory focused tests retained for disabled mode, record lifecycle, redaction, retrieval, prompt trace, retention policy, provider-safe projection, and migration coverage.
 packages/agent/src/engine/durability/resources/memory_definitions.rs	primitive	engine	Phase2-Slice3	Memory resource type definitions retained as engine-owned contract schemas without memory algorithms.
 packages/agent/src/domains/capability/operations/jobs.rs	implementation	capability	Phase2-Slice5A	Jobs execute operation retained as a lifecycle adapter behind the singular execute primitive.
 packages/agent/src/domains/jobs/mod.rs	implementation	jobs	Phase2-Slice5A	Jobs domain facade retained for durable process lifecycle foundation without restoring unrelated runtime features.
@@ -1918,6 +1920,7 @@ packages/agent/src/domains/module_registry/projection.rs	implementation	module_r
 packages/agent/src/domains/module_registry/service.rs	implementation	module_registry	TPC-10/P3MSA-S23A	resource-backed module_list and module_inspect service owner
 packages/agent/src/domains/module_registry/tests.rs	test	test_harness	TPC-10/P3MSA-S23A	focused Slice 23A module manifest schema seed redaction authority scope lifecycle and side-effect coverage
 packages/agent/src/engine/durability/resources/module_registry_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23A	built-in module_manifest resource schema and first-party seed records
+packages/agent/src/engine/durability/resources/module_registry_memory_manifest.rs	implementation	resource_kernel	Phase3-Slice24D	memory_engine_module seed manifest split from generic module registry definitions
 packages/agent/src/domains/capability/operations/module_authoring.rs	implementation	capability_execute	TPC-10/P3MSA-S23B	provider execute adapter for bounded module_proposal record list and inspect operations
 packages/agent/src/domains/module_authoring/authority.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module proposal authority guard owner for exact resource kind selectors current scope isolation inspect resource selectors and networkPolicy none
 packages/agent/src/domains/module_authoring/contract.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module-authoring worker contract constants retained for authority and lifecycle stream ownership

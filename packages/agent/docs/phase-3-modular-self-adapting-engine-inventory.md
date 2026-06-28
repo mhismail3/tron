@@ -358,6 +358,22 @@ Implementation workers must:
 - avoid production deploy/update commands;
 - end with exact final status `implementation complete` or `blocked`.
 
+## Current Implementation Candidate
+
+Slice 24D (`P3MSA-INV-012`) is implemented as a pending-review
+`memory_engine_module` pack on the focused branch. The candidate keeps memory
+retrieval, prompt inclusion, and retention evidence under the existing memory
+resource contracts and `capability::execute` audit operations. It records
+deterministic resource-backed retrieval over redacted memory record previews,
+ranked result refs with confidence/provenance, prompt-inclusion decision proof,
+retention/edit/delete policy evidence, exact memory/resource selectors, and
+`networkPolicy: none`.
+
+The candidate deliberately does not restore embeddings, vector indexes,
+generated summaries, automatic retention, fixed native memory panels, public
+`/engine` methods, package-manager behavior, or live network behavior. Any
+future semantic retrieval engine remains a module/dependency-policy decision.
+
 ## Review Rules
 
 Review workers must:

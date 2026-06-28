@@ -1,11 +1,11 @@
 //! Memory foundation and engine contract domain.
 //!
 //! This worker owns the source-backed memory contract for Phase 2 Slice 3:
-//! engine identity, policy/mode selection, canonical memory records, prompt
-//! inclusion traces, metadata-only query/decision evidence, eval-run resources,
-//! and migration envelopes. It does not implement semantic/vector retrieval,
-//! embeddings, ranking, summarization, hooks, rules, procedural skills, or
-//! automatic prompt memory.
+//! engine identity, policy/mode selection, canonical memory records,
+//! deterministic preview-backed retrieval evidence, prompt inclusion traces,
+//! query/decision evidence, eval-run resources, and migration envelopes. It
+//! does not implement semantic/vector retrieval, embeddings, generated
+//! summarization, hooks, rules, procedural skills, or automatic prompt memory.
 //!
 //! ## Submodules
 //!
@@ -16,17 +16,21 @@
 //! | `handlers` | Operation binding table |
 //! | `migration` | Migration export/import envelope behavior |
 //! | `prompt_trace` | Provider-safe memory prompt trace assembly |
-//! | `query_decision` | Metadata-only query and decision evidence records |
+//! | `query_decision` | Query/result and decision evidence records |
 //! | `query_decision_validation` | Bounds and leakage guards for query/decision evidence |
+//! | `retrieval` | Deterministic resource-backed retrieval over record refs/previews |
+//! | `retention` | Retention/edit/delete policy support evidence |
 //! | `schema_tests` | Test-only resource schema drift guards |
 //! | `service` | Resource-backed memory policy, record lifecycle, list, and inspect behavior |
 //! | `support` | Payload parsing, stream publication, and resource projections |
 //!
 //! # INVARIANT: no hidden prompt memory
 //!
-//! Prompt assembly may include only a memory audit/status section in this
-//! slice. Record body content is never injected into provider context; prompt
-//! traces record considered/included/excluded refs and reasons.
+//! Prompt assembly may include only explicit bounded record preview snippets
+//! when the current memory policy enables `bounded_snippets`; otherwise it
+//! emits audit/status facts only. Record body content is never injected into
+//! provider context; prompt traces record considered/included/excluded refs,
+//! snippets, policy evidence, decisions, and reasons.
 //! `bodyRef` payloads must be custody pointers only: retain, edit, and
 //! migration import reject inline body-like keys at any nested depth.
 //! Policy lookup is hierarchical: an explicit session policy wins, then an
@@ -50,6 +54,8 @@ mod migration;
 mod prompt_trace;
 mod query_decision;
 mod query_decision_validation;
+mod retention;
+mod retrieval;
 pub(crate) mod service;
 mod support;
 

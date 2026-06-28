@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 
+use super::module_registry_memory_manifest::memory_engine_module_manifest;
 use super::types::{
     CreateResource, EngineResourceScope, EngineResourceVersioningMode, MODULE_MANIFEST_KIND,
     MODULE_MANIFEST_SCHEMA_ID, RegisterResourceType,
@@ -54,6 +55,7 @@ pub(in crate::engine) fn builtin_module_manifest_resources() -> Vec<CreateResour
         capability_manifest(),
         file_git_module_manifest(),
         jobs_program_execution_module_manifest(),
+        memory_engine_module_manifest(),
     ]
     .into_iter()
     .map(seed_resource)
@@ -645,7 +647,7 @@ fn jobs_program_execution_module_manifest() -> Value {
     })
 }
 
-fn redaction_proof() -> Value {
+pub(super) fn redaction_proof() -> Value {
     json!({
         "localPaths": "absent",
         "environmentValues": "absent",

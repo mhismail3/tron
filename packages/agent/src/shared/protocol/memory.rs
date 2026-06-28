@@ -2,9 +2,8 @@
 //!
 //! This module describes the minimal engine-owned memory record, policy,
 //! prompt-trace, retrieval-audit query, decision, eval, and migration shapes.
-//! It deliberately does not define a retrieval algorithm, embedding/index
-//! format, summarizer, procedural rule runtime, or automatic prompt-retention
-//! behavior.
+//! It deliberately does not define an embedding/vector index format,
+//! summarizer, procedural rule runtime, or automatic prompt-retention behavior.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -242,7 +241,7 @@ pub struct MemoryPromptTrace {
     pub created_at: DateTime<Utc>,
 }
 
-/// Metadata-only query evidence for future memory retrieval engines.
+/// Query and retrieval evidence for memory retrieval engines.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryQueryEvidence {
@@ -264,9 +263,20 @@ pub struct MemoryQueryEvidence {
     /// Candidate refs explicitly excluded by this audit pass.
     #[serde(default)]
     pub excluded_refs: Vec<MemoryResourceRef>,
+    /// Retrieval execution metadata. `executed=false` preserves metadata-only
+    /// query records; `executed=true` records deterministic bounded retrieval.
+    pub retrieval: Value,
+    /// Bounded provider-safe result projections. Results may include record
+    /// previews, never private body material or generated summaries.
+    #[serde(default)]
+    pub results: Vec<Value>,
     /// Decision refs linked to this query evidence.
     #[serde(default)]
     pub decision_refs: Vec<MemoryResourceRef>,
+    /// Policy evidence observed while the query ran.
+    pub policy: Value,
+    /// Module/engine ownership evidence for replay and package provenance.
+    pub module: Value,
     /// Redaction guarantees for this query evidence.
     pub redaction: Value,
     /// Trace refs proving where the evidence came from.
@@ -301,6 +311,12 @@ pub struct MemoryDecisionEvidence {
     /// Bounded source refs. These are refs only, never raw event or prompt payloads.
     #[serde(default)]
     pub source_refs: Vec<Value>,
+    /// Prompt-inclusion proof for decisions that affect provider context.
+    pub prompt_inclusion: Value,
+    /// Retention/edit/delete policy proof for decisions that affect records.
+    pub retention_evidence: Value,
+    /// Policy evidence observed while the decision was recorded.
+    pub policy_evidence: Value,
     /// Redaction guarantees for this decision evidence.
     pub redaction: Value,
     /// Trace refs proving where the evidence came from.

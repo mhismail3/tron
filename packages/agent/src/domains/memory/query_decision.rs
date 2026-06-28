@@ -14,6 +14,11 @@ use super::query_decision_validation::{
     bounded_array, bounded_object, bounded_string, reason_codes, required_datetime,
     validate_bounded_metadata,
 };
+use super::retrieval::{
+    metadata_only_retrieval, module_evidence, policy_evidence, query_terms_from_payload,
+    retrieval_limit, retrieval_requested, retrieval_snippet_bytes, retrieve_memory_records,
+    validate_retrieval_payload,
+};
 use super::service::resolve_policy;
 use super::support::*;
 use super::{
@@ -31,6 +36,7 @@ pub(crate) async fn record_memory_query_value(
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     validate_bounded_metadata(payload, "memory_query", 0)?;
+    validate_retrieval_payload(payload)?;
     let occurred_at = required_datetime(payload, "occurredAt")?;
     let policy = resolve_policy(engine_host, invocation, false).await?;
     let query_kind = bounded_string(&required_string(payload, "queryKind")?, "queryKind")?;
@@ -66,22 +72,46 @@ pub(crate) async fn record_memory_query_value(
         }));
     }
 
-    let selected_refs = existing_ref_array(
-        engine_host,
-        invocation,
-        payload,
-        "selectedRefs",
-        MEMORY_RECORD_KIND,
-    )
-    .await?;
-    let excluded_refs = existing_ref_array(
-        engine_host,
-        invocation,
-        payload,
-        "excludedRefs",
-        MEMORY_RECORD_KIND,
-    )
-    .await?;
+    let retrieval_executed = retrieval_requested(payload);
+    let (selected_refs, excluded_refs, retrieval, results) = if retrieval_executed {
+        let terms = query_terms_from_payload(payload)?;
+        let evidence = retrieve_memory_records(
+            engine_host,
+            invocation,
+            &policy.record,
+            &terms,
+            retrieval_limit(payload),
+            retrieval_snippet_bytes(payload),
+        )
+        .await?;
+        (
+            evidence.selected_refs,
+            evidence.excluded_refs,
+            evidence.retrieval,
+            evidence.results,
+        )
+    } else {
+        (
+            existing_ref_array(
+                engine_host,
+                invocation,
+                payload,
+                "selectedRefs",
+                MEMORY_RECORD_KIND,
+            )
+            .await?,
+            existing_ref_array(
+                engine_host,
+                invocation,
+                payload,
+                "excludedRefs",
+                MEMORY_RECORD_KIND,
+            )
+            .await?,
+            metadata_only_retrieval(),
+            Vec::new(),
+        )
+    };
     let decision_refs = existing_ref_array(
         engine_host,
         invocation,
@@ -109,14 +139,18 @@ pub(crate) async fn record_memory_query_value(
         mode: policy.record.mode.clone(),
         selected_refs,
         excluded_refs,
+        retrieval,
+        results,
         decision_refs,
-        redaction: redaction_proof(),
+        policy: policy_evidence(&policy, None),
+        module: module_evidence(),
+        redaction: redaction_proof(!retrieval_executed, retrieval_executed),
         trace_refs: merge_trace_refs(optional_array(payload, "traceRefs")?, invocation),
         replay_refs: merge_replay_refs(optional_array(payload, "replayRefs")?, invocation),
         lifecycle: json!({
             "state": "recorded",
             "occurredAt": occurred_at.to_rfc3339(),
-            "retrievalExecuted": false,
+            "retrievalExecuted": retrieval_executed,
             "promptContentIncluded": false
         }),
         idempotency: idempotency_evidence(
@@ -154,7 +188,7 @@ pub(crate) async fn record_memory_query_value(
             "mode": evidence.mode.as_str(),
             "selected": evidence.selected_refs.len(),
             "excluded": evidence.excluded_refs.len(),
-            "retrievalExecuted": false,
+            "retrievalExecuted": retrieval_executed,
             "promptContentIncluded": false
         }),
     )
@@ -177,6 +211,7 @@ pub(crate) async fn record_memory_decision_value(
 ) -> Result<Value, CapabilityError> {
     validate_bounded_metadata(payload, "memory_decision", 0)?;
     let occurred_at = required_datetime(payload, "occurredAt")?;
+    let policy = resolve_policy(engine_host, invocation, false).await?;
     let decision_kind = bounded_string(&required_string(payload, "decisionKind")?, "decisionKind")?;
     let decision_id = optional_string(payload, "decisionId")?
         .map(|value| bounded_string(&value, "decisionId"))
@@ -227,6 +262,29 @@ pub(crate) async fn record_memory_decision_value(
     )
     .await?;
     let source_refs = bounded_array(payload, "sourceRefs")?;
+    let prompt_inclusion = bounded_object(payload, "promptInclusion")?.unwrap_or_else(|| {
+        json!({
+            "appliedToPrompt": false,
+            "boundedPreviewSnippetsOnly": false,
+            "privateBodyIncluded": false
+        })
+    });
+    let retention_evidence = bounded_object(payload, "retentionEvidence")?.unwrap_or_else(|| {
+        json!({
+            "automaticRetentionPerformed": false,
+            "retentionMutationPerformed": false
+        })
+    });
+    let policy_evidence = bounded_object(payload, "policyEvidence")?
+        .unwrap_or_else(|| policy_evidence(&policy, None));
+    let decision_applied_to_prompt = prompt_inclusion
+        .get("appliedToPrompt")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let automatic_retention_performed = retention_evidence
+        .get("automaticRetentionPerformed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let evidence = MemoryDecisionEvidence {
         schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
         decision_kind,
@@ -234,14 +292,17 @@ pub(crate) async fn record_memory_decision_value(
         subject_ref,
         query_ref,
         source_refs,
-        redaction: redaction_proof(),
+        prompt_inclusion,
+        retention_evidence,
+        policy_evidence,
+        redaction: redaction_proof(true, decision_applied_to_prompt),
         trace_refs: merge_trace_refs(optional_array(payload, "traceRefs")?, invocation),
         replay_refs: merge_replay_refs(optional_array(payload, "replayRefs")?, invocation),
         lifecycle: json!({
             "state": "recorded",
             "occurredAt": occurred_at.to_rfc3339(),
-            "decisionAppliedToPrompt": false,
-            "automaticRetentionPerformed": false
+            "decisionAppliedToPrompt": decision_applied_to_prompt,
+            "automaticRetentionPerformed": automatic_retention_performed
         }),
         idempotency: idempotency_evidence(
             &idempotency_key,
@@ -276,8 +337,8 @@ pub(crate) async fn record_memory_decision_value(
             "decisionVersionId": resource.current_version_id.clone(),
             "decisionKind": evidence.decision_kind,
             "reasonCodeCount": evidence.reason_codes.len(),
-            "decisionAppliedToPrompt": false,
-            "automaticRetentionPerformed": false
+            "decisionAppliedToPrompt": decision_applied_to_prompt,
+            "automaticRetentionPerformed": automatic_retention_performed
         }),
     )
     .await?;
@@ -423,9 +484,9 @@ async fn inspect_evidence(
         .collect::<Vec<_>>();
     Ok(json!({
         "schemaVersion": MEMORY_SCHEMA_VERSION,
-        "resource": inspection.resource,
+        "resource": redacted_resource_projection(&inspection.resource),
         "versions": versions,
-        "events": inspection.events,
+        "events": redacted_resource_events(&inspection.events),
         "redacted": true,
         "retrievalExecuted": false,
         "promptContentIncluded": false
@@ -581,9 +642,10 @@ fn idempotency_fingerprint(key: &str, domain: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn redaction_proof() -> Value {
+fn redaction_proof(metadata_only: bool, bounded_preview_snippets: bool) -> Value {
     json!({
-        "metadataOnly": true,
+        "metadataOnly": metadata_only,
+        "boundedPreviewSnippetsOnly": bounded_preview_snippets,
         "rawPromptStored": false,
         "rawProviderPayloadStored": false,
         "memoryBodyStored": false,
@@ -607,7 +669,11 @@ fn redacted_query_payload(payload: &Value) -> Value {
             "mode",
             "selectedRefs",
             "excludedRefs",
+            "retrieval",
+            "results",
             "decisionRefs",
+            "policy",
+            "module",
             "redaction",
             "traceRefs",
             "replayRefs",
@@ -618,6 +684,7 @@ fn redacted_query_payload(payload: &Value) -> Value {
         &[
             "selectedRefs",
             "excludedRefs",
+            "results",
             "decisionRefs",
             "traceRefs",
             "replayRefs",
@@ -635,6 +702,9 @@ fn redacted_decision_payload(payload: &Value) -> Value {
             "subjectRef",
             "queryRef",
             "sourceRefs",
+            "promptInclusion",
+            "retentionEvidence",
+            "policyEvidence",
             "redaction",
             "traceRefs",
             "replayRefs",
@@ -669,7 +739,6 @@ fn redacted_evidence_payload(kind: &str, payload: &Value) -> Value {
         redacted_decision_payload(payload)
     }
 }
-
 fn merge_trace_refs(mut refs: Vec<Value>, invocation: &Invocation) -> Vec<Value> {
     refs.extend(trace_refs(invocation));
     refs

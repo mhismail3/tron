@@ -1,10 +1,11 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::engine::{
-    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
-    EngineResourceVersion, Invocation, PublishStreamEvent, StreamCursor, VisibilityScope,
+    EngineHostHandle, EngineResource, EngineResourceEvent, EngineResourceInspection,
+    EngineResourceScope, EngineResourceVersion, Invocation, PublishStreamEvent, StreamCursor,
+    VisibilityScope,
 };
 use crate::shared::protocol::memory::{MemoryMode, MemoryResourceRef};
 use crate::shared::server::errors::CapabilityError;
@@ -213,6 +214,61 @@ pub(super) fn ensure_body_ref_is_pointer(body_ref: &Value) -> Result<(), Capabil
     ensure_body_ref_has_no_inline_content(body_ref, "bodyRef")
 }
 
+pub(super) fn provider_safe_optional_string(text: &str, max_bytes: usize) -> Option<String> {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.trim().is_empty() || provider_text_is_unsafe(&compact) {
+        None
+    } else {
+        Some(truncate_utf8(&compact, max_bytes))
+    }
+}
+
+pub(super) fn ensure_provider_safe_text(text: &str, field: &str) -> Result<(), CapabilityError> {
+    if provider_text_is_unsafe(text) {
+        return Err(invalid_params(format!(
+            "{field} cannot contain secret-like material or unsafe paths"
+        )));
+    }
+    Ok(())
+}
+
+fn provider_text_is_unsafe(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("bearer ")
+        || lower.contains("authorization:")
+        || lower.contains("secret=")
+        || lower.contains("secret:")
+        || lower.contains("token=")
+        || lower.contains("token:")
+        || lower.starts_with("sk-")
+        || text.starts_with('/')
+        || text.starts_with("~/")
+        || text.contains("://")
+        || text.contains(":/")
+        || text.contains(":\\")
+        || text.contains("../")
+        || text.contains("..\\")
+}
+
+pub(super) fn truncate_utf8(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let budget = max_bytes.saturating_sub(3);
+    let mut end = 0;
+    for (index, _) in text.char_indices() {
+        if index > budget {
+            break;
+        }
+        end = index;
+    }
+    if end == 0 {
+        "...".to_owned()
+    } else {
+        format!("{}...", &text[..end])
+    }
+}
+
 fn ensure_body_ref_has_no_inline_content(value: &Value, path: &str) -> Result<(), CapabilityError> {
     match value {
         Value::Object(object) => {
@@ -239,33 +295,159 @@ fn ensure_body_ref_has_no_inline_content(value: &Value, path: &str) -> Result<()
 pub(super) fn redacted_record_payload(payload: &Value) -> Value {
     json!({
         "schemaVersion": payload.get("schemaVersion").cloned().unwrap_or(Value::Null),
-        "subject": payload.get("subject").cloned().unwrap_or(Value::Null),
-        "scope": payload.get("scope").cloned().unwrap_or(Value::Null),
-        "preview": payload.get("preview").cloned().unwrap_or(Value::Null),
+        "subject": redacted_text_field(payload, "subject", 96),
+        "scope": redacted_scope(payload.get("scope").unwrap_or(&Value::Null)),
+        "preview": redacted_text_field(payload, "preview", 512),
         "bodyRef": redact_body_ref(payload.get("bodyRef").unwrap_or(&Value::Null)),
-        "provenance": payload.get("provenance").cloned().unwrap_or(Value::Null),
-        "confidence": payload.get("confidence").cloned().unwrap_or(Value::Null),
-        "sensitivity": payload.get("sensitivity").cloned().unwrap_or(Value::Null),
-        "retention": payload.get("retention").cloned().unwrap_or(Value::Null),
+        "provenance": provider_safe_projection(payload.get("provenance").unwrap_or(&Value::Null), 160, 3),
+        "confidence": provider_safe_projection(payload.get("confidence").unwrap_or(&Value::Null), 80, 2),
+        "sensitivity": redacted_text_field(payload, "sensitivity", 48),
+        "retention": provider_safe_projection(payload.get("retention").unwrap_or(&Value::Null), 160, 3),
         "expiresAt": payload.get("expiresAt").cloned().unwrap_or(Value::Null),
-        "sourceRefs": payload.get("sourceRefs").cloned().unwrap_or(json!([])),
-        "traceRefs": payload.get("traceRefs").cloned().unwrap_or(json!([])),
-        "replayRefs": payload.get("replayRefs").cloned().unwrap_or(json!([])),
-        "lifecycle": payload.get("lifecycle").cloned().unwrap_or(Value::Null),
-        "migration": payload.get("migration").cloned().unwrap_or(Value::Null),
-        "revision": payload.get("revision").cloned().unwrap_or(Value::Null)
+        "sourceRefs": provider_safe_projection(payload.get("sourceRefs").unwrap_or(&json!([])), 160, 3),
+        "traceRefs": provider_safe_projection(payload.get("traceRefs").unwrap_or(&json!([])), 160, 3),
+        "replayRefs": provider_safe_projection(payload.get("replayRefs").unwrap_or(&json!([])), 160, 3),
+        "lifecycle": provider_safe_projection(payload.get("lifecycle").unwrap_or(&Value::Null), 160, 3),
+        "migration": provider_safe_projection(payload.get("migration").unwrap_or(&Value::Null), 160, 3),
+        "revision": payload.get("revision").cloned().unwrap_or(Value::Null),
+        "redaction": {
+            "providerSafeProjection": true,
+            "rawBodyPointerIncluded": false,
+            "unsafeTextRedacted": true
+        }
     })
+}
+
+pub(super) fn redacted_resource_projection(resource: &EngineResource) -> Value {
+    let safe_resource_id = provider_safe_optional_string(&resource.resource_id, 128);
+    json!({
+        "resourceId": safe_resource_id.clone().map(Value::String).unwrap_or_else(redacted_unsafe_text),
+        "resourceIdRedacted": safe_resource_id.is_none(),
+        "kind": resource.kind.clone(),
+        "schemaId": resource.schema_id.clone(),
+        "scope": {
+            "kind": resource.scope.kind(),
+            "idPresent": !resource.scope.value().is_empty(),
+            "rawIdIncluded": false
+        },
+        "lifecycle": resource.lifecycle.clone(),
+        "currentVersionId": resource.current_version_id.clone(),
+        "policy": provider_safe_projection(&resource.policy, 120, 2),
+        "createdAt": resource.created_at,
+        "updatedAt": resource.updated_at,
+        "redaction": {
+            "ownerActorIdIncluded": false,
+            "traceIdIncluded": false,
+            "invocationIdIncluded": false
+        }
+    })
+}
+
+pub(super) fn redacted_resource_events(events: &[EngineResourceEvent]) -> Vec<Value> {
+    events
+        .iter()
+        .map(|event| {
+            json!({
+                "eventId": provider_safe_optional_string(&event.event_id, 96)
+                    .map(Value::String)
+                    .unwrap_or_else(redacted_unsafe_text),
+                "resourceId": provider_safe_optional_string(&event.resource_id, 128)
+                    .map(Value::String)
+                    .unwrap_or_else(redacted_unsafe_text),
+                "eventType": provider_safe_optional_string(&event.event_type, 64)
+                    .map(Value::String)
+                    .unwrap_or_else(redacted_unsafe_text),
+                "payload": provider_safe_projection(&event.payload, 120, 2),
+                "occurredAt": event.occurred_at,
+                "redaction": {
+                    "traceIdIncluded": false,
+                    "invocationIdIncluded": false
+                }
+            })
+        })
+        .collect()
 }
 
 fn redact_body_ref(body_ref: &Value) -> Value {
     let kind = body_ref
         .get("kind")
         .and_then(Value::as_str)
-        .unwrap_or("unknown");
+        .and_then(|value| provider_safe_optional_string(value, 48))
+        .unwrap_or_else(|| "unknown".to_owned());
     json!({
         "kind": kind,
         "redacted": true,
-        "resourceId": body_ref.get("resourceId").cloned().unwrap_or(Value::Null),
-        "contentHash": body_ref.get("contentHash").cloned().unwrap_or(Value::Null)
+        "resourceIdPresent": body_ref.get("resourceId").is_some(),
+        "contentHashPresent": body_ref.get("contentHash").is_some(),
+        "rawPointerIncluded": false
+    })
+}
+
+fn redacted_scope(scope: &Value) -> Value {
+    match scope {
+        Value::Object(object) => json!({
+            "kind": object
+                .get("kind")
+                .and_then(Value::as_str)
+                .and_then(|value| provider_safe_optional_string(value, 48))
+                .unwrap_or_else(|| "unknown".to_owned()),
+            "idPresent": object.get("id").is_some(),
+            "rawIdIncluded": false
+        }),
+        _ => Value::Null,
+    }
+}
+
+fn redacted_text_field(payload: &Value, field: &str, max_bytes: usize) -> Value {
+    match payload.get(field).and_then(Value::as_str) {
+        Some(text) => provider_safe_optional_string(text, max_bytes)
+            .map(Value::String)
+            .unwrap_or_else(redacted_unsafe_text),
+        None => Value::Null,
+    }
+}
+
+fn provider_safe_projection(value: &Value, max_text_bytes: usize, depth: usize) -> Value {
+    if depth == 0 {
+        return redacted_projection_depth();
+    }
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
+        Value::String(text) => provider_safe_optional_string(text, max_text_bytes)
+            .map(Value::String)
+            .unwrap_or_else(redacted_unsafe_text),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .take(16)
+                .map(|item| provider_safe_projection(item, max_text_bytes, depth - 1))
+                .collect(),
+        ),
+        Value::Object(object) => {
+            let mut projected = Map::new();
+            for (key, child) in object.iter().take(32) {
+                if let Some(safe_key) = provider_safe_optional_string(key, 64) {
+                    projected.insert(
+                        safe_key,
+                        provider_safe_projection(child, max_text_bytes, depth - 1),
+                    );
+                }
+            }
+            Value::Object(projected)
+        }
+    }
+}
+
+fn redacted_unsafe_text() -> Value {
+    json!({
+        "redacted": true,
+        "reason": "provider_unsafe_text"
+    })
+}
+
+fn redacted_projection_depth() -> Value {
+    json!({
+        "redacted": true,
+        "reason": "projection_depth_limit"
     })
 }

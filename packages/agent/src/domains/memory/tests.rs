@@ -346,6 +346,65 @@ async fn nested_inline_body_refs_are_rejected_on_retain() {
 }
 
 #[tokio::test]
+async fn redacted_record_projection_removes_unsafe_text_and_body_pointer_material() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-redacted-projection-configure").await;
+    let mut payload = retain_payload("redacted-projection-record");
+    payload["subject"] = json!("memory_record:/Users/private/project");
+    payload["preview"] = json!("token=secret should never be provider-visible");
+    payload["bodyRef"] = json!({
+        "kind": "vault_blob",
+        "resourceId": "blob:/Users/private/project",
+        "contentHash": "sk-secret-pointer",
+        "uri": "vault://memory/private"
+    });
+    payload["provenance"] = json!({
+        "source": "/Users/private/source",
+        "evidence": "explicit_user_statement"
+    });
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        payload,
+        "memory-redacted-projection-retain",
+    )
+    .await;
+    let record_resource_id = retained["recordResourceId"].as_str().expect("record id");
+
+    let list = invoke_read(
+        &ctx,
+        super::LIST_FUNCTION,
+        json!({}),
+        "memory-redacted-projection-list",
+    )
+    .await
+    .expect("list");
+    let listed_record = &list["records"][0]["record"];
+    assert_eq!(listed_record["preview"]["redacted"], true);
+    assert_eq!(listed_record["bodyRef"]["redacted"], true);
+    assert_eq!(listed_record["bodyRef"]["rawPointerIncluded"], false);
+    assert_eq!(
+        list["records"][0]["resource"]["redaction"]["traceIdIncluded"],
+        false
+    );
+
+    let inspect = invoke_read(
+        &ctx,
+        super::INSPECT_FUNCTION,
+        json!({"recordResourceId": record_resource_id}),
+        "memory-redacted-projection-inspect",
+    )
+    .await
+    .expect("inspect");
+    let serialized = serde_json::to_string(&inspect).expect("serialize inspect");
+    assert!(!serialized.contains("/Users/private"));
+    assert!(!serialized.contains("token=secret"));
+    assert!(!serialized.contains("vault://"));
+    assert!(!serialized.contains("sk-secret-pointer"));
+    assert!(!serialized.contains("engine-client"));
+}
+
+#[tokio::test]
 async fn prompt_trace_records_audit_without_private_memory_content() {
     let ctx = make_test_context();
     configure_active(&ctx, "memory-prompt-configure").await;
@@ -391,6 +450,162 @@ async fn prompt_trace_records_audit_without_private_memory_content() {
     assert_eq!(
         payload["considered"][0]["resourceRef"]["resourceId"],
         record_resource_id
+    );
+}
+
+#[tokio::test]
+async fn retrieval_query_records_ranked_preview_results_and_replays_idempotently() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-retrieval-configure").await;
+    let mut alpha_payload = retain_payload("retrieval-alpha");
+    alpha_payload["subject"] = json!("alpha preference");
+    alpha_payload["preview"] = json!("Alpha project uses the compact review flow");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        alpha_payload,
+        "memory-retrieval-alpha-retain",
+    )
+    .await;
+    let mut beta_payload = retain_payload("retrieval-beta");
+    beta_payload["subject"] = json!("beta preference");
+    beta_payload["preview"] = json!("Beta project uses a separate checklist");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        beta_payload,
+        "memory-retrieval-beta-retain",
+    )
+    .await;
+
+    let query_payload = json!({
+        "queryId": "ranked-preview-query",
+        "queryKind": "resource_backed_preview_query",
+        "intent": {"kind": "bounded_preview_lookup"},
+        "filters": {"scope": "current_session"},
+        "retrieval": {
+            "mode": "resource_backed_preview",
+            "terms": ["alpha"],
+            "limit": 5,
+            "maxSnippetBytes": 80
+        },
+        "occurredAt": "2026-06-26T00:03:00Z"
+    });
+    let query = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        query_payload.clone(),
+        "memory-retrieval-query",
+    )
+    .await;
+    assert_eq!(query["status"], "recorded");
+    assert_eq!(query["query"]["retrieval"]["executed"], true);
+    assert_eq!(query["query"]["retrieval"]["embeddings"], false);
+    assert_eq!(query["query"]["retrieval"]["networkPolicy"], "none");
+    assert_eq!(
+        query["query"]["results"].as_array().expect("results").len(),
+        1
+    );
+    assert_eq!(query["query"]["results"][0]["rank"], 1);
+    assert_eq!(
+        query["query"]["results"][0]["snippet"],
+        "Alpha project uses the compact review flow"
+    );
+    assert_eq!(query["query"]["results"][0]["redaction"]["bodyRead"], false);
+    assert_eq!(query["query"]["redaction"]["memoryBodyStored"], false);
+    assert_eq!(
+        query["query"]["redaction"]["boundedPreviewSnippetsOnly"],
+        true
+    );
+    let serialized = serde_json::to_string(&query).expect("serialize query");
+    assert!(!serialized.contains("vault://"));
+    assert!(!serialized.contains("secret private body"));
+
+    let replay = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        query_payload,
+        "memory-retrieval-query",
+    )
+    .await;
+    assert_eq!(replay["query"]["idempotency"]["rawKeyStored"], false);
+    assert_eq!(replay["queryResourceId"], query["queryResourceId"]);
+}
+
+#[tokio::test]
+async fn prompt_inclusion_requires_policy_and_records_user_visible_decision() {
+    let ctx = make_test_context();
+    invoke_write(
+        &ctx,
+        super::CONFIGURE_FUNCTION,
+        json!({
+            "mode": "active",
+            "inclusion": {
+                "promptInclusion": "bounded_snippets",
+                "maxSnippets": 1,
+                "maxSnippetBytes": 96
+            },
+            "provenance": {"source": "memory_prompt_inclusion_test"}
+        }),
+        "memory-prompt-include-configure",
+    )
+    .await;
+    let mut first = retain_payload("prompt-include-first");
+    first["preview"] = json!("Use concise release-note summaries");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        first,
+        "memory-prompt-include-first-retain",
+    )
+    .await;
+    let mut second = retain_payload("prompt-include-second");
+    second["preview"] = json!("Prefer issue links in final summaries");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        second,
+        "memory-prompt-include-second-retain",
+    )
+    .await;
+
+    let trace = invoke_write(
+        &ctx,
+        super::PROMPT_TRACE_FUNCTION,
+        json!({"source": "test_prompt_inclusion", "limit": 10}),
+        "memory-prompt-include-trace",
+    )
+    .await;
+    assert_eq!(trace["trace"]["included"], 1);
+    assert_eq!(trace["trace"]["privateBodyIncluded"], false);
+    let context = trace["context"].as_str().expect("context text");
+    assert!(context.contains("Bounded record previews included: yes"));
+    assert!(context.contains("Included memory previews:"));
+    assert!(context.contains("Private memory content included: no"));
+    assert!(!context.contains("vault://"));
+
+    let decision_resource_id = trace["trace"]["decisionResourceId"]
+        .as_str()
+        .expect("decision resource id");
+    let decision = invoke_read(
+        &ctx,
+        super::INSPECT_DECISION_FUNCTION,
+        json!({"decisionResourceId": decision_resource_id}),
+        "memory-prompt-include-decision-inspect",
+    )
+    .await
+    .expect("decision inspect");
+    assert_eq!(
+        decision["versions"][0]["record"]["promptInclusion"]["appliedToPrompt"],
+        true
+    );
+    assert_eq!(
+        decision["versions"][0]["record"]["promptInclusion"]["privateBodyIncluded"],
+        false
+    );
+    assert_eq!(
+        decision["versions"][0]["record"]["retentionEvidence"]["automaticRetentionPerformed"],
+        false
     );
 }
 
@@ -772,6 +987,62 @@ async fn query_and_decision_evidence_reject_wrong_scope_kind_stale_and_raw_mater
             .is_some_and(|error| error.to_string().contains("scope mismatch")),
         "cross-scope decision ref must fail: {:?}",
         cross_scope.error
+    );
+}
+
+#[tokio::test]
+async fn retention_policy_evidence_rejects_hard_delete_and_automatic_retention() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-retention-policy-configure").await;
+
+    let mut hard_delete = retain_payload("retention-hard-delete");
+    hard_delete["retention"] = json!({"policy": "explicit", "action": "hard_delete"});
+    let rejected_delete = invoke_write_result(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        hard_delete,
+        "memory-retention-hard-delete",
+    )
+    .await;
+    assert!(
+        rejected_delete
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("hard delete")),
+        "hard-delete retention must fail closed: {:?}",
+        rejected_delete.error
+    );
+
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        retain_payload("retention-edit-record"),
+        "memory-retention-edit-retain",
+    )
+    .await;
+    assert_eq!(
+        retained["retentionEvidence"]["automaticRetentionPerformed"],
+        false
+    );
+    let rejected_auto = invoke_write_result(
+        &ctx,
+        super::EDIT_FUNCTION,
+        json!({
+            "recordResourceId": retained["recordResourceId"],
+            "expectedCurrentVersionId": retained["recordVersionId"],
+            "retention": {"policy": "explicit", "automatic": true},
+            "reason": "unsupported_auto_retention"
+        }),
+        "memory-retention-automatic-edit",
+    )
+    .await;
+    assert!(
+        rejected_auto
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("automatic retention")),
+        "automatic retention must fail closed: {:?}",
+        rejected_auto.error
     );
 }
 
