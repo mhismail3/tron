@@ -3,18 +3,19 @@
 //! Resources are the durable object model for the primitive engine. Artifacts,
 //! goals, claims, evidence, decisions, approval requests/decisions, UI
 //! surfaces, catalog-discovery reports, module manifests, harness docs, inert
-//! procedural records, media artifacts, repository/import/program-execution
-//! metadata records, and files become typed resources with versioned payloads,
-//! links, lifecycle state, policy, provenance, and auditable events. Streams,
-//! indexes, and control-plane summaries are projections over this store.
+//! procedural records, procedural activation request/decision evidence, media
+//! artifacts, repository/import/program-execution metadata records, and files
+//! become typed resources with versioned payloads, links, lifecycle state,
+//! policy, provenance, and auditable events. Streams, indexes, and
+//! control-plane summaries are projections over this store.
 //!
 //! Ownership is split by concern: `types` holds public substrate structs,
 //! `definitions` registers built-in resource kinds, `validation` enforces the
 //! generic resource contract, `versions` owns payload hashing/current-version
 //! helpers, domain definition modules own contract resource schemas including
 //! module manifests, module validation reports, procedural
-//! skill/rule/hook/procedure custody records, module dependency policy
-//! metadata records, and media artifacts,
+//! skill/rule/hook/procedure custody and activation-review records, module
+//! dependency policy metadata records, and media artifacts,
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
 //! the in-memory and SQLite persistence implementations.
 
@@ -32,6 +33,7 @@ mod module_install_definitions;
 mod module_lifecycle_definitions;
 mod module_registry_definitions;
 mod module_registry_memory_manifest;
+mod module_registry_procedural_manifest;
 mod module_runtime_definitions;
 mod module_validation_definitions;
 mod notification_definitions;

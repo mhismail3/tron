@@ -139,7 +139,7 @@ fn safe_metadata(value: Option<&Value>, max_items: usize) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn safe_metadata_value(value: &Value, max_items: usize, depth: usize) -> Value {
+pub(super) fn safe_metadata_value(value: &Value, max_items: usize, depth: usize) -> Value {
     if depth >= METADATA_MAX_DEPTH {
         return json!({"truncated": true, "reason": "maxDepth"});
     }

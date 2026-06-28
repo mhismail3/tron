@@ -1228,8 +1228,15 @@ Current primitive operations:
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
 | `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
+| `procedural_definition_record` | Slice 24E operation that records one scoped `procedural_record` for metadata-only skill/rule/hook/procedure definitions, including validation evidence, review state, trigger declarations, conflict/ordering metadata, scoped-authority proof, trace/replay refs, bounded refs, content hash, and idempotency fingerprint without storing raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, trigger registration, prompt injection, dependency restoration, or code execution. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
+| `procedural_activation_request_record` | Slice 24E operation that records one pending-review `procedural_activation_request` for activate/deactivate/rollback review against an exact procedural record selector, carrying validation, trigger, conflict, ordering, scoped-authority, rollback, trace/replay, bounded-ref, and idempotency evidence while proving activation, trigger registration, hook firing, prompt injection, dependency restoration, package-manager, network, repo-managed skills, and code execution did not occur. |
+| `procedural_activation_request_list` | List scoped `procedural_activation_request` resources with bounded provider-safe summaries, exact procedural/resource authority, `proceduralKind:*` selector proof, `networkPolicy: none`, and no activation side effects. |
+| `procedural_activation_request_inspect` | Inspect one scoped `procedural_activation_request` through an exact `resource:<id>` selector, returning redacted metadata-only review/request evidence and no-execution proof without raw bodies, commands, file contents, unsafe paths, secrets, grant ids, or authority ids. |
+| `procedural_activation_decision_record` | Slice 24E operation that records one metadata-only `procedural_activation_decision` for approve/deny activation, approve deactivation, or approve rollback after exact activation-request and procedural-record selector authority, preserving decision reason, activation/deactivation/rollback proof refs, trace/replay refs, bounded refs, and idempotency proof without actually firing hooks, injecting prompts, registering triggers, running procedures, or restoring dependencies. |
+| `procedural_activation_decision_list` | List scoped `procedural_activation_decision` resources with bounded provider-safe summaries, exact procedural/resource authority, `proceduralKind:*` selector proof, `networkPolicy: none`, and no activation side effects. |
+| `procedural_activation_decision_inspect` | Inspect one scoped `procedural_activation_decision` through an exact `resource:<id>` selector, returning redacted metadata-only decision and rollback/deactivation proof evidence without raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, or debug payloads. |
 | `media_create` | Create one scoped `media_artifact` resource for a blob-backed voice note, audio, image, or document with explicit MIME/size validation, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw media bytes or raw caller idempotency keys in the resource payload. |
 | `media_list` | List scoped `media_artifact` resources as bounded/redacted metadata projections with blob refs and transcription summaries only. |
 | `media_inspect` | Inspect one scoped `media_artifact` after stored kind/schema/scope revalidation, returning bounded/redacted metadata, lifecycle evidence, storage refs, and local transcription metadata without raw audio. |
@@ -1583,24 +1590,33 @@ register catalog entries, promote trust, merge results into conversation state,
 start autonomous work, expand public `/engine` APIs, add settings/profile
 migrations, or add fixed native iOS subagent UI.
 
-The accepted Slice 11A foundation adds the smallest procedural inspection
+The accepted Slice 11A foundation added the smallest procedural inspection
 foundation: a built-in `procedural_record` resource schema for skills, rules,
-hooks, and procedures plus read-only `procedural_state_list` and
+hooks, and procedures plus bounded `procedural_state_list` and
 `procedural_state_inspect` operation values behind the existing
-`capability::execute` primitive. These operations require trusted
-current-session/workspace context, explicit non-wildcard `procedural.read` and
-`resource.read` authority, explicit `procedural_record` resource-kind grants,
-matching `kind:procedural_record` and `proceduralKind:*` selectors, and
-`networkPolicy: none`. They revalidate stored resource kind/schema/version,
-scope, lifecycle/status, procedural kind, provider-visible eval scalar fields,
-and payload content hashes before projection, and they return bounded/redacted
-provenance, eval, status, refs, and activation-proof evidence.
-Slice 11A does not restore repo-managed skills, trigger activation, bootstrap
-prompt injection, learned behavior, autonomous execution, scheduler work, tool
-execution, worker/package/job/process/network launch, MCP lifecycle, package
-install/catalog registration, trust promotion, public `/engine` APIs,
-settings/profile migrations, browser/search/crawl/login scope, native fixed UI,
-or result merge into conversation state.
+`capability::execute` primitive. Slice 24E extends the same procedural owner
+with metadata-only procedural module-pack state: `procedural_definition_record`
+records authoring/review metadata into `procedural_record`; activation,
+deactivation, and rollback review are represented by
+`procedural_activation_request` and `procedural_activation_decision` resources
+plus record/list/inspect operation values. These operations require trusted
+current-session/workspace context, explicit non-wildcard `procedural.read` /
+`procedural.write` and `resource.read` / `resource.write` authority as needed,
+exact procedural resource-kind grants, matching `kind:*`, `proceduralKind:*`,
+and inspect/prerequisite `resource:<id>` selectors, and `networkPolicy: none`.
+They revalidate stored resource kind/schema/version, scope, lifecycle/status,
+procedural kind, provider-visible eval scalar fields, content hashes, and
+request/decision linkage before projection, and they return bounded/redacted
+provenance, eval, review, trigger-declaration, conflict/ordering,
+scoped-authority, trace/replay, idempotency, rollback/deactivation, and
+activation-proof evidence. Slice 24E also seeds a pending-review
+`procedural_module` manifest in the module registry. It does not restore
+repo-managed skills, trigger activation, bootstrap prompt injection, learned
+behavior, autonomous execution, scheduler work, tool execution,
+worker/package/job/process/network launch, dependency restoration, MCP
+lifecycle, package install/catalog registration, trust promotion, public
+`/engine` APIs, settings/profile migrations, browser/search/crawl/login scope,
+native fixed UI, or result merge into conversation state.
 
 The accepted Slice 9B foundation adds read-only worker package lifecycle
 inspection under the same `capability::execute` primitive. `worker_package_list` and
@@ -1625,10 +1641,12 @@ Phase 3 Slice 23A adds the inspect-only module manifest registry foundation.
 The generic resource store registers `module_manifest` with resource schema
 `tron.resource.module_manifest.v1` and payload schema version
 `tron.module_manifest.v1`; bootstrap seeding creates narrow first-party
-metadata for the registry, capability domain, and the pending-review
-`file_git_module` operation pack plus the accepted Slice 24B pending-review
-`jobs_program_execution_module` pack without converting Phase 2 domains into
-separate provider-visible tools. `module_list` and `module_inspect` stay behind the
+metadata for the registry, capability domain, the pending-review
+`file_git_module` operation pack, the accepted Slice 24B pending-review
+`jobs_program_execution_module` pack, the accepted Slice 24D pending-review
+`memory_engine_module` pack, and the Slice 24E implementation-candidate
+pending-review `procedural_module` pack without converting Phase 2 domains into separate
+provider-visible tools. `module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard
 `module_registry.read` and `resource.read` authority, `module_manifest`
 resource-kind grants, `kind:module_manifest` selectors, and `networkPolicy:
@@ -2390,7 +2408,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

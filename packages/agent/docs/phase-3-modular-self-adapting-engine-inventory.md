@@ -375,12 +375,29 @@ generated summaries, automatic retention, fixed native memory panels, public
 `/engine` methods, package-manager behavior, or live network behavior. Any
 future semantic retrieval engine remains a module/dependency-policy decision.
 
-## Current Implementation Candidate
+## Slice 24E Implementation Candidate
 
-Slice 24E (`P3MSA-INV-013`) is the next planned discovery target. It must
-define learned procedural behavior as authorable, testable, reviewable, and
-reversible module state rather than repo-managed bootstrap skills or hidden hook
-execution.
+Slice 24E (`P3MSA-INV-013`) is ready-for-review implementation evidence for
+the procedural skills/rules/hooks module pack. It extends the existing
+`domains/procedural` owner rather than creating a parallel domain, adds metadata-only
+`procedural_record`, `procedural_activation_request`, and
+`procedural_activation_decision` resource contracts, and seeds a pending-review
+`procedural_module` manifest through the module registry.
+
+The implementation candidate records bounded authoring, validation evidence,
+review state, trigger declarations, conflict/ordering metadata,
+scoped-authority proof, trace/replay refs, bounded refs, idempotency
+fingerprints, activation/deactivation/rollback requests, and decision proof
+refs behind `capability::execute` operations. Runtime grants and authorization
+require exact procedural/resource scopes, exact `kind:*`, `proceduralKind:*`,
+and `resource:<id>` selectors, `networkPolicy: none`, and no inherited
+`agent_state` for 24E operations.
+
+The implementation candidate deliberately does not restore repo-managed
+`packages/agent/skills`, copy/bootstrap skills into prompts, register hidden
+triggers, inject prompt context, learn behavior automatically, execute generated
+or runtime code, restore dependencies, run package managers, access networks,
+add SQLite migrations, add public `/engine` methods, or add fixed native UI.
 
 ## Review Rules
 

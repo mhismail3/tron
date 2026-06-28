@@ -81,6 +81,7 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_program_execution_cancel"
             | "module_program_execution_cleanup"
     );
+    let procedural_module_operation = is_procedural_module_operation(operation);
     let memory_module_operation = is_memory_module_operation(operation);
     let delegated_subagent_operation = matches!(
         operation,
@@ -103,6 +104,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
+        || procedural_module_operation
         || memory_module_operation
         || delegated_subagent_operation
         || file_git_module_operation
@@ -127,6 +129,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_lifecycle_operation
         && !module_runtime_operation
         && !module_program_execution_operation
+        && !procedural_module_operation
         && !memory_module_operation
         && !delegated_subagent_operation
         && !file_git_module_operation
@@ -446,9 +449,26 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
-        "procedural_state_list" | "procedural_state_inspect"
+        "procedural_state_list"
+            | "procedural_state_inspect"
+            | "procedural_activation_request_list"
+            | "procedural_activation_request_inspect"
+            | "procedural_activation_decision_list"
+            | "procedural_activation_decision_inspect"
     ) {
         allowed_authority_scopes.extend(["procedural.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "procedural_definition_record"
+            | "procedural_activation_request_record"
+            | "procedural_activation_decision_record"
+    ) {
+        allowed_authority_scopes.extend([
+            "procedural.read".to_owned(),
+            "procedural.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(
         operation,
         "subagent_status" | "subagent_result" | "subagent_task_list" | "subagent_task_inspect"
@@ -498,6 +518,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
+        || procedural_module_operation
         || memory_module_operation
         || delegated_subagent_operation
         || file_git_module_operation
@@ -700,12 +721,9 @@ pub(super) async fn derive_capability_runtime_grant(
         if delegated_subagent_operation {
             allowed_resource_kinds.extend(delegated_subagent_module_resource_kinds(operation));
         }
-    } else if matches!(
-        operation,
-        "procedural_state_list" | "procedural_state_inspect"
-    ) && procedural_kind(effective_args).is_some()
+    } else if is_procedural_module_operation(operation) && procedural_kind(effective_args).is_some()
     {
-        allowed_resource_kinds.push("procedural_record".to_owned());
+        allowed_resource_kinds.extend(procedural_resource_kinds(operation));
     } else if matches!(operation, "device_list" | "device_inspect") {
         allowed_resource_kinds.push("device_registration".to_owned());
     } else if operation == "notification_list" {
@@ -781,7 +799,15 @@ pub(super) async fn derive_capability_runtime_grant(
     }
     if matches!(
         operation,
-        "procedural_state_list" | "procedural_state_inspect"
+        "procedural_definition_record"
+            | "procedural_state_list"
+            | "procedural_state_inspect"
+            | "procedural_activation_request_record"
+            | "procedural_activation_request_list"
+            | "procedural_activation_request_inspect"
+            | "procedural_activation_decision_record"
+            | "procedural_activation_decision_list"
+            | "procedural_activation_decision_inspect"
     ) && let Some(kind) = procedural_kind(effective_args)
     {
         resource_selectors.push(format!("proceduralKind:{kind}"));
@@ -1218,7 +1244,64 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
             ],
             "jobResourceId",
         ),
+        (&["procedural_state_inspect"], "proceduralRecordResourceId"),
+        (
+            &["procedural_activation_request_record"],
+            "proceduralRecordResourceId",
+        ),
+        (
+            &[
+                "procedural_activation_request_inspect",
+                "procedural_activation_decision_record",
+            ],
+            "proceduralActivationRequestResourceId",
+        ),
+        (
+            &["procedural_activation_decision_inspect"],
+            "proceduralActivationDecisionResourceId",
+        ),
     ]
+}
+
+fn is_procedural_module_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "procedural_definition_record"
+            | "procedural_state_list"
+            | "procedural_state_inspect"
+            | "procedural_activation_request_record"
+            | "procedural_activation_request_list"
+            | "procedural_activation_request_inspect"
+            | "procedural_activation_decision_record"
+            | "procedural_activation_decision_list"
+            | "procedural_activation_decision_inspect"
+    )
+}
+
+fn procedural_resource_kinds(operation: &str) -> Vec<String> {
+    match operation {
+        "procedural_definition_record" | "procedural_state_list" | "procedural_state_inspect" => {
+            vec!["procedural_record".to_owned()]
+        }
+        "procedural_activation_request_record"
+        | "procedural_activation_request_list"
+        | "procedural_activation_request_inspect" => {
+            vec![
+                "procedural_record".to_owned(),
+                "procedural_activation_request".to_owned(),
+            ]
+        }
+        "procedural_activation_decision_record"
+        | "procedural_activation_decision_list"
+        | "procedural_activation_decision_inspect" => {
+            vec![
+                "procedural_record".to_owned(),
+                "procedural_activation_request".to_owned(),
+                "procedural_activation_decision".to_owned(),
+            ]
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn procedural_kind(args: &Value) -> Option<&'static str> {

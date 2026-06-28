@@ -1,8 +1,18 @@
 use serde_json::{Value, json};
 
 use super::service::test_support::procedural_payload;
-use super::service::{inspect_procedural_state_value, list_procedural_state_value};
-use super::{PROCEDURAL_RECORD_KIND, PROCEDURAL_RECORD_SCHEMA_ID, SCHEMA_VERSION};
+use super::service::{
+    inspect_activation_decision_value, inspect_activation_request_value,
+    inspect_procedural_state_value, list_activation_decisions_value,
+    list_activation_requests_value, list_procedural_state_value,
+    record_activation_decision_value_at, record_activation_request_value_at,
+    record_procedural_definition_value_at,
+};
+use super::{
+    ACTIVATION_DECISION_SCHEMA_VERSION, ACTIVATION_REQUEST_SCHEMA_VERSION,
+    PROCEDURAL_ACTIVATION_DECISION_KIND, PROCEDURAL_ACTIVATION_REQUEST_KIND,
+    PROCEDURAL_RECORD_KIND, PROCEDURAL_RECORD_SCHEMA_ID, SCHEMA_VERSION,
+};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeliveryMode, DeriveGrant,
     EngineResourceScope, EngineResourceVersioningMode, FunctionId, Invocation, InvocationId,
@@ -10,6 +20,12 @@ use crate::engine::{
 };
 
 const WORKER: &str = "procedural";
+
+fn fixed_procedural_recorded_at() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-04-09T00:00:00Z")
+        .expect("fixed procedural timestamp")
+        .with_timezone(&chrono::Utc)
+}
 
 macro_rules! assert_denied_contains {
     ($future:expr, $needle:expr, $label:literal) => {{
@@ -682,6 +698,575 @@ async fn procedural_inspect_revalidates_stored_kind_schema_version_lifecycle_and
     );
 }
 
+#[tokio::test]
+async fn procedural_definition_record_is_metadata_only_and_idempotent() {
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    let session_id = "procedural-record-session";
+    let workspace_id = "workspace-procedural-record";
+    let grant = derived_procedural_read_grant(
+        &handle,
+        "definition-record",
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[PROCEDURAL_RECORD_KIND],
+        &["kind:procedural_record", "proceduralKind:skill"],
+        "none",
+    )
+    .await;
+    let invocation = procedural_read_invocation(
+        "definition-record",
+        json!({
+            "operation": "procedural_definition_record",
+            "proceduralKind": "skill",
+            "definitionId": "skill.review.demo",
+            "summary": "Metadata only procedural definition",
+            "idempotencyKey": "skill-review-demo",
+            "triggerDeclarations": [{"kind": "manual", "summary": "review gate"}],
+            "conflictMetadata": {"strategy": "deny_on_conflict"},
+            "orderingMetadata": {"priority": "normal"},
+            "scopedAuthorityProof": {"networkPolicy": "none"}
+        }),
+        grant,
+        session_id,
+        workspace_id,
+    );
+    let recorded = record_procedural_definition_value_at(
+        &handle,
+        &invocation,
+        &invocation.payload,
+        fixed_procedural_recorded_at(),
+    )
+    .await
+    .expect("record definition");
+    assert_eq!(recorded["idempotentReplay"], json!(false));
+    assert_eq!(recorded["activation"]["hookFired"], json!(false));
+    let replayed = record_procedural_definition_value_at(
+        &handle,
+        &invocation,
+        &invocation.payload,
+        fixed_procedural_recorded_at(),
+    )
+    .await
+    .expect("replay definition");
+    assert_eq!(replayed["idempotentReplay"], json!(true));
+    assert_eq!(
+        replayed["proceduralRecordResourceId"],
+        recorded["proceduralRecordResourceId"]
+    );
+    let rendered = serde_json::to_string(&recorded).expect("serialize recorded definition");
+    for forbidden in ["secret", "grant-", "/Users/", "/private/", "execute"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "definition projection leaked {forbidden}: {rendered}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn procedural_activation_request_and_decision_are_review_metadata_only() {
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    let session_id = "procedural-activation-session";
+    let workspace_id = "workspace-procedural-activation";
+    let procedural_record_id = "procedural_record:hook:activation";
+    create_procedural_record(
+        &handle,
+        procedural_record_id,
+        EngineResourceScope::Session(session_id.to_owned()),
+        procedural_payload("hook", "activation hook", "candidate"),
+        "candidate",
+    )
+    .await;
+
+    let request_grant = derived_procedural_read_grant(
+        &handle,
+        "activation-request",
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[PROCEDURAL_RECORD_KIND, PROCEDURAL_ACTIVATION_REQUEST_KIND],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "proceduralKind:hook",
+            "resource:procedural_record:hook:activation",
+        ],
+        "none",
+    )
+    .await;
+    let request_invocation = procedural_read_invocation(
+        "activation-request",
+        json!({
+            "operation": "procedural_activation_request_record",
+            "proceduralKind": "hook",
+            "proceduralRecordResourceId": procedural_record_id,
+            "activationRequestId": "hook-activation-request",
+            "requestedAction": "activate",
+            "idempotencyKey": "hook-activation-request",
+            "validationEvidenceRefs": [{"resourceId": "validation:hook"}],
+            "triggerDeclarations": [{"kind": "manual", "summary": "review gate"}],
+            "rollbackProofRefs": [{"resourceId": "rollback:hook"}]
+        }),
+        request_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let request = record_activation_request_value_at(
+        &handle,
+        &request_invocation,
+        &request_invocation.payload,
+        fixed_procedural_recorded_at(),
+    )
+    .await
+    .expect("record activation request");
+    let request_resource_id = request["proceduralActivationRequestResourceId"]
+        .as_str()
+        .expect("request resource id")
+        .to_owned();
+    assert_eq!(
+        request["schemaVersion"],
+        json!(ACTIVATION_REQUEST_SCHEMA_VERSION)
+    );
+    assert_eq!(request["activation"]["hookFired"], json!(false));
+
+    let request_list_invocation = procedural_read_invocation(
+        "activation-request-list",
+        json!({
+            "operation": "procedural_activation_request_list",
+            "proceduralKind": "hook"
+        }),
+        request_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let requests = list_activation_requests_value(
+        &handle,
+        &request_list_invocation,
+        &request_list_invocation.payload,
+    )
+    .await
+    .expect("list activation requests");
+    assert_eq!(requests["activationRequests"].as_array().unwrap().len(), 1);
+
+    let request_inspect_grant = derived_procedural_read_grant(
+        &handle,
+        "activation-request-inspect",
+        &["resource.read", "procedural.read"],
+        &[PROCEDURAL_RECORD_KIND, PROCEDURAL_ACTIVATION_REQUEST_KIND],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "proceduralKind:hook",
+            &format!("resource:{request_resource_id}"),
+        ],
+        "none",
+    )
+    .await;
+    let request_inspect_invocation = procedural_read_invocation(
+        "activation-request-inspect",
+        json!({
+            "operation": "procedural_activation_request_inspect",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": request_resource_id
+        }),
+        request_inspect_grant,
+        session_id,
+        workspace_id,
+    );
+    let inspected_request = inspect_activation_request_value(
+        &handle,
+        &request_inspect_invocation,
+        &request_inspect_invocation.payload,
+    )
+    .await
+    .expect("inspect activation request");
+    assert_eq!(
+        inspected_request["proceduralActivationRequest"]["payload"]["safetyProof"]["activationPerformed"],
+        json!(false)
+    );
+
+    let decision_grant = derived_procedural_read_grant(
+        &handle,
+        "activation-decision",
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[
+            PROCEDURAL_RECORD_KIND,
+            PROCEDURAL_ACTIVATION_REQUEST_KIND,
+            PROCEDURAL_ACTIVATION_DECISION_KIND,
+        ],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "kind:procedural_activation_decision",
+            "proceduralKind:hook",
+            "resource:procedural_record:hook:activation",
+            &format!("resource:{request_resource_id}"),
+        ],
+        "none",
+    )
+    .await;
+    let decision_invocation = procedural_read_invocation(
+        "activation-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": request_resource_id,
+            "activationDecisionId": "hook-activation-decision",
+            "decision": "deny_activation",
+            "reason": "Validation evidence is still pending",
+            "idempotencyKey": "hook-activation-decision",
+            "deactivationProofRefs": [{"resourceId": "deactivation:hook"}],
+            "rollbackProofRefs": [{"resourceId": "rollback:hook"}]
+        }),
+        decision_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let decision = record_activation_decision_value_at(
+        &handle,
+        &decision_invocation,
+        &decision_invocation.payload,
+        fixed_procedural_recorded_at(),
+    )
+    .await
+    .expect("record activation decision");
+    let decision_resource_id = decision["proceduralActivationDecisionResourceId"]
+        .as_str()
+        .expect("decision resource id")
+        .to_owned();
+    assert_eq!(
+        decision["schemaVersion"],
+        json!(ACTIVATION_DECISION_SCHEMA_VERSION)
+    );
+    assert_eq!(decision["activation"]["promptInjected"], json!(false));
+
+    let decision_list_invocation = procedural_read_invocation(
+        "activation-decision-list",
+        json!({
+            "operation": "procedural_activation_decision_list",
+            "proceduralKind": "hook"
+        }),
+        decision_grant.clone(),
+        session_id,
+        workspace_id,
+    );
+    let decisions = list_activation_decisions_value(
+        &handle,
+        &decision_list_invocation,
+        &decision_list_invocation.payload,
+    )
+    .await
+    .expect("list activation decisions");
+    assert_eq!(
+        decisions["activationDecisions"].as_array().unwrap().len(),
+        1
+    );
+
+    let decision_inspect_grant = derived_procedural_read_grant(
+        &handle,
+        "activation-decision-inspect",
+        &["resource.read", "procedural.read"],
+        &[
+            PROCEDURAL_RECORD_KIND,
+            PROCEDURAL_ACTIVATION_REQUEST_KIND,
+            PROCEDURAL_ACTIVATION_DECISION_KIND,
+        ],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "kind:procedural_activation_decision",
+            "proceduralKind:hook",
+            &format!("resource:{decision_resource_id}"),
+        ],
+        "none",
+    )
+    .await;
+    let decision_inspect_invocation = procedural_read_invocation(
+        "activation-decision-inspect",
+        json!({
+            "operation": "procedural_activation_decision_inspect",
+            "proceduralKind": "hook",
+            "proceduralActivationDecisionResourceId": decision_resource_id
+        }),
+        decision_inspect_grant,
+        session_id,
+        workspace_id,
+    );
+    let inspected_decision = inspect_activation_decision_value(
+        &handle,
+        &decision_inspect_invocation,
+        &decision_inspect_invocation.payload,
+    )
+    .await
+    .expect("inspect activation decision");
+    assert_eq!(
+        inspected_decision["proceduralActivationDecision"]["payload"]["activationResult"]["performed"],
+        json!(false)
+    );
+    let rendered = serde_json::to_string(&inspected_decision).expect("serialize decision");
+    for forbidden in ["grant-", "/Users/", "/private/", "secret-token"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "decision projection leaked {forbidden}: {rendered}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn procedural_activation_decision_must_match_requested_action() {
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    let session_id = "procedural-action-binding-session";
+    let workspace_id = "workspace-procedural-action-binding";
+    let procedural_record_id = "procedural_record:hook:action-binding";
+    let request_resource_id = create_activation_request_for_decision_test(
+        &handle,
+        "action-binding",
+        "deactivate",
+        procedural_record_id,
+        session_id,
+        workspace_id,
+    )
+    .await;
+    let decision_grant = activation_decision_grant_for_request(
+        &handle,
+        "action-binding",
+        &request_resource_id,
+        procedural_record_id,
+    )
+    .await;
+    let decision_invocation = procedural_read_invocation(
+        "action-binding-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": request_resource_id,
+            "activationDecisionId": "action-binding-decision",
+            "decision": "approve_rollback",
+            "reason": "Rollback proof exists, but the request asked for deactivation.",
+            "idempotencyKey": "action-binding-decision",
+            "rollbackProofRefs": [{"resourceId": "rollback:action-binding"}]
+        }),
+        decision_grant,
+        session_id,
+        workspace_id,
+    );
+
+    assert_denied_contains!(
+        record_activation_decision_value_at(
+            &handle,
+            &decision_invocation,
+            &decision_invocation.payload,
+            fixed_procedural_recorded_at(),
+        ),
+        "decision action rollback does not match activation request requestedAction deactivate",
+        "mismatched decision action denied"
+    );
+}
+
+#[tokio::test]
+async fn rollback_and_deactivation_approvals_require_matching_proof_refs() {
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    let session_id = "procedural-proof-required-session";
+    let workspace_id = "workspace-procedural-proof-required";
+
+    let rollback_record_id = "procedural_record:hook:rollback-proof";
+    let rollback_request_id = create_activation_request_for_decision_test(
+        &handle,
+        "rollback-proof",
+        "rollback",
+        rollback_record_id,
+        session_id,
+        workspace_id,
+    )
+    .await;
+    let rollback_grant = activation_decision_grant_for_request(
+        &handle,
+        "rollback-proof",
+        &rollback_request_id,
+        rollback_record_id,
+    )
+    .await;
+    let rollback_invocation = procedural_read_invocation(
+        "rollback-proof-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": rollback_request_id,
+            "activationDecisionId": "rollback-proof-decision",
+            "decision": "approve_rollback",
+            "reason": "Rollback approval must carry rollback proof refs.",
+            "idempotencyKey": "rollback-proof-decision"
+        }),
+        rollback_grant,
+        session_id,
+        workspace_id,
+    );
+    assert_denied_contains!(
+        record_activation_decision_value_at(
+            &handle,
+            &rollback_invocation,
+            &rollback_invocation.payload,
+            fixed_procedural_recorded_at(),
+        ),
+        "rollbackProofRefs are required for approve_rollback",
+        "rollback proof refs required"
+    );
+
+    let deactivation_record_id = "procedural_record:hook:deactivation-proof";
+    let deactivation_request_id = create_activation_request_for_decision_test(
+        &handle,
+        "deactivation-proof",
+        "deactivate",
+        deactivation_record_id,
+        session_id,
+        workspace_id,
+    )
+    .await;
+    let deactivation_grant = activation_decision_grant_for_request(
+        &handle,
+        "deactivation-proof",
+        &deactivation_request_id,
+        deactivation_record_id,
+    )
+    .await;
+    let deactivation_invocation = procedural_read_invocation(
+        "deactivation-proof-decision",
+        json!({
+            "operation": "procedural_activation_decision_record",
+            "proceduralKind": "hook",
+            "proceduralActivationRequestResourceId": deactivation_request_id,
+            "activationDecisionId": "deactivation-proof-decision",
+            "decision": "approve_deactivation",
+            "reason": "Deactivation approval must carry deactivation proof refs.",
+            "idempotencyKey": "deactivation-proof-decision",
+            "deactivationProofRefs": []
+        }),
+        deactivation_grant,
+        session_id,
+        workspace_id,
+    );
+    assert_denied_contains!(
+        record_activation_decision_value_at(
+            &handle,
+            &deactivation_invocation,
+            &deactivation_invocation.payload,
+            fixed_procedural_recorded_at(),
+        ),
+        "deactivationProofRefs are required for approve_deactivation",
+        "deactivation proof refs required"
+    );
+}
+
+async fn create_activation_request_for_decision_test(
+    handle: &crate::engine::EngineHostHandle,
+    suffix: &str,
+    requested_action: &str,
+    procedural_record_id: &str,
+    session_id: &str,
+    workspace_id: &str,
+) -> String {
+    create_procedural_record(
+        handle,
+        procedural_record_id,
+        EngineResourceScope::Session(session_id.to_owned()),
+        procedural_payload("hook", suffix, "candidate"),
+        "candidate",
+    )
+    .await;
+
+    let request_grant = derived_procedural_read_grant(
+        handle,
+        &format!("{suffix}-request"),
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[PROCEDURAL_RECORD_KIND, PROCEDURAL_ACTIVATION_REQUEST_KIND],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "proceduralKind:hook",
+            &format!("resource:{procedural_record_id}"),
+        ],
+        "none",
+    )
+    .await;
+    let request_invocation = procedural_read_invocation(
+        &format!("{suffix}-request"),
+        json!({
+            "operation": "procedural_activation_request_record",
+            "proceduralKind": "hook",
+            "proceduralRecordResourceId": procedural_record_id,
+            "activationRequestId": format!("{suffix}-request"),
+            "requestedAction": requested_action,
+            "idempotencyKey": format!("{suffix}-request"),
+            "validationEvidenceRefs": [{"resourceId": format!("validation:{suffix}")}],
+            "triggerDeclarations": [{"kind": "manual", "summary": "review gate"}]
+        }),
+        request_grant,
+        session_id,
+        workspace_id,
+    );
+    let request = record_activation_request_value_at(
+        handle,
+        &request_invocation,
+        &request_invocation.payload,
+        fixed_procedural_recorded_at(),
+    )
+    .await
+    .expect("record activation request fixture");
+    request["proceduralActivationRequestResourceId"]
+        .as_str()
+        .expect("request resource id")
+        .to_owned()
+}
+
+async fn activation_decision_grant_for_request(
+    handle: &crate::engine::EngineHostHandle,
+    suffix: &str,
+    request_resource_id: &str,
+    procedural_record_id: &str,
+) -> AuthorityGrantId {
+    derived_procedural_read_grant(
+        handle,
+        &format!("{suffix}-decision"),
+        &[
+            "resource.read",
+            "resource.write",
+            "procedural.read",
+            "procedural.write",
+        ],
+        &[
+            PROCEDURAL_RECORD_KIND,
+            PROCEDURAL_ACTIVATION_REQUEST_KIND,
+            PROCEDURAL_ACTIVATION_DECISION_KIND,
+        ],
+        &[
+            "kind:procedural_record",
+            "kind:procedural_activation_request",
+            "kind:procedural_activation_decision",
+            "proceduralKind:hook",
+            &format!("resource:{procedural_record_id}"),
+            &format!("resource:{request_resource_id}"),
+        ],
+        "none",
+    )
+    .await
+}
+
 async fn derived_procedural_read_grant(
     handle: &crate::engine::EngineHostHandle,
     suffix: &str,
@@ -707,6 +1292,20 @@ async fn derived_procedural_read_grant(
             resource_selectors: selectors
                 .iter()
                 .map(|selector| (*selector).to_owned())
+                .chain(
+                    [
+                        "procedural_record:skill:redacted",
+                        "procedural_record:hook:auth",
+                        "procedural_record:procedure:workspace",
+                        "procedural_record:wrong-kind",
+                        "procedural_record:schema-mismatch",
+                        "procedural_record:payload-version",
+                        "procedural_record:stale",
+                        "procedural_record:malformed",
+                    ]
+                    .into_iter()
+                    .map(|resource_id| format!("resource:{resource_id}")),
+                )
                 .collect(),
             file_roots: vec!["/tmp".to_owned()],
             network_policy: network_policy.to_owned(),

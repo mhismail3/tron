@@ -554,6 +554,29 @@ Minimal shape:
 - activation/deactivation lifecycle;
 - provenance and user audit trail.
 
+Slice 24E implementation-candidate evidence records a pending-review
+`procedural_module` manifest and keeps procedural behavior inside the existing
+`domains/procedural` resource owner. It adds metadata-only
+`procedural_definition_record`,
+`procedural_activation_request_*`, and `procedural_activation_decision_*`
+execute surfaces backed by `procedural_record`,
+`procedural_activation_request`, and `procedural_activation_decision`
+resources. The slice records bounded validation evidence, review state, trigger
+declarations, conflict/ordering metadata, scoped-authority proof, trace/replay
+refs, rollback/deactivation proof refs, provider-safe projections, and
+idempotency fingerprints while proving no hook firing, trigger registration,
+prompt injection, dependency restoration, package-manager behavior, network
+access, repo-managed skill copy, or code execution occurred.
+
+Out of scope:
+
+- repo-managed `packages/agent/skills` and bootstrap skill prompt context;
+- hidden hook firing, automatic activation, or learned behavior without review;
+- generated/runtime code execution, dependency restoration, package managers,
+  or network access;
+- raw commands, logs, paths, file contents, grant ids, authority ids, secrets,
+  or debug payloads in provider-visible projections.
+
 Out of scope:
 
 - repo-managed bootstrap skills;

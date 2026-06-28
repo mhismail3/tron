@@ -220,6 +220,81 @@ async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
 }
 
 #[tokio::test]
+async fn procedural_module_runtime_grants_are_exact_and_metadata_only() {
+    let cases = [
+        (
+            json!({
+                "operation": "procedural_definition_record",
+                "proceduralKind": "skill",
+                "definitionId": "grant.skill",
+                "summary": "Metadata only skill definition",
+                "idempotencyKey": "procedural-definition-record-grant"
+            }),
+            true,
+            vec!["procedural_record"],
+            vec!["kind:procedural_record", "proceduralKind:skill"],
+        ),
+        (
+            json!({
+                "operation": "procedural_activation_request_record",
+                "proceduralKind": "hook",
+                "proceduralRecordResourceId": "procedural_record:hook:grant",
+                "activationRequestId": "grant-hook-request",
+                "idempotencyKey": "procedural-activation-request-grant"
+            }),
+            true,
+            vec!["procedural_record", "procedural_activation_request"],
+            vec![
+                "kind:procedural_record",
+                "kind:procedural_activation_request",
+                "resource:procedural_record:hook:grant",
+                "proceduralKind:hook",
+            ],
+        ),
+        (
+            json!({
+                "operation": "procedural_activation_decision_record",
+                "proceduralKind": "hook",
+                "proceduralActivationRequestResourceId": "procedural_activation_request:grant",
+                "activationDecisionId": "grant-hook-decision",
+                "decision": "deny_activation",
+                "reason": "Pending validation",
+                "idempotencyKey": "procedural-activation-decision-grant"
+            }),
+            true,
+            vec![
+                "procedural_record",
+                "procedural_activation_request",
+                "procedural_activation_decision",
+            ],
+            vec![
+                "kind:procedural_record",
+                "kind:procedural_activation_request",
+                "kind:procedural_activation_decision",
+                "resource:procedural_activation_request:grant",
+                "proceduralKind:hook",
+            ],
+        ),
+    ];
+
+    for (payload, write_allowed, expected_kinds, expected_selectors) in cases {
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_procedural_module_runtime_grant(
+            &grant,
+            write_allowed,
+            &expected_kinds,
+            &expected_selectors,
+        );
+    }
+}
+
+#[tokio::test]
 async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped() {
     for (operation, kinds, id_field, resource_id) in [
         (
@@ -1082,16 +1157,17 @@ fn assert_procedural_runtime_grant_is_read_only_for_kind(
     }
     assert_eq!(
         grant.allowed_resource_kinds,
-        vec!["agent_state".to_owned(), "procedural_record".to_owned()]
+        vec!["procedural_record".to_owned()]
     );
-    assert_eq!(
-        grant.resource_selectors,
-        vec![
-            "kind:agent_state".to_owned(),
-            "kind:procedural_record".to_owned(),
-            format!("proceduralKind:{expected_procedural_kind}")
-        ]
-    );
+    for selector in [
+        "kind:procedural_record".to_owned(),
+        format!("proceduralKind:{expected_procedural_kind}"),
+    ] {
+        assert!(
+            grant.resource_selectors.contains(&selector),
+            "procedural read grant should include selector {selector}"
+        );
+    }
     for forbidden_kind in [
         "worker_package",
         "worker_launch_attempt",
@@ -1126,11 +1202,83 @@ fn assert_procedural_runtime_grant_is_read_only_for_kind(
     }
     assert_eq!(
         grant.allowed_capabilities,
-        vec![
-            "capability::execute".to_owned(),
-            "state::get".to_owned(),
-            "state::list".to_owned(),
-            "state::set".to_owned(),
-        ]
+        vec!["capability::execute".to_owned()]
     );
+}
+
+fn assert_procedural_module_runtime_grant(
+    grant: &crate::engine::EngineGrant,
+    write_allowed: bool,
+    expected_kinds: &[&str],
+    expected_selectors: &[&str],
+) {
+    assert_eq!(grant.network_policy, "none");
+    for scope in ["procedural.read", "resource.read"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "procedural module grant should include {scope}"
+        );
+    }
+    for scope in ["procedural.write", "resource.write"] {
+        assert_eq!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            write_allowed,
+            "procedural module write scope {scope} mismatch"
+        );
+    }
+    for forbidden_scope in [
+        "state.read",
+        "state.write",
+        "filesystem.write",
+        "git.write",
+        "jobs.write",
+        "web.write",
+        "subagents.write",
+        "module_install.write",
+    ] {
+        assert!(
+            !grant
+                .allowed_authority_scopes
+                .contains(&forbidden_scope.to_owned()),
+            "procedural module grant must not include {forbidden_scope}"
+        );
+    }
+    let mut actual_kinds = grant.allowed_resource_kinds.clone();
+    actual_kinds.sort();
+    let mut expected_kinds_sorted = expected_kinds
+        .iter()
+        .map(|kind| (*kind).to_owned())
+        .collect::<Vec<_>>();
+    expected_kinds_sorted.sort();
+    assert_eq!(actual_kinds, expected_kinds_sorted);
+    for selector in expected_selectors {
+        assert!(
+            grant.resource_selectors.contains(&(*selector).to_owned()),
+            "procedural module grant should include selector {selector}"
+        );
+    }
+    for forbidden_kind in [
+        "agent_state",
+        "module_manifest",
+        "module_proposal",
+        "worker_package",
+        "web_source",
+        "job_process",
+        "execution_output",
+        "subagent_task",
+    ] {
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&forbidden_kind.to_owned()),
+            "procedural module grant must not include kind {forbidden_kind}"
+        );
+        assert!(
+            !grant
+                .resource_selectors
+                .contains(&format!("kind:{forbidden_kind}")),
+            "procedural module grant must not include selector kind:{forbidden_kind}"
+        );
+    }
+    assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
 }

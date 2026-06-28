@@ -573,8 +573,18 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("raw dependency artifacts"));
     assert!(result.contains("procedural_state_list"));
     assert!(result.contains("procedural_state_inspect"));
+    assert!(result.contains("procedural_definition_record"));
+    assert!(result.contains("procedural_activation_request_record"));
+    assert!(result.contains("procedural_activation_request_list"));
+    assert!(result.contains("procedural_activation_request_inspect"));
+    assert!(result.contains("procedural_activation_decision_record"));
+    assert!(result.contains("procedural_activation_decision_list"));
+    assert!(result.contains("procedural_activation_decision_inspect"));
     assert!(result.contains("skill/rule/hook/procedure provenance evidence"));
     assert!(result.contains("without activation, trigger firing, prompt injection"));
+    assert!(result.contains("Procedural module-pack operations"));
+    assert!(result.contains("scoped-authority proof"));
+    assert!(result.contains("definition records require `definitionId`"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
     assert!(result.contains("memory_status"));

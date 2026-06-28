@@ -1082,3 +1082,44 @@ Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
 unchanged goals/web/tool-source UTC allow-list entries, and SUWRF has unchanged
 `packages/agent/src/domains/program_execution` residue outside Slice 24D.
+
+## Slice 24E Procedural Module Pack Evidence
+
+Status: implementation candidate, pending independent review.
+
+Slice 24E (`P3MSA-INV-013`) extends the existing procedural domain with
+metadata-only procedural module-pack records. It adds
+`procedural_definition_record`, activation request record/list/inspect, and
+activation decision record/list/inspect execute operations backed by generic
+resource-store definitions for `procedural_record`,
+`procedural_activation_request`, and `procedural_activation_decision`.
+Provider-visible projections are bounded and redacted; runtime grant derivation
+and engine authorization require exact procedural/resource scopes, exact
+resource selectors, and `networkPolicy: none` without `agent_state`
+inheritance.
+
+Rejected scope remains unchanged: repo-managed `packages/agent/skills`,
+bootstrap skill copy/prompt context, hidden hook firing, prompt injection,
+automatic activation, generated/runtime code execution, dependency restoration,
+package-manager or network side effects, public `/engine` expansion, SQLite
+migrations/tables, fixed native panels, and production deploy/update behavior.
+
+Ready-for-review validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | exit 0 | Agent crate formatting applied successfully during Slice 24E implementation. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/model/resource-store dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml procedural --lib` | exit 0 | Procedural record/list/inspect, definition record replay, activation request/decision metadata, projection redaction, no-managed-skills, and procedural runtime grant tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml procedural_module_runtime_grants_are_exact_and_metadata_only --lib` | exit 0 | Runtime grant derivation for procedural definition, activation request, and activation decision operations produced exact procedural/resource selectors, no `agent_state`, and `networkPolicy: none`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml procedural_module_operations_require_exact_selectors_and_reject_wildcards --lib` | exit 0 | Engine authorization accepted exact procedural grants and rejected wildcard/missing exact selector grants. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_registry --lib` | exit 0 | Module registry seed/projection tests passed, including the pending-review `procedural_module` manifest and provider-safety checks. |
+| `cargo test --manifest-path packages/agent/Cargo.toml message_converter --lib` | exit 0 | Provider message-converter tests passed after adding OpenAI guidance for procedural definition, activation request, and activation decision operations. |
+| `cargo check --manifest-path packages/agent/Cargo.toml --tests` | exit 0 | Test targets type-check passed with only existing provider/model/resource-store dead-code warnings. |
+| DESI, SACB, PMBD, PPACD, TMB, PCC, TPC, SSARR, ODA, and PERF invariant suites | exit 0 | Documentation/evidence, authority, provider/model, public protocol, modularity, cleanup/budget, readiness, auditability, and performance guards passed after adding pending-review Slice 24E budget rows and deterministic procedural test timestamps. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | expected baseline failure | 16 DRC tests passed; `replay_critical_entropy_is_allow_listed` still fails only on unchanged goals/web/tool-source UTC allow-list entries after Slice 24E procedural test timestamps were fixed to deterministic values. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` | expected baseline failure | 18 SOL tests passed; `sol_inventory_covers_stateful_marker_sources` still fails on the broad pre-existing marker-source backlog, including procedural/capability/resource files already part of the known backlog. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | expected baseline failure | 8 SUWRF tests passed; `no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets` still fails only on unchanged `packages/agent/src/domains/program_execution` fixed-surface residue. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full source scan found no personal-info literals. |
+| `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed for unstaged and staged diffs. |
+| Tracked ignored-file scan and `test ! -e packages/agent/skills` | exit 0 | No tracked ignored files were reported, and repo-managed `packages/agent/skills` remains absent. |
