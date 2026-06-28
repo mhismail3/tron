@@ -1083,9 +1083,9 @@ warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
 unchanged goals/web/tool-source UTC allow-list entries, and SUWRF has unchanged
 `packages/agent/src/domains/program_execution` residue outside Slice 24D.
 
-## Slice 24E Procedural Module Pack Evidence
+## Accepted Slice 24E: Procedural Skills, Rules, And Hooks Module Pack
 
-Status: implementation candidate, pending independent review.
+Status: accepted baseline after Fix 1 re-review and mainline integration.
 
 Slice 24E (`P3MSA-INV-013`) extends the existing procedural domain with
 metadata-only procedural module-pack records. It adds
@@ -1098,13 +1098,13 @@ and engine authorization require exact procedural/resource scopes, exact
 resource selectors, and `networkPolicy: none` without `agent_state`
 inheritance.
 
-Rejected scope remains unchanged: repo-managed `packages/agent/skills`,
+Accepted scope rejects repo-managed `packages/agent/skills`,
 bootstrap skill copy/prompt context, hidden hook firing, prompt injection,
 automatic activation, generated/runtime code execution, dependency restoration,
 package-manager or network side effects, public `/engine` expansion, SQLite
 migrations/tables, fixed native panels, and production deploy/update behavior.
 
-Ready-for-review validation evidence:
+Accepted validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1123,3 +1123,14 @@ Ready-for-review validation evidence:
 | `scripts/personal-info-guard.sh` | exit 0 | Full source scan found no personal-info literals. |
 | `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed for unstaged and staged diffs. |
 | Tracked ignored-file scan and `test ! -e packages/agent/skills` | exit 0 | No tracked ignored files were reported, and repo-managed `packages/agent/skills` remains absent. |
+| Discovery thread `019f0cdd-f2a1-7dc2-b7f7-0d90579e0268` | exact final status `implementation may start` | Discovery selected Slice 24E from accepted Slice 24D baseline and rejected repo-managed skills, hidden hook firing, prompt injection, generated/runtime execution, package-manager/network side effects, public `/engine` expansion, SQLite migrations, fixed native panels, and production deploy behavior. |
+| Implementation thread `019f0ce3-20ff-7d83-9dc2-7c7cb6b4f923` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24e-procedural-module-pack` at `46ad72f19ab1d9940da322e5483743b8bb0432a3` (`feat: add procedural module pack state`). |
+| Independent review thread `019f0d12-f605-7603-bc2c-0dffee5ab83c` | exact verdict `changes required` | Review required static inventory classifications for `module_registry_procedural_manifest.rs` and request-action/proof validation for procedural activation decisions. |
+| Fix 1 thread `019f0d1a-1c68-7d33-8525-7816bbf366c6` | exact final status `fix ready for review` | Added `7de27a0265bbd48575b377ab106f2171e9e9f3f3` (`fix: bind procedural decisions to requests`). |
+| Fix 1 re-review thread `019f0d29-90cd-7713-946e-51c9615965ef` | exact verdict `slice accepted` | Re-review verified branch/head cleanliness, baseline/implementation/fix ancestry, full and fix diffs, procedural request-action/proof enforcement, inventory coverage, provider-safe metadata-only scope, focused validation, hygiene checks, known caveats, and no repo-managed skills. |
+| Mainline merge `66f9bd51e5029e1e18cfe8a417efedb8d59d8460` plus closeout validation from `main` | exit 0 | Accepted Slice 24E implementation and fix were merged into `main`; focused Rust, static inventory, formatting, type-check, personal-info, whitespace, ignored-file, and no-managed-skills validation passed from the integrated branch before push. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
+unchanged goals/web/tool-source UTC allow-list entries, and SUWRF has unchanged
+`packages/agent/src/domains/program_execution` residue outside Slice 24E.

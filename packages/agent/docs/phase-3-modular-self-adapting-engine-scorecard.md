@@ -554,8 +554,8 @@ Minimal shape:
 - activation/deactivation lifecycle;
 - provenance and user audit trail.
 
-Slice 24E implementation-candidate evidence records a pending-review
-`procedural_module` manifest and keeps procedural behavior inside the existing
+Accepted Slice 24E records a pending-review `procedural_module` manifest and
+keeps procedural behavior inside the existing
 `domains/procedural` resource owner. It adds metadata-only
 `procedural_definition_record`,
 `procedural_activation_request_*`, and `procedural_activation_decision_*`
