@@ -1190,9 +1190,10 @@ allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` fixed-surface residue, and SOL
 may fail on the unchanged marker-source backlog outside Slice 24F.
 
-## Implementation-Candidate Slice 24G: Notifications And Device Delivery Module Pack
+## Accepted Slice 24G: Notifications And Device Delivery Module Pack
 
-Status: implementation candidate awaiting independent review.
+Status: accepted baseline after independent Fix 2 re-review and mainline
+integration.
 
 Slice 24G (`P3MSA-INV-015`) adds a pending-review
 `notification_delivery_module` manifest through the split manifest-file
@@ -1200,7 +1201,7 @@ pattern. It records module metadata only for the existing server-owned
 `device_registration`, `notification`, and `notification_delivery` resources
 and the existing device/notification execute operations.
 
-The candidate manifest declares device, notification, and resource authority
+The accepted manifest declares device, notification, and resource authority
 needs bounded to the existing resource kinds and their kind selectors,
 preserves trusted system/admin authority for `device_register` and
 `device_unregister`, keeps `networkPolicy: none`, and marks the module
@@ -1216,15 +1217,24 @@ migrations, public notification APIs, raw APNs/device tokens, device secrets,
 raw provider payloads, fixed native panels, repo-managed `packages/agent/skills`,
 and production deploy/update behavior.
 
-Implementation-candidate validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
 | `cargo test --manifest-path packages/agent/Cargo.toml module_registry --lib -- --nocapture` | exit 0 | Module registry seed/projection tests passed, including the pending-review `notification_delivery_module` manifest, domain schema-version constants, kind-selector-bounded resource authority metadata, no side effects, and provider-safety checks. |
 | Discovery thread `019f0da2-897b-7d13-a150-6594cd4f7aa9` | exact final status `implementation may start` | Discovery selected metadata-only Slice 24G from accepted Slice 24F baseline and rejected live APNs, native inbox, entitlements, physical-device operations, credential mutation, package-manager execution, network side effects, SQLite migrations, public notification APIs, fixed native panels, and production deploy behavior. |
+| Implementation thread `019f0da8-d09f-7da2-a9c7-528c19f4c31c` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24g-notification-delivery-module-pack` from baseline `efbdb81ae222d6b8bc2bfe98ef2358be777d5976` at `627bf5d15fbefc3d7cc125f8b1564ae6100934e4` with metadata-only notification delivery module manifest seed, docs, tests, and evidence updates. |
+| Independent review thread `019f0db8-f202-7883-8895-5056658af95d` | exact verdict `changes required` | Review found stale manifest payload schema names and over-broad exact-selector wording for generic `resource.*` authority. |
+| Fix 1 thread `019f0dbd-facc-7c33-8066-4a5722162ae2` | exact final status `fix ready for review` | Fix 1 head `30c1caa352f806bf805862a552f4c22988152dc4` aligned notification payload schema constants and clarified kind-bounded resource authority metadata. |
+| Fix 1 re-review thread `019f0dc6-6a79-7fb2-a1f2-bd31371dde56` | exact verdict `changes required` | Re-review required docs/TSV wording to stop overclaiming exact generic resource selectors and required provider-projection schema-version assertions. |
+| Fix 2 thread `019f0dd0-c4e3-7b00-b22c-8a14ca49e372` | exact final status `fix ready for review` | Fix 2 head `060659f0933b0c8429c290adaf67e9612dc922e6` updated README/TSV resource-authority wording and added projected `resourceDeclarations[*].payloadSchemaVersion` assertions. |
+| Fix 2 re-review thread `019f0dd5-f2b0-7443-8d7e-27b49d983cba` | exact verdict `slice accepted` | Re-review verified baseline, implementation, Fix 1, and Fix 2 ancestry; passed fmt, focused module registry tests, cargo check, DESI/SACB/TMB/PCC/TPC/PMBD/PPACD/SSARR/ODA/PERF, personal-info, whitespace, ignored-file, and no-managed-skills guards; HRA/DRC/SOL/SUWRF failures were unchanged baseline backlog outside Slice 24G. |
+| Mainline merge `5d7783728a4971cdcb2622f8bb3995d82b7e49b7` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24G implementation and fixes were merged into `main`; focused module registry, formatting, type-check, static inventory, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. HRA/DRC/SOL/SUWRF caveat targets still fail only on unchanged baseline backlog outside Slice 24G. |
 
-Known unchanged caveats to verify during closeout: existing
-provider/model/resource-store dead-code warnings remain; DRC may fail on
-unchanged goals/web/tool-source entropy allow-list entries, SOL may fail on the
-unchanged marker-source backlog, and SUWRF may fail on unchanged
-`packages/agent/src/domains/program_execution` residue outside Slice 24G.
+Known unchanged caveats verified during closeout: existing
+provider/model/resource-store dead-code warnings remain; HRA still has broader
+pre-existing capability decomposition, inventory, and procedural-file budget
+backlog; DRC still fails on unchanged goals/web/tool-source entropy allow-list
+entries, SOL still fails on the unchanged marker-source backlog, and SUWRF still
+fails on unchanged `packages/agent/src/domains/program_execution` residue
+outside Slice 24G.

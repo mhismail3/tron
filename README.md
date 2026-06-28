@@ -758,7 +758,7 @@ projections to refs/fingerprints/truncation/duration/exit/timeout/cancel/
 cleanup metadata rather than `process_run`, raw job payloads, raw commands,
 stdio, logs, paths, env, pids, grant ids, PTYs, package installs, or network
 execution.
-Slice 24G implementation-candidate metadata also seeds a pending-review
+Accepted Phase 3 Slice 24G also seeds a pending-review
 `notification_delivery_module` manifest for the existing server-owned
 `device_registration`, `notification`, and `notification_delivery` resource
 substrate. It declares only existing device list/inspect/register/unregister
@@ -1688,8 +1688,8 @@ metadata for the registry, capability domain, the pending-review
 `jobs_program_execution_module` pack, the accepted Slice 24D pending-review
 `memory_engine_module` pack, and the accepted Slice 24E pending-review
 `procedural_module` pack, plus the accepted Slice 24F
-pending-review `web_research_module` pack, plus the Slice 24G
-implementation-candidate pending-review `notification_delivery_module` pack
+pending-review `web_research_module` pack, plus the accepted Slice 24G
+pending-review `notification_delivery_module` pack
 without converting Phase 2 domains into separate provider-visible tools.
 `module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard

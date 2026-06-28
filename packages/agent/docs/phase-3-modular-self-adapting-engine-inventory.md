@@ -424,28 +424,28 @@ raw browser logs, package-manager or dependency restoration behavior,
 network-enabled runtime defaults, public `/engine` expansion, fixed native UI,
 repo-managed `packages/agent/skills`, or production deploy/update behavior.
 
-## Implementation-Candidate Slice 24G: Notifications And Device Delivery Module Pack
+## Accepted Slice 24G: Notifications And Device Delivery Module Pack
 
-Slice 24G (`P3MSA-INV-015`) is an implementation candidate awaiting independent
-review. It adds a pending-review `notification_delivery_module` manifest seed
-for the existing server-owned `domains/device` and `domains/notifications`
+Slice 24G (`P3MSA-INV-015`) is accepted baseline after independent Fix 2
+re-review. It adds a pending-review `notification_delivery_module` manifest
+seed for the existing server-owned `domains/device` and `domains/notifications`
 substrate. The manifest covers only existing `device_registration`,
 `notification`, and `notification_delivery` resources and existing
 `capability::execute` operation values for device list/inspect/register/
 unregister and notification send/list/inspect/mark-read/mark-all-read.
 
-The candidate preserves the trusted system/admin split for
+The accepted slice preserves the trusted system/admin split for
 `device_register` and `device_unregister`, declares device, notification, and
 resource authority needs bounded to the existing resource kinds with
 `kind:device_registration`, `kind:notification`, and
 `kind:notification_delivery` selectors, and keeps `networkPolicy: none`,
 `installable: false`, `executable: false`, and manifest lifecycle
-`pending_review`. Validation checks remain pending gates for APNs credential
+`pending_review`. Validation checks remain gates for APNs credential
 custody, APNs environment labels, entitlement proof, physical-device
 validation, delivery-failure evidence, provider redaction, and native inbox
 product decisions.
 
-The candidate deliberately does not add live APNs transport, native inbox UI,
+The accepted slice deliberately does not add live APNs transport, native inbox UI,
 APNs entitlements, physical-device operations, credential mutation, package
 manager execution, network side effects, SQLite migrations, public
 notification APIs, fixed native panels, repo-managed `packages/agent/skills`,
