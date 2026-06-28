@@ -105,7 +105,10 @@ pub(super) async fn publish_lifecycle_event(
                 "type": event_type,
                 "memoryContractOnly": true,
                 "algorithm": "none",
-                "authorityGrantId": invocation.causal_context.authority_grant_id.as_str(),
+                "authorityGrant": {
+                    "rawIdIncluded": false,
+                    "present": true
+                },
                 "actorId": invocation.causal_context.actor_id.as_str(),
                 "payload": payload
             }),
@@ -360,6 +363,7 @@ pub(super) fn redacted_resource_events(events: &[EngineResourceEvent]) -> Vec<Va
                 "payload": provider_safe_projection(&event.payload, 120, 2),
                 "occurredAt": event.occurred_at,
                 "redaction": {
+                    "authorityMetadataIncluded": false,
                     "traceIdIncluded": false,
                     "invocationIdIncluded": false
                 }
@@ -426,6 +430,9 @@ fn provider_safe_projection(value: &Value, max_text_bytes: usize, depth: usize) 
         Value::Object(object) => {
             let mut projected = Map::new();
             for (key, child) in object.iter().take(32) {
+                if provider_projection_key_is_sensitive(key) {
+                    continue;
+                }
                 if let Some(safe_key) = provider_safe_optional_string(key, 64) {
                     projected.insert(
                         safe_key,
@@ -436,6 +443,28 @@ fn provider_safe_projection(value: &Value, max_text_bytes: usize, depth: usize) 
             Value::Object(projected)
         }
     }
+}
+
+fn provider_projection_key_is_sensitive(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    matches!(
+        normalized.as_str(),
+        "authority"
+            | "authorityid"
+            | "authoritygrant"
+            | "authoritygrantid"
+            | "grantid"
+            | "parentgrantid"
+            | "createdgrantid"
+            | "createdauthoritygrantid"
+            | "actorid"
+            | "owneractorid"
+            | "subjectactorid"
+    )
 }
 
 fn redacted_unsafe_text() -> Value {

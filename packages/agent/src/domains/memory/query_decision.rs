@@ -443,7 +443,7 @@ async fn list_evidence(
             && let Some((version_id, payload)) = current_payload(&inspection)
         {
             records.push(json!({
-                "resource": inspection.resource,
+                "resource": redacted_resource_projection(&inspection.resource),
                 "currentVersionId": version_id,
                 "record": redacted_evidence_payload(kind, &payload)
             }));

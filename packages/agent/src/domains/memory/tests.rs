@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationResult, RiskLevel, TraceId,
+    InvocationResult, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -181,6 +181,8 @@ async fn record_lifecycle_is_versioned_resource_backed_and_redacted() {
             .get("uri")
             .is_none()
     );
+
+    assert_memory_lifecycle_stream_redacts_authority_grants(&ctx).await;
 }
 
 #[tokio::test]
@@ -1104,6 +1106,11 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         query_list["details"]["memory"]["queries"][0]["record"]["lifecycle"]["retrievalExecuted"],
         false
     );
+    assert_provider_visible_memory_surface_redacted("query_list", &query_list);
+    assert_list_resource_projection_redacted(
+        "query_list",
+        &query_list["details"]["memory"]["queries"][0]["resource"],
+    );
 
     let decision_inspect = invoke_read_with_context(
         &ctx,
@@ -1126,6 +1133,7 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         decision_inspect["details"]["memory"]["versions"][0]["record"]["redaction"]["memoryBodyStored"],
         false
     );
+    assert_provider_visible_memory_surface_redacted("decision_inspect", &decision_inspect);
 
     let query_inspect = invoke_read_with_context(
         &ctx,
@@ -1134,7 +1142,7 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
             "operation": "memory_query_inspect",
             "queryResourceId": query_resource_id
         }),
-        agent_context("memory-execute-query-inspect", execute_grant)
+        agent_context("memory-execute-query-inspect", execute_grant.clone())
             .with_scope("capability.execute")
             .with_scope(super::READ_SCOPE),
     )
@@ -1144,6 +1152,112 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         query_inspect["details"]["primitiveOperation"],
         "memory_query_inspect"
     );
+    assert_provider_visible_memory_surface_redacted("query_inspect", &query_inspect);
+
+    let decision_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_decision_list"}),
+        agent_context("memory-execute-decision-list", execute_grant)
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("execute decision list");
+    assert_eq!(
+        decision_list["details"]["primitiveOperation"],
+        "memory_decision_list"
+    );
+    assert_provider_visible_memory_surface_redacted("decision_list", &decision_list);
+    assert_list_resource_projection_redacted(
+        "decision_list",
+        &decision_list["details"]["memory"]["decisions"][0]["resource"],
+    );
+}
+
+fn assert_provider_visible_memory_surface_redacted(label: &str, value: &Value) {
+    let rendered = serde_json::to_string(value).expect("serialize provider-visible memory result");
+    for forbidden in [
+        "authorityGrantId",
+        "allowedAuthorityScopes",
+        "createdByInvocationId",
+        "engine-transport",
+        "memory-execute-memory-execute-grant",
+        "agent:memory-session",
+        "memory-execute-query-list",
+        "memory-execute-query-inspect",
+        "memory-execute-decision-list",
+        "memory-execute-decision-inspect",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "{label} leaked forbidden provider-visible memory material `{forbidden}`: {rendered}"
+        );
+    }
+}
+
+fn assert_list_resource_projection_redacted(label: &str, resource: &Value) {
+    assert_eq!(resource["scope"]["rawIdIncluded"], false, "{label}");
+    assert_eq!(
+        resource["redaction"]["ownerActorIdIncluded"], false,
+        "{label}"
+    );
+    assert_eq!(resource["redaction"]["traceIdIncluded"], false, "{label}");
+    assert_eq!(
+        resource["redaction"]["invocationIdIncluded"], false,
+        "{label}"
+    );
+    assert!(
+        resource.get("ownerActorId").is_none(),
+        "{label} leaked raw owner actor id"
+    );
+    assert!(
+        resource.get("traceId").is_none(),
+        "{label} leaked raw trace id"
+    );
+    assert!(
+        resource.get("createdByInvocationId").is_none(),
+        "{label} leaked raw invocation id"
+    );
+    assert!(
+        !resource["policy"].is_object() || resource["policy"].get("authority").is_none(),
+        "{label} leaked raw authority policy metadata: {resource}"
+    );
+}
+
+async fn assert_memory_lifecycle_stream_redacts_authority_grants(ctx: &ServerRuntimeContext) {
+    ctx.engine_host
+        .subscribe_stream(
+            "memory-lifecycle-redaction-sub".to_owned(),
+            super::MEMORY_LIFECYCLE_TOPIC.to_owned(),
+            StreamCursor(0),
+            VisibilityScope::System,
+            Some("memory-session".to_owned()),
+            Some("memory-workspace".to_owned()),
+        )
+        .await
+        .expect("subscribe to memory lifecycle stream");
+    let page = ctx
+        .engine_host
+        .poll_stream(
+            "memory-lifecycle-redaction-sub",
+            Some(StreamCursor(0)),
+            50,
+            &StreamActorScope::admin(),
+        )
+        .await
+        .expect("poll memory lifecycle stream");
+    assert!(
+        !page.events.is_empty(),
+        "memory lifecycle stream should contain audit events"
+    );
+    let rendered = serde_json::to_string(&page.events).expect("serialize lifecycle events");
+    for forbidden in ["authorityGrantId", "engine-transport"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "memory lifecycle stream leaked `{forbidden}`: {rendered}"
+        );
+    }
 }
 
 async fn configure_active(ctx: &ServerRuntimeContext, key: &str) -> Value {

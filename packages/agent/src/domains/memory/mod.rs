@@ -38,6 +38,10 @@
 //! default.
 //! Record-id operations must verify that the target record resource scope
 //! matches the caller's current memory scope before returning or mutating it.
+//! Provider-visible memory list/inspect projections must use compact redacted
+//! resource/event views: raw scope ids, owner actor ids, trace/invocation ids,
+//! grant ids, and authority metadata are never returned through memory
+//! capability results.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{
