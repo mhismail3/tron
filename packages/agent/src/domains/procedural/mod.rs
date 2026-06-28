@@ -26,7 +26,10 @@
 //! carry the corresponding proof refs. Procedural module registry seeds are
 //! metadata-only manifest evidence; this domain must not add repo-managed
 //! `packages/agent/skills`, package `SKILL.md` assets, skill-copy/bootstrap
-//! registries, or hidden skill prompt-context injection.
+//! registries, or hidden skill prompt-context injection. Static containment
+//! tests scan compacted code-like identifiers for singular/plural registry,
+//! loader, bootstrap, and prompt context forms while preserving allowed
+//! metadata-only module-registry evidence.
 
 mod projection;
 pub(crate) mod service;

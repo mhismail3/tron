@@ -29,6 +29,107 @@ fn git_ls_files() -> Vec<String> {
         .collect()
 }
 
+const FORBIDDEN_SKILL_BOOTSTRAP_IDENTIFIER_FRAGMENTS: &[&str] = &[
+    "bootstrapmanagedskill",
+    "bootstrapmanagedskills",
+    "bootstrapskill",
+    "bootstrapskills",
+    "builtinskill",
+    "builtinskills",
+    "copyskill",
+    "copyskills",
+    "firstpartyskill",
+    "firstpartyskills",
+    "injectskill",
+    "injectskills",
+    "loadskill",
+    "loadskills",
+    "managedskillbootstrap",
+    "managedskillsbootstrap",
+    "promptskillcontext",
+    "promptskillscontext",
+    "promptskillinjection",
+    "promptskillsinjection",
+    "repomanagedskillbootstrap",
+    "repomanagedskillsbootstrap",
+    "skillasset",
+    "skillassets",
+    "skillbootstrap",
+    "skillbundle",
+    "skillbundles",
+    "skillcopy",
+    "skillinject",
+    "skillloader",
+    "skillpromptcontext",
+    "skillpromptinjection",
+    "skillregistry",
+    "skillsasset",
+    "skillsassets",
+    "skillsbootstrap",
+    "skillsbundle",
+    "skillsbundles",
+    "skillscopy",
+    "skillsinject",
+    "skillsloader",
+    "skillspromptcontext",
+    "skillspromptinjection",
+    "skillsregistry",
+    "skillsync",
+    "syncskill",
+    "syncskills",
+];
+
+fn compact_identifier_token(token: &str) -> String {
+    token
+        .bytes()
+        .filter_map(|byte| match byte {
+            b'A'..=b'Z' => Some((byte + 32) as char),
+            b'a'..=b'z' | b'0'..=b'9' => Some(byte as char),
+            _ => None,
+        })
+        .collect()
+}
+
+fn push_identifier_compact(compacts: &mut Vec<String>, token: &str) {
+    if token.bytes().any(|byte| byte.is_ascii_alphabetic()) {
+        let compact = compact_identifier_token(token);
+        if !compact.is_empty() {
+            compacts.push(compact);
+        }
+    }
+}
+
+fn code_like_identifier_compacts(contents: &str) -> Vec<String> {
+    let mut compacts = Vec::new();
+    let mut token = String::new();
+    for ch in contents.chars() {
+        if ch == '_' || ch.is_ascii_alphanumeric() {
+            token.push(ch);
+        } else if !token.is_empty() {
+            push_identifier_compact(&mut compacts, &token);
+            token.clear();
+        }
+    }
+    if !token.is_empty() {
+        push_identifier_compact(&mut compacts, &token);
+    }
+    compacts
+}
+
+fn forbidden_skill_bootstrap_identifier_hits(path: &str, contents: &str) -> Vec<String> {
+    let identifiers = code_like_identifier_compacts(contents);
+    let mut hits = Vec::new();
+    for forbidden in FORBIDDEN_SKILL_BOOTSTRAP_IDENTIFIER_FRAGMENTS {
+        if identifiers
+            .iter()
+            .any(|identifier| identifier.contains(forbidden))
+        {
+            hits.push(format!("{path}: {forbidden}"));
+        }
+    }
+    hits
+}
+
 #[test]
 fn procedural_record_resource_definition_is_registered_as_inert_metadata() {
     let definitions = crate::engine::builtin_resource_type_definitions();
@@ -113,52 +214,6 @@ fn repo_managed_skills_and_skill_copy_wiring_remain_absent() {
         );
     }
 
-    let forbidden_symbols = [
-        "bootstrap_skill_registry",
-        "bootstrap_skills_registry",
-        "managed_skill_registry",
-        "repo_managed_skill_registry",
-        "first_party_skill_registry",
-        "builtin_skill_registry",
-        "built_in_skill_registry",
-        "skillregistry",
-        "builtinskill",
-        "firstpartyskill",
-        "skill_copy",
-        "skillcopy",
-        "copy_skill",
-        "copyskill",
-        "copy_skills",
-        "copyskills",
-        "sync_skill",
-        "syncskill",
-        "sync_skills",
-        "syncskills",
-        "skill_asset",
-        "skillasset",
-        "skill_assets",
-        "skillassets",
-        "skill_bundle",
-        "skillbundle",
-        "skill_bundles",
-        "skillbundles",
-        "skill_prompt_context",
-        "skillpromptcontext",
-        "prompt_skill_context",
-        "promptskillcontext",
-        "inject_skill",
-        "injectskill",
-        "skill_inject",
-        "skillinject",
-        "skill_prompt",
-        "skillprompt",
-        "prompt_skill",
-        "promptskill",
-        "load_skill",
-        "loadskill",
-        "load_skills",
-        "loadskills",
-    ];
     let mut hits = Vec::new();
     for path in tracked_files
         .iter()
@@ -171,17 +226,55 @@ fn repo_managed_skills_and_skill_copy_wiring_remain_absent() {
     {
         let contents = std::fs::read_to_string(repo_root.join(path))
             .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
-        let lower = contents.to_ascii_lowercase();
-        for forbidden in forbidden_symbols {
-            if lower.contains(forbidden) {
-                hits.push(format!("{path}: {forbidden}"));
-            }
-        }
+        hits.extend(forbidden_skill_bootstrap_identifier_hits(path, &contents));
     }
     assert!(
         hits.is_empty(),
         "bootstrap skill registries, skill-copy wiring, and hidden prompt-context skill injection must stay absent: {hits:#?}"
     );
+}
+
+#[test]
+fn skill_bootstrap_identifier_guard_rejects_realistic_name_variants() {
+    for (contents, expected_fragment) in [
+        ("struct SkillsRegistry;", "skillsregistry"),
+        ("struct BootstrapSkillsRegistry;", "bootstrapskills"),
+        ("struct ManagedSkillsRegistry;", "skillsregistry"),
+        ("struct SkillLoader;", "skillloader"),
+        ("struct SkillsLoader;", "skillsloader"),
+        ("struct SkillBootstrapRegistry;", "skillbootstrap"),
+        ("struct SkillsPromptContext;", "skillspromptcontext"),
+        ("fn bootstrap_skills_registry() {}", "bootstrapskills"),
+        ("fn managed_skill_bootstrap() {}", "managedskillbootstrap"),
+        ("fn skill_prompt_context() {}", "skillpromptcontext"),
+        ("fn prompt_skills_context() {}", "promptskillscontext"),
+        (
+            "fn repo_managed_skills_bootstrap() {}",
+            "repomanagedskillsbootstrap",
+        ),
+    ] {
+        let hits = forbidden_skill_bootstrap_identifier_hits("candidate.rs", contents);
+        assert!(
+            hits.iter().any(|hit| hit.ends_with(expected_fragment)),
+            "expected {contents:?} to be rejected by {expected_fragment}; hits: {hits:?}"
+        );
+    }
+}
+
+#[test]
+fn skill_bootstrap_identifier_guard_allows_metadata_only_proof_fields() {
+    for contents in [
+        r#"const MODULE_REGISTRY: &str = "module_registry_procedural_manifest";"#,
+        r#"const MODULE_ID: &str = "procedural_module";"#,
+        r#"json!({"sideEffectProof": {"repoManagedSkillsTouched": false}})"#,
+        "no skill-copy/bootstrap registries or hidden skill prompt-context injection may return",
+    ] {
+        let hits = forbidden_skill_bootstrap_identifier_hits("allowed.rs", contents);
+        assert!(
+            hits.is_empty(),
+            "metadata-only proof text must remain allowed: {hits:?}"
+        );
+    }
 }
 
 #[test]
