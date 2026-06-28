@@ -248,6 +248,83 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.projection.rawPayloadsReturned == false)
     }
 
+    @Test("Module activity overview ignores future fields without product fallback")
+    func moduleActivityOverviewIgnoresFutureFieldsWithoutProductFallback() throws {
+        let json = """
+        {
+          "schemaVersion": "tron.module_activity.overview.v1",
+          "operation": "module_activity_overview",
+          "summary": {
+            "total": 1,
+            "active": 0,
+            "waiting": 1,
+            "blocked": 0,
+            "ready": 0,
+            "recorded": 1,
+            "title": "Module work waiting",
+            "detail": "1 module runtime activity is waiting.",
+            "futureSummaryHint": {"style": "compact"}
+          },
+          "timeline": [
+            {
+              "id": "module_runtime_state:version-2",
+              "resourceId": "module_runtime_state:runtime-2",
+              "resourceKind": "module_runtime_state",
+              "status": "waiting",
+              "state": "awaiting_authority",
+              "title": "Runtime envelope",
+              "detail": "Server-owned projection",
+              "authorityLabels": ["grant redacted"],
+              "touchedResources": [
+                {"label": "output refs", "total": 0, "truncated": false, "futureCountLabel": "none"}
+              ],
+              "rollbackStatus": {"label": "Rollback", "state": "not_declared", "blocked": false, "waiting": false},
+              "quarantineStatus": {"label": "Quarantine", "state": "clear", "blocked": false, "waiting": false},
+              "runtimeAuthorizationStatus": {"label": "Runtime authorization", "state": "waiting", "blocked": false, "waiting": true},
+              "updatedAt": "2026-06-20T12:00:00Z",
+              "futureWorkflowRef": {"resourceId": "module_dependency_request:1"}
+            }
+          ],
+          "blocked": [],
+          "waiting": [],
+          "resources": [
+            {"kind": "module_runtime_state", "total": 1, "active": 0, "waiting": 1, "blocked": 0}
+          ],
+          "projection": {
+            "allowlist": "module_activity_cockpit_metadata_redacted_v1",
+            "serverOwnedTruth": true,
+            "metadataOnly": true,
+            "rawPayloadsReturned": false,
+            "rawCommandsReturned": false,
+            "rawLogsReturned": false,
+            "fileContentsReturned": false,
+            "absolutePathsReturned": false,
+            "grantIdsReturned": false,
+            "authorityIdsReturned": false,
+            "traceIdsReturned": false,
+            "invocationIdsReturned": false,
+            "tokenLikeMaterialReturned": false,
+            "boundedItems": true,
+            "futureProjectionPolicy": "ignored"
+          },
+          "productDashboard": {"panel": "legacy"},
+          "productDTO": {"table": "legacy_product_state"}
+        }
+        """
+
+        let overview = try JSONDecoder().decode(ModuleActivityOverviewDTO.self, from: Data(json.utf8))
+        #expect(overview.schemaVersion == "tron.module_activity.overview.v1")
+        #expect(overview.timeline.first?.status == "waiting")
+        #expect(overview.timeline.first?.runtimeAuthorizationStatus.waiting == true)
+
+        let encoded = try JSONEncoder().encode(overview)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let projection = try #require(object["projection"] as? [String: Any])
+        #expect(object["productDashboard"] == nil)
+        #expect(object["productDTO"] == nil)
+        #expect(projection["futureProjectionPolicy"] == nil)
+    }
+
     @Test("Resource inspection decodes package manifest payload")
     func resourceInspectionDecodesPackageManifestPayload() throws {
         let json = """

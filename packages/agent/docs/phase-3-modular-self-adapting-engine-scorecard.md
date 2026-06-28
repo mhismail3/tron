@@ -709,6 +709,38 @@ static evidence only after independent review and mainline integration. Future
 workflow-specific review surfaces remain deferred until their backend module
 contracts exist and generic cockpit rendering proves insufficient.
 
+### Slice 24J: Broad Product DTO Resurrection
+
+Objective: close `P3MSA-INV-018` as an implementation-candidate
+rejected-shape/static-guard slice so product DTO breadth does not return as a
+compatibility fallback or public protocol shortcut.
+
+Minimal shape:
+
+- source guards for broad product DTO buckets, product protocol namespaces,
+  product event payloads, old product DTO files/directories, and product table
+  names;
+- compatibility tests for accepted module-owned DTOs: `module_activity` keeps
+  decoding future/unknown server fields without preserving product fallback
+  state, and `ui_surface` remains generic resource-backed schema rendering;
+- Phase 3, PPACD, DESI, iOS architecture, and README evidence wording that
+  treats accepted DTO breadth as module/resource-owned rather than product
+  owned.
+
+Out of scope:
+
+- runtime product DTOs, product event variants, product tables, broad `/engine`
+  protocol expansion, fixed panels, old payload fallback/shim behavior,
+  client-owned server truth, SQLite migrations, package-manager/network
+  behavior, repo-managed skills, and production deploy/update behavior.
+
+Implementation-candidate Slice 24J records the broad product DTO rejected shape
+without adding runtime behavior. Accepted surfaces remain narrow and
+module-owned: `module_activity::overview`, accepted resource kinds including
+`ui_surface`, iOS module activity DTOs, generated UI DTOs, and worker lifecycle
+resource DTOs. Independent review and mainline integration remain the boundary
+for changing this section to accepted baseline wording.
+
 ## Execution Protocol
 
 Every Phase 3 slice follows this thread sequence:

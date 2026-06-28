@@ -85,6 +85,69 @@ struct GeneratedUIDTOTests {
         #expect(mutation.resourceRefs.first?.resourceId == "res-ui")
     }
 
+    @Test("ui surface stays generic resource backed without product fallback")
+    func surfaceStaysGenericResourceBackedWithoutProductFallback() throws {
+        let inspectJSON = """
+        {
+          "inspection": {"resource": {"resourceId": "res-ui", "kind": "ui_surface"}},
+          "surface": {
+            "surfaceId": "surface-2",
+            "title": "Runtime status",
+            "purpose": "Inspect state",
+            "schemaVersion": 1,
+            "layout": {
+              "type": "Table",
+              "props": {
+                "columns": ["Name", "State"],
+                "rows": [["Module", "Ready"]],
+                "futureRendererHint": {"density": "compact"}
+              },
+              "children": []
+            },
+            "actions": [{
+              "actionId": "refresh",
+              "label": "Refresh",
+              "inputSchema": {"type": "object"},
+              "expiresAt": "2100-01-01T00:00:00Z",
+              "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"},
+              "futureActionHint": {"placement": "toolbar"}
+            }],
+            "expiresAt": "2100-01-01T00:00:00Z",
+            "legacyPanel": {"kind": "fixed"}
+          },
+          "resourceRef": {
+            "resourceId": "res-ui",
+            "versionId": "ver-ui",
+            "kind": "ui_surface",
+            "schemaVersion": 1,
+            "futureResourceHint": "ignored"
+          },
+          "validationState": "valid",
+          "actions": [],
+          "lineage": {"versionCount": 1},
+          "legacyDashboard": {"table": "fixed"}
+        }
+        """
+
+        let inspected = try JSONDecoder().decode(UiSurfaceInspectResultDTO.self, from: Data(inspectJSON.utf8))
+        let surface = try #require(inspected.surface)
+        let resourceRef = try #require(inspected.resourceRef)
+
+        #expect(resourceRef.kind == WorkerLifecycleResourceKind.uiSurface.rawValue)
+        #expect(resourceRef.resourceId == "res-ui")
+        #expect(surface.layout.type == "Table")
+        let firstRow = surface.layout.props?.array("rows")?.first as? [Any]
+        #expect(firstRow?.compactMap { $0 as? String } == ["Module", "Ready"])
+
+        let encoded = try JSONEncoder().encode(inspected)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let encodedSurface = try #require(object["surface"] as? [String: Any])
+        let encodedResourceRef = try #require(object["resourceRef"] as? [String: Any])
+        #expect(object["legacyDashboard"] == nil)
+        #expect(encodedSurface["legacyPanel"] == nil)
+        #expect(encodedResourceRef["futureResourceHint"] == nil)
+    }
+
     @Test("action submission encodes only stored action coordinates")
     func actionSubmissionEncodesOnlyCoordinates() throws {
         let submission = UiActionSubmissionDTO(

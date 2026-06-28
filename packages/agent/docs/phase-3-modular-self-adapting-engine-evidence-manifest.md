@@ -1343,6 +1343,7 @@ Acceptance validation evidence:
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting check passed; no Rust source changed. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
 | `git diff --check` | exit 0 | Unstaged whitespace check passed. |
+| `git diff --cached --check` | exit 0 | Staged whitespace check passed before commit. |
 | `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
 | Implementation thread `019f0e1c-266d-7c32-93a2-4b061d5a8903` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24i-fixed-old-ios-product-panels` from baseline `ca5b17e1c2739ed7b4098abdce0e7563e7b575ce` at `37e9092087f19969b59f3a2254e23431d08574ff` with source-guard and Phase 3/DESI docs-only rejected-shape closeout. |
@@ -1354,3 +1355,54 @@ warnings remain; DRC may fail on unchanged goals/web/tool-source entropy
 allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` residue, and SOL may fail on the
 unchanged marker-source backlog outside Slice 24I.
+
+## Implementation Candidate Rejected Shape Slice 24J: Broad Product DTO Resurrection
+
+Status: implementation-candidate rejected-shape containment pending independent
+review.
+
+Discovery thread `019f0e2d-6cc1-7752-8930-4fb869f8bfba` selected Slice 24J
+(`P3MSA-INV-018`) with exact final status `implementation may start` from
+accepted Phase 3 Slice 24I baseline
+`origin/main@17c31d9a15e5c960d97c7e80c676fd2eaa647794`
+(`docs: accept phase 3 slice 24i`).
+
+Implementation branch:
+`codex/phase-3-slice-24j-broad-product-dto-containment`
+
+Slice 24J adds static iOS source guards against broad product DTO buckets,
+product protocol namespaces, old product DTO files, product event payloads,
+public protocol product clients, and product table names. It reinforces
+accepted DTO compatibility only on module/resource-owned surfaces:
+`module_activity::overview`, worker lifecycle generic resource DTOs, accepted
+resource kinds including `ui_surface`, and generated UI DTOs. Unknown future
+fields decode without preserving product-shaped fallback state.
+
+Rejected scope remains deferred or forbidden: runtime product DTOs, product
+event variants, product tables, fixed panels, public `/engine` expansion,
+fallback/shim behavior, client-owned truth, SQLite migrations,
+package-manager or network behavior, dependencies, repo-managed
+`packages/agent/skills`, and production deploy/update behavior.
+
+Implementation validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting check passed; no Rust source changed. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Type-check passed with only existing provider/model/resource-store dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | exit 0 | PPACD passed 7 tests after adding iOS module activity, worker lifecycle resource, generated UI, and source-guard protocol inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed 9 tests after adding Slice 24J documentation/evidence inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types --lib -- --nocapture` | exit 0 | Event catalog/unit guard passed 76 tests, including product-event rejection and primitive loop catalog domain checks. |
+| `cd packages/ios-app && xcodegen generate` | exit 0 | XcodeGen regenerated `TronMobile.xcodeproj`. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/WorkerLifecycleDTOTests -only-testing:TronMobileTests/GeneratedUIDTOTests -only-testing:TronMobileTests/SourceGuardTests` | exit 0 | Targeted Swift Testing run passed 66 tests across the touched DTO and source-guard suites; Xcode's XCTest wrapper reported 0 tests before Swift Testing executed. |
+| `cd packages/ios-app && git diff --exit-code -- TronMobile.xcodeproj` | exit 0 | XcodeGen produced no project diff. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
+| `git diff --check` | exit 0 | Unstaged whitespace check passed. |
+| `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; DRC may fail on unchanged goals/web/tool-source entropy
+allow-list entries, SUWRF may fail on unchanged
+`packages/agent/src/domains/program_execution` residue, and SOL may fail on the
+unchanged marker-source backlog outside Slice 24J.

@@ -941,6 +941,13 @@ memory, process, subagent, notification, skill, fabricated-activity, and other
 fixed-panel sentinels. It does not add native panels, runtime behavior, public
 API/DTO expansion, device work, package-manager/network behavior, SQLite
 migrations, or repo-managed skills.
+Phase 3 Slice 24J is an implementation-candidate rejected-shape containment
+slice for broad product DTO resurrection. Accepted iOS DTO breadth remains
+module/resource-owned (`module_activity`, worker lifecycle resource DTOs, and
+generic `ui_surface` schemas), source guards reject broad product DTO buckets,
+product protocol namespaces, product event payloads, and product table names,
+and the primitive loop event catalog remains the source of event truth pending
+independent review.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -2547,7 +2554,9 @@ packages/ios-app/Sources/
   does not fabricate catalog/package activity locally
   and does not restore fixed source-control, memory, process, subagent,
   notification, skill, approval, work, or work-dashboard panels; Slice 24I
-  accepts that absence as source-guarded rejected-shape scope. Refresh failures
+  accepts that absence as source-guarded rejected-shape scope. Slice 24J keeps
+  those cockpit DTOs narrow and module/resource-owned rather than broad product
+  DTOs while review is pending. Refresh failures
   render as a degraded cockpit status while preserving the last good server facts, and malformed
   catalog entries surface catalog decode degradation instead of disappearing
   from projected counts. The primary chat shell does not mount a passive
