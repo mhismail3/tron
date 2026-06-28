@@ -8,9 +8,10 @@ use crate::engine::{
     builtin_resource_type_definitions,
 };
 use crate::shared::protocol::memory::{
-    MEMORY_SCHEMA_VERSION, MemoryEngineDescriptor, MemoryEvalRun, MemoryMigrationEnvelope,
-    MemoryMode, MemoryPolicyRecord, MemoryPromptDecision, MemoryPromptTrace, MemoryRecord,
-    MemoryResourceRef, RESOURCE_BACKED_MEMORY_ENGINE_ID,
+    MEMORY_SCHEMA_VERSION, MemoryDecisionEvidence, MemoryEngineDescriptor, MemoryEvalRun,
+    MemoryMigrationEnvelope, MemoryMode, MemoryPolicyRecord, MemoryPromptDecision,
+    MemoryPromptTrace, MemoryQueryEvidence, MemoryRecord, MemoryResourceRef,
+    RESOURCE_BACKED_MEMORY_ENGINE_ID,
 };
 
 #[test]
@@ -95,6 +96,54 @@ fn resource_definitions_match_domain_constants_and_payloads() {
     );
     assert_definition(
         &definitions,
+        super::MEMORY_QUERY_KIND,
+        super::MEMORY_QUERY_SCHEMA_ID,
+        query_value(),
+        &[
+            "schemaVersion",
+            "queryKind",
+            "intent",
+            "filters",
+            "engineId",
+            "mode",
+            "selectedRefs",
+            "excludedRefs",
+            "retrieval",
+            "results",
+            "decisionRefs",
+            "policy",
+            "module",
+            "redaction",
+            "traceRefs",
+            "replayRefs",
+            "lifecycle",
+            "idempotency",
+            "occurredAt",
+        ],
+    );
+    assert_definition(
+        &definitions,
+        super::MEMORY_DECISION_KIND,
+        super::MEMORY_DECISION_SCHEMA_ID,
+        decision_value(),
+        &[
+            "schemaVersion",
+            "decisionKind",
+            "reasonCodes",
+            "sourceRefs",
+            "promptInclusion",
+            "retentionEvidence",
+            "policyEvidence",
+            "redaction",
+            "traceRefs",
+            "replayRefs",
+            "lifecycle",
+            "idempotency",
+            "occurredAt",
+        ],
+    );
+    assert_definition(
+        &definitions,
         MEMORY_EVAL_RUN_KIND,
         MEMORY_EVAL_RUN_SCHEMA_ID,
         eval_run_value(),
@@ -152,7 +201,11 @@ fn mutating_capabilities_declare_memory_resource_outputs() {
             .find(|spec| spec.function_id.as_str() == super::PROMPT_TRACE_FUNCTION)
             .expect("prompt trace capability")
             .output_contract,
-        &[super::MEMORY_PROMPT_TRACE_KIND],
+        &[
+            super::MEMORY_PROMPT_TRACE_KIND,
+            super::MEMORY_QUERY_KIND,
+            super::MEMORY_DECISION_KIND,
+        ],
     );
     assert_output_contract(
         &capabilities
@@ -324,6 +377,57 @@ fn prompt_trace_value() -> Value {
         created_at: timestamp(),
     })
     .expect("memory prompt trace should serialize")
+}
+
+fn query_value() -> Value {
+    serde_json::to_value(MemoryQueryEvidence {
+        schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
+        query_kind: "resource_backed_prompt_retrieval".to_owned(),
+        intent: json!({"kind": "prompt_memory_context"}),
+        filters: json!({"scope": "current_memory_scope"}),
+        engine_id: RESOURCE_BACKED_MEMORY_ENGINE_ID.to_owned(),
+        mode: MemoryMode::Active,
+        selected_refs: vec![resource_ref("memory_record:one")],
+        excluded_refs: Vec::new(),
+        retrieval: json!({"executed": true, "algorithm": "deterministic"}),
+        results: vec![json!({"rank": 1, "snippet": "Preference preview"})],
+        decision_refs: Vec::new(),
+        policy: json!({"mode": "active"}),
+        module: json!({"modulePackId": "memory_engine_module"}),
+        redaction: json!({"memoryBodyStored": false}),
+        trace_refs: vec![json!({"traceId": "memory-trace"})],
+        replay_refs: vec![json!({"source": "engine_invocation_ledger"})],
+        lifecycle: json!({"state": "recorded"}),
+        idempotency: json!({"rawKeyStored": false}),
+        occurred_at: timestamp(),
+    })
+    .expect("memory query should serialize")
+}
+
+fn decision_value() -> Value {
+    serde_json::to_value(MemoryDecisionEvidence {
+        schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
+        decision_kind: "prompt_inclusion".to_owned(),
+        reason_codes: vec!["bounded_snippets_policy_enabled".to_owned()],
+        subject_ref: Some(resource_ref("memory_record:one")),
+        query_ref: Some(MemoryResourceRef {
+            kind: super::MEMORY_QUERY_KIND.to_owned(),
+            resource_id: "memory_query:one".to_owned(),
+            version_id: Some("ver_query".to_owned()),
+            role: "prompt_retrieval_query".to_owned(),
+        }),
+        source_refs: vec![json!({"kind": "memory_record", "resourceId": "memory_record:one"})],
+        prompt_inclusion: json!({"appliedToPrompt": true, "privateBodyIncluded": false}),
+        retention_evidence: json!({"automaticRetentionPerformed": false}),
+        policy_evidence: json!({"mode": "active"}),
+        redaction: json!({"memoryBodyStored": false}),
+        trace_refs: vec![json!({"traceId": "memory-trace"})],
+        replay_refs: vec![json!({"source": "engine_invocation_ledger"})],
+        lifecycle: json!({"state": "recorded"}),
+        idempotency: json!({"rawKeyStored": false}),
+        occurred_at: timestamp(),
+    })
+    .expect("memory decision should serialize")
 }
 
 fn eval_run_value() -> Value {

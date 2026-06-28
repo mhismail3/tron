@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationResult, RiskLevel, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
+    EngineResourceScope, FunctionId, Invocation, InvocationResult, RiskLevel, StreamActorScope,
+    StreamCursor, TraceId, VisibilityScope, WorkerId,
 };
+use crate::shared::protocol::memory::MEMORY_SCHEMA_VERSION;
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
 
@@ -181,6 +183,8 @@ async fn record_lifecycle_is_versioned_resource_backed_and_redacted() {
             .get("uri")
             .is_none()
     );
+
+    assert_memory_lifecycle_stream_redacts_authority_grants(&ctx).await;
 }
 
 #[tokio::test]
@@ -346,6 +350,65 @@ async fn nested_inline_body_refs_are_rejected_on_retain() {
 }
 
 #[tokio::test]
+async fn redacted_record_projection_removes_unsafe_text_and_body_pointer_material() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-redacted-projection-configure").await;
+    let mut payload = retain_payload("redacted-projection-record");
+    payload["subject"] = json!("memory_record:/Users/private/project");
+    payload["preview"] = json!("token=secret should never be provider-visible");
+    payload["bodyRef"] = json!({
+        "kind": "vault_blob",
+        "resourceId": "blob:/Users/private/project",
+        "contentHash": "sk-secret-pointer",
+        "uri": "vault://memory/private"
+    });
+    payload["provenance"] = json!({
+        "source": "/Users/private/source",
+        "evidence": "explicit_user_statement"
+    });
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        payload,
+        "memory-redacted-projection-retain",
+    )
+    .await;
+    let record_resource_id = retained["recordResourceId"].as_str().expect("record id");
+
+    let list = invoke_read(
+        &ctx,
+        super::LIST_FUNCTION,
+        json!({}),
+        "memory-redacted-projection-list",
+    )
+    .await
+    .expect("list");
+    let listed_record = &list["records"][0]["record"];
+    assert_eq!(listed_record["preview"]["redacted"], true);
+    assert_eq!(listed_record["bodyRef"]["redacted"], true);
+    assert_eq!(listed_record["bodyRef"]["rawPointerIncluded"], false);
+    assert_eq!(
+        list["records"][0]["resource"]["redaction"]["traceIdIncluded"],
+        false
+    );
+
+    let inspect = invoke_read(
+        &ctx,
+        super::INSPECT_FUNCTION,
+        json!({"recordResourceId": record_resource_id}),
+        "memory-redacted-projection-inspect",
+    )
+    .await
+    .expect("inspect");
+    let serialized = serde_json::to_string(&inspect).expect("serialize inspect");
+    assert!(!serialized.contains("/Users/private"));
+    assert!(!serialized.contains("token=secret"));
+    assert!(!serialized.contains("vault://"));
+    assert!(!serialized.contains("sk-secret-pointer"));
+    assert!(!serialized.contains("engine-client"));
+}
+
+#[tokio::test]
 async fn prompt_trace_records_audit_without_private_memory_content() {
     let ctx = make_test_context();
     configure_active(&ctx, "memory-prompt-configure").await;
@@ -391,6 +454,162 @@ async fn prompt_trace_records_audit_without_private_memory_content() {
     assert_eq!(
         payload["considered"][0]["resourceRef"]["resourceId"],
         record_resource_id
+    );
+}
+
+#[tokio::test]
+async fn retrieval_query_records_ranked_preview_results_and_replays_idempotently() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-retrieval-configure").await;
+    let mut alpha_payload = retain_payload("retrieval-alpha");
+    alpha_payload["subject"] = json!("alpha preference");
+    alpha_payload["preview"] = json!("Alpha project uses the compact review flow");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        alpha_payload,
+        "memory-retrieval-alpha-retain",
+    )
+    .await;
+    let mut beta_payload = retain_payload("retrieval-beta");
+    beta_payload["subject"] = json!("beta preference");
+    beta_payload["preview"] = json!("Beta project uses a separate checklist");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        beta_payload,
+        "memory-retrieval-beta-retain",
+    )
+    .await;
+
+    let query_payload = json!({
+        "queryId": "ranked-preview-query",
+        "queryKind": "resource_backed_preview_query",
+        "intent": {"kind": "bounded_preview_lookup"},
+        "filters": {"scope": "current_session"},
+        "retrieval": {
+            "mode": "resource_backed_preview",
+            "terms": ["alpha"],
+            "limit": 5,
+            "maxSnippetBytes": 80
+        },
+        "occurredAt": "2026-06-26T00:03:00Z"
+    });
+    let query = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        query_payload.clone(),
+        "memory-retrieval-query",
+    )
+    .await;
+    assert_eq!(query["status"], "recorded");
+    assert_eq!(query["query"]["retrieval"]["executed"], true);
+    assert_eq!(query["query"]["retrieval"]["embeddings"], false);
+    assert_eq!(query["query"]["retrieval"]["networkPolicy"], "none");
+    assert_eq!(
+        query["query"]["results"].as_array().expect("results").len(),
+        1
+    );
+    assert_eq!(query["query"]["results"][0]["rank"], 1);
+    assert_eq!(
+        query["query"]["results"][0]["snippet"],
+        "Alpha project uses the compact review flow"
+    );
+    assert_eq!(query["query"]["results"][0]["redaction"]["bodyRead"], false);
+    assert_eq!(query["query"]["redaction"]["memoryBodyStored"], false);
+    assert_eq!(
+        query["query"]["redaction"]["boundedPreviewSnippetsOnly"],
+        true
+    );
+    let serialized = serde_json::to_string(&query).expect("serialize query");
+    assert!(!serialized.contains("vault://"));
+    assert!(!serialized.contains("secret private body"));
+
+    let replay = invoke_write(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        query_payload,
+        "memory-retrieval-query",
+    )
+    .await;
+    assert_eq!(replay["query"]["idempotency"]["rawKeyStored"], false);
+    assert_eq!(replay["queryResourceId"], query["queryResourceId"]);
+}
+
+#[tokio::test]
+async fn prompt_inclusion_requires_policy_and_records_user_visible_decision() {
+    let ctx = make_test_context();
+    invoke_write(
+        &ctx,
+        super::CONFIGURE_FUNCTION,
+        json!({
+            "mode": "active",
+            "inclusion": {
+                "promptInclusion": "bounded_snippets",
+                "maxSnippets": 1,
+                "maxSnippetBytes": 96
+            },
+            "provenance": {"source": "memory_prompt_inclusion_test"}
+        }),
+        "memory-prompt-include-configure",
+    )
+    .await;
+    let mut first = retain_payload("prompt-include-first");
+    first["preview"] = json!("Use concise release-note summaries");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        first,
+        "memory-prompt-include-first-retain",
+    )
+    .await;
+    let mut second = retain_payload("prompt-include-second");
+    second["preview"] = json!("Prefer issue links in final summaries");
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        second,
+        "memory-prompt-include-second-retain",
+    )
+    .await;
+
+    let trace = invoke_write(
+        &ctx,
+        super::PROMPT_TRACE_FUNCTION,
+        json!({"source": "test_prompt_inclusion", "limit": 10}),
+        "memory-prompt-include-trace",
+    )
+    .await;
+    assert_eq!(trace["trace"]["included"], 1);
+    assert_eq!(trace["trace"]["privateBodyIncluded"], false);
+    let context = trace["context"].as_str().expect("context text");
+    assert!(context.contains("Bounded record previews included: yes"));
+    assert!(context.contains("Included memory previews:"));
+    assert!(context.contains("Private memory content included: no"));
+    assert!(!context.contains("vault://"));
+
+    let decision_resource_id = trace["trace"]["decisionResourceId"]
+        .as_str()
+        .expect("decision resource id");
+    let decision = invoke_read(
+        &ctx,
+        super::INSPECT_DECISION_FUNCTION,
+        json!({"decisionResourceId": decision_resource_id}),
+        "memory-prompt-include-decision-inspect",
+    )
+    .await
+    .expect("decision inspect");
+    assert_eq!(
+        decision["versions"][0]["record"]["promptInclusion"]["appliedToPrompt"],
+        true
+    );
+    assert_eq!(
+        decision["versions"][0]["record"]["promptInclusion"]["privateBodyIncluded"],
+        false
+    );
+    assert_eq!(
+        decision["versions"][0]["record"]["retentionEvidence"]["automaticRetentionPerformed"],
+        false
     );
 }
 
@@ -773,6 +992,280 @@ async fn query_and_decision_evidence_reject_wrong_scope_kind_stale_and_raw_mater
         "cross-scope decision ref must fail: {:?}",
         cross_scope.error
     );
+
+    let authority_query = invoke_write_result(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryKind": "semantic_candidate_query",
+            "intent": {"authorityGrantId": "raw-query-grant"},
+            "occurredAt": "2026-06-26T00:01:04Z"
+        }),
+        "memory-evidence-authority-query",
+    )
+    .await;
+    assert!(
+        authority_query
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("raw/private")),
+        "authority query metadata must be rejected: {:?}",
+        authority_query.error
+    );
+
+    let authority_decision = invoke_write_result(
+        &ctx,
+        super::RECORD_DECISION_FUNCTION,
+        json!({
+            "decisionKind": "reject",
+            "reasonCodes": ["authority_metadata_rejected"],
+            "promptInclusion": {
+                "appliedToPrompt": false,
+                "allowedAuthorityScopes": ["memory.read"]
+            },
+            "occurredAt": "2026-06-26T00:01:05Z"
+        }),
+        "memory-evidence-authority-decision",
+    )
+    .await;
+    assert!(
+        authority_decision
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("raw/private")),
+        "authority decision metadata must be rejected: {:?}",
+        authority_decision.error
+    );
+}
+
+#[tokio::test]
+async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
+    let ctx = make_test_context();
+    let query_resource_id = "memory_query:legacy-authority-evidence-query";
+    let decision_resource_id = "memory_decision:legacy-authority-evidence-decision";
+    create_legacy_memory_evidence_resource(
+        &ctx,
+        query_resource_id,
+        super::MEMORY_QUERY_KIND,
+        super::MEMORY_QUERY_SCHEMA_ID,
+        json!({
+            "schemaVersion": MEMORY_SCHEMA_VERSION,
+            "queryKind": "semantic_candidate_query",
+            "intent": {
+                "kind": "candidate_refs_only",
+                "proof": "safe-query-proof",
+                "rawGrantId": "raw-query-legacy-grant",
+                "authorityGrantId": "raw-query-grant",
+                "nested": {
+                    "allowedAuthorityScopes": ["raw-query-scope"],
+                    "sourceGrantId": "source-query-legacy-grant"
+                }
+            },
+            "filters": {
+                "scope": "current_session",
+                "actorGrantId": "actor-query-legacy-grant",
+                "rawAuthorityId": "raw-query-authority"
+            },
+            "engineId": "resource-backed-memory",
+            "mode": "active",
+            "selectedRefs": [],
+            "excludedRefs": [],
+            "retrieval": {"executed": false},
+            "results": [],
+            "decisionRefs": [],
+            "policy": {"mode": "active", "authorityGrantId": "raw-policy-grant"},
+            "module": {"package": "memory"},
+            "redaction": {"metadataOnly": true, "memoryBodyStored": false},
+            "traceRefs": [{"kind": "trace", "id": "safe-query-trace", "authorityGrantId": "raw-trace-grant"}],
+            "replayRefs": [],
+            "lifecycle": {"state": "recorded", "retrievalExecuted": false, "promptContentIncluded": false},
+            "idempotency": {"algorithm": "sha256:test", "fingerprint": "safe-query-fingerprint", "rawKeyStored": false},
+            "occurredAt": "2026-06-26T00:03:00Z"
+        }),
+    )
+    .await;
+    create_legacy_memory_evidence_resource(
+        &ctx,
+        decision_resource_id,
+        super::MEMORY_DECISION_KIND,
+        super::MEMORY_DECISION_SCHEMA_ID,
+        json!({
+            "schemaVersion": MEMORY_SCHEMA_VERSION,
+            "decisionKind": "retrieve",
+            "reasonCodes": ["candidate_ref_selected"],
+            "sourceRefs": [{
+                "kind": "trace",
+                "id": "safe-decision-source",
+                "sourceGrantId": "source-decision-legacy-grant",
+                "authorityGrantId": "raw-decision-source-grant"
+            }],
+            "promptInclusion": {
+                "appliedToPrompt": false,
+                "boundedPreviewSnippetsOnly": true,
+                "rawGrantId": "raw-decision-legacy-grant",
+                "allowedAuthorityScopes": ["raw-decision-scope"]
+            },
+            "retentionEvidence": {
+                "automaticRetentionPerformed": false,
+                "proof": "safe-retention-proof",
+                "actorGrantId": "actor-decision-legacy-grant",
+                "rawAuthorityId": "raw-decision-authority"
+            },
+            "policyEvidence": {
+                "mode": "active",
+                "sourceGrantId": "source-policy-legacy-grant",
+                "authorityGrantId": "raw-decision-policy-grant"
+            },
+            "redaction": {"metadataOnly": true, "memoryBodyStored": false},
+            "traceRefs": [],
+            "replayRefs": [{"source": "test", "authorityGrantId": "raw-replay-grant"}],
+            "lifecycle": {"state": "recorded", "decisionAppliedToPrompt": false, "automaticRetentionPerformed": false},
+            "idempotency": {"algorithm": "sha256:test", "fingerprint": "safe-decision-fingerprint", "rawKeyStored": false},
+            "occurredAt": "2026-06-26T00:03:01Z"
+        }),
+    )
+    .await;
+
+    let execute_grant = derive_execute_grant(
+        &ctx,
+        "legacy-authority-evidence-grant",
+        query_resource_id,
+        decision_resource_id,
+    )
+    .await;
+    let query_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_query_list"}),
+        agent_context("memory-legacy-authority-query-list", execute_grant.clone())
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("query list");
+    let query_inspect = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({
+            "operation": "memory_query_inspect",
+            "queryResourceId": query_resource_id
+        }),
+        agent_context(
+            "memory-legacy-authority-query-inspect",
+            execute_grant.clone(),
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("query inspect");
+    let decision_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_decision_list"}),
+        agent_context(
+            "memory-legacy-authority-decision-list",
+            execute_grant.clone(),
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("decision list");
+    let decision_inspect = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({
+            "operation": "memory_decision_inspect",
+            "decisionResourceId": decision_resource_id
+        }),
+        agent_context("memory-legacy-authority-decision-inspect", execute_grant)
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("decision inspect");
+
+    for (label, value) in [
+        ("query_list", &query_list),
+        ("query_inspect", &query_inspect),
+        ("decision_list", &decision_list),
+        ("decision_inspect", &decision_inspect),
+    ] {
+        assert_authority_evidence_scrubbed(label, value);
+    }
+    assert_eq!(
+        query_list["details"]["memory"]["queries"][0]["record"]["intent"]["proof"],
+        "safe-query-proof"
+    );
+    assert_eq!(
+        query_inspect["details"]["memory"]["versions"][0]["record"]["filters"]["scope"],
+        "current_session"
+    );
+    assert_eq!(
+        decision_list["details"]["memory"]["decisions"][0]["record"]["sourceRefs"][0]["id"],
+        "safe-decision-source"
+    );
+    assert_eq!(
+        decision_inspect["details"]["memory"]["versions"][0]["record"]["retentionEvidence"]["proof"],
+        "safe-retention-proof"
+    );
+}
+
+#[tokio::test]
+async fn retention_policy_evidence_rejects_hard_delete_and_automatic_retention() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-retention-policy-configure").await;
+
+    let mut hard_delete = retain_payload("retention-hard-delete");
+    hard_delete["retention"] = json!({"policy": "explicit", "action": "hard_delete"});
+    let rejected_delete = invoke_write_result(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        hard_delete,
+        "memory-retention-hard-delete",
+    )
+    .await;
+    assert!(
+        rejected_delete
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("hard delete")),
+        "hard-delete retention must fail closed: {:?}",
+        rejected_delete.error
+    );
+
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        retain_payload("retention-edit-record"),
+        "memory-retention-edit-retain",
+    )
+    .await;
+    assert_eq!(
+        retained["retentionEvidence"]["automaticRetentionPerformed"],
+        false
+    );
+    let rejected_auto = invoke_write_result(
+        &ctx,
+        super::EDIT_FUNCTION,
+        json!({
+            "recordResourceId": retained["recordResourceId"],
+            "expectedCurrentVersionId": retained["recordVersionId"],
+            "retention": {"policy": "explicit", "automatic": true},
+            "reason": "unsupported_auto_retention"
+        }),
+        "memory-retention-automatic-edit",
+    )
+    .await;
+    assert!(
+        rejected_auto
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("automatic retention")),
+        "automatic retention must fail closed: {:?}",
+        rejected_auto.error
+    );
 }
 
 #[tokio::test]
@@ -833,6 +1326,11 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         query_list["details"]["memory"]["queries"][0]["record"]["lifecycle"]["retrievalExecuted"],
         false
     );
+    assert_provider_visible_memory_surface_redacted("query_list", &query_list);
+    assert_list_resource_projection_redacted(
+        "query_list",
+        &query_list["details"]["memory"]["queries"][0]["resource"],
+    );
 
     let decision_inspect = invoke_read_with_context(
         &ctx,
@@ -855,6 +1353,7 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         decision_inspect["details"]["memory"]["versions"][0]["record"]["redaction"]["memoryBodyStored"],
         false
     );
+    assert_provider_visible_memory_surface_redacted("decision_inspect", &decision_inspect);
 
     let query_inspect = invoke_read_with_context(
         &ctx,
@@ -863,7 +1362,7 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
             "operation": "memory_query_inspect",
             "queryResourceId": query_resource_id
         }),
-        agent_context("memory-execute-query-inspect", execute_grant)
+        agent_context("memory-execute-query-inspect", execute_grant.clone())
             .with_scope("capability.execute")
             .with_scope(super::READ_SCOPE),
     )
@@ -873,6 +1372,173 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         query_inspect["details"]["primitiveOperation"],
         "memory_query_inspect"
     );
+    assert_provider_visible_memory_surface_redacted("query_inspect", &query_inspect);
+
+    let decision_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_decision_list"}),
+        agent_context("memory-execute-decision-list", execute_grant)
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("execute decision list");
+    assert_eq!(
+        decision_list["details"]["primitiveOperation"],
+        "memory_decision_list"
+    );
+    assert_provider_visible_memory_surface_redacted("decision_list", &decision_list);
+    assert_list_resource_projection_redacted(
+        "decision_list",
+        &decision_list["details"]["memory"]["decisions"][0]["resource"],
+    );
+}
+
+fn assert_provider_visible_memory_surface_redacted(label: &str, value: &Value) {
+    let rendered = serde_json::to_string(value).expect("serialize provider-visible memory result");
+    for forbidden in [
+        "authorityGrantId",
+        "allowedAuthorityScopes",
+        "createdByInvocationId",
+        "engine-transport",
+        "memory-execute-memory-execute-grant",
+        "agent:memory-session",
+        "memory-execute-query-list",
+        "memory-execute-query-inspect",
+        "memory-execute-decision-list",
+        "memory-execute-decision-inspect",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "{label} leaked forbidden provider-visible memory material `{forbidden}`: {rendered}"
+        );
+    }
+}
+
+fn assert_list_resource_projection_redacted(label: &str, resource: &Value) {
+    assert_eq!(resource["scope"]["rawIdIncluded"], false, "{label}");
+    assert_eq!(
+        resource["redaction"]["ownerActorIdIncluded"], false,
+        "{label}"
+    );
+    assert_eq!(resource["redaction"]["traceIdIncluded"], false, "{label}");
+    assert_eq!(
+        resource["redaction"]["invocationIdIncluded"], false,
+        "{label}"
+    );
+    assert!(
+        resource.get("ownerActorId").is_none(),
+        "{label} leaked raw owner actor id"
+    );
+    assert!(
+        resource.get("traceId").is_none(),
+        "{label} leaked raw trace id"
+    );
+    assert!(
+        resource.get("createdByInvocationId").is_none(),
+        "{label} leaked raw invocation id"
+    );
+    assert!(
+        !resource["policy"].is_object() || resource["policy"].get("authority").is_none(),
+        "{label} leaked raw authority policy metadata: {resource}"
+    );
+}
+
+fn assert_authority_evidence_scrubbed(label: &str, value: &Value) {
+    let rendered = serde_json::to_string(value).expect("serialize provider-visible memory result");
+    for forbidden in [
+        "authorityGrantId",
+        "allowedAuthorityScopes",
+        "rawAuthorityId",
+        "rawGrantId",
+        "sourceGrantId",
+        "actorGrantId",
+        "raw-query-grant",
+        "raw-query-legacy-grant",
+        "source-query-legacy-grant",
+        "actor-query-legacy-grant",
+        "raw-query-scope",
+        "raw-query-authority",
+        "raw-policy-grant",
+        "raw-trace-grant",
+        "raw-decision-source-grant",
+        "source-decision-legacy-grant",
+        "raw-decision-legacy-grant",
+        "actor-decision-legacy-grant",
+        "source-policy-legacy-grant",
+        "raw-decision-scope",
+        "raw-decision-authority",
+        "raw-decision-policy-grant",
+        "raw-replay-grant",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "{label} leaked forbidden authority evidence `{forbidden}`: {rendered}"
+        );
+    }
+}
+
+async fn assert_memory_lifecycle_stream_redacts_authority_grants(ctx: &ServerRuntimeContext) {
+    ctx.engine_host
+        .subscribe_stream(
+            "memory-lifecycle-redaction-sub".to_owned(),
+            super::MEMORY_LIFECYCLE_TOPIC.to_owned(),
+            StreamCursor(0),
+            VisibilityScope::System,
+            Some("memory-session".to_owned()),
+            Some("memory-workspace".to_owned()),
+        )
+        .await
+        .expect("subscribe to memory lifecycle stream");
+    let page = ctx
+        .engine_host
+        .poll_stream(
+            "memory-lifecycle-redaction-sub",
+            Some(StreamCursor(0)),
+            50,
+            &StreamActorScope::admin(),
+        )
+        .await
+        .expect("poll memory lifecycle stream");
+    assert!(
+        !page.events.is_empty(),
+        "memory lifecycle stream should contain audit events"
+    );
+    let rendered = serde_json::to_string(&page.events).expect("serialize lifecycle events");
+    for forbidden in ["authorityGrantId", "engine-transport"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "memory lifecycle stream leaked `{forbidden}`: {rendered}"
+        );
+    }
+}
+
+async fn create_legacy_memory_evidence_resource(
+    ctx: &ServerRuntimeContext,
+    resource_id: &str,
+    kind: &str,
+    schema_id: &str,
+    payload: Value,
+) {
+    let trace_id = resource_id.replace(':', "-");
+    ctx.engine_host
+        .create_resource(CreateResource {
+            resource_id: Some(resource_id.to_owned()),
+            kind: kind.to_owned(),
+            schema_id: Some(schema_id.to_owned()),
+            scope: EngineResourceScope::Session("memory-session".to_owned()),
+            owner_worker_id: WorkerId::new(super::WORKER).expect("memory worker id"),
+            owner_actor_id: ActorId::new("engine-client").expect("owner actor id"),
+            lifecycle: Some("recorded".to_owned()),
+            policy: json!({"owner": super::WORKER, "kind": "legacy_evidence"}),
+            initial_payload: Some(payload),
+            locations: Vec::new(),
+            trace_id: TraceId::new(format!("trace-{trace_id}")).expect("trace id"),
+            invocation_id: None,
+        })
+        .await
+        .expect("create legacy memory evidence resource");
 }
 
 async fn configure_active(ctx: &ServerRuntimeContext, key: &str) -> Value {

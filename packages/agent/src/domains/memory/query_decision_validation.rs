@@ -148,9 +148,25 @@ fn raw_or_private_key(lower: &str) -> bool {
             | "path"
             | "url"
             | "uri"
+            | "authority"
+            | "authorityid"
+            | "authoritygrant"
+            | "authoritygrantid"
+            | "rawauthorityid"
+            | "allowedauthorityscopes"
+            | "grantid"
+            | "grantids"
+            | "parentgrantid"
+            | "createdgrantid"
+            | "createdauthoritygrantid"
+            | "actorid"
+            | "owneractorid"
+            | "subjectactorid"
     ) || lower.contains("secret")
         || lower.contains("token")
         || lower.contains("credential")
+        || lower.contains("authority")
+        || lower.contains("grantid")
 }
 
 fn secret_like_or_unsafe(lower: &str, text: &str) -> bool {

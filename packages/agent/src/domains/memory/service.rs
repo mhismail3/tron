@@ -18,6 +18,8 @@ pub(crate) use super::query_decision::{
     inspect_memory_decision_value, inspect_memory_query_value, list_memory_decisions_value,
     list_memory_queries_value, record_memory_decision_value, record_memory_query_value,
 };
+use super::retention::{ensure_retention_policy_supported, retention_policy_evidence};
+use super::retrieval::prompt_snippet_policy;
 use super::support::*;
 use super::{
     MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID, MEMORY_POLICY_KIND, MEMORY_POLICY_SCHEMA_ID,
@@ -63,9 +65,10 @@ pub(crate) async fn status_memory_value(
         "promptInclusion": prompt_inclusion_summary(&policy.record),
         "contract": {
             "resourceBacked": true,
+            "resourceBackedRetrieval": true,
             "semanticRetrieval": false,
             "embeddings": false,
-            "ranking": false,
+            "ranking": "deterministic_preview_match",
             "summarization": false,
             "hiddenPromptMemory": false
         }
@@ -229,6 +232,9 @@ pub(crate) async fn retain_memory_value(
     let policy = require_writable_policy(engine_host, invocation).await?;
     let body_ref = required_object(payload, "bodyRef")?;
     ensure_body_ref_is_pointer(&body_ref)?;
+    let retention = required_object(payload, "retention")?;
+    ensure_retention_policy_supported(&retention, "retain")?;
+    let retention_evidence = retention_policy_evidence(&policy, "retain");
     let now = Utc::now();
     let record = MemoryRecord {
         schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
@@ -239,12 +245,16 @@ pub(crate) async fn retain_memory_value(
         provenance: required_object(payload, "provenance")?,
         confidence: required_object(payload, "confidence")?,
         sensitivity: required_string(payload, "sensitivity")?,
-        retention: required_object(payload, "retention")?,
+        retention,
         expires_at: optional_datetime(payload, "expiresAt")?,
         source_refs: optional_array(payload, "sourceRefs")?,
         trace_refs: merge_trace_refs(optional_array(payload, "traceRefs")?, invocation),
         replay_refs: merge_replay_refs(optional_array(payload, "replayRefs")?, invocation),
-        lifecycle: json!({"state": "retained", "retainedAt": now}),
+        lifecycle: json!({
+            "state": "retained",
+            "retainedAt": now,
+            "policyEvidence": retention_evidence.clone()
+        }),
         migration: optional_object(payload, "migration")?
             .unwrap_or_else(|| json!({"portable": true, "lineage": []})),
         revision: 1,
@@ -278,6 +288,7 @@ pub(crate) async fn retain_memory_value(
             "policyResourceId": policy.resource_id.clone(),
             "mode": policy.record.mode.as_str(),
             "sensitivity": record.sensitivity.clone(),
+            "retentionEvidence": retention_evidence.clone(),
             "traceRefs": record.trace_refs.clone(),
             "replayRefs": record.replay_refs.clone()
         }),
@@ -288,6 +299,7 @@ pub(crate) async fn retain_memory_value(
         "status": "retained",
         "recordResourceId": resource.resource_id.clone(),
         "recordVersionId": resource.current_version_id.clone(),
+        "retentionEvidence": retention_evidence,
         "resourceRefs": [resource_ref(&resource, "memory_record")]
     }))
 }
@@ -298,7 +310,7 @@ pub(crate) async fn edit_memory_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _policy = require_writable_policy(engine_host, invocation).await?;
+    let policy = require_writable_policy(engine_host, invocation).await?;
     let resource_id = required_string(payload, "recordResourceId")?;
     let expected = required_string(payload, "expectedCurrentVersionId")?;
     let inspection = require_memory_record(engine_host, &resource_id).await?;
@@ -329,6 +341,7 @@ pub(crate) async fn edit_memory_value(
         record.confidence = confidence;
     }
     if let Some(retention) = optional_object(payload, "retention")? {
+        ensure_retention_policy_supported(&retention, "edit")?;
         record.retention = retention;
     }
     if let Some(sensitivity) = optional_string(payload, "sensitivity")? {
@@ -336,11 +349,13 @@ pub(crate) async fn edit_memory_value(
     }
     record.expires_at = optional_datetime(payload, "expiresAt")?.or(record.expires_at);
     record.revision = record.revision.saturating_add(1);
+    let retention_evidence = retention_policy_evidence(&policy, "edit");
     record.lifecycle = json!({
         "state": "edited",
         "editedAt": Utc::now(),
         "parentVersionId": expected,
-        "reason": optional_string(payload, "reason")?
+        "reason": optional_string(payload, "reason")?,
+        "policyEvidence": retention_evidence.clone()
     });
     record.trace_refs = merge_trace_refs(record.trace_refs, invocation);
     record.replay_refs = merge_replay_refs(record.replay_refs, invocation);
@@ -369,6 +384,7 @@ pub(crate) async fn edit_memory_value(
         "status": "edited",
         "recordResourceId": resource_id,
         "recordVersionId": version.version_id.clone(),
+        "retentionEvidence": retention_evidence,
         "resourceRefs": [version_ref(&inspection.resource, &version, "memory_record")]
     }))
 }
@@ -379,7 +395,7 @@ pub(crate) async fn tombstone_memory_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _policy = require_writable_policy(engine_host, invocation).await?;
+    let policy = require_writable_policy(engine_host, invocation).await?;
     let resource_id = required_string(payload, "recordResourceId")?;
     let expected = required_string(payload, "expectedCurrentVersionId")?;
     let inspection = require_memory_record(engine_host, &resource_id).await?;
@@ -394,11 +410,13 @@ pub(crate) async fn tombstone_memory_value(
     let mut record: MemoryRecord = serde_json::from_value(current_payload)
         .map_err(|err| invalid_params(format!("malformed memory record payload: {err}")))?;
     record.revision = record.revision.saturating_add(1);
+    let retention_evidence = retention_policy_evidence(&policy, "tombstone");
     record.lifecycle = json!({
         "state": "tombstoned",
         "tombstonedAt": Utc::now(),
         "parentVersionId": expected,
-        "reason": optional_string(payload, "reason")?.unwrap_or_else(|| "explicit_tombstone".to_owned())
+        "reason": optional_string(payload, "reason")?.unwrap_or_else(|| "explicit_tombstone".to_owned()),
+        "policyEvidence": retention_evidence.clone()
     });
     record.trace_refs = merge_trace_refs(record.trace_refs, invocation);
     record.replay_refs = merge_replay_refs(record.replay_refs, invocation);
@@ -427,6 +445,7 @@ pub(crate) async fn tombstone_memory_value(
         "status": "tombstoned",
         "recordResourceId": resource_id,
         "recordVersionId": version.version_id.clone(),
+        "retentionEvidence": retention_evidence,
         "resourceRefs": [version_ref(&inspection.resource, &version, "memory_record")]
     }))
 }
@@ -460,7 +479,7 @@ pub(crate) async fn list_memory_value(
             && let Some((version_id, payload)) = current_payload(&inspection)
         {
             records.push(json!({
-                "resource": inspection.resource,
+                "resource": redacted_resource_projection(&inspection.resource),
                 "currentVersionId": version_id,
                 "record": redacted_record_payload(&payload)
             }));
@@ -498,9 +517,9 @@ pub(crate) async fn inspect_memory_value(
         .collect::<Vec<_>>();
     Ok(json!({
         "schemaVersion": MEMORY_SCHEMA_VERSION,
-        "resource": inspection.resource,
+        "resource": redacted_resource_projection(&inspection.resource),
         "versions": redacted_versions,
-        "events": inspection.events,
+        "events": redacted_resource_events(&inspection.events),
         "redacted": true
     }))
 }
@@ -621,11 +640,13 @@ async fn ensure_engine_resource(
         label: "Deterministic resource-backed memory".to_owned(),
         version: "1".to_owned(),
         package_provenance: json!({
-            "kind": "built_in_contract_probe",
-            "algorithm": "none",
+            "kind": "source_backed_module_pack",
+            "modulePackId": "memory_engine_module",
+            "algorithm": "deterministic_resource_backed_preview_retrieval_v1",
             "embeddings": false,
-            "ranking": false,
-            "summarization": false
+            "ranking": "deterministic_preview_match",
+            "summarization": false,
+            "networkPolicy": "none"
         }),
         supported_modes: vec![
             MemoryMode::Disabled,
@@ -636,11 +657,15 @@ async fn ensure_engine_resource(
         supported_stores: vec!["engine_resources".to_owned()],
         privacy_features: json!({
             "bodyStorage": "resource_ref_only",
-            "promptContent": "status_and_refs_only",
+            "promptContent": "bounded_record_previews_when_policy_enabled",
+            "promptBodyContent": "forbidden",
             "redactedAudit": true
         }),
         migration_support: json!({"export": true, "import": true, "indexMetadata": "none"}),
-        eval_profile: json!({"requiredBeforeSemanticRetrieval": true, "currentEval": "schema_only"}),
+        eval_profile: json!({
+            "requiredBeforeSemanticRetrieval": true,
+            "currentEval": "deterministic_preview_contract"
+        }),
         status: "available".to_owned(),
     };
     engine_host
@@ -698,15 +723,14 @@ fn ensure_record_scope_matches_invocation(
 }
 
 fn prompt_inclusion_summary(policy: &MemoryPolicyRecord) -> Value {
+    let snippet_policy = prompt_snippet_policy(policy);
     json!({
         "mode": policy.mode.as_str(),
-        "enabledForPrompt": false,
-        "reason": if policy.mode == MemoryMode::Disabled {
-            "memory_disabled"
-        } else {
-            "prompt_inclusion_requires_future_retrieval_policy"
-        },
-        "privateContentIncluded": false
+        "enabledForPrompt": snippet_policy.enabled,
+        "reason": snippet_policy.reason,
+        "boundedPreviewSnippetsOnly": snippet_policy.enabled,
+        "privateContentIncluded": false,
+        "policy": snippet_policy.evidence
     })
 }
 

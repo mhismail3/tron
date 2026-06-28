@@ -96,17 +96,19 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .build()?,
         write_contract(
             PROMPT_TRACE_FUNCTION,
-            "Record a prompt inclusion trace without injecting private memory content.",
+            "Record a prompt inclusion trace with policy-governed bounded snippets and no private body content.",
         )
         .request_schema(prompt_trace_schema())
         .response_schema(prompt_trace_response_schema())
         .output_contract(DurableOutputContract::resource_backed([
             MEMORY_PROMPT_TRACE_KIND,
+            MEMORY_QUERY_KIND,
+            MEMORY_DECISION_KIND,
         ]))
         .build()?,
         write_contract(
             RECORD_QUERY_FUNCTION,
-            "Record metadata-only memory query evidence without executing retrieval.",
+            "Record memory query evidence, optionally executing deterministic resource-backed preview retrieval.",
         )
         .request_schema(query_record_schema())
         .response_schema(query_response_schema("recorded"))
@@ -114,7 +116,7 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         .build()?,
         write_contract(
             RECORD_DECISION_FUNCTION,
-            "Record metadata-only memory decision evidence without applying prompt inclusion.",
+            "Record memory decision evidence with prompt-inclusion and retention policy proof.",
         )
         .request_schema(decision_record_schema())
         .response_schema(decision_response_schema("recorded"))
@@ -314,6 +316,7 @@ fn prompt_trace_schema() -> serde_json::Value {
         "additionalProperties": false,
         "properties": {
             "source": {"type": "string"},
+            "terms": {"type": "array", "items": {"type": "string"}},
             "limit": {"type": "integer", "minimum": 1, "maximum": 500}
         }
     })
@@ -331,6 +334,7 @@ fn query_record_schema() -> serde_json::Value {
             "filters": {"type": "object"},
             "selectedRefs": {"type": "array"},
             "excludedRefs": {"type": "array"},
+            "retrieval": {"type": "object"},
             "decisionRefs": {"type": "array"},
             "traceRefs": {"type": "array"},
             "replayRefs": {"type": "array"},
@@ -351,6 +355,9 @@ fn decision_record_schema() -> serde_json::Value {
             "subjectRef": {"type": "object"},
             "queryRef": {"type": "object"},
             "sourceRefs": {"type": "array"},
+            "promptInclusion": {"type": "object"},
+            "retentionEvidence": {"type": "object"},
+            "policyEvidence": {"type": "object"},
             "traceRefs": {"type": "array"},
             "replayRefs": {"type": "array"},
             "occurredAt": {"type": "string"}

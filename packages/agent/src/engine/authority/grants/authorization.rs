@@ -104,6 +104,9 @@ pub(super) fn authorize_with_grant(
     if is_file_git_module_invocation(invocation) {
         ensure_file_git_module_grant_is_explicit(grant)?;
     }
+    if is_memory_module_invocation(invocation) {
+        ensure_memory_module_grant_is_explicit(grant, invocation)?;
+    }
     for scope in &function.required_authority.scopes {
         if !allows_item(&grant.allowed_authority_scopes, scope) {
             return Err(EngineError::PolicyViolation(format!(
@@ -371,6 +374,36 @@ fn ensure_jobs_grant_is_explicit(grant: &EngineGrant, invocation: &Invocation) -
     ensure_kind_selectors(grant, &kinds, "jobs operations")
 }
 
+fn ensure_memory_module_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "memory module-pack operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "memory module-pack operations")?;
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("memory_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["recordResourceId"],
+            "memory module-pack record inspect",
+        ),
+        Some("memory_query_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["queryResourceId"],
+            "memory module-pack query inspect",
+        ),
+        Some("memory_decision_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["decisionResourceId"],
+            "memory module-pack decision inspect",
+        ),
+        _ => Ok(()),
+    }
+}
+
 fn ensure_no_wildcard_grant_items(grant: &EngineGrant, label: &str) -> Result<()> {
     for (item_label, items) in [
         (
@@ -492,6 +525,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "programExecutionResourceId",
         "promptArtifactResourceId",
         "updateDiagnosticResourceId",
+        "recordResourceId",
         "queryResourceId",
         "decisionResourceId",
         "moduleManifestResourceId",
@@ -640,6 +674,10 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "update_diagnostics.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
+        }
+        Some("memory_status" | "memory_list" | "memory_inspect") => {
+            push_unique(&mut scopes, "memory.read");
+            push_unique(&mut scopes, "resource.read");
         }
         Some(
             "memory_query_list"
@@ -884,6 +922,8 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         ) => {
             vec!["update_diagnostic_record"]
         }
+        Some("memory_status") => vec!["memory_policy", "memory_engine"],
+        Some("memory_list" | "memory_inspect") => vec!["memory_record"],
         Some("memory_query_list" | "memory_query_inspect") => vec!["memory_query"],
         Some("memory_decision_list" | "memory_decision_inspect") => vec!["memory_decision"],
         Some("web_robots_check") => vec!["web_robots_policy"],
@@ -1103,6 +1143,22 @@ fn is_file_git_module_invocation(invocation: &Invocation) -> bool {
             .get("operation")
             .and_then(Value::as_str)
             .is_some_and(is_file_git_module_operation)
+}
+
+fn is_memory_module_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "memory_status"
+                    | "memory_list"
+                    | "memory_inspect"
+                    | "memory_query_list"
+                    | "memory_query_inspect"
+                    | "memory_decision_list"
+                    | "memory_decision_inspect"
+            )
+        )
 }
 
 fn is_file_git_module_operation(operation: &str) -> bool {

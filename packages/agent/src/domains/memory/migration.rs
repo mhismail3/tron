@@ -8,6 +8,7 @@ use crate::shared::protocol::memory::{
 use crate::shared::server::errors::CapabilityError;
 
 use super::errors::{engine_error, invalid_params};
+use super::retention::{ensure_retention_policy_supported, retention_policy_evidence};
 use super::service::{list_memory_value, require_writable_policy, resolve_policy};
 use super::support::*;
 use super::{
@@ -90,7 +91,7 @@ pub(crate) async fn migrate_import_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _policy = require_writable_policy(engine_host, invocation).await?;
+    let policy = require_writable_policy(engine_host, invocation).await?;
     let envelope_payload = required_object(payload, "envelope")?;
     let records = envelope_payload
         .get("records")
@@ -106,11 +107,14 @@ pub(crate) async fn migrate_import_value(
         let mut record: MemoryRecord = serde_json::from_value(record_payload)
             .map_err(|err| invalid_params(format!("malformed imported memory record: {err}")))?;
         ensure_body_ref_is_pointer(&record.body_ref)?;
+        ensure_retention_policy_supported(&record.retention, "import")?;
+        let retention_evidence = retention_policy_evidence(&policy, "import");
         record.revision = 1;
         record.lifecycle = json!({
             "state": "retained",
             "importedAt": Utc::now(),
-            "sourceEnvelope": "inline"
+            "sourceEnvelope": "inline",
+            "policyEvidence": retention_evidence
         });
         record.migration = json!({
             "imported": true,

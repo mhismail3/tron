@@ -1,9 +1,9 @@
 //! Built-in memory resource type definitions.
 //!
 //! These schemas define the engine-owned memory contract surface: engine
-//! identity, policy, records, prompt traces, query/decision evidence, eval
-//! runs, and migration envelopes. They do not define a retrieval/indexing
-//! algorithm.
+//! identity, policy, records, prompt traces, deterministic query/result
+//! evidence, decision evidence, eval runs, and migration envelopes. They do
+//! not define an embedding/vector indexing algorithm.
 
 use serde_json::{Value, json};
 
@@ -232,7 +232,11 @@ pub(super) fn memory_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "mode",
                     "selectedRefs",
                     "excludedRefs",
+                    "retrieval",
+                    "results",
                     "decisionRefs",
+                    "policy",
+                    "module",
                     "redaction",
                     "traceRefs",
                     "replayRefs",
@@ -250,7 +254,11 @@ pub(super) fn memory_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "mode": {"type": "string", "enum": ["disabled", "active", "shadow", "compare"]},
                     "selectedRefs": {"type": "array"},
                     "excludedRefs": {"type": "array"},
+                    "retrieval": {"type": "object"},
+                    "results": {"type": "array"},
                     "decisionRefs": {"type": "array"},
+                    "policy": {"type": "object"},
+                    "module": {"type": "object"},
                     "redaction": {"type": "object"},
                     "traceRefs": {"type": "array"},
                     "replayRefs": {"type": "array"},
@@ -279,6 +287,9 @@ pub(super) fn memory_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "decisionKind",
                     "reasonCodes",
                     "sourceRefs",
+                    "promptInclusion",
+                    "retentionEvidence",
+                    "policyEvidence",
                     "redaction",
                     "traceRefs",
                     "replayRefs",
@@ -294,6 +305,9 @@ pub(super) fn memory_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "subjectRef": {"type": "object"},
                     "queryRef": {"type": "object"},
                     "sourceRefs": {"type": "array"},
+                    "promptInclusion": {"type": "object"},
+                    "retentionEvidence": {"type": "object"},
+                    "policyEvidence": {"type": "object"},
                     "redaction": {"type": "object"},
                     "traceRefs": {"type": "array"},
                     "replayRefs": {"type": "array"},

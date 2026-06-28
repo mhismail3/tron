@@ -81,6 +81,7 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_program_execution_cancel"
             | "module_program_execution_cleanup"
     );
+    let memory_module_operation = is_memory_module_operation(operation);
     let delegated_subagent_operation = matches!(
         operation,
         "subagent_launch" | "subagent_status" | "subagent_result" | "subagent_cancel"
@@ -102,6 +103,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
+        || memory_module_operation
         || delegated_subagent_operation
         || file_git_module_operation
     {
@@ -125,6 +127,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_lifecycle_operation
         && !module_runtime_operation
         && !module_program_execution_operation
+        && !memory_module_operation
         && !delegated_subagent_operation
         && !file_git_module_operation
     {
@@ -241,7 +244,10 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
-        "memory_query_list"
+        "memory_status"
+            | "memory_list"
+            | "memory_inspect"
+            | "memory_query_list"
             | "memory_query_inspect"
             | "memory_decision_list"
             | "memory_decision_inspect"
@@ -492,6 +498,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
+        || memory_module_operation
         || delegated_subagent_operation
         || file_git_module_operation
     {
@@ -544,6 +551,10 @@ pub(super) async fn derive_capability_runtime_grant(
         "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
     ) {
         allowed_resource_kinds.push("update_diagnostic_record".to_owned());
+    } else if operation == "memory_status" {
+        allowed_resource_kinds.extend(["memory_policy".to_owned(), "memory_engine".to_owned()]);
+    } else if matches!(operation, "memory_list" | "memory_inspect") {
+        allowed_resource_kinds.push("memory_record".to_owned());
     } else if matches!(operation, "memory_query_list" | "memory_query_inspect") {
         allowed_resource_kinds.push("memory_query".to_owned());
     } else if matches!(
@@ -903,6 +914,19 @@ fn is_file_git_module_operation(operation: &str) -> bool {
     )
 }
 
+fn is_memory_module_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "memory_status"
+            | "memory_list"
+            | "memory_inspect"
+            | "memory_query_list"
+            | "memory_query_inspect"
+            | "memory_decision_list"
+            | "memory_decision_inspect"
+    )
+}
+
 fn delegated_subagent_module_scopes(operation: &str) -> Vec<String> {
     let mut scopes = vec![
         "module_runtime.read".to_owned(),
@@ -1119,6 +1143,7 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (&["program_execution_inspect"], "programExecutionResourceId"),
         (&["prompt_artifact_inspect"], "promptArtifactResourceId"),
         (&["update_diagnostic_inspect"], "updateDiagnosticResourceId"),
+        (&["memory_inspect"], "recordResourceId"),
         (&["memory_query_inspect"], "queryResourceId"),
         (&["memory_decision_inspect"], "decisionResourceId"),
         (&["module_inspect"], "moduleManifestResourceId"),

@@ -1014,3 +1014,62 @@ Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; DRC baseline entropy allow-list failures and SUWRF baseline
 findings under unchanged `packages/agent/src/domains/program_execution` remain
 outside accepted Slice 24C unless touched by later work.
+
+## Implementation Candidate Slice 24D: Memory Retrieval And Retention Module Pack
+
+Status: pending review, not accepted baseline.
+
+Baseline:
+`9302651e780c86198a9c7a66a6a011149c24a84a`
+(`docs: accept phase 3 slice 24c`)
+
+Implementation branch:
+`codex/phase-3-slice-24d-memory-module-pack`
+
+Implementation candidate scope:
+
+- Implements deterministic resource-backed memory retrieval through existing
+  `capability::execute` operations and existing `memory_record`,
+  `memory_query`, and `memory_decision` resources.
+- Records retrieval query/result evidence with bounded redacted snippets,
+  deterministic ranking/provenance/confidence, replay/idempotency refs, source
+  refs, resource refs, and `networkPolicy: none`.
+- Records explicit prompt-inclusion decisions and prompt trace proof before any
+  bounded memory snippet is exposed to provider context.
+- Records retention/edit/import/tombstone policy evidence while rejecting hard
+  delete, raw body erasure, and automatic retention actions.
+- Requires explicit memory/module/resource grants and exact resource selectors;
+  wildcard selectors, broad state inheritance, and raw grant/authority IDs stay
+  outside provider-visible projections.
+- Seeds the pending-review `memory_engine_module` manifest through the module
+  registry so the behavior remains module-owned and swappable.
+- Updates OpenAI provider compact guidance for the exposed
+  `memory_query_*` and `memory_decision_*` execute surfaces.
+
+Rejected scope remains unchanged: embeddings, vector-store dependencies,
+generated or invented summaries, hidden prompt injection, automatic retention
+without policy evidence, package-manager or network side effects, repo-managed
+`packages/agent/skills`, physical module package install, live dependency
+restoration, arbitrary generated runtime execution, broad public `/engine`
+expansion, fixed native panels, SQLite migrations/tables, and production
+deploy/update behavior.
+
+Implementation candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Agent crate formatting passed after Slice 24D edits. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/model/resource-store dead-code warnings were emitted. |
+| `cargo check --manifest-path packages/agent/Cargo.toml --tests` | exit 0 | Test targets type-check passed with the same existing dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::memory --lib -- --nocapture` | exit 0 | Focused memory tests passed, including deterministic retrieval, prompt inclusion, retention/edit/delete policy evidence, provider redaction, replay/idempotency, and migration/schema coverage. |
+| Focused runtime/module/provider tests for Slice 24D | exit 0 | Exact memory query/decision grants, capability execute authorization, memory module manifest projection, resource contracts, and OpenAI provider guidance tests passed. |
+| SACB, TMB, PCC, TPC, DESI, PMBD, PPACD, SSARR, ODA, and PERF invariant suites | exit 0 | Static authority, modularity, cleanup, documentation/evidence, provider-boundary, protocol-boundary, runtime-readiness, auditability, and performance inventories passed for touched Slice 24D surfaces. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` | expected baseline failure | 18 SOL tests passed; `sol_inventory_covers_stateful_marker_sources` still fails only on broad pre-existing marker-source backlog outside touched Slice 24D files. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | expected baseline failure | 16 DRC tests passed; `replay_critical_entropy_is_allow_listed` still fails only on unchanged goals/web/tool-source UTC allow-list entries listed in the Slice 24D validation log. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | expected baseline failure | 8 SUWRF tests passed; `no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets` still fails only on unchanged `packages/agent/src/domains/program_execution` fixed-surface residue. |
+| Discovery thread `019f0c4b-4f69-7162-b5bf-bb99efaf9830` | exact final status `implementation may start` | Discovery selected Slice 24D from accepted Slice 24C baseline and rejected embeddings/vector stores, hidden prompt injection, package/network side effects, public `/engine` expansion, repo-managed skills, SQLite migrations, fixed old panels, and production deploy behavior. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
+unchanged goals/web/tool-source UTC allow-list entries, and SUWRF has unchanged
+`packages/agent/src/domains/program_execution` residue outside Slice 24D.

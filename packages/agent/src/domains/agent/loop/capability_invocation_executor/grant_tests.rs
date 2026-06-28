@@ -221,18 +221,31 @@ async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
 
 #[tokio::test]
 async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped() {
-    for (operation, kind, id_field, resource_id) in [
-        ("memory_query_list", "memory_query", None, None),
+    for (operation, kinds, id_field, resource_id) in [
+        (
+            "memory_status",
+            vec!["memory_engine", "memory_policy"],
+            None,
+            None,
+        ),
+        ("memory_list", vec!["memory_record"], None, None),
+        (
+            "memory_inspect",
+            vec!["memory_record"],
+            Some("recordResourceId"),
+            Some("memory_record:runtime-grant"),
+        ),
+        ("memory_query_list", vec!["memory_query"], None, None),
         (
             "memory_query_inspect",
-            "memory_query",
+            vec!["memory_query"],
             Some("queryResourceId"),
             Some("memory_query:runtime-grant"),
         ),
-        ("memory_decision_list", "memory_decision", None, None),
+        ("memory_decision_list", vec!["memory_decision"], None, None),
         (
             "memory_decision_inspect",
-            "memory_decision",
+            vec!["memory_decision"],
             Some("decisionResourceId"),
             Some("memory_decision:runtime-grant"),
         ),
@@ -251,7 +264,7 @@ async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped(
             .expect("inspect grant")
             .expect("derived grant");
 
-        assert_memory_evidence_runtime_grant_is_read_only(&grant, kind, resource_id);
+        assert_memory_evidence_runtime_grant_is_read_only(&grant, &kinds, resource_id);
     }
 }
 
@@ -864,7 +877,7 @@ fn assert_module_registry_runtime_grant_is_read_only(
 
 fn assert_memory_evidence_runtime_grant_is_read_only(
     grant: &crate::engine::EngineGrant,
-    expected_kind: &str,
+    expected_kinds: &[&str],
     expected_resource_id: Option<&str>,
 ) {
     assert_eq!(grant.network_policy, "none");
@@ -891,23 +904,37 @@ fn assert_memory_evidence_runtime_grant_is_read_only(
             "memory evidence read grant must not include {forbidden_scope}"
         );
     }
-    assert_eq!(
-        grant.allowed_resource_kinds,
-        vec!["agent_state".to_owned(), expected_kind.to_owned()]
-    );
-    assert!(
-        grant
-            .resource_selectors
-            .contains(&format!("kind:{expected_kind}")),
-        "memory evidence grant should include selector kind:{expected_kind}"
-    );
+    let mut actual_kinds = grant.allowed_resource_kinds.clone();
+    actual_kinds.sort();
+    let mut expected_kinds_sorted = expected_kinds
+        .iter()
+        .map(|kind| (*kind).to_owned())
+        .collect::<Vec<_>>();
+    expected_kinds_sorted.sort();
+    assert_eq!(actual_kinds, expected_kinds_sorted);
+    for expected_kind in expected_kinds {
+        assert!(
+            grant
+                .resource_selectors
+                .contains(&format!("kind:{expected_kind}")),
+            "memory evidence grant should include selector kind:{expected_kind}"
+        );
+    }
     for forbidden_kind in [
+        "agent_state",
+        "memory_engine",
+        "memory_policy",
         "memory_record",
+        "memory_query",
+        "memory_decision",
         "memory_prompt_trace",
         "web_source",
         "subagent_task",
         "worker_package",
     ] {
+        if expected_kinds.contains(&forbidden_kind) {
+            continue;
+        }
         assert!(
             !grant
                 .allowed_resource_kinds
@@ -931,12 +958,7 @@ fn assert_memory_evidence_runtime_grant_is_read_only(
     }
     assert_eq!(
         grant.allowed_capabilities,
-        vec![
-            "capability::execute".to_owned(),
-            "state::get".to_owned(),
-            "state::list".to_owned(),
-            "state::set".to_owned(),
-        ]
+        vec!["capability::execute".to_owned()]
     );
 }
 

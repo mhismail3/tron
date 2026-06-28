@@ -39,6 +39,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         "module_manifest:capability",
         "module_manifest:file_git_module",
         "module_manifest:jobs_program_execution_module",
+        "module_manifest:memory_engine_module",
     ] {
         let inspection = host
             .inspect_resource(resource_id)
@@ -52,6 +53,85 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         assert_eq!(
             inspection.versions[0].payload["schemaVersion"],
             json!(SCHEMA_VERSION)
+        );
+    }
+}
+
+#[tokio::test]
+async fn memory_engine_module_manifest_projects_retrieval_and_retention_evidence() {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let grant_id = derive_module_read_grant(
+        &host,
+        "memory-engine-module",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[MODULE_MANIFEST_KIND],
+        &[
+            "kind:module_manifest",
+            "resource:module_manifest:memory_engine_module",
+        ],
+        "none",
+    )
+    .await;
+
+    let inspect_invocation = module_invocation(
+        "memory-engine-module",
+        json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:memory_engine_module",
+            "maxItems": 1000
+        }),
+        grant_id,
+    );
+    let inspected = inspect_module_value(&host, &inspect_invocation, &inspect_invocation.payload)
+        .await
+        .expect("inspect memory engine module");
+    let resource = &inspected["resource"];
+
+    assert_eq!(
+        resource["identity"]["moduleId"]["text"],
+        json!("memory_engine_module")
+    );
+    assert_eq!(resource["identity"]["kind"]["text"], json!("module_pack"));
+    assert_eq!(
+        resource["manifestLifecycle"]["state"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(
+        resource["manifestLifecycle"]["networkPolicy"]["text"],
+        json!("none")
+    );
+    assert_eq!(resource["capabilityDeclarations"]["total"], json!(7));
+    assert_eq!(resource["resourceDeclarations"]["total"], json!(6));
+    assert_eq!(resource["authorityNeeds"]["total"], json!(4));
+    assert_side_effects_are_absent(&inspected);
+    assert_provider_projection_has_no_raw_sensitive_material(&inspected);
+
+    let rendered = serde_json::to_string(&inspected).expect("serialize memory module projection");
+    for required in [
+        "memory_query_inspect",
+        "memory_decision_inspect",
+        "memory_record",
+        "memory_query",
+        "memory_decision",
+        "memory_prompt_trace",
+        "deterministic",
+        "networkPolicy",
+    ] {
+        assert!(
+            rendered.contains(required),
+            "missing memory module fact {required}"
+        );
+    }
+    for rejected in [
+        "fastembed",
+        "sqlite_vec",
+        "vault://",
+        "authorityGrantId",
+        "packageManagerOutput",
+    ] {
+        assert!(
+            !rendered.contains(rejected),
+            "leaked rejected memory module material {rejected}"
         );
     }
 }

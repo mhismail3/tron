@@ -700,21 +700,25 @@ provider errors to canonical failure envelopes, and redacts/bounds
 resources plus the reusable fail-closed freshness check consumed by future tool
 packages. Approval evidence is never an authority grant; existing engine
 authority grants remain the execution-permission primitive.
-`domains/memory` owns the Phase 2 memory foundation: source-backed memory
+`domains/memory` owns the Phase 2 memory foundation plus the pending-review
+Phase 3 Slice 24D memory module pack: source-backed memory
 engine/policy/record/prompt-trace/query/decision/eval-run/migration resource
 contracts, explicit disabled/active/shadow/compare policy state, redacted record
-audit, provider-safe prompt trace text, and metadata-only memory query/decision
-evidence. Memory policy resolves by session, then
-workspace, then system scope; prompt-trace audit writes use trace-specific
-idempotency so later turns do not replay stale memory status. Retained
-`bodyRef` payloads are pointer-only and reject inline body-like keys at any
-nested depth on retain, edit, and migration import. Direct
-record-id operations fail closed when the addressed resource is outside the
-caller memory scope. Query/decision evidence stores bounded refs, reason codes,
-redaction proof, trace/replay refs, deterministic timestamps, and idempotency
-fingerprints only. It does not implement semantic retrieval, embeddings,
-ranking, summarization, episodic event retrieval, procedural rules, prompt
-inclusion, or automatic prompt memory.
+audit, provider-safe prompt trace text, deterministic preview-backed
+query/result evidence, and prompt-inclusion decision proof. Memory policy
+resolves by session, then workspace, then system scope; prompt-trace audit
+writes use trace-specific idempotency so later turns do not replay stale memory
+status. Retained `bodyRef` payloads are pointer-only and reject inline
+body-like keys at any nested depth on retain, edit, and migration import.
+Direct record-id operations fail closed when the addressed resource is outside
+the caller memory scope. Query/decision evidence stores bounded refs, ranked
+preview snippets, confidence/provenance projections, policy proof, reason
+codes, redaction proof, trace/replay refs, deterministic timestamps, and
+idempotency fingerprints only; record list/inspect projections redact unsafe
+text and raw body pointers. It does not implement semantic retrieval,
+embeddings, vector stores, generated summaries, episodic event retrieval,
+procedural rules, hidden prompt memory, automatic retention, or network-backed
+memory behavior.
 `domains/filesystem` owns two separate surfaces: the iOS workspace-browser
 functions for home/list/create-dir selection and the Phase 2 agent filesystem
 toolbox. Agent operations resolve only from trusted working-directory metadata,
@@ -1254,10 +1258,10 @@ Current primitive operations:
 | `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled fallback. |
 | `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
 | `memory_inspect` | Inspect one redacted memory record and its version history within the current session. |
-| `memory_query_list` | List redacted current-session `memory_query` evidence records with metadata-only refs, redaction proof, and no retrieval execution. |
-| `memory_query_inspect` | Inspect one current-session `memory_query` evidence resource/version with bounded refs and proof that no prompt content or memory body was included. |
-| `memory_decision_list` | List redacted current-session `memory_decision` evidence records with reason codes, refs, redaction proof, and no automatic retention or prompt inclusion. |
-| `memory_decision_inspect` | Inspect one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, or raw idempotency keys. |
+| `memory_query_list` | List redacted current-session `memory_query` evidence records with deterministic resource-backed retrieval metadata, ranked record refs, bounded previews, redaction proof, and no embedding/vector index or raw body exposure. |
+| `memory_query_inspect` | Inspect one current-session `memory_query` evidence resource/version with bounded result refs, ranking/confidence/provenance, prompt-safe snippet policy evidence, and proof that retained memory body content was not included. |
+| `memory_decision_list` | List redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
+| `memory_decision_inspect` | Inspect one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, and report evidence without invoking catalog targets. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution. |
@@ -1290,8 +1294,10 @@ approval UI, or default risky-action policy. The post-baseline
 `memory::configure_policy`, `memory::retain`, `memory::edit`,
 `memory::tombstone`, `memory::list`, `memory::inspect`,
 `memory::record_prompt_trace`, and migration import/export functions; the model
-sees only read-only `execute` memory audit operations, and prompt assembly
-receives only mode/count/trace facts, never retained memory body content.
+sees only read-only `execute` memory audit operations. Prompt assembly records
+query/decision proof through the memory module pack and may include only
+explicitly policy-enabled bounded record previews; retained memory body content
+is never injected.
 The `jobs` domain owns durable non-interactive process lifecycle records:
 `jobs::start`, `jobs::status`, `jobs::list`, `jobs::log`, `jobs::cancel`, and
 `jobs::cleanup` create/update scoped `job_process` resources, bounded
@@ -2278,9 +2284,12 @@ turn assembles only the agent soul/system prompt, the compact agent-owned state
 projection, an explicit memory prompt-trace audit, environment metadata,
 conversation history, and any pending `execute` results. The memory audit
 records disabled/active/shadow/compare mode, considered/included/excluded
-counts, and the prompt-trace resource id; retained memory body content is never
-injected. The audit is recorded per turn trace, not reused as a session-stable
-idempotency result. Built-in rules, skills, worker guides, hooks, and profile policy
+counts, query/decision refs, prompt-inclusion policy proof, and the prompt-trace
+resource id. When policy explicitly enables bounded snippets, the prompt may
+include redacted memory record previews only; retained memory body content is
+never injected. The audit is recorded per turn trace, not reused as a
+session-stable idempotency result. Built-in rules, skills, worker guides, hooks,
+and profile policy
 primers are not model-context planes on this branch.
 
 The prompt loop records context totals in session events and trace metadata.

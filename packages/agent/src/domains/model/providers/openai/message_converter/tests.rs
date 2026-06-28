@@ -577,6 +577,16 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("without activation, trigger firing, prompt injection"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
+    assert!(result.contains("memory_status"));
+    assert!(result.contains("memory_list"));
+    assert!(result.contains("memory_inspect"));
+    assert!(result.contains("memory_query_list"));
+    assert!(result.contains("memory_query_inspect"));
+    assert!(result.contains("memory_decision_list"));
+    assert!(result.contains("memory_decision_inspect"));
+    assert!(result.contains("deterministic retrieval and prompt-inclusion evidence"));
+    assert!(result.contains("bounded preview snippets only when policy allowed"));
+    assert!(result.contains("never raw body refs"));
     for non_goal in [
         "web_search",
         "web_sitemap_traverse",
