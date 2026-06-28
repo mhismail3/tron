@@ -1465,3 +1465,60 @@ warnings may remain; DRC may fail on unchanged goals/web/tool-source entropy
 allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` residue, and SOL may fail on the
 unchanged marker-source backlog outside Slice 24K.
+
+## Implementation-Candidate Rejected Shape Slice 24L: Repo-Managed Skills And Bootstrap Behavior
+
+Status: implementation candidate pending independent review; TSV status is
+`pending_review`.
+
+Discovery thread `019f0e5b-a27c-7f23-b5ca-f933dd414bd3` selected Slice 24L
+(`P3MSA-INV-020`) with exact final status `implementation may start` from
+accepted Phase 3 Slice 24K baseline
+`origin/main@76cfcff2c1219b1c128a42517f174a937eb7f56a`
+(`docs: accept phase 3 slice 24k`).
+
+Implementation branch:
+`codex/phase-3-slice-24l-no-managed-skills-bootstrap`
+
+Slice 24L strengthens static rejected-shape containment for repo-managed
+skills and bootstrap behavior. The procedural static guard and PCC guard now
+prove no tracked `packages/agent/skills` directory, package `SKILL.md` assets,
+repo-managed first-party skill assets, skill-copy wiring, bootstrap skill
+registries, bootstrap prompt context, or hidden prompt-context skill injection
+return in agent production sources.
+
+Allowed scope remains narrow: `module_registry_procedural_manifest` may seed a
+source-backed `procedural_module` manifest only as metadata-only registry
+evidence tied to accepted `P3MSA-INV-013`. That seed is not a skill asset,
+package install, prompt context plane, hook firing path, or runtime behavior.
+
+Rejected scope remains deferred or forbidden: no repo-managed first-party
+skills, no package `SKILL.md` assets under `packages/agent`, no skill
+copy/sync/load/bootstrap registries, no hidden prompt injection, no automatic
+learned-behavior activation, no generated/runtime code execution, no
+package-manager or network behavior, no public `/engine` expansion, no fixed
+native skill panels, no production deploy/update behavior, and no runtime
+feature behavior is added.
+
+Implementation validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after static guard edits. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed with only existing provider/model/resource-store dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml procedural --lib -- --nocapture` | exit 0 | Focused procedural static and metadata-only resource tests passed 18 tests and prove procedural state remains inert with no skill bootstrap surface. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants repo_managed_skills_bootstrap_behavior_requires_phase_three_rejection_containment -- --nocapture` | exit 0 | PCC rejected-shape guard proves tracked skill assets, package `SKILL.md` assets, bootstrap skill symbols, and Phase 3 docs/evidence are aligned. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed 9 tests after Slice 24L documentation/evidence updates. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants forbidden_successor_runtime_surfaces_remain_absent -- --nocapture` | exit 0 | Focused SSARR successor-surface guard passed and confirms repo-managed first-party skills remain absent. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
+| `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed before staging. |
+| `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
+
+Known unchanged caveats remain outside Slice 24L unless validation shows new
+drift: existing provider/model/resource-store dead-code warnings may remain;
+DRC may fail on unchanged goals/web/tool-source entropy allow-list entries;
+SUWRF may fail on unchanged `packages/agent/src/domains/program_execution`
+residue; SOL may fail on unchanged marker-source backlog; full PCC may retain
+the unchanged `GeneratedUIDTOTests.swift` retired `Dashboard` caveat outside
+this branch.

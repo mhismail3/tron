@@ -23,7 +23,10 @@
 //! hooks, execute tools, start workers/jobs/processes, install packages, learn
 //! behavior, or merge results into conversation state. Decision evidence must
 //! match the stored request action, and rollback/deactivation approvals must
-//! carry the corresponding proof refs.
+//! carry the corresponding proof refs. Procedural module registry seeds are
+//! metadata-only manifest evidence; this domain must not add repo-managed
+//! `packages/agent/skills`, package `SKILL.md` assets, skill-copy/bootstrap
+//! registries, or hidden skill prompt-context injection.
 
 mod projection;
 pub(crate) mod service;

@@ -554,6 +554,31 @@ mutation, no network install, no raw dependency artifacts, no package-manager
 output, no public `/engine` expansion, no fixed native panel, no repo-managed
 `packages/agent/skills`, no production deploy/update behavior, and no dependencies are restored.
 
+## Implementation-Candidate Rejected Shape Slice 24L: Repo-Managed Skills And Bootstrap Behavior
+
+Slice 24L (`P3MSA-INV-020`) is pending-review rejected-shape containment. It
+keeps procedural behavior framed as agent-authored, module-owned,
+resource-backed state rather than core repo-managed skills or bootstrap prompt
+context.
+
+The implementation candidate strengthens static guards across tracked agent
+sources so no `packages/agent/skills` directory, package `SKILL.md` assets,
+repo-managed first-party skill assets, skill-copy wiring, bootstrap skill
+registries, bootstrap prompt context, or hidden prompt-context skill injection
+can return unnoticed. It also records the accepted exception clearly:
+`module_registry_procedural_manifest` may seed a source-backed
+`procedural_module` manifest only as metadata-only registry evidence tied to
+accepted `P3MSA-INV-013`; it is not a skill asset, package install, prompt
+context plane, or runtime behavior.
+
+The rejected shape remains forbidden: no repo-managed first-party skills, no
+package `SKILL.md` assets under `packages/agent`, no skill-copy/sync/load
+wiring, no bootstrap skill registry, no hidden prompt injection, no
+auto-activated learned behavior, no generated/runtime code execution, no
+package-manager or network behavior, no public `/engine` expansion, no fixed
+native skill panels, and no production deploy/update behavior belongs to this
+slice.
+
 ## Review Rules
 
 Review workers must:

@@ -50,6 +50,18 @@ fn direct_dependency_declared(cargo_toml: &str, dependency: &str) -> bool {
     })
 }
 
+fn production_rust_files() -> Vec<String> {
+    git_ls_files()
+        .into_iter()
+        .filter(|path| path.starts_with("packages/agent/src/") && path.ends_with(".rs"))
+        .filter(|path| {
+            !path.ends_with("_tests.rs")
+                && !path.ends_with("/tests.rs")
+                && !path.ends_with("/static_tests.rs")
+        })
+        .collect()
+}
+
 fn phase_two_inventory_row(row_id: &str) -> Vec<String> {
     let inventory = read_repo_file(PHASE_TWO_INVENTORY_TSV_PATH);
     inventory_tsv_row(&inventory, row_id, "Phase 2")
@@ -355,6 +367,154 @@ fn speculative_dependency_restoration_requires_phase_three_module_policy() {
             assert!(
                 contents.contains(required),
                 "{path} must record accepted Slice 24K Phase 3 dependency containment evidence: {required}"
+            );
+        }
+    }
+}
+
+#[test]
+fn repo_managed_skills_bootstrap_behavior_requires_phase_three_rejection_containment() {
+    assert!(
+        !repo_path("packages/agent/skills").exists(),
+        "repo-managed first-party skills directory must remain absent"
+    );
+
+    for path in git_ls_files() {
+        assert!(
+            path != "packages/agent/skills" && !path.starts_with("packages/agent/skills/"),
+            "repo-managed first-party skill assets must not be tracked: {path}"
+        );
+        assert!(
+            !(path.starts_with("packages/agent/") && path.ends_with("/SKILL.md")),
+            "package SKILL.md assets must not be tracked under packages/agent: {path}"
+        );
+    }
+
+    let forbidden_symbols = [
+        "bootstrap_skill_registry",
+        "bootstrap_skills_registry",
+        "managed_skill_registry",
+        "repo_managed_skill_registry",
+        "first_party_skill_registry",
+        "builtin_skill_registry",
+        "built_in_skill_registry",
+        "skillregistry",
+        "builtinskill",
+        "firstpartyskill",
+        "skill_copy",
+        "skillcopy",
+        "copy_skill",
+        "copyskill",
+        "copy_skills",
+        "copyskills",
+        "sync_skill",
+        "syncskill",
+        "sync_skills",
+        "syncskills",
+        "skill_asset",
+        "skillasset",
+        "skill_assets",
+        "skillassets",
+        "skill_bundle",
+        "skillbundle",
+        "skill_bundles",
+        "skillbundles",
+        "skill_prompt_context",
+        "skillpromptcontext",
+        "prompt_skill_context",
+        "promptskillcontext",
+        "inject_skill",
+        "injectskill",
+        "skill_inject",
+        "skillinject",
+        "skill_prompt",
+        "skillprompt",
+        "prompt_skill",
+        "promptskill",
+        "load_skill",
+        "loadskill",
+        "load_skills",
+        "loadskills",
+    ];
+    let mut hits = Vec::new();
+    for path in production_rust_files() {
+        let contents = read_repo_file(&path).to_ascii_lowercase();
+        for forbidden in forbidden_symbols {
+            if contents.contains(forbidden) {
+                hits.push(format!("{path}: {forbidden}"));
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "bootstrap skill registries, skill-copy wiring, and hidden prompt-context skill injection must stay absent: {hits:#?}"
+    );
+
+    let phase_three_repo_skills_row = phase_three_inventory_row("P3MSA-INV-020");
+    assert_eq!(
+        phase_three_repo_skills_row.len(),
+        15,
+        "Phase 3 inventory row schema changed: {phase_three_repo_skills_row:?}"
+    );
+    assert_eq!(
+        phase_three_repo_skills_row[1],
+        "Slice 24L Repo-Managed Skills And Bootstrap Behavior"
+    );
+    assert_eq!(phase_three_repo_skills_row[3], "reject_candidate");
+    assert_eq!(phase_three_repo_skills_row[5], "procedural_module");
+    assert_eq!(phase_three_repo_skills_row[13], "pending_review");
+    for required in [
+        "Slice 24L",
+        "packages/agent/skills",
+        "SKILL.md",
+        "repo-managed first-party skill assets",
+        "skill-copy wiring",
+        "bootstrap prompt context",
+        "hidden prompt-context skill injection",
+        "bootstrap skill registries",
+        "module_registry_procedural_manifest",
+        "procedural_module",
+        "metadata-only",
+        "P3MSA-INV-013",
+    ] {
+        assert!(
+            phase_three_repo_skills_row.join("\t").contains(required),
+            "P3MSA-INV-020 must record Slice 24L repo-managed-skill/bootstrap containment: {required}"
+        );
+    }
+
+    for (path, contents) in [
+        (
+            PHASE_THREE_SCORECARD_PATH,
+            read_repo_file(PHASE_THREE_SCORECARD_PATH),
+        ),
+        (
+            PHASE_THREE_INVENTORY_PATH,
+            read_repo_file(PHASE_THREE_INVENTORY_PATH),
+        ),
+        (
+            PHASE_THREE_EVIDENCE_PATH,
+            read_repo_file(PHASE_THREE_EVIDENCE_PATH),
+        ),
+    ] {
+        for required in [
+            "Slice 24L",
+            "P3MSA-INV-020",
+            "Repo-Managed Skills And Bootstrap Behavior",
+            "pending_review",
+            "packages/agent/skills",
+            "SKILL.md",
+            "repo-managed first-party skill assets",
+            "skill-copy wiring",
+            "bootstrap prompt context",
+            "hidden prompt-context skill injection",
+            "module_registry_procedural_manifest",
+            "procedural_module",
+            "metadata-only",
+        ] {
+            assert!(
+                contents.contains(required),
+                "{path} must record Slice 24L repo-managed-skill/bootstrap containment evidence: {required}"
             );
         }
     }
