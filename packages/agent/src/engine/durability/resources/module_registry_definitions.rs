@@ -2,11 +2,14 @@
 //!
 //! Module manifests are inspect-only registry records. The seed records here
 //! prove the registry contract without converting existing domains into
-//! executable modules or adding install/activation behavior.
+//! executable modules or adding install/activation behavior. Module-pack
+//! manifests with larger ownership surfaces live in split seed files beside
+//! this resource definition owner.
 
 use serde_json::{Value, json};
 
 use super::module_registry_memory_manifest::memory_engine_module_manifest;
+use super::module_registry_notification_delivery_manifest::notification_delivery_module_manifest;
 use super::module_registry_procedural_manifest::procedural_module_manifest;
 use super::module_registry_web_research_manifest::web_research_module_manifest;
 use super::types::{
@@ -60,6 +63,7 @@ pub(in crate::engine) fn builtin_module_manifest_resources() -> Vec<CreateResour
         memory_engine_module_manifest(),
         procedural_module_manifest(),
         web_research_module_manifest(),
+        notification_delivery_module_manifest(),
     ]
     .into_iter()
     .map(seed_resource)
