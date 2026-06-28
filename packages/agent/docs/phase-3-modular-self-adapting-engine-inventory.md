@@ -1,14 +1,15 @@
 # Phase 3 Modular Self-Adapting Engine Inventory
 
-Status: `planned`
+Status: `complete`
 
 Machine-readable inventory:
 [`phase-3-modular-self-adapting-engine-inventory.tsv`](phase-3-modular-self-adapting-engine-inventory.tsv)
 
-This inventory is the durable Phase 3 planning map for restoring the full
-modular engine direction. It is grouped by module-plane capability rather than
-old fixed product feature. The plan uses the old modular-capability branch as
-feature evidence while rejecting its fixed-domain and fixed-panel shape.
+This inventory is the durable Phase 3 planning and completion map for restoring
+the full modular engine direction. It is grouped by module-plane capability
+rather than old fixed product feature. The completed plan uses the old
+modular-capability branch as feature evidence while rejecting its fixed-domain
+and fixed-panel shape.
 
 ## Controlled Vocabulary
 

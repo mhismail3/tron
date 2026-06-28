@@ -13,6 +13,8 @@ const INVENTORY_PATH: &str =
     "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md";
 const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv";
+const PHASE_THREE_INVENTORY_TSV_PATH: &str =
+    "packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv";
 const TARGET_PATH: &str =
     "packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs";
 const TARGET_NAME: &str = "documentation_evidence_scorecard_integrity_invariants";
@@ -109,6 +111,40 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| line.split('\t').map(str::to_owned).collect::<Vec<_>>())
         .collect()
+}
+
+fn parse_phase_three_inventory_rows() -> Vec<BTreeMap<String, String>> {
+    let tsv = read_repo_file(PHASE_THREE_INVENTORY_TSV_PATH);
+    let mut lines = tsv.lines();
+    let header: Vec<_> = lines
+        .next()
+        .expect("Phase 3 inventory TSV must have a header")
+        .split('\t')
+        .map(str::to_owned)
+        .collect();
+    lines
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let fields: Vec<_> = line.split('\t').map(str::to_owned).collect();
+            assert_eq!(
+                fields.len(),
+                header.len(),
+                "Phase 3 inventory row must match the header: {line}"
+            );
+            header.iter().cloned().zip(fields).collect()
+        })
+        .collect()
+}
+
+fn phase_three_slice_label(slice: &str) -> String {
+    let mut parts = slice.split_whitespace();
+    let prefix = parts
+        .next()
+        .unwrap_or_else(|| panic!("Phase 3 slice field is empty: {slice}"));
+    let number = parts
+        .next()
+        .unwrap_or_else(|| panic!("Phase 3 slice field has no number: {slice}"));
+    format!("{prefix} {number}")
 }
 
 fn parse_quality_closeout_targets() -> Vec<String> {
@@ -497,6 +533,61 @@ fn desi_inventory_is_structured_and_covers_required_surfaces() {
             "DESI inventory missing required path {required_path}"
         );
     }
+}
+
+#[test]
+fn accepted_phase_three_desi_rows_use_current_baseline_closeout_wording() {
+    let accepted_phase_three_slices: BTreeSet<_> = parse_phase_three_inventory_rows()
+        .into_iter()
+        .filter(|row| row.get("status").map(String::as_str) == Some("current_baseline"))
+        .map(|row| {
+            phase_three_slice_label(
+                row.get("slice")
+                    .expect("Phase 3 inventory row must include slice"),
+            )
+        })
+        .collect();
+    assert!(
+        !accepted_phase_three_slices.is_empty(),
+        "Phase 3 inventory must contain accepted current_baseline rows"
+    );
+
+    let forbidden = [
+        ["implementation", "candidate"].join("-"),
+        ["review-pending", "status"].join(" "),
+        [
+            "tsv must preserve pending_review status",
+            "until acceptance",
+        ]
+        .join(" "),
+    ];
+    let mut checked_rows = 0_u32;
+    for row in parse_inventory_rows() {
+        if row[4] != "active_current" {
+            continue;
+        }
+        let joined = row.join("\t");
+        if !accepted_phase_three_slices
+            .iter()
+            .any(|slice| joined.contains(slice))
+        {
+            continue;
+        }
+        checked_rows += 1;
+        let normalized = joined.to_lowercase();
+        for phrase in &forbidden {
+            assert!(
+                !normalized.contains(phrase.as_str()),
+                "{} describes an accepted Phase 3 current_baseline row with stale closeout wording: {phrase}",
+                row[0]
+            );
+        }
+    }
+
+    assert!(
+        checked_rows > 0,
+        "DESI inventory must contain active/current rows for accepted Phase 3 slices"
+    );
 }
 
 #[test]

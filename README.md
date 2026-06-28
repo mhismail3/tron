@@ -408,18 +408,19 @@ Current living entry points:
   machine-readable Phase 2 feature-family inventory used by future slice
   handoffs.
 - `packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md`:
-  completed planning scorecard for the Phase 3 modular self-adapting engine
-  roadmap, minimal-core boundary, first-principles implementation standard,
-  module-plane slices, feature-pack activation order, and review/fix/re-review
-  execution protocol.
+  completed scorecard for the Phase 3 modular self-adapting engine roadmap,
+  minimal-core boundary, first-principles implementation standard, module-plane
+  slices, feature-pack activation order, review/fix/re-review execution
+  protocol, and closeout status.
 - `packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md`:
-  companion evidence manifest for the Phase 3 planning scorecard.
+  companion evidence manifest for the completed Phase 3 scorecard and closeout
+  evidence.
 - `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md`:
-  narrative inventory for Phase 3 module-plane foundations, feature module
-  packs, rejected old shapes, and deferred product decisions.
+  narrative inventory for completed Phase 3 module-plane foundations, feature
+  module packs, rejected old shapes, and deferred product decisions.
 - `packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv`:
-  machine-readable Phase 3 slice inventory used by future discovery and
-  implementation handoffs.
+  machine-readable Phase 3 slice inventory used by completed handoffs and
+  closeout audits.
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current

@@ -623,8 +623,9 @@ Out of scope:
 - raw token exposure;
 - production push behavior without explicit environment and user decision.
 
-Implementation-candidate Slice 24G records a pending-review
-`notification_delivery_module` manifest only. It covers the existing
+Accepted Slice 24G records a current-baseline metadata-only
+`notification_delivery_module` manifest seed. The manifest remains
+pending-review module metadata only and covers the existing
 server-owned `device_registration`, `notification`, and `notification_delivery`
 resources and existing device/notification execute operations, keeps the
 trusted system/admin split for device register/unregister, declares
@@ -633,9 +634,10 @@ kinds with `kind:device_registration`, `kind:notification`, and
 `kind:notification_delivery` selectors, and keeps `networkPolicy: none`,
 `installable: false`, and `executable: false`.
 
-Pending acceptance gates remain APNs credential custody, APNs environment
-labels, entitlement proof, physical-device validation, delivery-failure
-evidence, provider redaction, and native inbox product decisions. Live APNs
+Deferred activation/product gates remain APNs credential custody, APNs
+environment labels, entitlement proof, physical-device validation,
+delivery-failure evidence, provider redaction, and native inbox product
+decisions. Live APNs
 transport, native inbox UI, entitlements, physical-device operations,
 credential mutation, package-manager execution, network side effects, SQLite
 migrations, public notification APIs, raw provider payloads, repo-managed

@@ -1545,3 +1545,13 @@ SUWRF may fail on unchanged `packages/agent/src/domains/program_execution`
 residue; SOL may fail on unchanged marker-source backlog; full PCC may retain
 the unchanged `GeneratedUIDTOTests.swift` retired `Dashboard` caveat outside
 this branch.
+
+## Phase 3 Closeout Evidence
+
+Status: `phase complete`.
+
+Final summary thread `019f0e87-5cba-71b2-9e43-ee02d922bec4` and completion-audit
+thread `019f0e86-e72b-7b52-8b55-4699bcbf26df` close Phase 3 after Slice 24L.
+Closeout commit `45fd7b72df236f380fd4a67df91e8390e0f570e3` (`docs: accept
+phase 3 slice 24l`) is the accepted mainline baseline: the Phase 3 inventory
+has 20 data rows, with 19 `current_baseline` rows and one `rejected_shape` row.
