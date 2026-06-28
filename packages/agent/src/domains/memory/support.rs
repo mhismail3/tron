@@ -455,20 +455,15 @@ fn provider_projection_key_is_sensitive(key: &str) -> bool {
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect::<String>();
-    if normalized.contains("authority") {
+    if normalized.contains("authority")
+        || normalized.contains("grantid")
+        || normalized.contains("grantidentifier")
+    {
         return true;
     }
     matches!(
         normalized.as_str(),
-        "grantid"
-            | "grantids"
-            | "parentgrantid"
-            | "createdgrantid"
-            | "allowedgrantids"
-            | "grantmetadata"
-            | "actorid"
-            | "owneractorid"
-            | "subjectactorid"
+        "grantmetadata" | "actorid" | "owneractorid" | "subjectactorid"
     )
 }
 

@@ -1054,11 +1054,16 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
             "intent": {
                 "kind": "candidate_refs_only",
                 "proof": "safe-query-proof",
+                "rawGrantId": "raw-query-legacy-grant",
                 "authorityGrantId": "raw-query-grant",
-                "nested": {"allowedAuthorityScopes": ["raw-query-scope"]}
+                "nested": {
+                    "allowedAuthorityScopes": ["raw-query-scope"],
+                    "sourceGrantId": "source-query-legacy-grant"
+                }
             },
             "filters": {
                 "scope": "current_session",
+                "actorGrantId": "actor-query-legacy-grant",
                 "rawAuthorityId": "raw-query-authority"
             },
             "engineId": "resource-backed-memory",
@@ -1091,19 +1096,26 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
             "sourceRefs": [{
                 "kind": "trace",
                 "id": "safe-decision-source",
+                "sourceGrantId": "source-decision-legacy-grant",
                 "authorityGrantId": "raw-decision-source-grant"
             }],
             "promptInclusion": {
                 "appliedToPrompt": false,
                 "boundedPreviewSnippetsOnly": true,
+                "rawGrantId": "raw-decision-legacy-grant",
                 "allowedAuthorityScopes": ["raw-decision-scope"]
             },
             "retentionEvidence": {
                 "automaticRetentionPerformed": false,
                 "proof": "safe-retention-proof",
+                "actorGrantId": "actor-decision-legacy-grant",
                 "rawAuthorityId": "raw-decision-authority"
             },
-            "policyEvidence": {"mode": "active", "authorityGrantId": "raw-decision-policy-grant"},
+            "policyEvidence": {
+                "mode": "active",
+                "sourceGrantId": "source-policy-legacy-grant",
+                "authorityGrantId": "raw-decision-policy-grant"
+            },
             "redaction": {"metadataOnly": true, "memoryBodyStored": false},
             "traceRefs": [],
             "replayRefs": [{"source": "test", "authorityGrantId": "raw-replay-grant"}],
@@ -1439,12 +1451,22 @@ fn assert_authority_evidence_scrubbed(label: &str, value: &Value) {
         "authorityGrantId",
         "allowedAuthorityScopes",
         "rawAuthorityId",
+        "rawGrantId",
+        "sourceGrantId",
+        "actorGrantId",
         "raw-query-grant",
+        "raw-query-legacy-grant",
+        "source-query-legacy-grant",
+        "actor-query-legacy-grant",
         "raw-query-scope",
         "raw-query-authority",
         "raw-policy-grant",
         "raw-trace-grant",
         "raw-decision-source-grant",
+        "source-decision-legacy-grant",
+        "raw-decision-legacy-grant",
+        "actor-decision-legacy-grant",
+        "source-policy-legacy-grant",
         "raw-decision-scope",
         "raw-decision-authority",
         "raw-decision-policy-grant",

@@ -40,8 +40,9 @@
 //! matches the caller's current memory scope before returning or mutating it.
 //! Provider-visible memory list/inspect projections must use compact redacted
 //! resource/event/evidence views: raw scope ids, owner actor ids,
-//! trace/invocation ids, grant ids, authority ids, and authority metadata are
-//! never returned through memory capability results.
+//! trace/invocation ids, grant ids, grant-id-shaped legacy evidence keys,
+//! authority ids, and authority metadata are never returned through memory
+//! capability results.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{
