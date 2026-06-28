@@ -95,6 +95,9 @@ pub(super) fn authorize_with_grant(
     if is_module_program_execution_invocation(invocation) {
         ensure_module_program_execution_grant_is_explicit(grant, invocation)?;
     }
+    if is_procedural_module_invocation(invocation) {
+        ensure_procedural_module_grant_is_explicit(grant, invocation)?;
+    }
     if is_delegated_subagent_invocation(invocation) {
         ensure_delegated_subagent_grant_is_explicit(grant, invocation)?;
     }
@@ -305,6 +308,65 @@ fn ensure_file_git_module_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn ensure_procedural_module_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "procedural module-pack operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "procedural module-pack operations")?;
+    if let Some(kind) = invocation
+        .payload
+        .get("proceduralKind")
+        .and_then(Value::as_str)
+    {
+        let selector = format!("proceduralKind:{kind}");
+        if !grant
+            .resource_selectors
+            .iter()
+            .any(|actual| actual == &selector)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} requires explicit {selector} selector for procedural module-pack operations",
+                grant.grant_id
+            )));
+        }
+    }
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("procedural_state_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["proceduralRecordResourceId"],
+            "procedural module-pack operations",
+        ),
+        Some("procedural_activation_request_record") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["proceduralRecordResourceId"],
+            "procedural module-pack operations",
+        ),
+        Some("procedural_activation_request_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["proceduralActivationRequestResourceId"],
+            "procedural module-pack operations",
+        ),
+        Some("procedural_activation_decision_record") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["proceduralActivationRequestResourceId"],
+            "procedural module-pack operations",
+        ),
+        Some("procedural_activation_decision_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["proceduralActivationDecisionResourceId"],
+            "procedural module-pack operations",
+        ),
+        _ => Ok(()),
+    }
 }
 
 fn ensure_module_program_execution_grant_is_explicit(
@@ -538,6 +600,9 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "moduleDependencyPolicyResourceId",
         "moduleLifecycleResourceId",
         "moduleRuntimeResourceId",
+        "proceduralRecordResourceId",
+        "proceduralActivationRequestResourceId",
+        "proceduralActivationDecisionResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
@@ -823,9 +888,26 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "git.write");
             push_unique(&mut scopes, "resource.write");
         }
-        Some("procedural_state_list" | "procedural_state_inspect") => {
+        Some(
+            "procedural_state_list"
+            | "procedural_state_inspect"
+            | "procedural_activation_request_list"
+            | "procedural_activation_request_inspect"
+            | "procedural_activation_decision_list"
+            | "procedural_activation_decision_inspect",
+        ) => {
             push_unique(&mut scopes, "procedural.read");
             push_unique(&mut scopes, "resource.read");
+        }
+        Some(
+            "procedural_definition_record"
+            | "procedural_activation_request_record"
+            | "procedural_activation_decision_record",
+        ) => {
+            push_unique(&mut scopes, "procedural.read");
+            push_unique(&mut scopes, "procedural.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
         }
         Some(
             "subagent_status" | "subagent_result" | "subagent_task_list" | "subagent_task_inspect",
@@ -1017,7 +1099,23 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             | "subagent_task_list"
             | "subagent_task_inspect",
         ) => vec!["subagent_task"],
-        Some("procedural_state_list" | "procedural_state_inspect") => vec!["procedural_record"],
+        Some(
+            "procedural_definition_record" | "procedural_state_list" | "procedural_state_inspect",
+        ) => vec!["procedural_record"],
+        Some(
+            "procedural_activation_request_record"
+            | "procedural_activation_request_list"
+            | "procedural_activation_request_inspect",
+        ) => vec!["procedural_record", "procedural_activation_request"],
+        Some(
+            "procedural_activation_decision_record"
+            | "procedural_activation_decision_list"
+            | "procedural_activation_decision_inspect",
+        ) => vec![
+            "procedural_record",
+            "procedural_activation_request",
+            "procedural_activation_decision",
+        ],
         _ => Vec::new(),
     }
 }
@@ -1116,6 +1214,24 @@ fn is_module_program_execution_invocation(invocation: &Invocation) -> bool {
                     | "module_program_execution_status"
                     | "module_program_execution_cancel"
                     | "module_program_execution_cleanup"
+            )
+        )
+}
+
+fn is_procedural_module_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "procedural_definition_record"
+                    | "procedural_state_list"
+                    | "procedural_state_inspect"
+                    | "procedural_activation_request_record"
+                    | "procedural_activation_request_list"
+                    | "procedural_activation_request_inspect"
+                    | "procedural_activation_decision_record"
+                    | "procedural_activation_decision_list"
+                    | "procedural_activation_decision_inspect"
             )
         )
 }
@@ -1275,6 +1391,13 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
             push_unique(&mut kinds, "program_execution_record");
             push_unique(&mut kinds, "job_process");
             push_unique(&mut kinds, "execution_output");
+        }
+        Some("procedural_definition_record") => push_unique(&mut kinds, "procedural_record"),
+        Some("procedural_activation_request_record") => {
+            push_unique(&mut kinds, "procedural_activation_request")
+        }
+        Some("procedural_activation_decision_record") => {
+            push_unique(&mut kinds, "procedural_activation_decision")
         }
         Some("filesystem_write" | "filesystem_edit" | "filesystem_apply_patch") => {
             push_unique(&mut kinds, "patch_proposal");
@@ -1925,6 +2048,90 @@ mod tests {
             error.contains("does not allow resource module_validation_report:second"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn procedural_module_operations_require_exact_selectors_and_reject_wildcards() {
+        let function = test_execute_function();
+        let read_grant = test_grant(
+            &["capability.execute", "procedural.read", "resource.read"],
+            &["procedural_record"],
+            &[
+                "kind:procedural_record",
+                "proceduralKind:hook",
+                "resource:procedural_record:hook:first",
+            ],
+        );
+        authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "procedural_state_inspect",
+                "proceduralKind": "hook",
+                "proceduralRecordResourceId": "procedural_record:hook:first"
+            })),
+        )
+        .expect("exact procedural inspect selector accepted");
+
+        let error = authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "procedural_state_inspect",
+                "proceduralKind": "hook",
+                "proceduralRecordResourceId": "procedural_record:hook:second"
+            })),
+        )
+        .expect_err("wrong procedural record selector denied")
+        .to_string();
+        assert!(
+            error.contains("requires exact selector for proceduralRecordResourceId resource procedural_record:hook:second"),
+            "{error}"
+        );
+
+        let request_grant = test_grant(
+            &[
+                "capability.execute",
+                "procedural.read",
+                "procedural.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["procedural_record", "procedural_activation_request"],
+            &[
+                "kind:procedural_record",
+                "kind:procedural_activation_request",
+                "proceduralKind:hook",
+                "resource:procedural_record:hook:first",
+            ],
+        );
+        authorize_with_grant(
+            &request_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "procedural_activation_request_record",
+                "proceduralKind": "hook",
+                "proceduralRecordResourceId": "procedural_record:hook:first"
+            })),
+        )
+        .expect("exact procedural activation request grant accepted");
+
+        let wildcard_grant = test_grant(
+            &["*", "procedural.read", "resource.read"],
+            &["procedural_record"],
+            &["kind:procedural_record", "proceduralKind:hook"],
+        );
+        let error = authorize_with_grant(
+            &wildcard_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "procedural_state_list",
+                "proceduralKind": "hook"
+            })),
+        )
+        .expect_err("procedural wildcard authority denied")
+        .to_string();
+        assert!(error.contains("wildcard authority"), "{error}");
     }
 
     #[test]

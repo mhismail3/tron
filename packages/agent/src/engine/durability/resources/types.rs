@@ -106,6 +106,16 @@ pub const SUBAGENT_TASK_SCHEMA_ID: &str = "tron.resource.subagent_task.v1";
 pub const PROCEDURAL_RECORD_KIND: &str = "procedural_record";
 /// Built-in inert procedural state record resource schema id.
 pub const PROCEDURAL_RECORD_SCHEMA_ID: &str = "tron.resource.procedural_record.v1";
+/// Built-in metadata-only procedural activation review request resource kind.
+pub const PROCEDURAL_ACTIVATION_REQUEST_KIND: &str = "procedural_activation_request";
+/// Built-in metadata-only procedural activation review request resource schema id.
+pub const PROCEDURAL_ACTIVATION_REQUEST_SCHEMA_ID: &str =
+    "tron.resource.procedural_activation_request.v1";
+/// Built-in metadata-only procedural activation decision resource kind.
+pub const PROCEDURAL_ACTIVATION_DECISION_KIND: &str = "procedural_activation_decision";
+/// Built-in metadata-only procedural activation decision resource schema id.
+pub const PROCEDURAL_ACTIVATION_DECISION_SCHEMA_ID: &str =
+    "tron.resource.procedural_activation_decision.v1";
 /// Built-in durable schedule resource kind.
 pub const SCHEDULE_KIND: &str = "schedule";
 /// Built-in durable schedule resource schema id.

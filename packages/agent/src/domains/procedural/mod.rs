@@ -1,34 +1,43 @@
 //! Procedural state provenance and inspection foundation.
 //!
-//! This domain owns inert procedural record projections for Phase 2 Slice 11A:
-//! skills, rules, hooks, and procedures are represented as typed
-//! `procedural_record` resources with provenance/eval/status metadata. The
-//! provider-visible surface is limited to bounded read-only list/inspect
-//! helpers called through `capability::execute`. Projection inputs are
-//! revalidated for stored kind/schema/scope/lifecycle plus the eval scalar and
-//! content-hash fields that remain visible to providers.
+//! This domain owns inert procedural module-pack metadata for skills, rules,
+//! hooks, and procedures. Definitions are represented as typed
+//! `procedural_record` resources with provenance/eval/status/review metadata,
+//! and activation/deactivation/rollback review is represented as separate
+//! request/decision resources. The provider-visible surface is limited to
+//! bounded record/list/inspect helpers called through `capability::execute`.
+//! Projection inputs are revalidated for stored kind/schema/scope/lifecycle
+//! plus scalar/hash fields that remain visible to providers.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `projection` | Bounded/redacted provider-safe procedural record views |
-//! | `service` | Resource-backed list/inspect validation and projections |
+//! | `projection` | Bounded/redacted provider-safe procedural resource views |
+//! | `service` | Resource-backed record/list/inspect validation and projections |
 //!
 //! # INVARIANT: no procedural activation
 //!
-//! Procedural records are custody and inspection evidence only. This domain
-//! must not register triggers, inject prompt context, fire hooks, execute tools,
-//! start workers/jobs/processes, install packages, learn behavior, or merge
-//! results into conversation state.
+//! Procedural records and activation decisions are custody/review evidence
+//! only. This domain must not register triggers, inject prompt context, fire
+//! hooks, execute tools, start workers/jobs/processes, install packages, learn
+//! behavior, or merge results into conversation state.
 
 mod projection;
 pub(crate) mod service;
 
-pub(crate) use crate::engine::{PROCEDURAL_RECORD_KIND, PROCEDURAL_RECORD_SCHEMA_ID};
+pub(crate) use crate::engine::{
+    PROCEDURAL_ACTIVATION_DECISION_KIND, PROCEDURAL_ACTIVATION_DECISION_SCHEMA_ID,
+    PROCEDURAL_ACTIVATION_REQUEST_KIND, PROCEDURAL_ACTIVATION_REQUEST_SCHEMA_ID,
+    PROCEDURAL_RECORD_KIND, PROCEDURAL_RECORD_SCHEMA_ID,
+};
 
 pub(crate) const READ_SCOPE: &str = "procedural.read";
+pub(crate) const WRITE_SCOPE: &str = "procedural.write";
 pub(crate) const SCHEMA_VERSION: &str = "tron.procedural_record.v1";
+pub(crate) const ACTIVATION_REQUEST_SCHEMA_VERSION: &str = "tron.procedural_activation_request.v1";
+pub(crate) const ACTIVATION_DECISION_SCHEMA_VERSION: &str =
+    "tron.procedural_activation_decision.v1";
 
 #[cfg(test)]
 mod projection_scalar_tests;
