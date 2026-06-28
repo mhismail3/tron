@@ -160,4 +160,62 @@ extension SourceGuardTests {
             }
         }
     }
+
+    @Test("Protocol surfaces have no broad product DTO resurrection")
+    func testProtocolSurfacesHaveNoBroadProductDTOResurrection() throws {
+        let iosRoot = iosAppRoot()
+        let deletedProtocolPaths = [
+            "Sources/Engine/Protocol/Product",
+            "Sources/Engine/Protocol/ProductSurfaces",
+            "Sources/Engine/Protocol/ProductDTOs.swift",
+            "Sources/Engine/Protocol/ProductTables.swift",
+            "Sources/Engine/Protocol/RuntimeProductDTOs.swift",
+            "Sources/Engine/Protocol/LegacyProductDTOs.swift",
+            "Sources/Engine/Protocol/BroadProductDTOs.swift",
+            "Sources/Engine/Protocol/DTOs.swift",
+            "Sources/Engine/Events/Payloads/ProductEvents.swift",
+            "Sources/Engine/Persistence/Models/ProductTables.swift",
+        ]
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("Product" + "DTO", "broad product DTO namespace"),
+            ("Product" + "Surface" + "DTO", "broad product surface DTO"),
+            ("Product" + "Table", "product-owned table model"),
+            ("Product" + "Event", "product event catalog expansion"),
+            ("Legacy" + "Product", "legacy product compatibility shim"),
+            ("Runtime" + "Product", "runtime product DTO bucket"),
+            ("Broad" + "Product", "broad product DTO bucket"),
+            ("product" + "_dto", "product DTO table or payload name"),
+            ("product" + "_surface", "product surface table or payload name"),
+            ("product" + "_event", "product event table or payload name"),
+            ("product" + "_table", "product table name"),
+            ("product" + "_tables", "product tables name"),
+            ("product" + "." + "tables", "product table namespace"),
+            ("engine" + "." + "product", "public protocol product namespace"),
+            ("Engine" + "Product" + "Client", "public protocol product client"),
+        ]
+
+        for relativePath in deletedProtocolPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) would resurrect a broad product DTO/protocol surface"
+            )
+        }
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if isSourceGuardFile(url) { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
 }

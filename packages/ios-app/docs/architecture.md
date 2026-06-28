@@ -83,6 +83,10 @@ workflow panels, assistant-management panels, extension-source panels, or their
 matching state/client objects. Static source guards and the cleanup invariant
 test are the regression gates for this boundary; product names live only in
 scorecards, evidence manifests, inventory docs, and static absence tests.
+Protocol code must also avoid broad product DTO buckets, product event payload
+files, public product clients, and product table models. Accepted DTOs live
+under server-domain owners such as worker lifecycle, module activity, and
+generated UI resources.
 
 ## Directory Structure
 
@@ -298,6 +302,11 @@ must not use `Task.detached`, `DispatchQueue.global`, or
 UI delays use cancellation-aware Swift concurrency tasks.
 
 `Engine/Protocol` groups DTOs by server domain instead of one broad DTO bucket.
+The retained runtime cockpit DTOs are accepted only where a server-owned module
+or resource surface exists: worker lifecycle catalog/resources,
+`module_activity::overview`, and generic `ui_surface` schemas. Unknown fields
+may be ignored for wire compatibility, but iOS must not preserve product-shaped
+fallback fields as client-owned truth.
 `Engine/Persistence` owns the local SQLite cache, repositories, and sync cursor
 coordination. `Engine/Events` owns live event dispatch, payload decoding,
 plugin registration, and stored-event reconstruction helpers.
@@ -387,8 +396,10 @@ summaries from the server: active/waiting/blocked status, generic timeline
 entries, authority labels, touched-resource summaries, and
 rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
 module resource payloads, invent activity states, own redaction policy, or
-mount fixed source-control, memory, process, subagent, notification, or skill
-panels.
+mount fixed source-control, memory, process, subagent, notification, skill,
+approval, work, or work-dashboard panels. These generic surfaces also do not
+reintroduce broad product DTOs, product event variants, or product table-backed
+state.
 `UI/AgentCockpit/AgentCockpitModuleActivityViews.swift` owns the Activity tab's
 bounded summary card so the root cockpit sheet remains only the tab shell and
 shared row composition.

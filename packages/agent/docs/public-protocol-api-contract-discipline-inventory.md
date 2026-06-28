@@ -31,3 +31,10 @@ This inventory treats Rust decoder strictness, Rust contract metadata, iOS
 encoders, and iOS decoders as one parity surface. A server-only denylist is not
 enough: public clients must also be unable to construct or preserve internal
 control fields as first-class protocol DTOs.
+
+Slice 24J adds iOS protocol inventory coverage for the accepted narrow Runtime
+Cockpit DTO surfaces: worker lifecycle generic resources,
+`module_activity::overview`, and generated `ui_surface` schemas. Compatibility
+tests cover unknown server fields while source guards reject broad product DTO
+namespaces, product event payloads, old product protocol files, public product
+clients, and product table names.
