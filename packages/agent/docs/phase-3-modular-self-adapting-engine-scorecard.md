@@ -776,6 +776,40 @@ through `P3MSA-INV-007` with an approved `module_dependency_request`, approved
 `module_dependency_policy`, module owner rationale, parity evidence, tests, and
 removal plan.
 
+### Slice 24L: Repo-Managed Skills And Bootstrap Behavior
+
+Objective: close `P3MSA-INV-020` as a rejected-shape/static-containment slice
+so learned/procedural behavior remains agent-authored, module-owned,
+resource-backed metadata instead of repo-managed skills or bootstrap prompt
+context.
+
+Minimal shape:
+
+- static checks that keep `packages/agent/skills`, package `SKILL.md` assets,
+  and repo-managed first-party skill assets absent;
+- static checks that reject skill-copy wiring, bootstrap skill registries,
+  bootstrap prompt context, and hidden prompt-context skill injection in
+  production Rust sources;
+- Phase 3, PCC, DESI, SSARR, and README evidence wording that distinguishes
+  allowed metadata-only `module_registry_procedural_manifest` seeding of the
+  `procedural_module` manifest from forbidden skill assets or runtime
+  bootstrap behavior.
+
+Out of scope:
+
+- creating repo-managed first-party skills or package `SKILL.md` assets;
+- adding skill copy/sync/load/bootstrap registries;
+- adding hidden prompt context, prompt injection, hook firing, automatic
+  learned-behavior activation, generated/runtime code execution,
+  package-manager/network side effects, public `/engine` expansion, fixed
+  native skill panels, or production deploy/update behavior.
+
+Implementation-candidate Slice 24L records the repo-managed skills/bootstrap
+rejected shape without adding runtime behavior. `P3MSA-INV-020` is
+`pending_review`: procedural records, activation requests, and decisions remain
+resource-backed metadata only, and the `procedural_module` manifest seed remains
+metadata-only evidence, not a skill asset or prompt plane.
+
 ## Execution Protocol
 
 Every Phase 3 slice follows this thread sequence:

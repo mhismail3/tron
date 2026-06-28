@@ -1683,6 +1683,17 @@ worker/package/job/process/network launch, dependency restoration, MCP
 lifecycle, package install/catalog registration, trust promotion, public
 `/engine` APIs, settings/profile migrations, browser/search/crawl/login scope,
 native fixed UI, or result merge into conversation state.
+Slice 24L is a pending-review rejected-shape guard for the same boundary: no
+`packages/agent/skills`, package `SKILL.md` assets, repo-managed first-party
+skill assets, skill-copy wiring, bootstrap skill registries, bootstrap prompt
+context, or hidden prompt-context skill injection may return. The static guard
+normalizes code-like identifiers so camel/snake and singular/plural names such
+as `SkillsRegistry`, `BootstrapSkillsRegistry`, `ManagedSkillsRegistry`,
+`SkillLoader`, `SkillsLoader`, `SkillBootstrapRegistry`, and
+`SkillsPromptContext` are rejected. The
+`module_registry_procedural_manifest` seed remains allowed only as
+metadata-only `procedural_module` registry evidence, not as a skill asset,
+prompt plane, hook runner, or runtime activation path.
 
 The accepted Slice 9B foundation adds read-only worker package lifecycle
 inspection under the same `capability::execute` primitive. `worker_package_list` and
