@@ -42,6 +42,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         "module_manifest:memory_engine_module",
         "module_manifest:procedural_module",
         "module_manifest:web_research_module",
+        "module_manifest:notification_delivery_module",
     ] {
         let inspection = host
             .inspect_resource(resource_id)
@@ -55,6 +56,110 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         assert_eq!(
             inspection.versions[0].payload["schemaVersion"],
             json!(SCHEMA_VERSION)
+        );
+    }
+}
+
+#[tokio::test]
+async fn notification_delivery_module_manifest_projects_pending_review_delivery_gates() {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let grant_id = derive_module_read_grant(
+        &host,
+        "notification-delivery-module",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[MODULE_MANIFEST_KIND],
+        &[
+            "kind:module_manifest",
+            "resource:module_manifest:notification_delivery_module",
+        ],
+        "none",
+    )
+    .await;
+
+    let inspect_invocation = module_invocation(
+        "notification-delivery-module",
+        json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:notification_delivery_module",
+            "maxItems": 1000
+        }),
+        grant_id,
+    );
+    let inspected = inspect_module_value(&host, &inspect_invocation, &inspect_invocation.payload)
+        .await
+        .expect("inspect notification delivery module");
+    let resource = &inspected["resource"];
+
+    assert_eq!(
+        resource["identity"]["moduleId"]["text"],
+        json!("notification_delivery_module")
+    );
+    assert_eq!(resource["identity"]["kind"]["text"], json!("module_pack"));
+    assert_eq!(
+        resource["manifestLifecycle"]["state"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(
+        resource["manifestLifecycle"]["networkPolicy"]["text"],
+        json!("none")
+    );
+    assert_eq!(resource["manifestLifecycle"]["installable"], json!(false));
+    assert_eq!(resource["manifestLifecycle"]["executable"], json!(false));
+    assert_eq!(
+        resource["validation"]["status"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(resource["capabilityDeclarations"]["total"], json!(9));
+    assert_eq!(resource["resourceDeclarations"]["total"], json!(3));
+    assert_eq!(resource["authorityNeeds"]["total"], json!(6));
+    assert_side_effects_are_absent(&inspected);
+    assert_provider_projection_has_no_raw_sensitive_material(&inspected);
+
+    let rendered =
+        serde_json::to_string(&inspected).expect("serialize notification delivery module");
+    for required in [
+        "device_register",
+        "device_unregister",
+        "device_list",
+        "device_inspect",
+        "notification_send",
+        "notification_list",
+        "notification_inspect",
+        "notification_mark_read",
+        "notification_mark_all_read",
+        "device_registration",
+        "notification",
+        "notification_delivery",
+        "device.read",
+        "device.write",
+        "notifications.read",
+        "notifications.write",
+        "resource.read",
+        "resource.write",
+        "apns_custody_gate",
+        "environment_entitlement_device_gate",
+        "delivery_failure_evidence",
+        "native_inbox_decision",
+        "P3MSA-INV-015",
+    ] {
+        assert!(
+            rendered.contains(required),
+            "notification delivery manifest omitted {required}"
+        );
+    }
+    for forbidden in [
+        "liveApnsTransport:true",
+        "rawApnsToken",
+        "rawDeviceToken",
+        "deviceSecret",
+        "rawProviderPayload",
+        "productionPushEnabled:true",
+        "nativeInboxEnabled:true",
+        "publicNotificationApi:true",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "notification delivery manifest leaked forbidden material {forbidden}"
         );
     }
 }

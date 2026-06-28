@@ -13,7 +13,7 @@
 //! `definitions` registers built-in resource kinds, `validation` enforces the
 //! generic resource contract, `versions` owns payload hashing/current-version
 //! helpers, domain definition modules own contract resource schemas including
-//! module manifests, module validation reports, procedural
+//! module manifests and split module-pack manifest seeds, module validation reports, procedural
 //! skill/rule/hook/procedure custody and activation-review records, module
 //! dependency policy metadata records, and media artifacts,
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
@@ -33,6 +33,7 @@ mod module_install_definitions;
 mod module_lifecycle_definitions;
 mod module_registry_definitions;
 mod module_registry_memory_manifest;
+mod module_registry_notification_delivery_manifest;
 mod module_registry_procedural_manifest;
 mod module_registry_web_research_manifest;
 mod module_runtime_definitions;

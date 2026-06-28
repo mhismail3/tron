@@ -758,6 +758,17 @@ projections to refs/fingerprints/truncation/duration/exit/timeout/cancel/
 cleanup metadata rather than `process_run`, raw job payloads, raw commands,
 stdio, logs, paths, env, pids, grant ids, PTYs, package installs, or network
 execution.
+Slice 24G implementation-candidate metadata also seeds a pending-review
+`notification_delivery_module` manifest for the existing server-owned
+`device_registration`, `notification`, and `notification_delivery` resource
+substrate. It declares only existing device list/inspect/register/unregister
+and notification send/list/inspect/read/badge operation values, exact
+device/notification/resource authority needs, and validation gates for APNs
+credential custody, APNs environment labels, entitlement proof, physical-device
+validation, delivery-failure evidence, provider redaction, and native inbox
+product decisions. It does not enable APNs transport, native inbox UI,
+entitlements, public notification APIs, provider payload leakage, or network
+behavior.
 `domains/module_authoring` owns the accepted Phase 3 Slice 23B foundation for
 inert module proposals. It records current-session/workspace
 `module_proposal` resources with schema `tron.resource.module_proposal.v1` and
@@ -1676,8 +1687,10 @@ metadata for the registry, capability domain, the pending-review
 `jobs_program_execution_module` pack, the accepted Slice 24D pending-review
 `memory_engine_module` pack, and the accepted Slice 24E pending-review
 `procedural_module` pack, plus the accepted Slice 24F
-pending-review `web_research_module` pack without converting Phase 2 domains into separate
-provider-visible tools. `module_list` and `module_inspect` stay behind the
+pending-review `web_research_module` pack, plus the Slice 24G
+implementation-candidate pending-review `notification_delivery_module` pack
+without converting Phase 2 domains into separate provider-visible tools.
+`module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard
 `module_registry.read` and `resource.read` authority, `module_manifest`
 resource-kind grants, `kind:module_manifest` selectors, and `networkPolicy:
