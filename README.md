@@ -1683,7 +1683,7 @@ worker/package/job/process/network launch, dependency restoration, MCP
 lifecycle, package install/catalog registration, trust promotion, public
 `/engine` APIs, settings/profile migrations, browser/search/crawl/login scope,
 native fixed UI, or result merge into conversation state.
-Slice 24L is a pending-review rejected-shape guard for the same boundary: no
+Accepted Slice 24L records a rejected-shape guard for the same boundary: no
 `packages/agent/skills`, package `SKILL.md` assets, repo-managed first-party
 skill assets, skill-copy wiring, bootstrap skill registries, bootstrap prompt
 context, or hidden prompt-context skill injection may return. The static guard

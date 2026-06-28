@@ -554,14 +554,14 @@ mutation, no network install, no raw dependency artifacts, no package-manager
 output, no public `/engine` expansion, no fixed native panel, no repo-managed
 `packages/agent/skills`, no production deploy/update behavior, and no dependencies are restored.
 
-## Implementation-Candidate Rejected Shape Slice 24L: Repo-Managed Skills And Bootstrap Behavior
+## Accepted Rejected Shape Slice 24L: Repo-Managed Skills And Bootstrap Behavior
 
-Slice 24L (`P3MSA-INV-020`) is pending-review rejected-shape containment. It
-keeps procedural behavior framed as agent-authored, module-owned,
-resource-backed state rather than core repo-managed skills or bootstrap prompt
-context.
+Accepted Slice 24L (`P3MSA-INV-020`) is current-baseline rejected-shape
+containment. It keeps procedural behavior framed as agent-authored,
+module-owned, resource-backed state rather than core repo-managed skills or
+bootstrap prompt context.
 
-The implementation candidate strengthens static guards across tracked agent
+The accepted implementation strengthens static guards across tracked agent
 sources so no `packages/agent/skills` directory, package `SKILL.md` assets,
 repo-managed first-party skill assets, skill-copy wiring, bootstrap skill
 registries, bootstrap prompt context, or hidden prompt-context skill injection

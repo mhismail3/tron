@@ -1466,10 +1466,10 @@ allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` residue, and SOL may fail on the
 unchanged marker-source backlog outside Slice 24K.
 
-## Implementation-Candidate Rejected Shape Slice 24L: Repo-Managed Skills And Bootstrap Behavior
+## Accepted Rejected Shape Slice 24L: Repo-Managed Skills And Bootstrap Behavior
 
-Status: implementation candidate pending independent review; TSV status is
-`pending_review`.
+Status: accepted after independent Fix 1 re-review; TSV status is
+`current_baseline`.
 
 Discovery thread `019f0e5b-a27c-7f23-b5ca-f933dd414bd3` selected Slice 24L
 (`P3MSA-INV-020`) with exact final status `implementation may start` from
@@ -1479,6 +1479,17 @@ accepted Phase 3 Slice 24K baseline
 
 Implementation branch:
 `codex/phase-3-slice-24l-no-managed-skills-bootstrap`
+
+Acceptance trail:
+
+| Thread or commit | Result | Evidence |
+| --- | --- | --- |
+| Discovery thread `019f0e5b-a27c-7f23-b5ca-f933dd414bd3` | exact final status `implementation may start` | Selected Slice 24L from accepted Slice 24K baseline `76cfcff2c1219b1c128a42517f174a937eb7f56a`. |
+| Implementation thread `019f0e5f-3611-7443-b09c-c6170d7da1a1` | exact final status `implementation complete` | Produced implementation commit `ac8e02222205dbe7a64a82b108aed3ba621a447b` (`test: guard repo-managed skill bootstrap absence`). |
+| Independent review thread `019f0e6c-d929-74e3-83f6-e102d66c5d84` | exact verdict `changes required` | Found the initial denylist could miss realistic singular/plural/camel/snake skill-bootstrap identifiers. |
+| Fix 1 thread `019f0e71-f6b1-7c02-b794-85f5c5582ccf` | exact final status `fix ready for review` | Produced fix commit `ce8fe2a46d7f7393ae1066888cea1c1e6cd23af3` (`test: harden skill bootstrap static guard`). |
+| Fix 1 re-review thread `019f0e79-50ae-7793-a655-28f65b4df5f0` | exact verdict `slice accepted` | Verified full Slice 24L diff `76cfcff2c1219b1c128a42517f174a937eb7f56a..ce8fe2a46d7f7393ae1066888cea1c1e6cd23af3`, Fix 1 diff `ac8e02222205dbe7a64a82b108aed3ba621a447b..ce8fe2a46d7f7393ae1066888cea1c1e6cd23af3`, branch/head/ancestry/cleanliness, deterministic variant coverage, and no runtime scope expansion. |
+| Mainline merge `abb494ba6713c1be6bf3fedff251fb706593b349` | merged to `main` before closeout validation | Accepted implementation and Fix 1 commits were merged with `merge phase 3 slice 24l`. |
 
 Slice 24L strengthens static rejected-shape containment for repo-managed
 skills and bootstrap behavior. The procedural static guard and PCC guard now
@@ -1514,6 +1525,18 @@ Implementation validation evidence:
 | `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
 | `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed before staging. |
 | `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
+
+Fix 1 and re-review validation additionally verified:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml skill_bootstrap_identifier_guard --lib -- --nocapture` | exit 0 | Exact variant and allow-list procedural tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml procedural --lib -- --nocapture` | exit 0 | Broader procedural filter passed 20 tests after Fix 1. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants repo_managed_skills_bootstrap -- --nocapture` | exit 0 | Mirrored PCC guard passed 3 focused tests including realistic identifier variants and metadata-only allow-list. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed 9 tests during re-review. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants forbidden_successor_runtime_surfaces_remain_absent -- --nocapture` | exit 0 | Focused SSARR guard passed during re-review. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Re-review type-check passed with only existing provider/model/resource-store dead-code warnings. |
+| `test ! -e packages/agent/skills`, package `SKILL.md` scans, realistic forbidden-name production scan, personal-info guard, whitespace checks, cached diff check, and ignored-file scan | exit 0 | Re-review confirmed no repo-managed skill assets, package skill docs, production bootstrap identifiers, personal-info literals, whitespace drift, staged whitespace drift, or tracked ignored files. |
 
 Known unchanged caveats remain outside Slice 24L unless validation shows new
 drift: existing provider/model/resource-store dead-code warnings may remain;

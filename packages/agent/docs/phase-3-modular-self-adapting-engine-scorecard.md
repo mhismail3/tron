@@ -804,11 +804,11 @@ Out of scope:
   package-manager/network side effects, public `/engine` expansion, fixed
   native skill panels, or production deploy/update behavior.
 
-Implementation-candidate Slice 24L records the repo-managed skills/bootstrap
-rejected shape without adding runtime behavior. `P3MSA-INV-020` is
-`pending_review`: procedural records, activation requests, and decisions remain
-resource-backed metadata only, and the `procedural_module` manifest seed remains
-metadata-only evidence, not a skill asset or prompt plane.
+Accepted Slice 24L records the repo-managed skills/bootstrap rejected shape
+without adding runtime behavior. `P3MSA-INV-020` is `current_baseline`:
+procedural records, activation requests, and decisions remain resource-backed
+metadata only, and the `procedural_module` manifest seed remains metadata-only
+evidence, not a skill asset or prompt plane.
 
 ## Execution Protocol
 

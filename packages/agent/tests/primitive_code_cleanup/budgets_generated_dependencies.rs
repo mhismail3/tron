@@ -513,7 +513,7 @@ fn repo_managed_skills_bootstrap_behavior_requires_phase_three_rejection_contain
     );
     assert_eq!(phase_three_repo_skills_row[3], "reject_candidate");
     assert_eq!(phase_three_repo_skills_row[5], "procedural_module");
-    assert_eq!(phase_three_repo_skills_row[13], "pending_review");
+    assert_eq!(phase_three_repo_skills_row[13], "current_baseline");
     for required in [
         "Slice 24L",
         "packages/agent/skills",
@@ -552,7 +552,7 @@ fn repo_managed_skills_bootstrap_behavior_requires_phase_three_rejection_contain
             "Slice 24L",
             "P3MSA-INV-020",
             "Repo-Managed Skills And Bootstrap Behavior",
-            "pending_review",
+            "current_baseline",
             "packages/agent/skills",
             "SKILL.md",
             "repo-managed first-party skill assets",
