@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::execution::{
     cancel_subagent_value, launch_subagent_value, result_subagent_value, status_subagent_value,
@@ -152,12 +154,13 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         "{cross_scope}"
     );
 
+    let exact_resource_selector = format!("resource:{resource_id}");
     let read_only = first
         .derive_grant(
             "read-only-cancel",
             &[READ_SCOPE, "resource.read"],
             &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
+            &["kind:subagent_task", exact_resource_selector.as_str()],
             "none",
         )
         .await;
@@ -266,8 +269,6 @@ fn static_non_goal_guards_keep_subagent_execution_foundation_narrow() {
 struct Fixture {
     deps: Deps,
     session_id: String,
-    read_grant_id: AuthorityGrantId,
-    write_grant_id: AuthorityGrantId,
 }
 
 impl Fixture {
@@ -277,56 +278,13 @@ impl Fixture {
             engine_host: ctx.engine_host.clone(),
         };
         let session_id = format!("{label}-session");
-        let read_grant_id = derive_grant(
-            &deps,
-            &format!("{label}-read"),
-            &[READ_SCOPE, "resource.read"],
-            &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
-            "none",
-        )
-        .await;
-        let write_grant_id = derive_grant(
-            &deps,
-            &format!("{label}-write"),
-            &[READ_SCOPE, WRITE_SCOPE, "resource.read", "resource.write"],
-            &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
-            "none",
-        )
-        .await;
-        Self {
-            deps,
-            session_id,
-            read_grant_id,
-            write_grant_id,
-        }
+        Self { deps, session_id }
     }
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
-        let read_grant_id = self
-            .derive_grant(
-                &format!("{session_id}-read"),
-                &[READ_SCOPE, "resource.read"],
-                &[SUBAGENT_TASK_KIND],
-                &["kind:subagent_task"],
-                "none",
-            )
-            .await;
-        let write_grant_id = self
-            .derive_grant(
-                &format!("{session_id}-write"),
-                &[READ_SCOPE, WRITE_SCOPE, "resource.read", "resource.write"],
-                &[SUBAGENT_TASK_KIND],
-                &["kind:subagent_task"],
-                "none",
-            )
-            .await;
         Self {
             deps: self.deps.clone(),
             session_id: session_id.to_owned(),
-            read_grant_id,
-            write_grant_id,
         }
     }
 
@@ -350,7 +308,10 @@ impl Fixture {
     }
 
     async fn launch(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.write_invocation(key, payload);
+        let resource_id = self.launch_resource_id(key, &payload);
+        let invocation = self
+            .write_invocation(key, payload, Some(&resource_id))
+            .await;
         launch_subagent_value(
             &self.deps,
             &invocation,
@@ -362,7 +323,10 @@ impl Fixture {
     }
 
     async fn launch_error(&self, key: &str, payload: Value) -> String {
-        let invocation = self.write_invocation(key, payload);
+        let resource_id = self.launch_resource_id(key, &payload);
+        let invocation = self
+            .write_invocation(key, payload, Some(&resource_id))
+            .await;
         launch_subagent_value(
             &self.deps,
             &invocation,
@@ -375,14 +339,26 @@ impl Fixture {
     }
 
     async fn status(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
+        let invocation = self
+            .read_invocation(
+                key,
+                json!({"subagentTaskResourceId": resource_id}),
+                Some(resource_id),
+            )
+            .await;
         status_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("status")
     }
 
     async fn status_error(&self, key: &str, resource_id: &str) -> String {
-        let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
+        let invocation = self
+            .read_invocation(
+                key,
+                json!({"subagentTaskResourceId": resource_id}),
+                Some(resource_id),
+            )
+            .await;
         status_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect_err("status should fail")
@@ -390,47 +366,120 @@ impl Fixture {
     }
 
     async fn result(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
+        let invocation = self
+            .read_invocation(
+                key,
+                json!({"subagentTaskResourceId": resource_id}),
+                Some(resource_id),
+            )
+            .await;
         result_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("result")
     }
 
     async fn cancel(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.write_invocation(key, payload);
+        let resource_id = payload
+            .get("subagentTaskResourceId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let invocation = self
+            .write_invocation(key, payload, resource_id.as_deref())
+            .await;
         cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("cancel")
     }
 
     async fn cancel_error(&self, key: &str, payload: Value) -> String {
-        let invocation = self.write_invocation(key, payload);
+        let resource_id = payload
+            .get("subagentTaskResourceId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let invocation = self
+            .write_invocation(key, payload, resource_id.as_deref())
+            .await;
         cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect_err("cancel should fail")
             .to_string()
     }
 
-    fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
+    async fn read_invocation(
+        &self,
+        key: &str,
+        payload: Value,
+        resource_id: Option<&str>,
+    ) -> Invocation {
+        let grant_id = self
+            .derive_task_grant(
+                &format!("{key}-read"),
+                &[READ_SCOPE, "resource.read"],
+                resource_id,
+            )
+            .await;
         invocation(
             "capability::execute",
             key,
             payload,
-            self.read_grant_id.clone(),
+            grant_id,
             ActorKind::Agent,
             Some(&self.session_id),
         )
     }
 
-    fn write_invocation(&self, key: &str, payload: Value) -> Invocation {
+    async fn write_invocation(
+        &self,
+        key: &str,
+        payload: Value,
+        resource_id: Option<&str>,
+    ) -> Invocation {
+        let grant_id = self
+            .derive_task_grant(
+                &format!("{key}-write"),
+                &[READ_SCOPE, WRITE_SCOPE, "resource.read", "resource.write"],
+                resource_id,
+            )
+            .await;
         invocation(
             "capability::execute",
             key,
             payload,
-            self.write_grant_id.clone(),
+            grant_id,
             ActorKind::Agent,
             Some(&self.session_id),
         )
+    }
+
+    async fn derive_task_grant(
+        &self,
+        suffix: &str,
+        scopes: &[&str],
+        resource_id: Option<&str>,
+    ) -> AuthorityGrantId {
+        let mut selectors = vec!["kind:subagent_task".to_owned()];
+        if let Some(resource_id) = resource_id {
+            selectors.push(format!("resource:{resource_id}"));
+        }
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        self.derive_grant(
+            suffix,
+            scopes,
+            &[SUBAGENT_TASK_KIND],
+            &selector_refs,
+            "none",
+        )
+        .await
+    }
+
+    fn launch_resource_id(&self, key: &str, payload: &Value) -> String {
+        let task_id = payload
+            .get("taskId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("invocation-{key}"));
+        task_resource_id(&self.session_id, &task_id, key)
     }
 }
 
@@ -442,9 +491,13 @@ async fn derive_grant(
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
+    static GRANT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let counter = GRANT_COUNTER.fetch_add(1, Ordering::Relaxed);
     deps.engine_host
         .derive_authority_grant(DeriveGrant {
-            grant_id: Some(AuthorityGrantId::new(format!("subagent-exec-{suffix}")).unwrap()),
+            grant_id: Some(
+                AuthorityGrantId::new(format!("subagent-exec-{suffix}-{counter}")).unwrap(),
+            ),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
             subject_actor_id: None,
             subject_worker_id: None,
@@ -503,6 +556,18 @@ fn invocation(
         payload,
         causal_context: context,
     }
+}
+
+fn task_resource_id(session_id: &str, task_id: &str, idempotency_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"session");
+    hasher.update(b":");
+    hasher.update(session_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(task_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(idempotency_key.as_bytes());
+    format!("{SUBAGENT_TASK_KIND}:{}", hex::encode(hasher.finalize()))
 }
 
 fn launch_payload() -> Value {

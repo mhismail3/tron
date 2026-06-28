@@ -1559,7 +1559,8 @@ Slice 24C activates provider-visible subagent lifecycle operation values
 `subagent_cancel` behind the same single `capability::execute` primitive.
 Launch requires trusted current-session context, derived non-bootstrap
 `subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
-authority, exact `kind:subagent_task` selectors, idempotency, explicit
+authority, exact `resource:<subagent_task_id>` selectors in addition to
+`kind:subagent_task`, idempotency, explicit
 `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind:
 module_program_execution`, `modulePackId: jobs_program_execution`, bounded
 objective/prompt summaries, summary-only handoff refs, one running subagent
@@ -1567,9 +1568,10 @@ task per current scope, parent session/workspace/trace refs, replay refs, exact
 enabled module lifecycle/runtime selectors, and delegated module
 runtime/program/job refs. Status/result/cancel follow the delegated
 module-runtime/job binding through the accepted `module_program_execution_*`
-adapter; result returns reviewable merge-proposal evidence and explicitly
-does not mutate parent conversation state. Slice 24C still does not spawn
-hidden child agents, launch arbitrary workers or packages, execute tools
+adapter and require the exact task resource selector from
+`subagentTaskResourceId`; result returns reviewable merge-proposal evidence and
+explicitly does not mutate parent conversation state. Slice 24C still does not
+spawn hidden child agents, launch arbitrary workers or packages, execute tools
 outside the accepted module pack, open network/browser/search/login scope,
 register catalog entries, promote trust, merge results into conversation state,
 start autonomous work, expand public `/engine` APIs, add settings/profile

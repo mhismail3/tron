@@ -956,13 +956,11 @@ fn push_subagent_launch_selector(
     run_id: Option<&str>,
     args: &Value,
 ) {
-    let Some(task_id) = args
+    let task_id = args
         .get("taskId")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
-    else {
-        return;
-    };
+        .unwrap_or(invocation_id);
     let idempotency_key = model_capability_invocation_idempotency_key(
         run_id,
         session_id,

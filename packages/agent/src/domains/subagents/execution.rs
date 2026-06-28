@@ -244,8 +244,8 @@ pub(crate) async fn cancel_subagent_value(
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     let grant = inspect_grant(deps, invocation, "subagent_cancel").await?;
-    require_write_grant(&grant, "subagent_cancel")?;
     let resource_id = required_subagent_resource_id(payload, "subagent_cancel")?;
+    require_write_grant(&grant, "subagent_cancel", Some(&resource_id))?;
     let scope = resource_scope(invocation)?;
     let inspection = deps
         .engine_host
@@ -448,7 +448,6 @@ async fn launch_identity(
     operation: &str,
 ) -> Result<LaunchIdentity, CapabilityError> {
     let grant = inspect_grant(deps, invocation, operation).await?;
-    require_write_grant(&grant, operation)?;
     require_delegated_policy(payload)?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
@@ -457,6 +456,7 @@ async fn launch_identity(
         .transpose()?
         .unwrap_or_else(|| invocation.id.as_str().to_owned());
     let resource_id = task_resource_id(&scope, &task_id, &idempotency_key);
+    require_write_grant(&grant, operation, Some(&resource_id))?;
     Ok(LaunchIdentity {
         task_id,
         resource_id,
@@ -502,8 +502,8 @@ async fn inspect_current_task<'a>(
     operation: &str,
 ) -> Result<(EngineResourceInspection, EngineResourceVersion, Value), CapabilityError> {
     let grant = inspect_grant(deps, invocation, operation).await?;
-    require_read_grant(&grant, operation)?;
     let resource_id = required_subagent_resource_id(payload, operation)?;
+    require_read_grant(&grant, operation, Some(&resource_id))?;
     let scope = resource_scope(invocation)?;
     let inspection = deps
         .engine_host
@@ -559,7 +559,11 @@ async fn inspect_grant(
     Ok(grant)
 }
 
-fn require_read_grant(grant: &EngineGrant, operation: &str) -> Result<(), CapabilityError> {
+fn require_read_grant(
+    grant: &EngineGrant,
+    operation: &str,
+    resource_id: Option<&str>,
+) -> Result<(), CapabilityError> {
     require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
     require_explicit_grant_item(
         &grant.allowed_authority_scopes,
@@ -567,11 +571,15 @@ fn require_read_grant(grant: &EngineGrant, operation: &str) -> Result<(), Capabi
         operation,
     )?;
     require_explicit_grant_item(&grant.allowed_resource_kinds, SUBAGENT_TASK_KIND, operation)?;
-    require_explicit_subagent_task_selector(&grant.resource_selectors, operation)
+    require_explicit_subagent_task_selector(&grant.resource_selectors, operation, resource_id)
 }
 
-fn require_write_grant(grant: &EngineGrant, operation: &str) -> Result<(), CapabilityError> {
-    require_read_grant(grant, operation)?;
+fn require_write_grant(
+    grant: &EngineGrant,
+    operation: &str,
+    resource_id: Option<&str>,
+) -> Result<(), CapabilityError> {
+    require_read_grant(grant, operation, resource_id)?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, WRITE_SCOPE, operation)?;
     require_explicit_grant_item(
         &grant.allowed_authority_scopes,
@@ -583,6 +591,7 @@ fn require_write_grant(grant: &EngineGrant, operation: &str) -> Result<(), Capab
 fn require_explicit_subagent_task_selector(
     selectors: &[String],
     operation: &str,
+    resource_id: Option<&str>,
 ) -> Result<(), CapabilityError> {
     if let Some(selector) = selectors.iter().find(|selector| {
         let trimmed = selector.trim();
@@ -602,6 +611,14 @@ fn require_explicit_subagent_task_selector(
         return Err(invalid(format!(
             "{operation} requires an explicit {expected} selector"
         )));
+    }
+    if let Some(resource_id) = resource_id {
+        let expected = format!("resource:{resource_id}");
+        if !selectors.iter().any(|selector| selector == &expected) {
+            return Err(invalid(format!(
+                "{operation} requires an exact {expected} selector"
+            )));
+        }
     }
     Ok(())
 }

@@ -414,7 +414,12 @@ async fn subagent_launch_activates_accepted_module_pack_with_reviewable_result_r
         "subagent-runtime-request-1",
     )
     .await;
-    let subagent_grant = fixture.subagent_grant(&fixture.runtime_resource_id).await;
+    let subagent_grant = fixture
+        .subagent_grant(
+            &fixture.runtime_resource_id,
+            &fixture.subagent_task_resource_id("subagent-task-alpha", "subagent-launch-key"),
+        )
+        .await;
     let launch = fixture
         .invoke_with_grant(
             "subagent-launch",
@@ -563,7 +568,15 @@ async fn subagent_launch_partial_replay_recovers_existing_delegated_job_refs() {
     let launch = fixture
         .invoke_with_grant(
             "subagent-partial-replay-launch",
-            fixture.subagent_grant(&fixture.runtime_resource_id).await,
+            fixture
+                .subagent_grant(
+                    &fixture.runtime_resource_id,
+                    &fixture.subagent_task_resource_id(
+                        "subagent-partial-task",
+                        "subagent-partial-replay-key",
+                    ),
+                )
+                .await,
             Some("subagent-partial-replay-key"),
             json!({
                 "operation": "subagent_launch",
@@ -719,7 +732,11 @@ impl<'a> Fixture<'a> {
         .await
     }
 
-    async fn subagent_grant(&self, runtime_resource_id: &str) -> AuthorityGrantId {
+    async fn subagent_grant(
+        &self,
+        runtime_resource_id: &str,
+        subagent_task_resource_id: &str,
+    ) -> AuthorityGrantId {
         let selectors = [
             "kind:subagent_task".to_owned(),
             "kind:module_runtime_state".to_owned(),
@@ -729,6 +746,7 @@ impl<'a> Fixture<'a> {
             "kind:execution_output".to_owned(),
             format!("resource:{}", self.lifecycle_id),
             format!("resource:{runtime_resource_id}"),
+            format!("resource:{subagent_task_resource_id}"),
         ];
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         self.derive_grant(
@@ -910,6 +928,10 @@ impl<'a> Fixture<'a> {
 
     fn runtime_resource_id_for(&self, runtime_request_id: &str) -> String {
         runtime_resource_id(&self.session_id, &self.lifecycle_id, runtime_request_id)
+    }
+
+    fn subagent_task_resource_id(&self, task_id: &str, idempotency_key: &str) -> String {
+        subagent_task_resource_id(&self.session_id, task_id, idempotency_key)
     }
 
     async fn derive_grant(
@@ -1169,6 +1191,18 @@ fn runtime_resource_id(
         format!("session:{session_id}:{lifecycle_resource_id}:{runtime_request_id}").as_bytes(),
     );
     format!("module_runtime_state:{}", hex::encode(hasher.finalize()))
+}
+
+fn subagent_task_resource_id(session_id: &str, task_id: &str, idempotency_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"session");
+    hasher.update(b":");
+    hasher.update(session_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(task_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(idempotency_key.as_bytes());
+    format!("subagent_task:{}", hex::encode(hasher.finalize()))
 }
 
 fn sandbox_available() -> bool {
