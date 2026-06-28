@@ -525,8 +525,8 @@ Minimal shape:
 - retention/edit/delete policy evidence;
 - prompt-inclusion decision resource with user-visible proof.
 
-Implementation candidate: Slice 24D records a pending-review
-`memory_engine_module` manifest and keeps the behavior inside the existing
+Accepted Slice 24D records a pending-review `memory_engine_module` manifest and
+keeps the behavior inside the existing
 `capability::execute` memory audit surface. Retrieval is deterministic and
 resource-backed over redacted `memory_record` previews only, with ranked refs,
 confidence, provenance, bounded snippets, prompt-inclusion decision proof, and

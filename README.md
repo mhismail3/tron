@@ -700,8 +700,8 @@ provider errors to canonical failure envelopes, and redacts/bounds
 resources plus the reusable fail-closed freshness check consumed by future tool
 packages. Approval evidence is never an authority grant; existing engine
 authority grants remain the execution-permission primitive.
-`domains/memory` owns the Phase 2 memory foundation plus the pending-review
-Phase 3 Slice 24D memory module pack: source-backed memory
+`domains/memory` owns the Phase 2 memory foundation plus the accepted Phase 3
+Slice 24D memory module pack: source-backed memory
 engine/policy/record/prompt-trace/query/decision/eval-run/migration resource
 contracts, explicit disabled/active/shadow/compare policy state, redacted record
 audit, provider-safe prompt trace text, deterministic preview-backed
@@ -1258,10 +1258,10 @@ Current primitive operations:
 | `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled fallback. |
 | `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
 | `memory_inspect` | Inspect one redacted memory record and its version history within the current session. |
-| `memory_query_list` | List redacted current-session `memory_query` evidence records with deterministic resource-backed retrieval metadata, ranked record refs, bounded previews, redaction proof, and no embedding/vector index or raw body exposure. |
-| `memory_query_inspect` | Inspect one current-session `memory_query` evidence resource/version with bounded result refs, ranking/confidence/provenance, prompt-safe snippet policy evidence, and proof that retained memory body content was not included. |
-| `memory_decision_list` | List redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
-| `memory_decision_inspect` | Inspect one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
+| `memory_query_list` | Accepted Slice 24D operation that lists redacted current-session `memory_query` evidence records with deterministic resource-backed retrieval metadata, ranked record refs, bounded previews, redaction proof, and no embedding/vector index or raw body exposure. |
+| `memory_query_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_query` evidence resource/version with bounded result refs, ranking/confidence/provenance, prompt-safe snippet policy evidence, and proof that retained memory body content was not included. |
+| `memory_decision_list` | Accepted Slice 24D operation that lists redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
+| `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, and report evidence without invoking catalog targets. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution. |

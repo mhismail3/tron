@@ -1015,9 +1015,9 @@ warnings remain; DRC baseline entropy allow-list failures and SUWRF baseline
 findings under unchanged `packages/agent/src/domains/program_execution` remain
 outside accepted Slice 24C unless touched by later work.
 
-## Implementation Candidate Slice 24D: Memory Retrieval And Retention Module Pack
+## Accepted Slice 24D: Memory Retrieval And Retention Module Pack
 
-Status: pending review, not accepted baseline.
+Status: accepted baseline after Fix 3 re-review and mainline integration.
 
 Baseline:
 `9302651e780c86198a9c7a66a6a011149c24a84a`
@@ -1026,7 +1026,7 @@ Baseline:
 Implementation branch:
 `codex/phase-3-slice-24d-memory-module-pack`
 
-Implementation candidate scope:
+Accepted scope:
 
 - Implements deterministic resource-backed memory retrieval through existing
   `capability::execute` operations and existing `memory_record`,
@@ -1054,7 +1054,7 @@ restoration, arbitrary generated runtime execution, broad public `/engine`
 expansion, fixed native panels, SQLite migrations/tables, and production
 deploy/update behavior.
 
-Implementation candidate validation evidence:
+Accepted validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1068,6 +1068,15 @@ Implementation candidate validation evidence:
 | `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | expected baseline failure | 16 DRC tests passed; `replay_critical_entropy_is_allow_listed` still fails only on unchanged goals/web/tool-source UTC allow-list entries listed in the Slice 24D validation log. |
 | `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | expected baseline failure | 8 SUWRF tests passed; `no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets` still fails only on unchanged `packages/agent/src/domains/program_execution` fixed-surface residue. |
 | Discovery thread `019f0c4b-4f69-7162-b5bf-bb99efaf9830` | exact final status `implementation may start` | Discovery selected Slice 24D from accepted Slice 24C baseline and rejected embeddings/vector stores, hidden prompt injection, package/network side effects, public `/engine` expansion, repo-managed skills, SQLite migrations, fixed old panels, and production deploy behavior. |
+| Implementation thread `019f0c53-75bd-7713-a4c6-d72a6e0476e5` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24d-memory-module-pack` at `567630ea5c9fa7a5e88926d4dde8a8808ea08d05` (`feat: add memory retrieval module pack`). |
+| Independent review thread `019f0c92-e678-7f91-921c-57ab0c8e95d3` | exact verdict `changes required` | Review required provider-safe authority metadata redaction fixes for memory inspect evidence. |
+| Fix 1 thread `019f0c9b-3762-7282-8b93-df6fc20b0120` | exact final status `fix ready for review` | Added `4ae842c7d07b4f87a954efc58296019e8a6bf8bf` (`fix: redact memory inspect authority metadata`). |
+| Fix 1 re-review thread `019f0caa-cbe9-73e1-9d25-f3d4e3e0533a` | exact verdict `changes required` | Re-review required broader memory evidence authority metadata scrubbing. |
+| Fix 2 thread `019f0cb0-3c3e-7032-910f-61b022a0c0fa` | exact final status `fix ready for review` | Added `8e0bc21826ecf9da3b1a166473d576b889877bb1` (`fix: scrub memory evidence authority metadata`). |
+| Fix 2 re-review thread `019f0cb9-87a3-72a3-9a7f-6f3b16113161` | exact verdict `changes required` | Re-review required defensive scrubbing for grant-shaped memory evidence keys. |
+| Fix 3 thread `019f0cc0-c822-7d22-82be-65db355f4e2c` | exact final status `fix ready for review` | Added `783cb48c5042736843ff6266518f747bd2b1e767` (`fix: scrub grant-shaped memory evidence keys`). |
+| Fix 3 re-review thread `019f0cc7-ec17-7453-885e-6e1ca0c5ba66` | exact verdict `slice accepted` | Re-review verified the full Slice 24D stack and all three fixes, with no blocking findings. |
+| Mainline merge `6b052ba398cceb36c941221b87a0fa4466a349a5` plus closeout validation from `main` | exit 0 | Accepted Slice 24D implementation and fixes were merged into `main`; focused Rust, static inventory, formatting, type-check, personal-info, whitespace, ignored-file, and no-managed-skills validation passed from the integrated branch before push. |
 
 Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
