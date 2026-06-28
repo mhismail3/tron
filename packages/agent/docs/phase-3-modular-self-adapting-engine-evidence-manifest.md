@@ -1301,9 +1301,10 @@ Acceptance validation evidence:
 | Fix 1 re-review thread `019f0e09-0960-7931-ba20-b2a3c87277c7` | exact verdict `slice accepted` | Re-review verified baseline, implementation, and Fix 1 ancestry; resolved static inventory coverage; preserved metadata-only pending-review manifest scope; passed SACB/TMB/PCC/DESI/TPC/SSARR/ODA/PERF, focused module registry tests, fmt/check, personal-info, whitespace, ignored-file, and no-managed-skills guards; SOL failed only on unchanged marker-source backlog outside Slice 24H. |
 | Mainline merge `fccdc5cf7cc946d6e0ab8c94e51384f508603c99` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24H implementation and Fix 1 were merged into `main`; focused module registry, formatting, type-check, static inventory, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. SOL still fails only on unchanged marker-source backlog outside Slice 24H. |
 
-## Rejected Shape Slice 24I: Fixed Old iOS Product Panels
+## Accepted Rejected Shape Slice 24I: Fixed Old iOS Product Panels
 
-Status: rejected shape recorded with static/source-guard hardening.
+Status: accepted rejected-shape baseline after independent review and mainline
+integration.
 
 Discovery thread `019f0e19-3b68-7d11-8557-a8a66ecb3f09` selected Slice 24I
 (`P3MSA-INV-017`) with exact final status `implementation may start` from
@@ -1329,7 +1330,7 @@ hardware-device work, SQLite migrations, runtime behavior, public APIs,
 dependencies, repo-managed `packages/agent/skills`, and production
 deploy/update behavior.
 
-Implementation validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1344,6 +1345,9 @@ Implementation validation evidence:
 | `git diff --check` | exit 0 | Unstaged whitespace check passed. |
 | `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+| Implementation thread `019f0e1c-266d-7c32-93a2-4b061d5a8903` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24i-fixed-old-ios-product-panels` from baseline `ca5b17e1c2739ed7b4098abdce0e7563e7b575ce` at `37e9092087f19969b59f3a2254e23431d08574ff` with source-guard and Phase 3/DESI docs-only rejected-shape closeout. |
+| Independent review thread `019f0e23-c0ba-7c02-9138-f00c8870c827` | exact verdict `slice accepted` | Review verified branch/head/ancestry/cleanliness, no findings, docs/static/source-guard-only scope, README/iOS architecture non-acceptance boundaries, and passed focused iOS source guard, IOSAC, IOSTC, IARM, DESI, cargo fmt, personal-info, whitespace, ignored-file, and no-managed-skills checks. |
+| Mainline merge `ff055fb8b23aaa861460321a060dea4ba776af2c` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24I implementation was merged into `main`; focused source-guard/static docs, formatting, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. Existing provider/model/resource-store dead-code warnings remain unchanged. |
 
 Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; DRC may fail on unchanged goals/web/tool-source entropy

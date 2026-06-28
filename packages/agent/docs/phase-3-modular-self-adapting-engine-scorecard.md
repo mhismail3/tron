@@ -704,10 +704,10 @@ Out of scope:
   expansion, package-manager/network behavior, physical-device work, SQLite
   migrations, and repo-managed skills.
 
-Slice 24I records the rejection of fixed old iOS product panels as static
-evidence only. Future workflow-specific review surfaces remain deferred until
-their backend module contracts exist and generic cockpit rendering proves
-insufficient.
+Accepted Slice 24I records the rejection of fixed old iOS product panels as
+static evidence only after independent review and mainline integration. Future
+workflow-specific review surfaces remain deferred until their backend module
+contracts exist and generic cockpit rendering proves insufficient.
 
 ## Execution Protocol
 

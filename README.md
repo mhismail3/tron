@@ -934,6 +934,13 @@ semantics in iOS, add fixed product panels, or expose raw payloads, paths,
 commands, logs, stdout/stderr, env values, secrets, code, file contents, raw
 grant ids, raw authority ids, trace/invocation ids, token-like material, or
 personal-info literals.
+Accepted Phase 3 Slice 24I records fixed old iOS product panels as an
+accepted rejected-shape baseline: the iOS source guard explicitly rejects old
+approval/work panels and work dashboards alongside the existing source-control,
+memory, process, subagent, notification, skill, fabricated-activity, and other
+fixed-panel sentinels. It does not add native panels, runtime behavior, public
+API/DTO expansion, device work, package-manager/network behavior, SQLite
+migrations, or repo-managed skills.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
@@ -2539,8 +2546,9 @@ packages/ios-app/Sources/
   liquid-glass sheet chrome and shared segmented tab control. The Activity tab
   does not fabricate catalog/package activity locally
   and does not restore fixed source-control, memory, process, subagent,
-  notification, or skill panels. Refresh failures render as a degraded
-  cockpit status while preserving the last good server facts, and malformed
+  notification, skill, approval, work, or work-dashboard panels; Slice 24I
+  accepts that absence as source-guarded rejected-shape scope. Refresh failures
+  render as a degraded cockpit status while preserving the last good server facts, and malformed
   catalog entries surface catalog decode degradation instead of disappearing
   from projected counts. The primary chat shell does not mount a passive
   worker-runtime banner.
