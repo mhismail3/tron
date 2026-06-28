@@ -627,8 +627,10 @@ Implementation-candidate Slice 24G records a pending-review
 `notification_delivery_module` manifest only. It covers the existing
 server-owned `device_registration`, `notification`, and `notification_delivery`
 resources and existing device/notification execute operations, keeps the
-trusted system/admin split for device register/unregister, declares exact
-device/notification/resource authority needs, and keeps `networkPolicy: none`,
+trusted system/admin split for device register/unregister, declares
+device/notification/resource authority needs bounded to the existing resource
+kinds with `kind:device_registration`, `kind:notification`, and
+`kind:notification_delivery` selectors, and keeps `networkPolicy: none`,
 `installable: false`, and `executable: false`.
 
 Pending acceptance gates remain APNs credential custody, APNs environment

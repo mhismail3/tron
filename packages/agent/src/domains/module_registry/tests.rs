@@ -115,6 +115,60 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
     assert_side_effects_are_absent(&inspected);
     assert_provider_projection_has_no_raw_sensitive_material(&inspected);
 
+    let manifest = host
+        .inspect_resource("module_manifest:notification_delivery_module")
+        .await
+        .expect("inspect raw notification delivery manifest")
+        .expect("notification delivery manifest exists");
+    let payload = &manifest.versions[0].payload;
+    assert_manifest_resource_schema_version(
+        payload,
+        "device_registration",
+        crate::domains::device::contract::SCHEMA_VERSION,
+    );
+    assert_manifest_resource_schema_version(
+        payload,
+        "notification",
+        crate::domains::notifications::contract::NOTIFICATION_SCHEMA_VERSION,
+    );
+    assert_manifest_resource_schema_version(
+        payload,
+        "notification_delivery",
+        crate::domains::notifications::contract::DELIVERY_SCHEMA_VERSION,
+    );
+    let notification_resource_selectors = vec![
+        "kind:device_registration".to_owned(),
+        "kind:notification".to_owned(),
+        "kind:notification_delivery".to_owned(),
+    ];
+    for scope in ["resource.read", "resource.write"] {
+        assert_manifest_authority_need(
+            payload,
+            scope,
+            &[
+                "device_registration",
+                "notification",
+                "notification_delivery",
+            ],
+            &notification_resource_selectors,
+        );
+        let projected = projected_authority_need(resource, scope);
+        assert_eq!(
+            projected_text_items(projected, "resourceKinds"),
+            vec![
+                "device_registration".to_owned(),
+                "notification".to_owned(),
+                "notification_delivery".to_owned()
+            ],
+            "projected {scope} resource kinds must match manifest kind bounds"
+        );
+        assert_eq!(
+            projected_text_items(projected, "selectors"),
+            notification_resource_selectors,
+            "projected {scope} selectors must remain kind-selector bounded"
+        );
+    }
+
     let rendered =
         serde_json::to_string(&inspected).expect("serialize notification delivery module");
     for required in [
@@ -136,6 +190,9 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         "notifications.write",
         "resource.read",
         "resource.write",
+        "kind:device_registration",
+        "kind:notification",
+        "kind:notification_delivery",
         "apns_custody_gate",
         "environment_entitlement_device_gate",
         "delivery_failure_evidence",
@@ -1153,6 +1210,90 @@ fn valid_manifest_payload(module_id: &str) -> Value {
             "personalInfoLiterals": "absent"
         }
     })
+}
+
+fn assert_manifest_resource_schema_version(
+    payload: &Value,
+    kind: &str,
+    expected_schema_version: &str,
+) {
+    let declaration = payload["resourceDeclarations"]
+        .as_array()
+        .expect("resource declarations")
+        .iter()
+        .find(|declaration| declaration["kind"] == json!(kind))
+        .unwrap_or_else(|| panic!("missing {kind} resource declaration"));
+    assert_eq!(
+        declaration["payloadSchemaVersion"],
+        json!(expected_schema_version),
+        "{kind} payload schema version must match domain contract"
+    );
+}
+
+fn assert_manifest_authority_need(
+    payload: &Value,
+    scope: &str,
+    expected_resource_kinds: &[&str],
+    expected_selectors: &[String],
+) {
+    let need = payload["authorityNeeds"]
+        .as_array()
+        .expect("authority needs")
+        .iter()
+        .find(|need| need["scope"] == json!(scope))
+        .unwrap_or_else(|| panic!("missing {scope} authority need"));
+    assert_eq!(
+        raw_text_items(need, "resourceKinds"),
+        expected_resource_kinds
+            .iter()
+            .map(|kind| (*kind).to_owned())
+            .collect::<Vec<_>>(),
+        "{scope} resource kinds must stay bounded"
+    );
+    assert_eq!(
+        raw_text_items(need, "selectors"),
+        expected_selectors.to_vec(),
+        "{scope} selectors must stay kind-selector bounded"
+    );
+    assert!(
+        expected_selectors
+            .iter()
+            .all(|selector| selector.starts_with("kind:") && selector != "kind:*"),
+        "{scope} must not declare wildcard or non-kind selectors"
+    );
+}
+
+fn raw_text_items(value: &Value, field: &str) -> Vec<String> {
+    value[field]
+        .as_array()
+        .unwrap_or_else(|| panic!("{field} array"))
+        .iter()
+        .map(|item| item.as_str().unwrap_or_else(|| panic!("{field} string")))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn projected_authority_need<'a>(resource: &'a Value, scope: &str) -> &'a Value {
+    resource["authorityNeeds"]["items"]
+        .as_array()
+        .expect("projected authority needs")
+        .iter()
+        .find(|need| need.pointer("/scope/text").and_then(Value::as_str) == Some(scope))
+        .unwrap_or_else(|| panic!("missing projected {scope} authority need"))
+}
+
+fn projected_text_items(value: &Value, field: &str) -> Vec<String> {
+    value[field]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("projected {field} array"))
+        .iter()
+        .map(|item| {
+            item.get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("projected {field} text"))
+        })
+        .map(str::to_owned)
+        .collect()
 }
 
 fn assert_side_effects_are_absent(value: &Value) {

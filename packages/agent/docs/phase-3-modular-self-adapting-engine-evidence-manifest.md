@@ -1200,13 +1200,14 @@ pattern. It records module metadata only for the existing server-owned
 `device_registration`, `notification`, and `notification_delivery` resources
 and the existing device/notification execute operations.
 
-The candidate manifest declares exact device, notification, and resource
-authority needs, preserves trusted system/admin authority for
-`device_register` and `device_unregister`, keeps `networkPolicy: none`, and
-marks the module non-installable and non-executable. Validation checks remain
-pending gates for APNs credential custody, APNs environment labels, entitlement
-proof, physical-device validation, delivery-failure evidence, provider
-redaction, and native inbox decisions.
+The candidate manifest declares device, notification, and resource authority
+needs bounded to the existing resource kinds and their kind selectors,
+preserves trusted system/admin authority for `device_register` and
+`device_unregister`, keeps `networkPolicy: none`, and marks the module
+non-installable and non-executable. Validation checks remain pending gates for
+APNs credential custody, APNs environment labels, entitlement proof,
+physical-device validation, delivery-failure evidence, provider redaction, and
+native inbox decisions.
 
 Rejected scope remains deferred or forbidden: live APNs transport, APNs
 entitlements, native inbox UI or deep links, physical-device operations,
@@ -1219,7 +1220,7 @@ Implementation-candidate validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml module_registry --lib -- --nocapture` | exit 0 | Module registry seed/projection tests passed, including the pending-review `notification_delivery_module` manifest, exact declared operation/resource/authority metadata, no side effects, and provider-safety checks. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_registry --lib -- --nocapture` | exit 0 | Module registry seed/projection tests passed, including the pending-review `notification_delivery_module` manifest, domain schema-version constants, kind-selector-bounded resource authority metadata, no side effects, and provider-safety checks. |
 | Discovery thread `019f0da2-897b-7d13-a150-6594cd4f7aa9` | exact final status `implementation may start` | Discovery selected metadata-only Slice 24G from accepted Slice 24F baseline and rejected live APNs, native inbox, entitlements, physical-device operations, credential mutation, package-manager execution, network side effects, SQLite migrations, public notification APIs, fixed native panels, and production deploy behavior. |
 
 Known unchanged caveats to verify during closeout: existing

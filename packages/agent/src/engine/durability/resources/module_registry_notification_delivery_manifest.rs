@@ -8,6 +8,11 @@
 use serde_json::{Value, json};
 
 use super::module_registry_definitions::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
+use super::types::{
+    DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, NOTIFICATION_DELIVERY_KIND,
+    NOTIFICATION_DELIVERY_SCHEMA_ID, NOTIFICATION_KIND, NOTIFICATION_SCHEMA_ID,
+};
+use crate::domains::{device::contract as device_contract, notifications::contract};
 
 pub(super) fn notification_delivery_module_manifest() -> Value {
     json!({
@@ -32,17 +37,17 @@ pub(super) fn notification_delivery_module_manifest() -> Value {
             {"operation": "notification_mark_all_read", "effect": "write", "providerVisible": true, "description": "Mark current-scope notifications read with badge evidence"}
         ],
         "resourceDeclarations": [
-            {"kind": "device_registration", "schemaId": "tron.resource.device_registration.v1", "payloadSchemaVersion": "tron.device.registration.v1", "scope": "session_or_workspace"},
-            {"kind": "notification", "schemaId": "tron.resource.notification.v1", "payloadSchemaVersion": "tron.notification.v1", "scope": "session_or_workspace"},
-            {"kind": "notification_delivery", "schemaId": "tron.resource.notification_delivery.v1", "payloadSchemaVersion": "tron.notification.delivery.v1", "scope": "session_or_workspace"}
+            {"kind": DEVICE_REGISTRATION_KIND, "schemaId": DEVICE_REGISTRATION_SCHEMA_ID, "payloadSchemaVersion": device_contract::SCHEMA_VERSION, "scope": "session_or_workspace"},
+            {"kind": NOTIFICATION_KIND, "schemaId": NOTIFICATION_SCHEMA_ID, "payloadSchemaVersion": contract::NOTIFICATION_SCHEMA_VERSION, "scope": "session_or_workspace"},
+            {"kind": NOTIFICATION_DELIVERY_KIND, "schemaId": NOTIFICATION_DELIVERY_SCHEMA_ID, "payloadSchemaVersion": contract::DELIVERY_SCHEMA_VERSION, "scope": "session_or_workspace"}
         ],
         "authorityNeeds": [
-            {"scope": "device.read", "purpose": "inspect redacted device registration projections", "resourceKinds": ["device_registration"], "selectors": ["kind:device_registration"]},
-            {"scope": "device.write", "purpose": "trusted system/admin device register and unregister authority", "resourceKinds": ["device_registration"], "selectors": ["kind:device_registration", "resource:<device_registration_id>"]},
-            {"scope": "notifications.read", "purpose": "inspect notification inbox and delivery evidence projections", "resourceKinds": ["notification", "notification_delivery"], "selectors": ["kind:notification", "kind:notification_delivery"]},
-            {"scope": "notifications.write", "purpose": "record notification read state, badge, inbox, and delivery evidence", "resourceKinds": ["notification", "notification_delivery"], "selectors": ["kind:notification", "kind:notification_delivery", "resource:<notification_id>"]},
-            {"scope": "resource.read", "purpose": "inspect exact device registration, notification, and notification delivery resource versions", "resourceKinds": ["device_registration", "notification", "notification_delivery"]},
-            {"scope": "resource.write", "purpose": "append server-owned device, notification, and delivery evidence under exact selectors", "resourceKinds": ["device_registration", "notification", "notification_delivery"]}
+            {"scope": contract::DEVICE_READ_SCOPE, "purpose": "inspect redacted device registration projections", "resourceKinds": [DEVICE_REGISTRATION_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}")]},
+            {"scope": device_contract::WRITE_SCOPE, "purpose": "trusted system/admin device register and unregister authority", "resourceKinds": [DEVICE_REGISTRATION_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}"), "resource:<device_registration_id>"]},
+            {"scope": contract::READ_SCOPE, "purpose": "inspect notification inbox and delivery evidence projections", "resourceKinds": [NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]},
+            {"scope": contract::WRITE_SCOPE, "purpose": "record notification read state, badge, inbox, and delivery evidence", "resourceKinds": [NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}"), "resource:<notification_id>"]},
+            {"scope": contract::RESOURCE_READ_SCOPE, "purpose": "inspect device registration, notification, and notification delivery resource versions under kind selectors", "resourceKinds": [DEVICE_REGISTRATION_KIND, NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}"), format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]},
+            {"scope": contract::RESOURCE_WRITE_SCOPE, "purpose": "append server-owned device, notification, and delivery evidence under kind selectors", "resourceKinds": [DEVICE_REGISTRATION_KIND, NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}"), format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]}
         ],
         "settingsDeclarations": [],
         "dependencyIntents": [],
