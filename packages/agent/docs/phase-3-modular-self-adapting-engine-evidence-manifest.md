@@ -948,9 +948,9 @@ pre-existing marker-source inventory backlog outside the touched Slice 24B
 files; exploratory HRA tracked-file coverage still reports the unrelated
 pre-existing `grant_file_git_tests.rs` missing row.
 
-## P3MSA-INV-011 Implementation Candidate: Slice 24C Subagent Delegation Module Pack Activation
+## Accepted Slice 24C: Subagent Delegation Module Pack Activation
 
-Status: `implementation-candidate` / `pending_review`.
+Status: accepted, current baseline.
 
 Baseline:
 `83c7080a8be5b52be00c304803d85d5aa504e9b8`
@@ -959,7 +959,7 @@ Baseline:
 Implementation branch:
 `codex/p3msa-inv-011-subagent-delegation-module-pack`
 
-Candidate scope:
+Accepted scope:
 
 - Extends provider-visible `subagent_launch`, `subagent_status`,
   `subagent_result`, and `subagent_cancel` through the existing
@@ -986,19 +986,31 @@ wildcard selectors, broad grants, inherited `agent_state`, old native subagent
 panels, new SQLite migrations, package-manager/network side effects,
 repo-managed `packages/agent/skills`, and production deploy/update behavior.
 
-Candidate validation evidence:
+Accepted validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/model/resource-store dead-code warnings were emitted. |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Agent crate formatting passed after the Slice 24C candidate edits. |
-| `cargo test --manifest-path packages/agent/Cargo.toml subagent --lib` | exit 0 | 26 focused subagent tests passed, including delegated launch refs, explicit selection rejection, bounded handoff rejection, idempotency, cancellation, scope, authority, and non-goal guards. |
-| `cargo test --manifest-path packages/agent/Cargo.toml module_program_execution --lib` | exit 0 | 6 focused module-program-execution tests passed, including the new subagent launch/result integration through the accepted module pack plus existing runtime/job binding and provider-safety regressions. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib clarification_describes_delegated_subagent_module_pack_contract` | exit 0 | Focused OpenAI provider guidance regression passed and verifies the active delegated module-pack contract is documented instead of the old bounded-placeholder text. |
+| `cargo test --manifest-path packages/agent/Cargo.toml subagent --lib` | exit 0 | Focused subagent tests passed, including exact task-selector denial, delegated runtime/job refs, grant derivation, launch/replay integration, provider guidance, scope/idempotency, cancellation, authority, and non-goal guards. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_program_execution --lib` | exit 0 | Focused module-program-execution tests passed, including exact runtime/job grants, mismatched runtime/job rejection, subagent delegation integration, and provider-safety regressions. |
 | PCC/TPC/TMB/SACB/DESI inventory gates | exit 0 | Primitive cleanup, true primitive cleanup, true modularity, security-authority, and documentation evidence inventory gates passed for the touched source/docs/tests. |
-| PMBD/PPACD/CSD/ODA/PERF/SSARR/SUWRF static gates | exit 0 | Provider-model, public-protocol, concurrency scheduling, observability, performance, SSARR predecessor, and self-updating worker inventory/resource gates passed for the touched surfaces. |
+| PMBD/PPACD/CSD/ODA/PERF/SSARR static gates | exit 0 | Provider-model, public-protocol, concurrency scheduling, observability, performance, and SSARR predecessor gates passed for the touched surfaces. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants` | expected baseline failure | 16 DRC tests passed; `replay_critical_entropy_is_allow_listed` still fails only on the unchanged goals/web/tool_sources UTC allow-list baseline listed in the handoff. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | expected baseline failure | SUWRF still fails only on unchanged `packages/agent/src/domains/program_execution` fixed-surface residue outside accepted Slice 24C. |
+| Discovery thread `019f0b97-48c9-72b1-8ad5-9954ba9c9ccc` | exact final status `implementation may start` | Discovery selected Slice 24C from accepted Slice 24B baseline and rejected hidden autonomous spawning, unbounded context transfer, old fixed panels, public `/engine` expansion, repo-managed skills, package-manager/network side effects, and production deploy behavior. |
+| Implementation thread `019f0b9a-889d-7ce3-9a5c-af2ff2326cc8` | exact final status `implementation complete` | Implementation landed `c0f8b9619a4c0aa6cd611165e38c2d2570d7b633` (`feat: activate subagent delegation module pack`) on the Slice 24C branch. |
+| Independent review thread `019f0bbc-9601-70f2-8491-5fbf4365cbf7` | exact verdict `changes required` | Review found delegated module authority and partial replay recovery gaps. |
+| Fix 1 thread `019f0bc7-bd50-7b40-8e09-b549a2a51cbc` | exact final status `fix ready for review` | Fix 1 landed `b08ccb6914f7859c34bbc829bb50b61493f14098` (`fix: harden subagent delegated module authority`). |
+| Fix 1 re-review thread `019f0be3-52a1-7ff0-ae88-a88146eddf45` | exact verdict `changes required` | Re-review found broad `kind:subagent_task` authority was still sufficient and cleanup evidence rows were stale. |
+| Fix 2 thread `019f0bf0-e0bb-7011-ae84-e3db25cd5024` | exact final status `fix ready for review` | Fix 2 landed `372aee0beed72c5cd129ac21c5be83658922fbd4` (`fix: enforce exact delegated subagent selectors`). |
+| Fix 2 re-review thread `019f0c11-8186-78f3-ad0d-55fa93b02e42` | exact verdict `changes required` | Re-review found stale provider guidance, imprecise evidence-manifest selector wording, and a stale TPC jobs-service row. |
+| Fix 3 thread `019f0c24-658a-7af1-ae95-6bfcea4f6873` | exact final status `fix ready for review` | Fix 3 landed `f8a59f84c51688845ab34a935192f9883e9904b8` (`fix: update delegated subagent provider guidance`). |
+| Fix 3 re-review thread `019f0c33-71d1-7862-8043-eec30b5344af` | exact verdict `slice accepted` | Re-review verified the full Slice 24C stack and all three fixes, with no blocking findings. |
+| Mainline merge `8e142a5a3eb7d14c016da80ddae6ea064dc29008` plus closeout validation from `main` | exit 0 | Accepted Slice 24C implementation and fixes were merged into `main`; focused Rust, static inventory, formatting, type-check, and hygiene validation passed from the integrated branch. |
 
 Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; DRC baseline entropy allow-list failures and SUWRF baseline
 findings under unchanged `packages/agent/src/domains/program_execution` remain
-outside this Slice 24C candidate unless touched by review.
+outside accepted Slice 24C unless touched by later work.

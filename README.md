@@ -1184,7 +1184,7 @@ Current primitive operations:
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
 | `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
-| `subagent_launch` | Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
+| `subagent_launch` | Accepted Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
 | `subagent_status` | Inspect one scoped `subagent_task`, then inspect the delegated module runtime/job binding through `module_program_execution_status`, returning bounded/redacted task and delegated job refs without raw output payloads. |
 | `subagent_result` | Return a reviewable merge proposal for one scoped delegated subagent task by reading the bound module runtime/job refs; it proves `parentConversationMutated: false` and does not merge output into conversation state. |
 | `subagent_cancel` | Cancel one nonterminal scoped delegated subagent task with idempotency and optional expected subagent version freshness, delegating cancellation through the bound module runtime/job pair before recording subagent cancellation provenance. |
@@ -1554,7 +1554,7 @@ authority plus a matching `kind:subagent_task` selector, stored kind/schema
 revalidation, allowlisted bounded/redacted projection, scope isolation, and
 `networkPolicy: none`.
 
-Slice 24C activates provider-visible subagent lifecycle operation values
+Accepted Slice 24C activates provider-visible subagent lifecycle operation values
 `subagent_launch`, `subagent_status`, `subagent_result`, and
 `subagent_cancel` behind the same single `capability::execute` primitive.
 Launch requires trusted current-session context, derived non-bootstrap
@@ -1570,7 +1570,7 @@ runtime/program/job refs. Status/result/cancel follow the delegated
 module-runtime/job binding through the accepted `module_program_execution_*`
 adapter and require the exact task resource selector from
 `subagentTaskResourceId`; result returns reviewable merge-proposal evidence and
-explicitly does not mutate parent conversation state. Slice 24C still does not
+explicitly does not mutate parent conversation state. Accepted Slice 24C still does not
 spawn hidden child agents, launch arbitrary workers or packages, execute tools
 outside the accepted module pack, open network/browser/search/login scope,
 register catalog entries, promote trust, merge results into conversation state,

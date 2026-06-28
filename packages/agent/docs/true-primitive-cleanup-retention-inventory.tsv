@@ -64,7 +64,7 @@ packages/agent/src/domains/agent/contract.rs	implementation	agent_runtime	TPC-6	
 packages/agent/src/domains/agent/deps.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/handlers.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
-packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	implementation	agent_runtime	TPC-10/P3MSA-INV-011	capability-runtime grant derivation helper retained for Slice 24C implementation-candidate delegated subagent exact selectors pending review
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	implementation	agent_runtime	TPC-10/P3MSA-INV-011	capability-runtime grant derivation helper retained for accepted Slice 24C delegated subagent exact selectors
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -377,7 +377,7 @@ packages/agent/src/domains/settings/profile/types/server.rs	support	settings	TPC
 packages/agent/src/domains/settings/profile/types/ui.rs	support	settings	TPC-6	profile setting decode, storage, and update support
 packages/agent/src/domains/system/mod.rs	implementation	domain_worker	TPC-3	retained narrow domain worker implementation
 packages/agent/src/engine/authority/compensation.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
-packages/agent/src/engine/authority/grants/authorization.rs	primitive	engine	TPC-2/P3MSA-INV-011	engine authority substrate retained for Slice 24C implementation-candidate delegated subagent exact selector enforcement pending review
+packages/agent/src/engine/authority/grants/authorization.rs	primitive	engine	TPC-2/P3MSA-INV-011	engine authority substrate retained for accepted Slice 24C delegated subagent exact selector enforcement
 packages/agent/src/engine/authority/grants/derivation.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/authority/grants/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/authority/grants/model.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -1767,7 +1767,7 @@ packages/agent/src/domains/web/web_extraction_tests.rs	test	test_harness	Phase2-
 packages/agent/src/domains/web/web_robots_tests.rs	test	test_harness	Phase2-Slice8E	Web robots tests retained for pending-review robots policy authority, parser, evidence, safety, metadata-only sitemap, and replay regressions.
 packages/agent/src/domains/web/web_source_tests.rs	test	test_harness	Phase2-Slice8B	Web source inspection tests retained for read authority, scope, version freshness, bounded snippets, and no-network regressions.
 packages/agent/src/engine/durability/resources/web_definitions.rs	primitive	engine	Phase2-Slice8E	Web resource definitions retained as engine-owned web_source and web_robots_policy contract schemas.
-packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_tests.rs	test	test_harness	Phase2-Slice8F/P3MSA-INV-011	Capability invocation executor grant tests retained for Slice 24C implementation-candidate delegated subagent runtime grant regressions pending review.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_tests.rs	test	test_harness	Phase2-Slice8F/P3MSA-INV-011	Capability invocation executor grant tests retained for accepted Slice 24C delegated subagent runtime grant regressions.
 packages/agent/src/domains/web/robots_link.rs	implementation	web	Phase2-Slice8F	Web robots link service retained for pending-review fetch-side web_robots_policy evidence validation and bounded robotsPolicyRefs linkage.
 packages/agent/src/domains/web/web_fetch_robots_link_tests.rs	test	test_harness	Phase2-Slice8F	Web fetch robots link tests retained for pending-review allow/deny/stale/wrong-scope/target-mismatch and bounded-ref regressions.
 packages/agent/src/domains/capability/operations/tool_sources.rs	implementation	capability_execute	TPC-10/P2AER-S9A	read-only provider execute adapter for tool-source proposal inspection

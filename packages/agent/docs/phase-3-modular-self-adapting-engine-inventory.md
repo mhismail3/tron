@@ -173,6 +173,28 @@ APIs, production deploy/update behavior, or repo-managed
 `current_baseline` after independent Fix 2 re-review acceptance and mainline
 integration.
 
+P3MSA-INV-011 is accepted baseline after Slice 24C: Subagent Delegation Module
+Pack Activation. The accepted slice activates provider-visible
+`subagent_launch`, `subagent_status`, `subagent_result`, and `subagent_cancel`
+only through the existing `capability::execute` primitive and only by composing
+with the accepted jobs/program-execution module pack. Launch records a scoped
+`subagent_task` parent lifecycle, requires explicit `modelPolicy:
+accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`,
+`modulePackId: jobs_program_execution`, bounded objective/prompt summaries,
+summary-only handoff refs, exact `resource:<subagent_task_id>` selectors plus
+`kind:subagent_task`, exact delegated module lifecycle/runtime/job selectors,
+one running task per current scope, and `networkPolicy: none`. Status, result,
+and cancel follow the delegated module-runtime/job binding through
+`module_program_execution_*`; result returns reviewable merge-proposal evidence
+and never mutates parent conversation state. The accepted slice deliberately
+does not add hidden autonomous spawning, unbounded context transfer, raw
+prompts/results/tool logs, raw command output, local paths, secrets, raw grant
+or authority ids, public `/engine` APIs, fixed native subagent panels, package
+manager/network side effects, repo-managed `packages/agent/skills`, or
+production deploy/update behavior. It moves `P3MSA-INV-011` from
+`pending_review` to `current_baseline` after independent Fix 3 re-review
+acceptance and mainline integration.
+
 SSARR classification: `self-sufficient-agent-runtime-readiness` treats this
 Phase 3 inventory as planning plus accepted module-plane and module-pack
 foundation evidence, not successor runtime execution completion proof.
