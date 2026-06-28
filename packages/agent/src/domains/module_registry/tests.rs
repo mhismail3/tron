@@ -136,6 +136,21 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         "notification_delivery",
         crate::domains::notifications::contract::DELIVERY_SCHEMA_VERSION,
     );
+    assert_projected_resource_schema_version(
+        resource,
+        "device_registration",
+        crate::domains::device::contract::SCHEMA_VERSION,
+    );
+    assert_projected_resource_schema_version(
+        resource,
+        "notification",
+        crate::domains::notifications::contract::NOTIFICATION_SCHEMA_VERSION,
+    );
+    assert_projected_resource_schema_version(
+        resource,
+        "notification_delivery",
+        crate::domains::notifications::contract::DELIVERY_SCHEMA_VERSION,
+    );
     let notification_resource_selectors = vec![
         "kind:device_registration".to_owned(),
         "kind:notification".to_owned(),
@@ -1227,6 +1242,26 @@ fn assert_manifest_resource_schema_version(
         declaration["payloadSchemaVersion"],
         json!(expected_schema_version),
         "{kind} payload schema version must match domain contract"
+    );
+}
+
+fn assert_projected_resource_schema_version(
+    resource: &Value,
+    kind: &str,
+    expected_schema_version: &str,
+) {
+    let declaration = resource["resourceDeclarations"]["items"]
+        .as_array()
+        .expect("projected resource declarations")
+        .iter()
+        .find(|declaration| declaration.pointer("/kind/text").and_then(Value::as_str) == Some(kind))
+        .unwrap_or_else(|| panic!("missing projected {kind} resource declaration"));
+    assert_eq!(
+        declaration
+            .pointer("/payloadSchemaVersion/text")
+            .and_then(Value::as_str),
+        Some(expected_schema_version),
+        "projected {kind} payload schema version must match domain contract"
     );
 }
 

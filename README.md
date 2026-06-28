@@ -763,7 +763,8 @@ Slice 24G implementation-candidate metadata also seeds a pending-review
 `device_registration`, `notification`, and `notification_delivery` resource
 substrate. It declares only existing device list/inspect/register/unregister
 and notification send/list/inspect/read/badge operation values, exact
-device/notification/resource authority needs, and validation gates for APNs
+device/notification operation authority needs, kind-selector-bounded generic
+resource authority needs, and validation gates for APNs
 credential custody, APNs environment labels, entitlement proof, physical-device
 validation, delivery-failure evidence, provider redaction, and native inbox
 product decisions. It does not enable APNs transport, native inbox UI,
