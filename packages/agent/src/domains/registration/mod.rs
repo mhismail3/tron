@@ -35,7 +35,7 @@ use crate::domains::{
     module_authoring, module_dependencies, module_install, module_lifecycle, module_registry,
     module_runtime, module_validation, notifications, program_execution, prompt_artifacts,
     repository_tree, scheduler, session, settings, subagents, system, tool_sources, transcription,
-    update_diagnostics, web, worker_lifecycle,
+    update_diagnostics, web, web_research, worker_lifecycle,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -83,6 +83,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         module_lifecycle::worker_module(&deps)?,
         module_runtime::worker_module(&deps)?,
         module_activity::worker_module(&deps)?,
+        web_research::worker_module(&deps)?,
         memory::worker_module(&deps)?,
         jobs::worker_module(&deps)?,
         git::worker_module(&deps)?,

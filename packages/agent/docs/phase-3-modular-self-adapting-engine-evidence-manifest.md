@@ -1134,3 +1134,53 @@ Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; SOL has a broad pre-existing marker-source backlog, DRC has
 unchanged goals/web/tool-source UTC allow-list entries, and SUWRF has unchanged
 `packages/agent/src/domains/program_execution` residue outside Slice 24E.
+
+## Implementation Candidate Slice 24F: Web Browser And Research Module Pack
+
+Status: implementation candidate pending independent review.
+
+Slice 24F (`P3MSA-INV-014`) adds a new `domains/web_research` owner for
+metadata-only web research custody. It records `web_research_request`,
+`web_research_review`, and `web_research_source` resources and exposes
+request/review/source record/list/inspect operation values through the existing
+`capability::execute` primitive. It also seeds a pending-review
+`web_research_module` manifest through the split manifest-file pattern.
+
+The candidate requires `web_research.read`, `web_research.write`, and
+`resource.read`/`resource.write` scopes, exact `kind:web_research_*`
+selectors, exact `resource:<id>` selectors for inspect and linked writes, and
+`networkPolicy: none`. Records and projections are bounded summaries,
+policy labels, source/citation/robots/dependency/current-scope/evidence refs,
+trace/replay refs, side-effect proof, and idempotency fingerprints only.
+
+Rejected scope remains deferred or forbidden: search provider integration,
+browser drivers, crawling, sitemap traversal, logged-in cookie custody, raw
+HTML or page dumps, browser logs, credentials, package-manager execution,
+dependency restoration, network-enabled runtime defaults, public `/engine`
+expansion, fixed native research UI, repo-managed `packages/agent/skills`, and
+production deploy/update behavior.
+
+Implementation-candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Agent crate formatting passed after Slice 24F edits. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/model/resource-store dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml web_research -- --nocapture` | exit 0 | Focused web research resource schema, request/review/source record/list/inspect, provider-safe projection, replay/idempotency, unsafe payload rejection, exact selector, network-policy, module manifest, and no-raw-material tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml web_research_runtime_grants_are_scoped_to_research_resources -- --nocapture` | exit 0 | Runtime grant derivation produced web research/resource scopes, exact kind and resource selectors, no `agent_state`, and `networkPolicy: none`. |
+| `cargo test --manifest-path packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets -- --nocapture` | exit 0 | Capability execute schema includes the web research operation values and request fields while preserving the single execute primitive. |
+| Focused provider guidance tests | exit 0 | OpenAI capability guidance names the metadata-only web research operations and keeps network/browser/search/crawl/cookie behavior outside provider-visible defaults. |
+| SACB, TMB, PCC, TPC, PMBD, PPACD, DESI, SSARR, ODA, and PERF invariant suites | exit 0 | Static authority, modularity, cleanup, provider-boundary, public-protocol, documentation/evidence, readiness, observability, and resource-governance inventories passed for touched Slice 24F surfaces. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | expected baseline failure | DRC still fails only on unchanged goals/web/tool-source entropy allow-list entries outside Slice 24F. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` | expected baseline failure | SOL still fails only on the broad pre-existing marker-source backlog outside Slice 24F. |
+| `cargo test --quiet --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | expected baseline failure | SUWRF still fails only on unchanged `packages/agent/src/domains/program_execution` fixed-surface residue. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full source scan found no personal-info literals. |
+| `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed for unstaged and staged diffs. |
+| Tracked ignored-file scan and `test ! -e packages/agent/skills` | exit 0 | No tracked ignored files were reported, and repo-managed `packages/agent/skills` remains absent. |
+| Discovery thread `019f0d3b-3b61-7bf2-a8db-630e7214d45e` | exact final status `implementation may start` | Discovery selected Slice 24F from accepted Slice 24E baseline and rejected broad browser automation, login/cookie reuse without authority, unbounded crawl/search, raw dumps/logs, network-enabled runtime defaults, dependency restoration, package-manager execution, fixed native panels, public `/engine` expansion, and production deploy behavior. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; DRC may fail on unchanged goals/web/tool-source entropy
+allow-list entries, SUWRF may fail on unchanged
+`packages/agent/src/domains/program_execution` fixed-surface residue, and SOL
+may fail on the unchanged marker-source backlog outside Slice 24F.

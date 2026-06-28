@@ -34,6 +34,7 @@ use super::types::{
 use super::ui_surface::ui_surface_schema;
 use super::update_diagnostics_definitions::update_diagnostics_resource_type_definitions;
 use super::web_definitions::web_resource_type_definitions;
+use super::web_research_definitions::web_research_resource_type_definitions;
 use crate::engine::kernel::ids::WorkerId;
 
 /// Built-in resource kinds for the collapsed modular substrate.
@@ -682,6 +683,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(module_dependencies_resource_type_definitions());
     definitions.extend(module_lifecycle_resource_type_definitions());
     definitions.extend(module_runtime_resource_type_definitions());
+    definitions.extend(web_research_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions.extend(media_resource_type_definitions());
     definitions.extend(notification_resource_type_definitions());

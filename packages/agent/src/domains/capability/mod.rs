@@ -103,6 +103,7 @@
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
 //! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
+//! | `web_research_contract` | Web research request/review/source schema fields |
 //! | `module_install_contract` | Module-install review request schema fields |
 //! | `module_lifecycle_contract` | Module-lifecycle request schema fields |
 //! | `module_runtime_contract` | Module-runtime supervisor schema fields |
@@ -148,6 +149,7 @@ mod prompt_artifacts_contract;
 mod repository_tree_contract;
 mod scheduler_contract;
 mod update_diagnostics_contract;
+mod web_research_contract;
 pub(crate) use operations::execute_value;
 
 use std::sync::Arc;

@@ -60,6 +60,18 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_dependency_policy_list"
             | "module_dependency_policy_inspect"
     );
+    let web_research_operation = matches!(
+        operation,
+        "web_research_request_record"
+            | "web_research_request_list"
+            | "web_research_request_inspect"
+            | "web_research_review_record"
+            | "web_research_review_list"
+            | "web_research_review_inspect"
+            | "web_research_source_record"
+            | "web_research_source_list"
+            | "web_research_source_inspect"
+    );
     let module_lifecycle_operation = matches!(
         operation,
         "module_lifecycle_request"
@@ -101,6 +113,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_dependencies_operation
+        || web_research_operation
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
@@ -126,6 +139,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_validation_operation
         && !module_install_operation
         && !module_dependencies_operation
+        && !web_research_operation
         && !module_lifecycle_operation
         && !module_runtime_operation
         && !module_program_execution_operation
@@ -342,6 +356,27 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
+        "web_research_request_list"
+            | "web_research_request_inspect"
+            | "web_research_review_list"
+            | "web_research_review_inspect"
+            | "web_research_source_list"
+            | "web_research_source_inspect"
+    ) {
+        allowed_authority_scopes
+            .extend(["web_research.read".to_owned(), "resource.read".to_owned()]);
+    } else if matches!(
+        operation,
+        "web_research_request_record" | "web_research_review_record" | "web_research_source_record"
+    ) {
+        allowed_authority_scopes.extend([
+            "web_research.read".to_owned(),
+            "web_research.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
         "module_lifecycle_list" | "module_lifecycle_inspect"
     ) {
         allowed_authority_scopes.extend([
@@ -515,6 +550,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_dependencies_operation
+        || web_research_operation
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
@@ -632,6 +668,23 @@ pub(super) async fn derive_capability_runtime_grant(
             "module_dependency_request".to_owned(),
             "module_dependency_decision".to_owned(),
             "module_dependency_policy".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "web_research_request_record"
+            | "web_research_request_list"
+            | "web_research_request_inspect"
+            | "web_research_review_record"
+            | "web_research_review_list"
+            | "web_research_review_inspect"
+            | "web_research_source_record"
+            | "web_research_source_list"
+            | "web_research_source_inspect"
+    ) {
+        allowed_resource_kinds.extend([
+            "web_research_request".to_owned(),
+            "web_research_review".to_owned(),
+            "web_research_source".to_owned(),
         ]);
     } else if matches!(
         operation,
@@ -1210,6 +1263,22 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (
             &["module_dependency_policy_inspect"],
             "moduleDependencyPolicyResourceId",
+        ),
+        (
+            &[
+                "web_research_request_inspect",
+                "web_research_review_record",
+                "web_research_source_record",
+            ],
+            "webResearchRequestResourceId",
+        ),
+        (
+            &["web_research_review_inspect", "web_research_source_record"],
+            "webResearchReviewResourceId",
+        ),
+        (
+            &["web_research_source_inspect"],
+            "webResearchSourceResourceId",
         ),
         (
             &["module_lifecycle_decision", "module_lifecycle_inspect"],

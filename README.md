@@ -1186,6 +1186,15 @@ Current primitive operations:
 | `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
 | `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
+| `web_research_request_record` | Slice 24F implementation-candidate operation that records one current-session or current-workspace `web_research_request` metadata record with bounded question/scope summaries, policy labels, source/citation/robots/dependency/current-scope/trace/replay refs, idempotency fingerprint, side-effect proof, and `networkPolicy: none` without fetching, search, crawling, browser automation, cookies, raw HTML, logs, commands, local paths, or credentials. |
+| `web_research_request_list` | List scoped `web_research_request` records as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with explicit truncation metadata and no network or browser side effects. |
+| `web_research_request_inspect` | Inspect one scoped `web_research_request` through exact `kind:web_research_request` plus `resource:<id>` selector authorization, returning bounded metadata and refs without raw web, browser, command, path, grant, authority, token-like, personal, or debug material. |
+| `web_research_review_record` | Slice 24F implementation-candidate operation that records one scoped `web_research_review` linked to an exact request selector, with bounded review outcome/summary, evidence refs, idempotency fingerprint, and `networkPolicy: none` without approval minting, network, browser, crawl, or raw local/web material. |
+| `web_research_review_list` | List scoped `web_research_review` records as bounded provider-safe summaries after resource-store revalidation and without network access. |
+| `web_research_review_inspect` | Inspect one scoped `web_research_review` through exact `kind:web_research_review` plus `resource:<id>` selector authorization, returning bounded review metadata and refs only. |
+| `web_research_source_record` | Slice 24F implementation-candidate operation that records one bounded source/citation artifact metadata record linked by exact request or review selectors, with source/citation/robots/dependency/current-scope/evidence refs, idempotency fingerprint, and no raw page dumps, browser logs, cookies, credentials, commands, raw file contents, or network behavior. |
+| `web_research_source_list` | List scoped `web_research_source` artifact records as bounded provider-safe source/citation summaries after kind/schema/scope/current-version revalidation. |
+| `web_research_source_inspect` | Inspect one scoped `web_research_source` through exact `kind:web_research_source` plus `resource:<id>` selector authorization, returning bounded citation/source artifact metadata and refs only. |
 | `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
 | `subagent_launch` | Accepted Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
@@ -1529,6 +1538,27 @@ traversal, search providers, browser automation, crawling, login/cookies,
 credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
 side channels, native iOS web UI, and public `/engine` web API expansion remain
 deferred.
+Phase 3 Slice 24F adds a separate implementation-candidate
+`web_research` owner instead of expanding `web_fetch` into a crawler or
+browser. It registers metadata-only `web_research_request`,
+`web_research_review`, and `web_research_source` resource contracts and exposes
+only record/list/inspect operation values through `capability::execute`.
+Records require trusted current-session or current-workspace context, explicit
+non-wildcard `web_research.read` / `web_research.write` plus `resource.read` /
+`resource.write` authority as needed, exact `kind:web_research_*` selectors,
+exact `resource:<id>` selectors for inspect and linked review/source writes,
+stable idempotency keys for writes, and `networkPolicy: none`. Stored and
+projected payloads are bounded summaries, policy labels, source refs, citation
+refs, robots evidence refs, dependency-request refs, trace/replay refs,
+current-scope linkage, side-effect proof, and idempotency fingerprints only.
+They deliberately omit raw HTML, page dumps, browser logs, cookies,
+credentials, raw local paths, commands, raw code or file contents, raw grant
+ids, raw authority ids, token-like strings, personal-info literals, debug
+payloads, hidden chain-of-thought, package-manager output, and raw dependency
+artifacts. Actual fetch and robots network use remains in `web_fetch` and
+`web_robots_check`; search providers, browser drivers, crawling, sitemap
+traversal, logged-in cookie custody, and native research cockpit UI remain
+future module/runtime decisions.
 The accepted Slice 9A foundation adds the `tool_sources` domain as an inert
 external source-proposal and provenance boundary. Trusted internal system/admin
 callers can create
@@ -1645,7 +1675,8 @@ metadata for the registry, capability domain, the pending-review
 `file_git_module` operation pack, the accepted Slice 24B pending-review
 `jobs_program_execution_module` pack, the accepted Slice 24D pending-review
 `memory_engine_module` pack, and the accepted Slice 24E pending-review
-`procedural_module` pack without converting Phase 2 domains into separate
+`procedural_module` pack, plus the Slice 24F implementation-candidate
+pending-review `web_research_module` pack without converting Phase 2 domains into separate
 provider-visible tools. `module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard
 `module_registry.read` and `resource.read` authority, `module_manifest`
@@ -2408,7 +2439,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, implementation-candidate `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

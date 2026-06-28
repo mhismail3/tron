@@ -12,6 +12,7 @@
 //! authoring records, inert module validation report records, metadata-only
 //! module install review-gate records, metadata-only module dependency request
 //! and policy records, inspect-only generic module activity cockpit projection,
+//! metadata-only web research request/review/source custody,
 //! durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
@@ -44,6 +45,7 @@
 //! | `module_lifecycle` | Metadata-only module enable/disable/quarantine/rollback state |
 //! | `module_runtime` | Supervised module runtime envelope records for enabled modules |
 //! | `module_activity` | Read-only generic module activity cockpit projection |
+//! | `web_research` | Metadata-only web research request, review, and source artifact custody |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
@@ -225,4 +227,5 @@ pub mod tool_sources;
 pub mod transcription;
 pub mod update_diagnostics;
 pub mod web;
+pub mod web_research;
 pub mod worker_lifecycle;
