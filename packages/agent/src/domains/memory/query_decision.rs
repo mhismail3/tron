@@ -726,7 +726,7 @@ fn pick_fields(payload: &Value, fields: &[&str], array_fields: &[&str]) -> Value
         };
         object.insert(
             (*field).to_owned(),
-            payload.get(*field).cloned().unwrap_or(fallback),
+            provider_safe_projection(payload.get(*field).unwrap_or(&fallback), 160, 6),
         );
     }
     Value::Object(object)

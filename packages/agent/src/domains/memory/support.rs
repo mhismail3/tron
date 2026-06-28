@@ -411,7 +411,11 @@ fn redacted_text_field(payload: &Value, field: &str, max_bytes: usize) -> Value 
     }
 }
 
-fn provider_safe_projection(value: &Value, max_text_bytes: usize, depth: usize) -> Value {
+pub(super) fn provider_safe_projection(
+    value: &Value,
+    max_text_bytes: usize,
+    depth: usize,
+) -> Value {
     if depth == 0 {
         return redacted_projection_depth();
     }
@@ -451,16 +455,17 @@ fn provider_projection_key_is_sensitive(key: &str) -> bool {
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect::<String>();
+    if normalized.contains("authority") {
+        return true;
+    }
     matches!(
         normalized.as_str(),
-        "authority"
-            | "authorityid"
-            | "authoritygrant"
-            | "authoritygrantid"
-            | "grantid"
+        "grantid"
+            | "grantids"
             | "parentgrantid"
             | "createdgrantid"
-            | "createdauthoritygrantid"
+            | "allowedgrantids"
+            | "grantmetadata"
             | "actorid"
             | "owneractorid"
             | "subjectactorid"

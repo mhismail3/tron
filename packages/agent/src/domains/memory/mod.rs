@@ -16,8 +16,8 @@
 //! | `handlers` | Operation binding table |
 //! | `migration` | Migration export/import envelope behavior |
 //! | `prompt_trace` | Provider-safe memory prompt trace assembly |
-//! | `query_decision` | Query/result and decision evidence records |
-//! | `query_decision_validation` | Bounds and leakage guards for query/decision evidence |
+//! | `query_decision` | Query/result and decision evidence records plus provider-safe list/inspect projections |
+//! | `query_decision_validation` | Bounds and authority/grant leakage guards for query/decision evidence |
 //! | `retrieval` | Deterministic resource-backed retrieval over record refs/previews |
 //! | `retention` | Retention/edit/delete policy support evidence |
 //! | `schema_tests` | Test-only resource schema drift guards |
@@ -39,9 +39,9 @@
 //! Record-id operations must verify that the target record resource scope
 //! matches the caller's current memory scope before returning or mutating it.
 //! Provider-visible memory list/inspect projections must use compact redacted
-//! resource/event views: raw scope ids, owner actor ids, trace/invocation ids,
-//! grant ids, and authority metadata are never returned through memory
-//! capability results.
+//! resource/event/evidence views: raw scope ids, owner actor ids,
+//! trace/invocation ids, grant ids, authority ids, and authority metadata are
+//! never returned through memory capability results.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{

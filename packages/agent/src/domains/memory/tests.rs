@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationResult, RiskLevel, StreamActorScope, StreamCursor, TraceId, VisibilityScope,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
+    EngineResourceScope, FunctionId, Invocation, InvocationResult, RiskLevel, StreamActorScope,
+    StreamCursor, TraceId, VisibilityScope, WorkerId,
 };
+use crate::shared::protocol::memory::MEMORY_SCHEMA_VERSION;
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
 
@@ -990,6 +992,212 @@ async fn query_and_decision_evidence_reject_wrong_scope_kind_stale_and_raw_mater
         "cross-scope decision ref must fail: {:?}",
         cross_scope.error
     );
+
+    let authority_query = invoke_write_result(
+        &ctx,
+        super::RECORD_QUERY_FUNCTION,
+        json!({
+            "queryKind": "semantic_candidate_query",
+            "intent": {"authorityGrantId": "raw-query-grant"},
+            "occurredAt": "2026-06-26T00:01:04Z"
+        }),
+        "memory-evidence-authority-query",
+    )
+    .await;
+    assert!(
+        authority_query
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("raw/private")),
+        "authority query metadata must be rejected: {:?}",
+        authority_query.error
+    );
+
+    let authority_decision = invoke_write_result(
+        &ctx,
+        super::RECORD_DECISION_FUNCTION,
+        json!({
+            "decisionKind": "reject",
+            "reasonCodes": ["authority_metadata_rejected"],
+            "promptInclusion": {
+                "appliedToPrompt": false,
+                "allowedAuthorityScopes": ["memory.read"]
+            },
+            "occurredAt": "2026-06-26T00:01:05Z"
+        }),
+        "memory-evidence-authority-decision",
+    )
+    .await;
+    assert!(
+        authority_decision
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("raw/private")),
+        "authority decision metadata must be rejected: {:?}",
+        authority_decision.error
+    );
+}
+
+#[tokio::test]
+async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
+    let ctx = make_test_context();
+    let query_resource_id = "memory_query:legacy-authority-evidence-query";
+    let decision_resource_id = "memory_decision:legacy-authority-evidence-decision";
+    create_legacy_memory_evidence_resource(
+        &ctx,
+        query_resource_id,
+        super::MEMORY_QUERY_KIND,
+        super::MEMORY_QUERY_SCHEMA_ID,
+        json!({
+            "schemaVersion": MEMORY_SCHEMA_VERSION,
+            "queryKind": "semantic_candidate_query",
+            "intent": {
+                "kind": "candidate_refs_only",
+                "proof": "safe-query-proof",
+                "authorityGrantId": "raw-query-grant",
+                "nested": {"allowedAuthorityScopes": ["raw-query-scope"]}
+            },
+            "filters": {
+                "scope": "current_session",
+                "rawAuthorityId": "raw-query-authority"
+            },
+            "engineId": "resource-backed-memory",
+            "mode": "active",
+            "selectedRefs": [],
+            "excludedRefs": [],
+            "retrieval": {"executed": false},
+            "results": [],
+            "decisionRefs": [],
+            "policy": {"mode": "active", "authorityGrantId": "raw-policy-grant"},
+            "module": {"package": "memory"},
+            "redaction": {"metadataOnly": true, "memoryBodyStored": false},
+            "traceRefs": [{"kind": "trace", "id": "safe-query-trace", "authorityGrantId": "raw-trace-grant"}],
+            "replayRefs": [],
+            "lifecycle": {"state": "recorded", "retrievalExecuted": false, "promptContentIncluded": false},
+            "idempotency": {"algorithm": "sha256:test", "fingerprint": "safe-query-fingerprint", "rawKeyStored": false},
+            "occurredAt": "2026-06-26T00:03:00Z"
+        }),
+    )
+    .await;
+    create_legacy_memory_evidence_resource(
+        &ctx,
+        decision_resource_id,
+        super::MEMORY_DECISION_KIND,
+        super::MEMORY_DECISION_SCHEMA_ID,
+        json!({
+            "schemaVersion": MEMORY_SCHEMA_VERSION,
+            "decisionKind": "retrieve",
+            "reasonCodes": ["candidate_ref_selected"],
+            "sourceRefs": [{
+                "kind": "trace",
+                "id": "safe-decision-source",
+                "authorityGrantId": "raw-decision-source-grant"
+            }],
+            "promptInclusion": {
+                "appliedToPrompt": false,
+                "boundedPreviewSnippetsOnly": true,
+                "allowedAuthorityScopes": ["raw-decision-scope"]
+            },
+            "retentionEvidence": {
+                "automaticRetentionPerformed": false,
+                "proof": "safe-retention-proof",
+                "rawAuthorityId": "raw-decision-authority"
+            },
+            "policyEvidence": {"mode": "active", "authorityGrantId": "raw-decision-policy-grant"},
+            "redaction": {"metadataOnly": true, "memoryBodyStored": false},
+            "traceRefs": [],
+            "replayRefs": [{"source": "test", "authorityGrantId": "raw-replay-grant"}],
+            "lifecycle": {"state": "recorded", "decisionAppliedToPrompt": false, "automaticRetentionPerformed": false},
+            "idempotency": {"algorithm": "sha256:test", "fingerprint": "safe-decision-fingerprint", "rawKeyStored": false},
+            "occurredAt": "2026-06-26T00:03:01Z"
+        }),
+    )
+    .await;
+
+    let execute_grant = derive_execute_grant(
+        &ctx,
+        "legacy-authority-evidence-grant",
+        query_resource_id,
+        decision_resource_id,
+    )
+    .await;
+    let query_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_query_list"}),
+        agent_context("memory-legacy-authority-query-list", execute_grant.clone())
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("query list");
+    let query_inspect = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({
+            "operation": "memory_query_inspect",
+            "queryResourceId": query_resource_id
+        }),
+        agent_context(
+            "memory-legacy-authority-query-inspect",
+            execute_grant.clone(),
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("query inspect");
+    let decision_list = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({"operation": "memory_decision_list"}),
+        agent_context(
+            "memory-legacy-authority-decision-list",
+            execute_grant.clone(),
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("decision list");
+    let decision_inspect = invoke_read_with_context(
+        &ctx,
+        crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
+        json!({
+            "operation": "memory_decision_inspect",
+            "decisionResourceId": decision_resource_id
+        }),
+        agent_context("memory-legacy-authority-decision-inspect", execute_grant)
+            .with_scope("capability.execute")
+            .with_scope(super::READ_SCOPE),
+    )
+    .await
+    .expect("decision inspect");
+
+    for (label, value) in [
+        ("query_list", &query_list),
+        ("query_inspect", &query_inspect),
+        ("decision_list", &decision_list),
+        ("decision_inspect", &decision_inspect),
+    ] {
+        assert_authority_evidence_scrubbed(label, value);
+    }
+    assert_eq!(
+        query_list["details"]["memory"]["queries"][0]["record"]["intent"]["proof"],
+        "safe-query-proof"
+    );
+    assert_eq!(
+        query_inspect["details"]["memory"]["versions"][0]["record"]["filters"]["scope"],
+        "current_session"
+    );
+    assert_eq!(
+        decision_list["details"]["memory"]["decisions"][0]["record"]["sourceRefs"][0]["id"],
+        "safe-decision-source"
+    );
+    assert_eq!(
+        decision_inspect["details"]["memory"]["versions"][0]["record"]["retentionEvidence"]["proof"],
+        "safe-retention-proof"
+    );
 }
 
 #[tokio::test]
@@ -1225,6 +1433,30 @@ fn assert_list_resource_projection_redacted(label: &str, resource: &Value) {
     );
 }
 
+fn assert_authority_evidence_scrubbed(label: &str, value: &Value) {
+    let rendered = serde_json::to_string(value).expect("serialize provider-visible memory result");
+    for forbidden in [
+        "authorityGrantId",
+        "allowedAuthorityScopes",
+        "rawAuthorityId",
+        "raw-query-grant",
+        "raw-query-scope",
+        "raw-query-authority",
+        "raw-policy-grant",
+        "raw-trace-grant",
+        "raw-decision-source-grant",
+        "raw-decision-scope",
+        "raw-decision-authority",
+        "raw-decision-policy-grant",
+        "raw-replay-grant",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "{label} leaked forbidden authority evidence `{forbidden}`: {rendered}"
+        );
+    }
+}
+
 async fn assert_memory_lifecycle_stream_redacts_authority_grants(ctx: &ServerRuntimeContext) {
     ctx.engine_host
         .subscribe_stream(
@@ -1258,6 +1490,33 @@ async fn assert_memory_lifecycle_stream_redacts_authority_grants(ctx: &ServerRun
             "memory lifecycle stream leaked `{forbidden}`: {rendered}"
         );
     }
+}
+
+async fn create_legacy_memory_evidence_resource(
+    ctx: &ServerRuntimeContext,
+    resource_id: &str,
+    kind: &str,
+    schema_id: &str,
+    payload: Value,
+) {
+    let trace_id = resource_id.replace(':', "-");
+    ctx.engine_host
+        .create_resource(CreateResource {
+            resource_id: Some(resource_id.to_owned()),
+            kind: kind.to_owned(),
+            schema_id: Some(schema_id.to_owned()),
+            scope: EngineResourceScope::Session("memory-session".to_owned()),
+            owner_worker_id: WorkerId::new(super::WORKER).expect("memory worker id"),
+            owner_actor_id: ActorId::new("engine-client").expect("owner actor id"),
+            lifecycle: Some("recorded".to_owned()),
+            policy: json!({"owner": super::WORKER, "kind": "legacy_evidence"}),
+            initial_payload: Some(payload),
+            locations: Vec::new(),
+            trace_id: TraceId::new(format!("trace-{trace_id}")).expect("trace id"),
+            invocation_id: None,
+        })
+        .await
+        .expect("create legacy memory evidence resource");
 }
 
 async fn configure_active(ctx: &ServerRuntimeContext, key: &str) -> Value {
