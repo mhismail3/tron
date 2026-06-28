@@ -14,8 +14,8 @@ use super::support::{
     already_terminal_response, apply_runtime_terminal_outcome, is_resource_version_conflict,
     job_record, list_limit, max_output_bytes, maybe_pause_cancel_after_runtime,
     maybe_pause_finalize_before_update, optional_string, optional_u64, publish_lifecycle_event,
-    replay_refs, require_job, resource_policy, resource_ref, resource_scope, sha256_hex,
-    timeout_ms, to_value, trace_refs, trusted_working_directory, update_job_record,
+    replay_refs, require_job, required_string, resource_policy, resource_ref, resource_scope,
+    sha256_hex, timeout_ms, to_value, trace_refs, trusted_working_directory, update_job_record,
     update_job_record_raw, version_ref,
 };
 use super::types::{
@@ -274,6 +274,33 @@ pub(crate) async fn log_job_value(
     }))
 }
 
+pub(crate) async fn redacted_job_status_value(
+    engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
+    invocation: &crate::engine::Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(
+        engine_host,
+        runtime.clone(),
+        reconcile.clone(),
+        Some(invocation),
+    )
+    .await?;
+    let inspection = require_job(engine_host, invocation, payload).await?;
+    let inspection =
+        reconcile_targeted_running_job(engine_host, &runtime, &reconcile, invocation, inspection)
+            .await?;
+    let (version_id, record) = job_record(&inspection)?;
+    Ok(json!({
+        "schemaVersion": JOB_SCHEMA_VERSION,
+        "status": record.state.as_str(),
+        "job": redacted_job_summary(&inspection.resource, &version_id, &record),
+        "resourceRefs": redacted_job_resource_refs(&inspection.resource, &record)
+    }))
+}
+
 pub(crate) async fn cancel_job_value(
     engine_host: &EngineHostHandle,
     runtime: JobRuntime,
@@ -402,6 +429,89 @@ pub(crate) async fn cancel_job_value(
         "idempotent": false,
         "runtimeHadJob": true,
         "resourceRefs": [version_ref(&latest.resource, &version, "job_process")]
+    }))
+}
+
+pub(crate) async fn cleanup_job_resource_value(
+    engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
+    invocation: &crate::engine::Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(
+        engine_host,
+        runtime.clone(),
+        reconcile.clone(),
+        Some(invocation),
+    )
+    .await?;
+    let inspection = require_job(engine_host, invocation, payload).await?;
+    let inspection =
+        reconcile_targeted_running_job(engine_host, &runtime, &reconcile, invocation, inspection)
+            .await?;
+    let (current_version_id, mut record) = job_record(&inspection)?;
+    let expected_version_id = required_string(payload, "expectedJobVersionId")?;
+    if current_version_id != expected_version_id {
+        return Err(invalid_params(format!(
+            "job current version conflict: expected {expected_version_id}, actual {current_version_id}"
+        )));
+    }
+    if record.state == JobState::Archived {
+        return Ok(json!({
+            "schemaVersion": JOB_SCHEMA_VERSION,
+            "status": JobState::Archived.as_str(),
+            "idempotent": true,
+            "job": redacted_job_summary(&inspection.resource, &current_version_id, &record),
+            "resourceRefs": redacted_job_resource_refs(&inspection.resource, &record)
+        }));
+    }
+    if !record.state.is_terminal() {
+        return Err(invalid_params(
+            "job cleanup requires a terminal job_process resource",
+        ));
+    }
+
+    let cleaned_at = Utc::now();
+    record.state = JobState::Archived;
+    record.revision += 1;
+    let version = update_job_record(
+        engine_host,
+        invocation,
+        &inspection.resource.resource_id,
+        Some(current_version_id),
+        &record,
+    )
+    .await?;
+    let _ = publish_lifecycle_event(
+        engine_host,
+        invocation,
+        "jobs.archived",
+        json!({
+            "jobResourceId": inspection.resource.resource_id,
+            "jobVersionId": version.version_id,
+            "cleanup": {
+                "state": "archived",
+                "cleanedAt": cleaned_at.to_rfc3339(),
+                "exactResourceCleanup": true
+            }
+        }),
+    )
+    .await;
+
+    Ok(json!({
+        "schemaVersion": JOB_SCHEMA_VERSION,
+        "status": JobState::Archived.as_str(),
+        "idempotent": false,
+        "cleanup": {
+            "state": "archived",
+            "cleanedAt": cleaned_at.to_rfc3339(),
+            "exactResourceCleanup": true,
+            "rawOutputDeleted": false,
+            "resourceLifecycleArchived": true
+        },
+        "job": redacted_job_summary(&inspection.resource, &version.version_id, &record),
+        "resourceRefs": [version_ref(&inspection.resource, &version, "job_process")]
     }))
 }
 
@@ -981,6 +1091,83 @@ fn job_summary(resource: &EngineResource, version_id: &str, record: &JobProcessR
         "replayRefs": record.replay_refs.clone(),
         "revision": record.revision
     })
+}
+
+fn redacted_job_summary(
+    resource: &EngineResource,
+    version_id: &str,
+    record: &JobProcessRecord,
+) -> Value {
+    json!({
+        "jobResourceId": resource.resource_id,
+        "jobVersionId": version_id,
+        "state": record.state.as_str(),
+        "limits": {
+            "timeoutMs": record.limits.timeout_ms,
+            "maxOutputBytes": record.limits.max_output_bytes
+        },
+        "retention": {
+            "mode": record.retention.get("mode").and_then(Value::as_str).unwrap_or("explicit"),
+            "cleanupAfterSeconds": record.retention.get("cleanupAfterSeconds").cloned().unwrap_or(Value::Null)
+        },
+        "createdAt": record.created_at,
+        "startedAt": record.started_at,
+        "completedAt": record.completed_at,
+        "cancellation": {
+            "requested": record.cancellation.requested,
+            "requestedAt": record.cancellation.requested_at,
+            "reasonRedacted": record.cancellation.reason.is_some(),
+            "rawReasonReturned": false
+        },
+        "terminal": record.terminal.as_ref().map(redacted_terminal_record),
+        "output": record.output.as_ref().map(redacted_output_ref),
+        "revision": record.revision,
+        "projection": {
+            "allowlist": "job_process_module_redacted_v1",
+            "rawCommandReturned": false,
+            "workingDirectoryReturned": false,
+            "authorityReturned": false,
+            "stdoutPreviewReturned": false,
+            "stderrPreviewReturned": false,
+            "rawOutputReturned": false,
+            "providerVisibleOutput": "refs_fingerprints_and_exit_metadata_only"
+        }
+    })
+}
+
+fn redacted_terminal_record(terminal: &JobTerminalRecord) -> Value {
+    json!({
+        "status": terminal.status,
+        "exitCode": terminal.exit_code,
+        "timedOut": terminal.timed_out,
+        "cancelled": terminal.cancelled,
+        "errorRedacted": terminal.error.is_some(),
+        "rawErrorReturned": false
+    })
+}
+
+fn redacted_output_ref(output: &JobOutputRef) -> Value {
+    json!({
+        "kind": EXECUTION_OUTPUT_KIND,
+        "resourceId": output.output_resource_id,
+        "versionId": output.output_version_id,
+        "role": "execution_output",
+        "contentHash": output.content_hash,
+        "durationMs": output.duration_ms,
+        "exitCode": output.exit_code,
+        "outputTruncated": output.output_truncated,
+        "stdoutPreviewReturned": false,
+        "stderrPreviewReturned": false,
+        "rawOutputReturned": false
+    })
+}
+
+fn redacted_job_resource_refs(resource: &EngineResource, record: &JobProcessRecord) -> Vec<Value> {
+    let mut refs = vec![resource_ref(resource, "job_process")];
+    if let Some(output) = &record.output {
+        refs.push(redacted_output_ref(output));
+    }
+    refs
 }
 
 fn worker_id() -> Result<WorkerId, CapabilityError> {

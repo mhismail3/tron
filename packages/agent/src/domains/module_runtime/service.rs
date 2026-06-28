@@ -24,6 +24,18 @@ use super::resource_store::{
 use super::validation::*;
 use super::{Deps, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID};
 
+pub(crate) struct DelegatedJobRuntimeUpdate {
+    pub(crate) module_runtime_resource_id: String,
+    pub(crate) expected_module_runtime_version_id: Option<String>,
+    pub(crate) state: String,
+    pub(crate) job_ref: Value,
+    pub(crate) program_execution_ref: Option<Value>,
+    pub(crate) output_ref: Option<Value>,
+    pub(crate) terminal: Option<Value>,
+    pub(crate) cancellation: Option<Value>,
+    pub(crate) cleanup: Option<Value>,
+}
+
 pub(crate) async fn request_module_runtime_value_at(
     deps: &Deps,
     invocation: &Invocation,
@@ -446,9 +458,165 @@ pub(crate) async fn cancel_module_runtime_value_at(
     }))
 }
 
+pub(crate) async fn record_delegated_job_runtime_update_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    update: DelegatedJobRuntimeUpdate,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    validate_module_runtime_resource_id(&update.module_runtime_resource_id)?;
+    let scope = resource_scope(invocation)?;
+    let inspection = inspect_resource_required(
+        deps,
+        &update.module_runtime_resource_id,
+        "module runtime state",
+    )
+    .await?;
+    ensure_module_runtime_state(&inspection, "module runtime delegated job update")?;
+    ensure_scope(&inspection, &scope, "module runtime delegated job update")?;
+    let (current_version, current) =
+        current_payload(&inspection, "module runtime delegated job update")?;
+    if let Some(expected) = &update.expected_module_runtime_version_id
+        && current_version.version_id != *expected
+    {
+        return Err(invalid(format!(
+            "module runtime current version conflict: expected {expected}, actual {}",
+            current_version.version_id
+        )));
+    }
+
+    let now = operation_at.to_rfc3339();
+    let mut updated = current.clone();
+    updated["state"] = json!(update.state.clone());
+    updated["updatedAt"] = json!(now);
+    updated["revision"] = json!(
+        current
+            .get("revision")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .saturating_add(1)
+    );
+    updated["runtime"]["processLaunched"] = json!(true);
+    updated["runtime"]["jobDelegated"] = json!(true);
+    updated["runtime"]["jobExposedToProvider"] = json!(false);
+    updated["runtime"]["providerVisibleJobProjection"] = json!("refs_only");
+    updated["supervision"]["state"] = json!(update.state.clone());
+    updated["supervision"]["job"] = json!({
+        "delegated": true,
+        "providerVisibleJob": "redacted_ref_only",
+        "jobRef": update.job_ref.clone(),
+        "terminal": update.terminal.clone(),
+        "rawCommandStoredInModuleRuntime": false,
+        "rawOutputStoredInModuleRuntime": false,
+        "stdoutPreviewReturned": false,
+        "stderrPreviewReturned": false
+    });
+    updated["supervision"]["outputCustody"] = json!({
+        "outputRef": update.output_ref.clone(),
+        "rawStdoutReturned": false,
+        "rawStderrReturned": false,
+        "rawOutputReturned": false,
+        "providerVisibleOutput": "refs_fingerprints_and_exit_metadata_only"
+    });
+    if let Some(cancellation) = update.cancellation {
+        updated["supervision"]["cancellation"] = cancellation;
+    }
+    if let Some(cleanup) = update.cleanup {
+        updated["supervision"]["cleanup"] = cleanup;
+    }
+    if let Some(output_ref) = update.output_ref.clone() {
+        append_ref(&mut updated["outputArtifactRefs"], output_ref);
+    }
+    let delegated_job_ref = updated["supervision"]["job"]["jobRef"].clone();
+    append_ref(&mut updated["evidenceRefs"], delegated_job_ref);
+    if let Some(program_execution_ref) = update.program_execution_ref.clone() {
+        updated["supervision"]["programExecution"] = json!({
+            "metadataOnlyRecordRef": program_execution_ref.clone(),
+            "rawCodeStored": false,
+            "rawIoStored": false
+        });
+        append_ref(&mut updated["evidenceRefs"], program_execution_ref);
+    }
+    match update.state.as_str() {
+        "timed_out" => {
+            updated["supervision"]["timeout"]["state"] = json!("triggered");
+        }
+        "completed" | "failed" | "cancelled" | "archived" => {
+            updated["supervision"]["timeout"]["state"] = json!("disarmed");
+        }
+        _ => {}
+    }
+
+    let version = deps
+        .engine_host
+        .update_resource(UpdateResource {
+            resource_id: update.module_runtime_resource_id.clone(),
+            expected_current_version_id: Some(current_version.version_id.clone()),
+            lifecycle: Some(update.state.clone()),
+            payload: updated,
+            state: None,
+            locations: vec![EngineResourceLocation {
+                kind: "module_runtime_state".to_owned(),
+                uri: format!("module-runtime-state:{}", update.module_runtime_resource_id),
+                mime_type: Some("application/json".to_owned()),
+                size_bytes: None,
+            }],
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })
+        .await
+        .map_err(engine_error)?;
+    let updated = inspect_resource_required(
+        deps,
+        &update.module_runtime_resource_id,
+        "module runtime state",
+    )
+    .await?;
+    publish_lifecycle_event(
+        deps,
+        invocation,
+        "module_runtime.delegated_job_updated",
+        &updated.resource,
+        json!({
+            "runtimeState": update.state,
+            "jobDelegated": true,
+            "jobExposedToProvider": false,
+            "providerVisibleOutput": "refs_only",
+            "networkPolicy": "none"
+        }),
+    )
+    .await?;
+
+    Ok(json!({
+        "schemaVersion": MODULE_RUNTIME_STATE_SCHEMA_VERSION,
+        "operation": "module_runtime_delegated_job_update",
+        "status": updated.resource.lifecycle,
+        "moduleRuntimeResourceId": update.module_runtime_resource_id,
+        "moduleRuntimeVersionId": version.version_id,
+        "moduleRuntime": module_runtime_summary_for_resource(deps, &updated.resource).await?,
+        "resourceRefs": [version_ref(&updated.resource, &version, "module_runtime_state")]
+    }))
+}
+
 fn output_refs_len(payload: &Value) -> usize {
     payload
         .get("outputArtifactRefs")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
+}
+
+fn append_ref(target: &mut Value, item: Value) {
+    let Some(items) = target.as_array_mut() else {
+        *target = json!([item]);
+        return;
+    };
+    if items
+        .iter()
+        .any(|existing| existing.get("resourceId") == item.get("resourceId"))
+    {
+        return;
+    }
+    if items.len() < MAX_REFS {
+        items.push(item);
+    }
 }

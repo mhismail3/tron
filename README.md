@@ -743,6 +743,17 @@ network access, install, activation, dependency resolution, or execution.
 Accepted Slice 24A also seeds a `file_git_module` manifest with module
 lifecycle `pending_review`; it declares only existing filesystem/Git execute
 operations, their evidence resource kinds, and their exact authority needs.
+Slice 24B adds the pending-review `jobs_program_execution_module` manifest for
+the module-owned jobs/program-execution pack. It declares implementation-candidate
+evidence for only
+`module_program_execution_start`, `module_program_execution_status`,
+`module_program_execution_cancel`, and `module_program_execution_cleanup`,
+maps them to exact module-runtime, module-lifecycle, program-execution, jobs,
+job-process, execution-output, and resource authority, and keeps provider
+projections to refs/fingerprints/truncation/duration/exit/timeout/cancel/
+cleanup metadata rather than `process_run`, raw job payloads, raw commands,
+stdio, logs, paths, env, pids, grant ids, PTYs, package installs, or network
+execution.
 `domains/module_authoring` owns the accepted Phase 3 Slice 23B foundation for
 inert module proposals. It records current-session/workspace
 `module_proposal` resources with schema `tron.resource.module_proposal.v1` and
@@ -1154,6 +1165,10 @@ Current primitive operations:
 | `job_list` | List durable `job_process` resources in the current session scope, optionally filtered by lifecycle state. |
 | `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
 | `job_cancel` | Request cancellation for a running durable job; runtime finalization records terminal cancellation with bounded output evidence after signalling the owned process group. |
+| `module_program_execution_start` | Slice 24B operation that starts a module-owned supervised non-interactive job after enabled lifecycle/runtime authorization, records content-free `program_execution_record` evidence, delegates process execution to durable jobs, and returns only runtime/program/job/output refs plus bounded safety metadata without raw command, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, PTY, package install, or network behavior. |
+| `module_program_execution_status` | Inspect one delegated module job through exact runtime and job selectors, returning ref-only job/output custody with fingerprints, truncation, duration, exit, timeout, and terminal metadata instead of job logs or output previews. |
+| `module_program_execution_cancel` | Request cancellation for one delegated module job through exact runtime/job selectors and idempotency, updating module runtime cancellation metadata while keeping raw reason/output/process payloads out of provider-visible results. |
+| `module_program_execution_cleanup` | Archive one terminal delegated module job after exact module-runtime and job-version freshness checks, recording cleanup metadata and bounded refs without exposing raw job or execution-output resource payloads. |
 | `goal_create` | Create a scoped durable `goal` record with bounded objective, owner/scope, queue/plan/evidence refs, trace/replay refs, lifecycle state, and resource evidence. |
 | `goal_list` | List scoped goal records with bounded summaries and explicit truncation metadata. |
 | `goal_inspect` | Inspect one scoped goal record with current resource/version refs and lifecycle evidence. |
@@ -1204,7 +1219,7 @@ Current primitive operations:
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
 | `module_lifecycle_inspect` | Slice 23E accepted operation that inspects one scoped `module_lifecycle_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning metadata-only lifecycle transition, approval, rollback, runtime-authorization, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, code, file contents, raw grant ids, raw authority ids, debug payloads, chain-of-thought, or token-like material. |
-| `module_runtime_request` | Slice 23F accepted operation that records one scoped `module_runtime_state` supervisor envelope only after exact-selector authority and enabled lifecycle authorization, with sandbox/network/secrets labels, timeout/shutdown metadata, bounded input/output/evidence refs, idempotency fingerprint, trace-safe request projection, `networkPolicy: none`, and no raw commands/logs/output, package install, dependency restore, PTY, browser automation, network, or direct provider-visible job surface. |
+| `module_runtime_request` | Slice 23F accepted operation that records one scoped `module_runtime_state` supervisor envelope only after exact-selector authority and enabled lifecycle authorization, with sandbox/network/secrets labels, timeout/shutdown metadata, bounded input/output/evidence refs, idempotency fingerprint, trace-safe request projection, `networkPolicy: none`, and no raw commands/logs/output, package install, dependency restore, PTY, browser automation, network, or provider-visible job logs/raw job payloads. |
 | `module_runtime_list` | Slice 23F accepted operation that lists scoped `module_runtime_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, output artifact refs only, `networkPolicy: none`, and no execution side effects or raw runtime material. |
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
@@ -1290,7 +1305,13 @@ resource after scope validation without mutating unrelated scopes.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, job-owned network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
-not part of this foundation.
+not part of this foundation. Slice 24B adds a module-owned adapter over the
+same job resources for `module_program_execution_*` operations. That adapter
+uses redacted job status/cleanup projections only: provider-visible module
+results can carry `job_process` and `execution_output` refs, version ids,
+content hashes, truncation, duration, exit, timeout, cancellation, and cleanup
+metadata, but not raw commands, canonical working directories, grant ids,
+stdout/stderr previews, logs, or raw job/output resource payloads.
 The accepted Slice 7A `goals` domain owns durable backend records only.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `goal_create`, `goal_list`, `goal_inspect`,
@@ -1413,6 +1434,11 @@ manager directives, absolute or unsafe paths, file contents, secrets, personal
 info, process state, runtime execution output, or provider-visible raw payloads.
 Embedded runtimes, subprocess/job launch, package installation, live network
 behavior, file writes, notebook/PTY surfaces, and result merge remain absent.
+Slice 24B may create a program-execution record as evidence for a delegated
+module job, but the record still stores only runtime/language ids, program
+fingerprints, I/O-envelope refs, output refs/fingerprints, and lifecycle
+evidence. Raw command/code/stdin/stdout/stderr/log/path/env/process/network
+material remains ineligible for `program_execution_record` custody.
 Accepted Slice 16A adds a backend-only
 `domains/prompt_artifacts` foundation behind `capability::execute`. Prompt
 artifact records are durable `prompt_artifact` resources for explicit opt-in
@@ -1588,8 +1614,9 @@ The generic resource store registers `module_manifest` with resource schema
 `tron.resource.module_manifest.v1` and payload schema version
 `tron.module_manifest.v1`; bootstrap seeding creates narrow first-party
 metadata for the registry, capability domain, and the pending-review
-`file_git_module` operation pack without converting Phase 2 domains into
-provider-visible tools. `module_list` and `module_inspect` stay behind the
+`file_git_module` operation pack plus the pending-review Slice 24B
+`jobs_program_execution_module` implementation-candidate pack without converting Phase 2 domains into
+separate provider-visible tools. `module_list` and `module_inspect` stay behind the
 single `capability::execute` primitive and require explicit non-wildcard
 `module_registry.read` and `resource.read` authority, `module_manifest`
 resource-kind grants, `kind:module_manifest` selectors, and `networkPolicy:
@@ -1603,6 +1630,12 @@ secrets/raw grant ids/token-like material/personal-info literals, install or
 activate modules, resolve dependencies, execute module behavior, access
 networks, add public `/engine` APIs, restore repo-managed skills, or add fixed
 iOS panels.
+The Slice 24B manifest declares only `module_program_execution_*` operation
+values, exact module/runtime/program/job/output/resource authority needs, and
+ref-only output custody for delegated jobs; it deliberately does not expose
+`process_run`, `job_start`, `job_log`, raw commands, raw stdio/log previews,
+paths, env, pids, grant ids, package installs, PTYs, or network behavior as
+module-owned provider output.
 
 Phase 3 Slice 23B adds the accepted module authoring workspace foundation. The
 generic resource store registers `module_proposal` with
@@ -1924,7 +1957,8 @@ state, streams, queues, triggers, grants, generic resources, storage operations,
 and bounded internal projections. They are not exported as model tools. The
 agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 `log_recent`, `replay_manifest`, `catalog_search`, `catalog_inspect`,
-`catalog_conformance`, and the `job_*` lifecycle operations; trace operations read durable
+`catalog_conformance`, the `job_*` lifecycle operations, and Slice 24B
+`module_program_execution_*` module-owned job refs; trace operations read durable
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
 snapshot through the same single tool. Catalog discovery reads current
@@ -1948,7 +1982,10 @@ runtime cancellation first signals the owned process group and terminal
 finalization then records bounded output evidence. If a nonterminal cancel
 request wins the resource-version race, finalization reloads, preserves the
 request metadata, and retries the terminal update so output refs stay attached.
-Late cancel requests do not overwrite already-completed jobs. Goal/question
+Late cancel requests do not overwrite already-completed jobs. Module-owned
+program execution reuses those resources through redacted refs/fingerprints and
+module runtime supervision updates rather than provider-visible job logs or raw
+execution-output payloads. Goal/question
 records are generic `goal`, `user_question`, and `goal_answer` resources with
 lifecycle events on `goals.lifecycle`; answer handoff uses the execute
 idempotency ledger and resource expected-version checks so replaying the same

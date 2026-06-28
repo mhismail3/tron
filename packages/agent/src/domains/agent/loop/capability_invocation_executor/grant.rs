@@ -74,6 +74,13 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_runtime_inspect"
             | "module_runtime_cancel"
     );
+    let module_program_execution_operation = matches!(
+        operation,
+        "module_program_execution_start"
+            | "module_program_execution_status"
+            | "module_program_execution_cancel"
+            | "module_program_execution_cleanup"
+    );
     let file_git_module_operation = is_file_git_module_operation(operation);
     let notification_push_requested = operation == "notification_send"
         && effective_args
@@ -90,6 +97,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_dependencies_operation
         || module_lifecycle_operation
         || module_runtime_operation
+        || module_program_execution_operation
         || file_git_module_operation
     {
         vec![target_function_id.as_str().to_owned()]
@@ -111,6 +119,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_dependencies_operation
         && !module_lifecycle_operation
         && !module_runtime_operation
+        && !module_program_execution_operation
         && !file_git_module_operation
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
@@ -347,6 +356,48 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if operation == "module_program_execution_start" {
+        allowed_authority_scopes.extend([
+            "module_runtime.read".to_owned(),
+            "module_runtime.write".to_owned(),
+            "program_execution.read".to_owned(),
+            "program_execution.write".to_owned(),
+            "jobs.read".to_owned(),
+            "jobs.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if operation == "module_program_execution_status" {
+        allowed_authority_scopes.extend([
+            "module_runtime.read".to_owned(),
+            "program_execution.read".to_owned(),
+            "jobs.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "module_program_execution_cancel" | "module_program_execution_cleanup"
+    ) {
+        allowed_authority_scopes.extend([
+            "module_runtime.read".to_owned(),
+            "module_runtime.write".to_owned(),
+            "program_execution.read".to_owned(),
+            "jobs.read".to_owned(),
+            "jobs.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if operation == "job_start" {
+        allowed_authority_scopes.extend(["jobs.write".to_owned(), "resource.write".to_owned()]);
+    } else if matches!(operation, "job_status" | "job_list" | "job_log") {
+        allowed_authority_scopes.extend(["jobs.read".to_owned(), "resource.read".to_owned()]);
+    } else if operation == "job_cancel" {
+        allowed_authority_scopes.extend([
+            "jobs.read".to_owned(),
+            "jobs.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(
         operation,
         "filesystem_read"
@@ -431,6 +482,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_dependencies_operation
         || module_lifecycle_operation
         || module_runtime_operation
+        || module_program_execution_operation
         || file_git_module_operation
     {
         Vec::new()
@@ -558,6 +610,31 @@ pub(super) async fn derive_capability_runtime_grant(
         if operation == "module_runtime_request" {
             allowed_resource_kinds.push("module_lifecycle_state".to_owned());
         }
+    } else if operation == "module_program_execution_start" {
+        allowed_resource_kinds.extend([
+            "module_runtime_state".to_owned(),
+            "module_lifecycle_state".to_owned(),
+            "program_execution_record".to_owned(),
+            "job_process".to_owned(),
+            "execution_output".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "module_program_execution_status"
+            | "module_program_execution_cancel"
+            | "module_program_execution_cleanup"
+    ) {
+        allowed_resource_kinds.extend([
+            "module_runtime_state".to_owned(),
+            "program_execution_record".to_owned(),
+            "job_process".to_owned(),
+            "execution_output".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "job_start" | "job_status" | "job_list" | "job_log" | "job_cancel"
+    ) {
+        allowed_resource_kinds.extend(["job_process".to_owned(), "execution_output".to_owned()]);
     } else if matches!(
         operation,
         "filesystem_read"
@@ -639,6 +716,9 @@ pub(super) async fn derive_capability_runtime_grant(
         push_module_lifecycle_request_selector(&mut resource_selectors, session_id, effective_args);
     }
     if operation == "module_runtime_request" {
+        push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
+    }
+    if operation == "module_program_execution_start" {
         push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
     }
     if matches!(
@@ -914,8 +994,28 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         ),
         (&["module_runtime_request"], "moduleLifecycleResourceId"),
         (
+            &["module_program_execution_start"],
+            "moduleLifecycleResourceId",
+        ),
+        (
             &["module_runtime_inspect", "module_runtime_cancel"],
             "moduleRuntimeResourceId",
+        ),
+        (
+            &[
+                "module_program_execution_status",
+                "module_program_execution_cancel",
+                "module_program_execution_cleanup",
+            ],
+            "moduleRuntimeResourceId",
+        ),
+        (
+            &[
+                "module_program_execution_status",
+                "module_program_execution_cancel",
+                "module_program_execution_cleanup",
+            ],
+            "jobResourceId",
         ),
     ]
 }

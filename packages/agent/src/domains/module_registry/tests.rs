@@ -38,6 +38,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         "module_manifest:module_registry",
         "module_manifest:capability",
         "module_manifest:file_git_module",
+        "module_manifest:jobs_program_execution_module",
     ] {
         let inspection = host
             .inspect_resource(resource_id)
@@ -51,6 +52,107 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         assert_eq!(
             inspection.versions[0].payload["schemaVersion"],
             json!(SCHEMA_VERSION)
+        );
+    }
+}
+
+#[tokio::test]
+async fn jobs_program_execution_module_manifest_projects_ref_only_pending_review_metadata() {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let grant_id = derive_module_read_grant(
+        &host,
+        "jobs-program-execution-module",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[MODULE_MANIFEST_KIND],
+        &[
+            "kind:module_manifest",
+            "resource:module_manifest:jobs_program_execution_module",
+        ],
+        "none",
+    )
+    .await;
+
+    let inspect_invocation = module_invocation(
+        "jobs-program-execution-module",
+        json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:jobs_program_execution_module",
+            "maxItems": 1000
+        }),
+        grant_id,
+    );
+    let inspected = inspect_module_value(&host, &inspect_invocation, &inspect_invocation.payload)
+        .await
+        .expect("inspect jobs/program execution module");
+    let resource = &inspected["resource"];
+
+    assert_eq!(
+        resource["identity"]["moduleId"]["text"],
+        json!("jobs_program_execution_module")
+    );
+    assert_eq!(resource["identity"]["kind"]["text"], json!("module_pack"));
+    assert_eq!(
+        resource["manifestLifecycle"]["state"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(
+        resource["manifestLifecycle"]["activation"]["text"],
+        json!("authority_mapped_module_pack")
+    );
+    assert_eq!(resource["manifestLifecycle"]["executable"], json!(false));
+    assert_eq!(
+        resource["validation"]["status"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(resource["capabilityDeclarations"]["total"], json!(4));
+    assert_eq!(resource["resourceDeclarations"]["total"], json!(5));
+    assert_eq!(resource["authorityNeeds"]["total"], json!(8));
+    assert_side_effects_are_absent(&inspected);
+    assert_provider_projection_has_no_raw_sensitive_material(&inspected);
+
+    let declared_operations = resource["capabilityDeclarations"]["items"]
+        .as_array()
+        .expect("capability declarations")
+        .iter()
+        .filter_map(|item| item.pointer("/operation/text").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        declared_operations,
+        vec![
+            "module_program_execution_start",
+            "module_program_execution_status",
+            "module_program_execution_cancel",
+            "module_program_execution_cleanup",
+        ]
+    );
+    let rendered = serde_json::to_string(&inspected).expect("serialize module projection");
+    for operation in [
+        "module_program_execution_start",
+        "module_program_execution_status",
+        "module_program_execution_cancel",
+        "module_program_execution_cleanup",
+    ] {
+        assert!(
+            rendered.contains(operation),
+            "missing operation {operation}"
+        );
+    }
+    for resource_kind in [
+        "module_runtime_state",
+        "module_lifecycle_state",
+        "program_execution_record",
+        "job_process",
+        "execution_output",
+    ] {
+        assert!(
+            rendered.contains(resource_kind),
+            "missing resource kind {resource_kind}"
+        );
+    }
+    for rejected in ["job_start", "job_log", "stdoutPreview", "stderrPreview"] {
+        assert!(
+            !rendered.contains(rejected),
+            "leaked rejected jobs/program-execution material {rejected}"
         );
     }
 }

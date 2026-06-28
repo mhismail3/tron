@@ -457,12 +457,21 @@ Out of scope:
 Objective: connect durable jobs and program-execution metadata to a real
 module-owned execution path with sandboxed runtime policy.
 
-Minimal shape:
+Implementation candidate scope:
 
-- module-owned runtime declaration;
-- execution envelope and output custody;
-- approval triggers for filesystem/network/package behavior;
-- deterministic tests for cancellation, timeout, output bounds, and cleanup.
+- pending-review `jobs_program_execution_module` manifest declaring only
+  `module_program_execution_start`, `module_program_execution_status`,
+  `module_program_execution_cancel`, and `module_program_execution_cleanup`;
+- module-owned runtime envelope that delegates non-interactive process work to
+  the existing jobs runtime after enabled lifecycle authorization;
+- content-free `program_execution_record` evidence linked to runtime/job/output
+  refs, never raw command/code/stdin/stdout/stderr/log/path/env/pid material;
+- exact authority selectors for module runtime, module lifecycle, program
+  execution, job process, execution output, resource reads/writes, and trusted
+  working-directory roots;
+- provider-safe refs/fingerprints/truncation/duration/exit/timeout/
+  cancellation/cleanup projections, trace-safe request/result redaction, and
+  deterministic coverage for output custody and cleanup.
 
 Out of scope:
 
@@ -470,6 +479,8 @@ Out of scope:
 - package install by default;
 - PTY by default;
 - network by default.
+- fixed jobs/process cockpit panels;
+- raw job_process or execution_output payload exposure.
 
 ### Slice 24C: Subagent Delegation Module Pack Activation
 

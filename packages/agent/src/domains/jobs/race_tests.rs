@@ -195,9 +195,19 @@ async fn derive_execute_grant(
                 "subjectActorId": actor_id.as_str(),
                 "allowedCapabilities": ["capability::execute"],
                 "allowedNamespaces": ["__no_namespace_authority__"],
-                "allowedAuthorityScopes": ["capability.execute"],
-                "allowedResourceKinds": ["agent_state"],
-                "resourceSelectors": ["kind:agent_state"],
+                "allowedAuthorityScopes": [
+                    "capability.execute",
+                    "jobs.read",
+                    "jobs.write",
+                    "resource.read",
+                    "resource.write"
+                ],
+                "allowedResourceKinds": ["agent_state", "job_process", "execution_output"],
+                "resourceSelectors": [
+                    "kind:agent_state",
+                    "kind:job_process",
+                    "kind:execution_output"
+                ],
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
                 "maxRisk": "medium",

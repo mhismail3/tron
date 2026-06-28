@@ -82,6 +82,15 @@
 //! labels, timeout/cancel/shutdown metadata, and provider-safe output refs only,
 //! without raw commands/logs/output, PTYs, browser automation, dependency
 //! restoration, package-manager use, network access, or physical install.
+//! Module program-execution operations activate the jobs/program execution pack
+//! through `module_program_execution_start/status/cancel/cleanup`: they require
+//! exact module runtime, module lifecycle, program execution, job process,
+//! execution output, and resource selectors, delegate real process work to the
+//! jobs domain, link content-free program execution metadata, update module
+//! runtime supervision state, and trace-redact requests/results so provider
+//! output remains bounded refs/fingerprints/truncation/duration/exit/timeout/
+//! cancellation/cleanup metadata rather than raw command, code, stdio, logs,
+//! paths, env, pids, grant ids, or raw job/output payloads.
 //! File/Git module-pack activation is metadata and authority only: the existing
 //! `filesystem_*` and selected `git_*` operation values remain inside this
 //! primitive, but derived grants use exact filesystem/Git/resource scopes,

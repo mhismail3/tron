@@ -29,7 +29,10 @@
 //! paths, blob bytes, process handles, network behavior, file-write requests, or
 //! secret-like caller material. Program timestamps are supplied by
 //! `capability::execute` or tests; this domain does not sample wall-clock time
-//! directly.
+//! directly. Module-owned job execution records may link to delegated runtime
+//! and output resource refs, but the record remains metadata evidence only and
+//! must not be loosened to carry the command, stdio, process ids, install
+//! steps, paths, network requests, or raw output previews.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

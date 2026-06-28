@@ -843,3 +843,82 @@ store dead-code warnings remain; DRC may fail on unchanged goals/web/tool-source
 UTC allow-list entries outside Slice 24A; SUWRF may fail at baseline only on
 unchanged `packages/agent/src/domains/program_execution`; exploratory HRA may
 still fail on broad pre-existing overbudget/gap findings outside Slice 24A.
+
+## Implementation Candidate Slice 24B: Jobs And Program Execution Module Pack Activation
+
+Discovery thread `019f0b12-18b2-7960-8dde-eb3b1fd4b70c` selected Slice 24B
+with exact final status `implementation may start` from baseline
+`origin/main@4da793f69daaa879325fd99b769fc56657c771f1`
+(`docs: accept phase 3 slice 24a`).
+
+Implementation branch:
+`codex/phase-3-slice-24b-jobs-program-execution-module-pack`
+
+Implementation status:
+`pending_review`, implementation candidate awaiting independent review.
+
+Baseline HEAD:
+`4da793f69daaa879325fd99b769fc56657c771f1`
+(`docs: accept phase 3 slice 24a`)
+
+Candidate scope:
+
+- Adds the built-in `jobs_program_execution_module` manifest seed with
+  validation status `pending_review`, lifecycle state `pending_review`, and
+  activation mode `authority_mapped_module_pack`.
+- Declares only `module_program_execution_start`,
+  `module_program_execution_status`, `module_program_execution_cancel`, and
+  `module_program_execution_cleanup` through the existing
+  `capability::execute` primitive.
+- Starts module-owned execution by recording an enabled-lifecycle-guarded
+  `module_runtime_state`, writing content-free `program_execution_record`
+  evidence, delegating actual non-interactive process execution to the existing
+  jobs runtime, and updating module runtime supervision with redacted job/output
+  refs.
+- Requires exact module-runtime, module-lifecycle, program-execution,
+  job-process, execution-output, resource, and trusted-working-directory
+  authority selectors for the new module-owned operations.
+- Returns provider-safe refs, version ids, fingerprints, truncation, duration,
+  exit, timeout, cancellation, and cleanup metadata only; trace records use a
+  redacted module/job request projection.
+
+Rejected scope remains unchanged: `process_run` as the module surface,
+unconstrained shell, raw command/code/stdin/stdout/stderr/log/path/env/pid/grant
+exposure, raw `job_process` or `execution_output` payload projection,
+provider-visible `job_log` output previews, default network access, package
+installation, PTY/browser/native UI automation, public `/engine` expansion,
+fixed jobs/process cockpit panels, SQLite migrations, repo-managed
+`packages/agent/skills`, production deploy/update behavior, and unrelated
+DRC/SUWRF cleanup.
+
+Candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting gate passed after the module-program-execution implementation and docs updates. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate type-check passed; only existing provider/model/resource-store dead-code warnings were emitted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib module_program_execution` | exit 0 | Module-owned start/status/cleanup flow, exact follow-up grant selectors, module-scoped start grants, and exact authorization guard tests passed. |
+| Focused module registry, jobs lifecycle/output custody, execute schema, provider guidance, approval/cancellation/timeout/cleanup, trace-safety, and job authorization tests | exit 0 | Built-in manifest registration, bounded job output/resource refs, exact jobs/resource/job-process/execution-output selectors, OpenAI execute guidance, redacted trace requests, and cleanup metadata passed under narrow `--lib` filters. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants primitive_code_cleanup_inventory_covers_tracked_files` | exit 0 | PCC inventory coverage passed for new module-program-execution files. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants tracked_source_inventory_is_formalized` | exit 0 | TPC tracked-source inventory passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants boundary_inventory_covers_tracked_sources` | exit 0 | TMB boundary inventory passed for new module-owned surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants sacb_inventory_covers_all_tracked_security_marker_files` | exit 0 | SACB security/authority inventory passed for exact selectors and provider-safe refs. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants perf_inventory_is_structured_and_covers_resource_surfaces` | exit 0 | PERF resource-governance inventory passed for bounded execution and cleanup surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test provider_model_boundary_discipline_invariants pmbd_inventory_is_structured_and_covers_required_surfaces` | exit 0 | PMBD provider/model inventory passed for ref-only job/program projections. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants ppacd_inventory_is_structured_and_covers_required_surfaces` | exit 0 | PPACD public protocol inventory passed for new execute schema and provider guidance. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants predecessor_inventories_classify_ssarr_artifacts` | exit 0 | SSARR predecessor classification passed for deferred runtime-readiness framing. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants oda_inventory_rows_are_structured_and_reference_tracked_paths` | exit 0 | ODA inventory passed for trace-safe request/result evidence and runtime update events. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants desi_inventory_is_structured_and_covers_required_surfaces` | exit 0 | DESI docs/evidence inventory passed for Slice 24B scorecard, inventory, and evidence updates. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants csd_inventory_rows_are_structured_and_cover_marker_files` and `production_rust_tokio_spawns_have_explicit_ownership` | exit 0 | CSD coverage and Rust spawn ownership guards passed; Slice 24B delegates process supervision to the existing jobs runtime. |
+| Touched-file DRC entropy scan | reviewed | New module-program-execution production path adds no `Utc::now`, `SystemTime::now`, `Instant::now`, `thread_rng`, or random source; matches were limited to existing jobs/authorization time use and a test timestamp. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills directory remains absent. |
+| `git diff --check` and `git ls-files -ci --exclude-standard` | exit 0 | No whitespace errors and no tracked ignored files were reported before staging. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings remain; DRC may fail on unchanged goals/web/tool-source UTC allow-list
+entries outside Slice 24B; SUWRF may still report unchanged baseline risk in
+`packages/agent/src/domains/program_execution`; SOL still has a broad
+pre-existing marker-source inventory backlog outside the touched Slice 24B
+files; exploratory HRA tracked-file coverage still reports the unrelated
+pre-existing `grant_file_git_tests.rs` missing row.

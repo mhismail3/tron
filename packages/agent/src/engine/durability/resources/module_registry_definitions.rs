@@ -53,6 +53,7 @@ pub(in crate::engine) fn builtin_module_manifest_resources() -> Vec<CreateResour
         module_registry_manifest(),
         capability_manifest(),
         file_git_module_manifest(),
+        jobs_program_execution_module_manifest(),
     ]
     .into_iter()
     .map(seed_resource)
@@ -463,6 +464,169 @@ fn file_git_module_manifest() -> Value {
                 {
                     "kind": "crate_module",
                     "ref": "domains::git"
+                },
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::capability"
+                }
+            ]
+        },
+        "lifecycle": {
+            "state": "pending_review",
+            "activation": "authority_mapped_module_pack",
+            "installable": false,
+            "executable": false,
+            "networkPolicy": "none"
+        },
+        "redactionProof": redaction_proof()
+    })
+}
+
+fn jobs_program_execution_module_manifest() -> Value {
+    json!({
+        "schemaVersion": MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION,
+        "identity": {
+            "moduleId": "jobs_program_execution_module",
+            "name": "Jobs And Program Execution Module Pack",
+            "kind": "module_pack",
+            "owner": "domains::jobs+domains::program_execution+domains::module_runtime",
+            "summary": "Supervised non-interactive program execution through capability::execute with redacted job and output refs",
+            "version": "phase3-slice24b"
+        },
+        "capabilityDeclarations": [
+            {
+                "operation": "module_program_execution_start",
+                "effect": "write",
+                "providerVisible": true,
+                "description": "Start one enabled-lifecycle supervised job and record content-free program execution metadata"
+            },
+            {
+                "operation": "module_program_execution_status",
+                "effect": "read",
+                "providerVisible": true,
+                "description": "Inspect redacted runtime, job, and output custody refs for one delegated module job"
+            },
+            {
+                "operation": "module_program_execution_cancel",
+                "effect": "write",
+                "providerVisible": true,
+                "description": "Request cancellation through the jobs domain and update the module runtime envelope"
+            },
+            {
+                "operation": "module_program_execution_cleanup",
+                "effect": "write",
+                "providerVisible": true,
+                "description": "Archive a terminal delegated job with exact version freshness and record cleanup metadata"
+            }
+        ],
+        "resourceDeclarations": [
+            {
+                "kind": "module_runtime_state",
+                "schemaId": "tron.resource.module_runtime_state.v1",
+                "payloadSchemaVersion": "tron.module_runtime_state.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "module_lifecycle_state",
+                "schemaId": "tron.resource.module_lifecycle_state.v1",
+                "payloadSchemaVersion": "tron.module_lifecycle_state.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "program_execution_record",
+                "schemaId": "tron.resource.program_execution_record.v1",
+                "payloadSchemaVersion": "tron.program_execution_record.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "job_process",
+                "schemaId": "tron.resource.job_process.v1",
+                "payloadSchemaVersion": "tron.job_process.v1",
+                "scope": "session"
+            },
+            {
+                "kind": "execution_output",
+                "schemaId": "tron.resource.execution_output.v1",
+                "payloadSchemaVersion": "tron.execution_output.v1",
+                "scope": "session"
+            }
+        ],
+        "authorityNeeds": [
+            {
+                "scope": "module_runtime.read",
+                "purpose": "inspect runtime envelope refs and freshness"
+            },
+            {
+                "scope": "module_runtime.write",
+                "purpose": "record delegated job supervision state and cancellation or cleanup metadata"
+            },
+            {
+                "scope": "program_execution.read",
+                "purpose": "link metadata-only program execution evidence"
+            },
+            {
+                "scope": "program_execution.write",
+                "purpose": "record content-free runtime/language/fingerprint evidence"
+            },
+            {
+                "scope": "jobs.read",
+                "purpose": "inspect redacted delegated job state"
+            },
+            {
+                "scope": "jobs.write",
+                "purpose": "start, cancel, and archive the delegated non-interactive job"
+            },
+            {
+                "scope": "resource.read",
+                "purpose": "inspect exact lifecycle, runtime, job, and output resource refs"
+            },
+            {
+                "scope": "resource.write",
+                "purpose": "record runtime, program, job, and output resource updates"
+            }
+        ],
+        "settingsDeclarations": [],
+        "dependencyIntents": [],
+        "validation": {
+            "status": "pending_review",
+            "checks": [
+                {
+                    "id": "single_model_surface",
+                    "status": "passed",
+                    "summary": "The pack is available only through capability::execute module_program_execution operations"
+                },
+                {
+                    "id": "bounded_output_custody",
+                    "status": "implementation-candidate",
+                    "summary": "Provider-visible results expose refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata only"
+                },
+                {
+                    "id": "no_raw_process_material",
+                    "status": "passed",
+                    "summary": "Manifest and projections do not expose process_run, raw job payloads, commands, code, stdin, stdout, stderr, logs, paths, env, pids, grant ids, PTYs, package installs, or network execution"
+                }
+            ],
+            "evidenceRefs": [
+                {
+                    "kind": "phase3_inventory",
+                    "ref": "P3MSA-INV-010"
+                }
+            ]
+        },
+        "provenance": {
+            "source": "source_backed_first_party",
+            "sourceRefs": [
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::jobs"
+                },
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::program_execution"
+                },
+                {
+                    "kind": "crate_module",
+                    "ref": "domains::module_runtime"
                 },
                 {
                     "kind": "crate_module",

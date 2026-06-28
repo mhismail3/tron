@@ -79,12 +79,19 @@ fn projected_runtime(value: Option<&Value>) -> Value {
         "featureSemanticsOwnedByPackage",
         "supervisorEnvelopeOnly",
         "processLaunched",
+        "jobDelegated",
         "jobExposedToProvider",
     ] {
         if let Some(value) = runtime.get(key).and_then(Value::as_bool) {
             projected.insert(key.to_owned(), json!(value));
         }
     }
+    insert_projected_string(
+        runtime,
+        &mut projected,
+        "providerVisibleJobProjection",
+        PROJECTION_ID_BYTES,
+    );
     Value::Object(projected)
 }
 
@@ -101,6 +108,10 @@ fn projected_supervision(value: Option<&Value>) -> Value {
         "timeout",
         "cancellation",
         "shutdown",
+        "job",
+        "outputCustody",
+        "cleanup",
+        "programExecution",
     ] {
         if let Some(child) = supervision.get(key) {
             projected.insert(key.to_owned(), projected_policy(child));
