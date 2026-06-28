@@ -1238,3 +1238,59 @@ backlog; DRC still fails on unchanged goals/web/tool-source entropy allow-list
 entries, SOL still fails on the unchanged marker-source backlog, and SUWRF still
 fails on unchanged `packages/agent/src/domains/program_execution` residue
 outside Slice 24G.
+
+## Implementation Candidate Slice 24H: Import Repository And Update Module Pack
+
+Status: implementation candidate pending independent review.
+
+Discovery thread `019f0de8-2128-76c0-8bd0-f93e72678ece` selected Slice 24H
+(`P3MSA-INV-016`) with exact final status `implementation may start` from
+baseline `origin/main@964b9aced48772ceb67f8991b6ef6bdc6103a417`
+(`docs: accept phase 3 slice 24g`).
+
+Implementation branch:
+`codex/phase-3-slice-24h-import-update-module-pack`
+
+Implementation thread:
+`019efe16-09d7-73d3-9708-6c6ba5bc6493`
+
+Slice 24H adds a pending-review `import_update_module` manifest through the
+split manifest-file pattern. It records module metadata only for existing
+`import_history_record`, `repository_tree_snapshot`, `import_preview`, and
+`update_diagnostic_record` resources and existing import-history,
+repository-tree, import-preview, and update-diagnostic record/list/inspect
+execute operations.
+
+The candidate manifest declares domain/resource authority needs bounded to the
+existing resource kinds and their kind-prefixed selectors, keeps
+`networkPolicy: none`, and marks the module non-installable and non-executable.
+Validation checks remain pending gates for approval, rollback, future action
+contracts, bounded payload custody, and provider redaction.
+
+Rejected scope remains deferred or forbidden: import execution, repository
+mutation, raw tree dumps, raw diagnostics payloads, live update checks,
+installer/restart/update commands, package-manager behavior, production deploy
+behavior, network behavior, SQLite migrations, public `/engine` expansion,
+native fixed panels, repo-managed `packages/agent/skills`, local path leakage,
+raw packages/endpoints/commands, grants, authority ids, and token-like
+material.
+
+Implementation validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting remained stable after the split manifest seed and focused test additions. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 with known warnings | Type-check passed. Existing provider/model/resource-store dead-code warnings remained unchanged from the accepted baseline. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::module_registry::tests -- --nocapture` | exit 0 | Module registry seed/projection tests passed, including the pending-review `import_update_module` manifest, domain schema-version constants, kind-selector-bounded authority metadata, no side effects, provider-safety checks, and rejected operation-name guards. Cargo also walked filtered integration test binaries with zero matching tests. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::module_registry::tests -- --nocapture` | exit 0 | Focused lib-only module registry test rerun passed 12 tests, including the Slice 24H manifest projection test. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants` | exit 0 | DESI static docs/evidence/scorecard integrity checks passed after adding Slice 24H evidence and inventory rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants --test true_modularity_boundary_invariants --test public_protocol_api_contract_discipline_invariants --test self_sufficient_agent_runtime_readiness_invariants --test observability_diagnostics_auditability_invariants --test performance_resource_governance_invariants` | exit 0 | SACB, TMB, PCC, SSARR, ODA, and PERF static guards passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants` | exit 0 after docs count fix | TPC passed after updating the retention inventory classification and owner summary counts for the new split manifest file. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants` | exit 101, unchanged caveat | HRA still fails on pre-existing capability execute decomposition backlog, pre-existing missing `grant_file_git_tests.rs` inventory row, and pre-existing over-budget `domains/procedural/service.rs` and `domains/procedural/tests.rs`; the new Slice 24H HRA row is accepted by the inventory vocabulary. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants` | exit 101, unchanged caveat | DRC still fails on pre-existing goals/web/tool-source wall-clock allow-list backlog outside Slice 24H. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants` | exit 101, unchanged caveat | SUWRF still fails on pre-existing `packages/agent/src/domains/program_execution` fixed-surface residue outside Slice 24H. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants` | exit 101, unchanged caveat | SOL still fails on pre-existing stateful marker-source inventory backlog outside Slice 24H. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
+| `git diff --check` | exit 0 | Unstaged diff whitespace check passed. |
+| `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |

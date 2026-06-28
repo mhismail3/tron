@@ -454,6 +454,34 @@ bounded and omit raw APNs tokens, raw device tokens, credentials, device
 secrets, raw provider payloads, full token hashes, grants, authority ids, and
 local material.
 
+## Implementation Candidate Slice 24H: Import Repository And Update Module Pack
+
+Slice 24H (`P3MSA-INV-016`) is implementation-candidate pending independent
+review. It adds a pending-review `import_update_module` manifest seed for the
+existing `domains/import_history`, `domains/repository_tree`,
+`domains/import_preview`, and `domains/update_diagnostics` metadata
+foundations. The manifest covers only existing `import_history_*`,
+`repository_tree_*`, `import_preview_*`, and `update_diagnostic_*`
+`capability::execute` operation values and their existing durable resource
+kinds.
+
+The candidate declares `import_history_record`, `repository_tree_snapshot`,
+`import_preview`, and `update_diagnostic_record` resource declarations with
+domain-owned payload schema versions, kind-selector-bounded domain and generic
+resource authority metadata, `networkPolicy: none`, `installable: false`,
+`executable: false`, and manifest lifecycle `pending_review`. Validation
+checks remain gates for approval, rollback, future action contracts, bounded
+payload custody, and provider redaction.
+
+The candidate deliberately does not add import execution, repository mutation,
+raw repository tree dumps, raw diagnostics payloads, live update checks,
+installer/restart/update commands, package-manager behavior, production deploy
+behavior, SQLite migrations, public `/engine` expansion, native fixed panels,
+repo-managed `packages/agent/skills`, or network behavior. Provider-visible
+projections remain bounded and omit raw import payloads, raw repository
+contents, file contents, unsafe paths, endpoints, commands, packages, grants,
+authority ids, and token-like material.
+
 ## Review Rules
 
 Review workers must:

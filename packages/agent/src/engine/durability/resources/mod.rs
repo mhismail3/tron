@@ -32,6 +32,7 @@ mod module_dependencies_definitions;
 mod module_install_definitions;
 mod module_lifecycle_definitions;
 mod module_registry_definitions;
+mod module_registry_import_update_manifest;
 mod module_registry_memory_manifest;
 mod module_registry_notification_delivery_manifest;
 mod module_registry_procedural_manifest;

@@ -43,6 +43,7 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         "module_manifest:procedural_module",
         "module_manifest:web_research_module",
         "module_manifest:notification_delivery_module",
+        "module_manifest:import_update_module",
     ] {
         let inspection = host
             .inspect_resource(resource_id)
@@ -56,6 +57,258 @@ async fn built_in_definition_and_seed_resources_are_registered() {
         assert_eq!(
             inspection.versions[0].payload["schemaVersion"],
             json!(SCHEMA_VERSION)
+        );
+    }
+}
+
+#[tokio::test]
+async fn import_update_module_manifest_projects_pending_review_metadata_only_gates() {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let grant_id = derive_module_read_grant(
+        &host,
+        "import-update-module",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[MODULE_MANIFEST_KIND],
+        &[
+            "kind:module_manifest",
+            "resource:module_manifest:import_update_module",
+        ],
+        "none",
+    )
+    .await;
+
+    let inspect_invocation = module_invocation(
+        "import-update-module",
+        json!({
+            "operation": "module_inspect",
+            "moduleManifestResourceId": "module_manifest:import_update_module",
+            "maxItems": 1000
+        }),
+        grant_id,
+    );
+    let inspected = inspect_module_value(&host, &inspect_invocation, &inspect_invocation.payload)
+        .await
+        .expect("inspect import/update module");
+    let resource = &inspected["resource"];
+
+    assert_eq!(
+        resource["identity"]["moduleId"]["text"],
+        json!("import_update_module")
+    );
+    assert_eq!(resource["identity"]["kind"]["text"], json!("module_pack"));
+    assert_eq!(
+        resource["manifestLifecycle"]["state"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(
+        resource["manifestLifecycle"]["activation"]["text"],
+        json!("authority_mapped_module_pack")
+    );
+    assert_eq!(
+        resource["manifestLifecycle"]["networkPolicy"]["text"],
+        json!("none")
+    );
+    assert_eq!(resource["manifestLifecycle"]["installable"], json!(false));
+    assert_eq!(resource["manifestLifecycle"]["executable"], json!(false));
+    assert_eq!(
+        resource["validation"]["status"]["text"],
+        json!("pending_review")
+    );
+    assert_eq!(resource["capabilityDeclarations"]["total"], json!(12));
+    assert_eq!(resource["resourceDeclarations"]["total"], json!(4));
+    assert_eq!(resource["authorityNeeds"]["total"], json!(10));
+    assert_side_effects_are_absent(&inspected);
+    assert_provider_projection_has_no_raw_sensitive_material(&inspected);
+
+    let declared_operations = resource["capabilityDeclarations"]["items"]
+        .as_array()
+        .expect("capability declarations")
+        .iter()
+        .filter_map(|item| item.pointer("/operation/text").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        declared_operations,
+        vec![
+            "import_history_record",
+            "import_history_list",
+            "import_history_inspect",
+            "repository_tree_snapshot",
+            "repository_tree_list",
+            "repository_tree_inspect",
+            "import_preview_record",
+            "import_preview_list",
+            "import_preview_inspect",
+            "update_diagnostic_record",
+            "update_diagnostic_list",
+            "update_diagnostic_inspect",
+        ]
+    );
+
+    let manifest = host
+        .inspect_resource("module_manifest:import_update_module")
+        .await
+        .expect("inspect raw import/update manifest")
+        .expect("import/update manifest exists");
+    let payload = &manifest.versions[0].payload;
+    assert_manifest_resource_schema_version(
+        payload,
+        "import_history_record",
+        crate::domains::import_history::contract::IMPORT_HISTORY_SCHEMA_VERSION,
+    );
+    assert_manifest_resource_schema_version(
+        payload,
+        "repository_tree_snapshot",
+        crate::domains::repository_tree::contract::REPOSITORY_TREE_SCHEMA_VERSION,
+    );
+    assert_manifest_resource_schema_version(
+        payload,
+        "import_preview",
+        crate::domains::import_preview::contract::IMPORT_PREVIEW_SCHEMA_VERSION,
+    );
+    assert_manifest_resource_schema_version(
+        payload,
+        "update_diagnostic_record",
+        crate::domains::update_diagnostics::contract::UPDATE_DIAGNOSTICS_SCHEMA_VERSION,
+    );
+    assert_projected_resource_schema_version(
+        resource,
+        "import_history_record",
+        crate::domains::import_history::contract::IMPORT_HISTORY_SCHEMA_VERSION,
+    );
+    assert_projected_resource_schema_version(
+        resource,
+        "repository_tree_snapshot",
+        crate::domains::repository_tree::contract::REPOSITORY_TREE_SCHEMA_VERSION,
+    );
+    assert_projected_resource_schema_version(
+        resource,
+        "import_preview",
+        crate::domains::import_preview::contract::IMPORT_PREVIEW_SCHEMA_VERSION,
+    );
+    assert_projected_resource_schema_version(
+        resource,
+        "update_diagnostic_record",
+        crate::domains::update_diagnostics::contract::UPDATE_DIAGNOSTICS_SCHEMA_VERSION,
+    );
+
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::import_history::contract::READ_SCOPE,
+        &["import_history_record"],
+        &["kind:import_history_record".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::import_history::contract::WRITE_SCOPE,
+        &["import_history_record"],
+        &["kind:import_history_record".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::repository_tree::contract::READ_SCOPE,
+        &["repository_tree_snapshot"],
+        &["kind:repository_tree_snapshot".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::repository_tree::contract::WRITE_SCOPE,
+        &["repository_tree_snapshot"],
+        &["kind:repository_tree_snapshot".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::import_preview::contract::READ_SCOPE,
+        &["import_preview"],
+        &["kind:import_preview".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::import_preview::contract::WRITE_SCOPE,
+        &["import_preview"],
+        &["kind:import_preview".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::update_diagnostics::contract::READ_SCOPE,
+        &["update_diagnostic_record"],
+        &["kind:update_diagnostic_record".to_owned()],
+    );
+    assert_manifest_authority_need(
+        payload,
+        crate::domains::update_diagnostics::contract::WRITE_SCOPE,
+        &["update_diagnostic_record"],
+        &["kind:update_diagnostic_record".to_owned()],
+    );
+
+    let import_update_resource_kinds = vec![
+        "import_history_record".to_owned(),
+        "repository_tree_snapshot".to_owned(),
+        "import_preview".to_owned(),
+        "update_diagnostic_record".to_owned(),
+    ];
+    let import_update_resource_selectors = vec![
+        "kind:import_history_record".to_owned(),
+        "kind:repository_tree_snapshot".to_owned(),
+        "kind:import_preview".to_owned(),
+        "kind:update_diagnostic_record".to_owned(),
+    ];
+    for scope in ["resource.read", "resource.write"] {
+        assert_manifest_authority_need(
+            payload,
+            scope,
+            &[
+                "import_history_record",
+                "repository_tree_snapshot",
+                "import_preview",
+                "update_diagnostic_record",
+            ],
+            &import_update_resource_selectors,
+        );
+        let projected = projected_authority_need(resource, scope);
+        assert_eq!(
+            projected_text_items(projected, "resourceKinds"),
+            import_update_resource_kinds.clone(),
+            "projected {scope} resource kinds must match manifest kind bounds"
+        );
+        assert_eq!(
+            projected_text_items(projected, "selectors"),
+            import_update_resource_selectors.clone(),
+            "projected {scope} selectors must remain kind-selector bounded"
+        );
+    }
+
+    let rendered = serde_json::to_string(&inspected).expect("serialize import/update module");
+    for required in [
+        "import_history_record",
+        "repository_tree_snapshot",
+        "import_preview_record",
+        "update_diagnostic_record",
+        "approval_gate",
+        "rollback_gate",
+        "action_contract_gate",
+        "bounded_payload_custody",
+        "provider_redaction",
+        "P3MSA-INV-016",
+    ] {
+        assert!(
+            rendered.contains(required),
+            "import/update manifest omitted {required}"
+        );
+    }
+    for forbidden in [
+        "import_execute",
+        "repository_tree_action",
+        "repository_mutate",
+        "update_diagnostic_action",
+        "update_install",
+        "update_restart",
+        "package_manager",
+        "rawRepositoryContentsStored:true",
+        "rawImportPayloadStored:true",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "import/update manifest leaked forbidden material {forbidden}"
         );
     }
 }

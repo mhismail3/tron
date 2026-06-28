@@ -8,6 +8,7 @@
 
 use serde_json::{Value, json};
 
+use super::module_registry_import_update_manifest::import_update_module_manifest;
 use super::module_registry_memory_manifest::memory_engine_module_manifest;
 use super::module_registry_notification_delivery_manifest::notification_delivery_module_manifest;
 use super::module_registry_procedural_manifest::procedural_module_manifest;
@@ -64,6 +65,7 @@ pub(in crate::engine) fn builtin_module_manifest_resources() -> Vec<CreateResour
         procedural_module_manifest(),
         web_research_module_manifest(),
         notification_delivery_module_manifest(),
+        import_update_module_manifest(),
     ]
     .into_iter()
     .map(seed_resource)
