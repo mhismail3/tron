@@ -711,7 +711,7 @@ contracts exist and generic cockpit rendering proves insufficient.
 
 ### Slice 24J: Broad Product DTO Resurrection
 
-Objective: close `P3MSA-INV-018` as an implementation-candidate
+Objective: close `P3MSA-INV-018` as an accepted
 rejected-shape/static-guard slice so product DTO breadth does not return as a
 compatibility fallback or public protocol shortcut.
 
@@ -734,12 +734,11 @@ Out of scope:
   client-owned server truth, SQLite migrations, package-manager/network
   behavior, repo-managed skills, and production deploy/update behavior.
 
-Implementation-candidate Slice 24J records the broad product DTO rejected shape
-without adding runtime behavior. Accepted surfaces remain narrow and
-module-owned: `module_activity::overview`, accepted resource kinds including
-`ui_surface`, iOS module activity DTOs, generated UI DTOs, and worker lifecycle
-resource DTOs. Independent review and mainline integration remain the boundary
-for changing this section to accepted baseline wording.
+Accepted Slice 24J records the broad product DTO rejected shape without adding
+runtime behavior. Accepted surfaces remain narrow and module-owned:
+`module_activity::overview`, accepted resource kinds including `ui_surface`,
+iOS module activity DTOs, generated UI DTOs, and worker lifecycle resource
+DTOs.
 
 ## Execution Protocol
 

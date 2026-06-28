@@ -1356,10 +1356,10 @@ allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` residue, and SOL may fail on the
 unchanged marker-source backlog outside Slice 24I.
 
-## Implementation Candidate Rejected Shape Slice 24J: Broad Product DTO Resurrection
+## Accepted Rejected Shape Slice 24J: Broad Product DTO Resurrection
 
-Status: implementation-candidate rejected-shape containment pending independent
-review.
+Status: accepted rejected-shape containment after independent review and
+mainline integration.
 
 Discovery thread `019f0e2d-6cc1-7752-8930-4fb869f8bfba` selected Slice 24J
 (`P3MSA-INV-018`) with exact final status `implementation may start` from
@@ -1384,7 +1384,7 @@ fallback/shim behavior, client-owned truth, SQLite migrations,
 package-manager or network behavior, dependencies, repo-managed
 `packages/agent/skills`, and production deploy/update behavior.
 
-Implementation validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1400,6 +1400,9 @@ Implementation validation evidence:
 | `git diff --check` | exit 0 | Unstaged whitespace check passed. |
 | `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+| Implementation thread `019f0e31-3da7-73c2-8caa-1e4b8313b72b` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24j-broad-product-dto-containment` from baseline `17c31d9a15e5c960d97c7e80c676fd2eaa647794` at `1ad2b80122f64938573b65925bdfd09c8be2cebe` with static source guards, DTO compatibility tests, Phase 3, PPACD, DESI, README, and iOS architecture docs. |
+| Independent review thread `019f0e39-c625-7be1-8f15-ea158cabc78d` | exact verdict `slice accepted` | Review verified `17c31d9a15e5c960d97c7e80c676fd2eaa647794..1ad2b80122f64938573b65925bdfd09c8be2cebe`, branch/head/ancestry/cleanliness, rejected-shape containment, no broad product DTO/public `/engine`/product event/migration/runtime expansion, focused iOS DTO/source-guard tests, PPACD, DESI, event catalog, fmt/check, hygiene checks, and caveat-only DRC/SUWRF failures outside Slice 24J. |
+| Mainline merge `1483fde65d6bda136ac363710dde6b8aa69bc166` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24J implementation was merged into `main`; focused DTO/source-guard/static docs, formatting, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. Existing provider/model/resource-store dead-code warnings and unchanged DRC/SUWRF caveats remain. |
 
 Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings remain; DRC may fail on unchanged goals/web/tool-source entropy

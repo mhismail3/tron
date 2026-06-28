@@ -941,13 +941,12 @@ memory, process, subagent, notification, skill, fabricated-activity, and other
 fixed-panel sentinels. It does not add native panels, runtime behavior, public
 API/DTO expansion, device work, package-manager/network behavior, SQLite
 migrations, or repo-managed skills.
-Phase 3 Slice 24J is an implementation-candidate rejected-shape containment
-slice for broad product DTO resurrection. Accepted iOS DTO breadth remains
+Accepted Phase 3 Slice 24J records broad product DTO resurrection as an
+accepted rejected-shape containment baseline. Accepted iOS DTO breadth remains
 module/resource-owned (`module_activity`, worker lifecycle resource DTOs, and
 generic `ui_surface` schemas), source guards reject broad product DTO buckets,
 product protocol namespaces, product event payloads, and product table names,
-and the primitive loop event catalog remains the source of event truth pending
-independent review.
+and the primitive loop event catalog remains the source of event truth.
 `domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it

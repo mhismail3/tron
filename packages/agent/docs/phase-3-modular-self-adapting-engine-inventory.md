@@ -503,11 +503,11 @@ client-owned server truth, public `/engine` expansion, broad DTO resurrection,
 package-manager/network behavior, physical-device work, SQLite migration, or
 repo-managed `packages/agent/skills` belongs to this slice.
 
-## Implementation Candidate Rejected Shape Slice 24J: Broad Product DTO Resurrection
+## Accepted Rejected Shape Slice 24J: Broad Product DTO Resurrection
 
-Slice 24J (`P3MSA-INV-018`) is implementation-candidate rejected-shape
-containment pending independent review. It keeps DTO/protocol growth tied to
-accepted module resources and stable workflows instead of reviving the old
+Slice 24J (`P3MSA-INV-018`) is accepted rejected-shape containment after
+independent review and mainline integration. It keeps DTO/protocol growth tied
+to accepted module resources and stable workflows instead of reviving the old
 product DTO layer as a compatibility bucket.
 
 Accepted surfaces stay narrow and module-owned: `module_activity::overview`
@@ -517,10 +517,10 @@ accepted resource kinds including `ui_surface`, and generated UI DTOs used by
 forward compatibility, but unknown product-shaped fields are not preserved as
 client-owned fallback state.
 
-The implementation-candidate slice adds static iOS source guards against broad
-product DTO namespaces, old product protocol files/directories, product event
-payload files, public protocol product clients, and product table names. It
-also reinforces that the event catalog remains the primitive loop catalog in
+The accepted slice adds static iOS source guards against broad product DTO
+namespaces, old product protocol files/directories, product event payload files,
+public protocol product clients, and product table names. It also reinforces
+that the event catalog remains the primitive loop catalog in
 `packages/agent/src/domains/session/event_store/types/generated.rs`; product
 event variants are not part of this slice.
 
