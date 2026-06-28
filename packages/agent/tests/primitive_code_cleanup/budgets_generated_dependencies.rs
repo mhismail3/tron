@@ -8,6 +8,14 @@ const PHASE_TWO_SCORECARD_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md";
 const PHASE_TWO_EVIDENCE_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md";
+const PHASE_THREE_INVENTORY_TSV_PATH: &str =
+    "packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv";
+const PHASE_THREE_SCORECARD_PATH: &str =
+    "packages/agent/docs/phase-3-modular-self-adapting-engine-scorecard.md";
+const PHASE_THREE_INVENTORY_PATH: &str =
+    "packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md";
+const PHASE_THREE_EVIDENCE_PATH: &str =
+    "packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md";
 const FEATURE_INDEX_PATH: &str =
     "packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md";
 
@@ -44,10 +52,19 @@ fn direct_dependency_declared(cargo_toml: &str, dependency: &str) -> bool {
 
 fn phase_two_inventory_row(row_id: &str) -> Vec<String> {
     let inventory = read_repo_file(PHASE_TWO_INVENTORY_TSV_PATH);
+    inventory_tsv_row(&inventory, row_id, "Phase 2")
+}
+
+fn phase_three_inventory_row(row_id: &str) -> Vec<String> {
+    let inventory = read_repo_file(PHASE_THREE_INVENTORY_TSV_PATH);
+    inventory_tsv_row(&inventory, row_id, "Phase 3")
+}
+
+fn inventory_tsv_row(inventory: &str, row_id: &str, label: &str) -> Vec<String> {
     let row = inventory
         .lines()
         .find(|line| line.starts_with(&format!("{row_id}\t")))
-        .unwrap_or_else(|| panic!("missing Phase 2 inventory row {row_id}"));
+        .unwrap_or_else(|| panic!("missing {label} inventory row {row_id}"));
     row.split('\t').map(str::to_owned).collect()
 }
 
@@ -124,11 +141,11 @@ fn rust_dead_dependency_artifacts_stay_removed() {
     for banned in removed_dependency_names_from_feature_index() {
         assert!(
             !direct_dependency_declared(&cargo_toml, &banned),
-            "Cargo.toml must not reintroduce removed dependency `{banned}` without an owning module and Phase 2 dependency-restoration rationale"
+            "Cargo.toml must not reintroduce removed dependency `{banned}` without an approved Phase 3 module dependency request, owner rationale, policy decision, and P3MSA-INV-019 review evidence"
         );
         assert!(
             !cargo_lock.contains(&format!("name = \"{banned}\"")),
-            "Cargo.lock must not retain removed dependency `{banned}` without an owning module and Phase 2 dependency-restoration rationale"
+            "Cargo.lock must not retain removed dependency `{banned}` without an approved Phase 3 module dependency request, owner rationale, policy decision, and P3MSA-INV-019 review evidence"
         );
     }
 
@@ -154,7 +171,7 @@ fn rust_dead_dependency_artifacts_stay_removed() {
 }
 
 #[test]
-fn dependency_restoration_review_is_source_backed_by_phase_two_policy() {
+fn speculative_dependency_restoration_requires_phase_three_module_policy() {
     let expected_removed_dependencies: BTreeSet<String> = [
         "apns",
         "bytemuck",
@@ -182,7 +199,7 @@ fn dependency_restoration_review_is_source_backed_by_phase_two_policy() {
     let removed_dependencies = removed_dependency_names_from_feature_index();
     assert_eq!(
         removed_dependencies, expected_removed_dependencies,
-        "feature-index section 24 is the source-backed removed-dependency policy; update this guard and Phase 2 evidence together when that catalog intentionally changes"
+        "feature-index section 24 is the source-backed removed-dependency policy; update this guard plus Phase 2 and Phase 3 evidence together when that catalog intentionally changes"
     );
 
     let feature_index = read_repo_file(FEATURE_INDEX_PATH);
@@ -212,7 +229,7 @@ fn dependency_restoration_review_is_source_backed_by_phase_two_policy() {
     ] {
         assert!(
             inventory_row.join("\t").contains(required),
-            "P2AER-INV-023 must record Slice 22A dependency policy evidence: {required}"
+            "P2AER-INV-023 must keep the accepted Slice 22A source policy evidence that Phase 3 builds on: {required}"
         );
     }
 
@@ -234,6 +251,110 @@ fn dependency_restoration_review_is_source_backed_by_phase_two_policy() {
             assert!(
                 lower_contents.contains(&required.to_ascii_lowercase()),
                 "{path} must record Slice 22A accepted dependency policy evidence: {required}"
+            );
+        }
+    }
+
+    let phase_three_dependency_row = phase_three_inventory_row("P3MSA-INV-007");
+    assert_eq!(
+        phase_three_dependency_row.len(),
+        15,
+        "Phase 3 inventory row schema changed: {phase_three_dependency_row:?}"
+    );
+    assert_eq!(phase_three_dependency_row[0], "P3MSA-INV-007");
+    assert_eq!(
+        phase_three_dependency_row[2],
+        "Modules can request dependencies with owner rationale and review instead of speculative restoration"
+    );
+    assert_eq!(phase_three_dependency_row[3], "module_plane");
+    assert_eq!(phase_three_dependency_row[5], "module_dependencies");
+    assert_eq!(phase_three_dependency_row[13], "current_baseline");
+    for required in [
+        "Accepted Slice 23G",
+        "module_dependency_request",
+        "module_dependency_decision",
+        "module_dependency_policy",
+        "Cargo.toml/Cargo.lock parity evidence",
+        "Speculative dependency restoration",
+        "without selected module",
+        "package-manager execution",
+        "Cargo.toml/Cargo.lock mutation",
+        "Dependency request policy",
+        "no package-manager execution or manifest/lockfile mutation",
+    ] {
+        assert!(
+            phase_three_dependency_row.join("\t").contains(required),
+            "P3MSA-INV-007 must record accepted module dependency request/policy evidence: {required}"
+        );
+    }
+
+    let phase_three_rejection_row = phase_three_inventory_row("P3MSA-INV-019");
+    assert_eq!(
+        phase_three_rejection_row.len(),
+        15,
+        "Phase 3 inventory row schema changed: {phase_three_rejection_row:?}"
+    );
+    assert_eq!(
+        phase_three_rejection_row[1],
+        "Slice 24K Speculative Dependency Restoration"
+    );
+    assert_eq!(phase_three_rejection_row[3], "reject_candidate");
+    assert_eq!(phase_three_rejection_row[5], "none");
+    assert_eq!(
+        phase_three_rejection_row[8],
+        "Implementation-candidate Slice 24K records rejected-shape/static containment for dependency reappearance: removed dependencies stay absent unless a selected module owns a module_dependency_request with rationale risk tests removal path parity evidence and approved module_dependency_policy decision"
+    );
+    assert_eq!(phase_three_rejection_row[13], "pending_review");
+    for required in [
+        "P3MSA-INV-007",
+        "Accepted Slice 23G",
+        "approved module_dependency_request",
+        "approved module_dependency_policy",
+        "Portable PTY",
+        "APNs",
+        "package-manager execution",
+        "manifest or lockfile mutation",
+        "raw dependency artifacts",
+        "package-manager output",
+        "Dependency guard denies reappearance without approved module rationale",
+    ] {
+        assert!(
+            phase_three_rejection_row.join("\t").contains(required),
+            "P3MSA-INV-019 must record Slice 24K rejected-shape dependency containment: {required}"
+        );
+    }
+
+    for (path, contents) in [
+        (
+            PHASE_THREE_SCORECARD_PATH,
+            read_repo_file(PHASE_THREE_SCORECARD_PATH),
+        ),
+        (
+            PHASE_THREE_INVENTORY_PATH,
+            read_repo_file(PHASE_THREE_INVENTORY_PATH),
+        ),
+        (
+            PHASE_THREE_EVIDENCE_PATH,
+            read_repo_file(PHASE_THREE_EVIDENCE_PATH),
+        ),
+    ] {
+        for required in [
+            "Slice 24K",
+            "P3MSA-INV-019",
+            "Speculative Dependency Restoration",
+            "implementation-candidate",
+            "pending_review",
+            "P3MSA-INV-007",
+            "module_dependency_request",
+            "module_dependency_policy",
+            "Cargo.toml",
+            "Cargo.lock",
+            "no package-manager",
+            "no dependencies are restored",
+        ] {
+            assert!(
+                contents.contains(required),
+                "{path} must record pending-review Slice 24K Phase 3 dependency containment evidence: {required}"
             );
         }
     }

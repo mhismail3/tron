@@ -740,6 +740,42 @@ runtime behavior. Accepted surfaces remain narrow and module-owned:
 iOS module activity DTOs, generated UI DTOs, and worker lifecycle resource
 DTOs.
 
+### Slice 24K: Speculative Dependency Restoration
+
+Objective: close `P3MSA-INV-019` as an implementation-candidate
+rejected-shape/static-containment slice so removed dependencies do not return
+without an approved module-owned dependency request and policy decision.
+
+Minimal shape:
+
+- a Phase 3-aware dependency guard that keeps the removed dependency catalog
+  source-backed by the feature index, the accepted Phase 2 Slice 22A policy,
+  and accepted `P3MSA-INV-007` module dependency request/policy governance;
+- static checks that deny reappearance in `Cargo.toml` or `Cargo.lock` without
+  a selected module owner, rationale, risk class, tests, removal path,
+  manifest/lockfile parity evidence, and approved `module_dependency_policy`;
+- Phase 3, DESI, and evidence wording that keeps this branch
+  `implementation-candidate` / `pending_review` until independent review
+  acceptance.
+
+Out of scope:
+
+- adding dependencies or restoring `portable-pty`, interpreters, embeddings,
+  browser automation, APNs transport, signing, rendering, or package-manager
+  packages;
+- package-manager execution, network installs, manifest or lockfile mutation,
+  raw dependency artifacts, package-manager output, runtime dependency
+  restoration, public `/engine` expansion, fixed native panels,
+  repo-managed skills, production deploy/update behavior, and no package-manager
+  behavior.
+
+Implementation-candidate Slice 24K records the speculative dependency
+restoration rejected shape without adding runtime behavior. `P3MSA-INV-019`
+stays `pending_review`: no dependencies are restored, and any future
+dependency return must pass through `P3MSA-INV-007` with an approved
+`module_dependency_request`, approved `module_dependency_policy`, module owner
+rationale, parity evidence, tests, and removal plan.
+
 ## Execution Protocol
 
 Every Phase 3 slice follows this thread sequence:

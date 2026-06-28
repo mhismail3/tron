@@ -1409,3 +1409,56 @@ warnings remain; DRC may fail on unchanged goals/web/tool-source entropy
 allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` residue, and SOL may fail on the
 unchanged marker-source backlog outside Slice 24J.
+
+## Implementation Candidate Rejected Shape Slice 24K: Speculative Dependency Restoration
+
+Status: implementation-candidate rejected-shape containment pending
+independent review; TSV status remains `pending_review`.
+
+Discovery thread `019f0e47-4f80-7c92-af27-8f56f8b8d251` selected Slice 24K
+(`P3MSA-INV-019`) with exact final status `implementation may start` from
+accepted Phase 3 Slice 24J baseline
+`origin/main@187dbbeffca35cd7f268ae09dfcff2fd1aa3b0b4`
+(`docs: accept phase 3 slice 24j`).
+
+Implementation branch:
+`codex/phase-3-slice-24k-speculative-dependency-restoration`
+
+Slice 24K strengthens the existing primitive cleanup dependency guard so
+removed dependency reappearance is rejected unless it is source-backed by an
+approved module-owned dependency path. The guard still uses the feature-index
+removed dependency catalog and accepted Phase 2 Slice 22A evidence, and now
+also requires accepted `P3MSA-INV-007` module dependency governance:
+`module_dependency_request`, `module_dependency_policy`, module owner
+rationale, risk class, tests, removal path, and `Cargo.toml` / `Cargo.lock`
+parity evidence.
+
+Rejected scope remains deferred or forbidden while this candidate is in
+review: no speculative dependency restoration, no runtime dependency
+restoration, no dependency additions, no `portable-pty`, interpreter,
+embedding/vector, browser automation, APNs transport, signing, or rendering
+package return, no package-manager execution, no manifest or lockfile
+mutation, no network install, no raw dependency artifacts, no package-manager
+output, no public `/engine` expansion, no fixed native panels, no repo-managed
+`packages/agent/skills`, no production deploy/update behavior, and no dependencies are restored.
+
+Implementation-candidate validation evidence:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting passed after the dependency guard update. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Type-check passed with only existing provider/model/resource-store dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants speculative_dependency_restoration_requires_phase_three_module_policy -- --nocapture` | exit 0 | Focused guard proves removed dependency names stay absent from `Cargo.toml` and `Cargo.lock`, and that Slice 24K ties reappearance to accepted `P3MSA-INV-007` policy evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 101, unchanged caveat | Full PCC target passed 16 tests and failed only on pre-existing `GeneratedUIDTOTests.swift` retired `Dashboard` residue outside Slice 24K; this branch did not touch iOS sources. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | TPC passed 15 tests because dependency restoration remains rejected shape/static containment only. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI passed 9 tests after adding Slice 24K documentation/evidence inventory rows. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan passed. |
+| `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed. |
+| `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
+| `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+
+Known unchanged caveats: existing provider/model/resource-store dead-code
+warnings may remain; DRC may fail on unchanged goals/web/tool-source entropy
+allow-list entries, SUWRF may fail on unchanged
+`packages/agent/src/domains/program_execution` residue, and SOL may fail on the
+unchanged marker-source backlog outside Slice 24K.
