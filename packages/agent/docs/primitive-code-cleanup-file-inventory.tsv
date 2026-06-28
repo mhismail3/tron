@@ -78,7 +78,7 @@ packages/agent/src/domains/agent/contract.rs	retain	rust agent	PCC-10/AHA-9	Curr
 packages/agent/src/domains/agent/deps.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/handlers.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	retain	rust agent	SACB-10	Current capability-runtime grant helper split retained after SACB-10 closeout.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	retain	phase3 agent	PCC-10/SACB-10/P3MSA-INV-011	Capability-runtime grant derivation retained for Slice 24C implementation-candidate delegated subagent exact selectors and module refs pending review.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -393,7 +393,7 @@ packages/agent/src/domains/transcription/implementation/types.rs	retain	transcri
 packages/agent/src/domains/transcription/mod.rs	retain	transcription domain	Phase1-closeout	Transcription module root is retained for the approved Phase 1 local composer dictation capability.
 packages/agent/src/domains/system/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/authority/compensation.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/engine/authority/grants/authorization.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/engine/authority/grants/authorization.rs	retain	phase3 engine	PCC-10/AHA-9/P3MSA-INV-011	Engine capability authorization retained for Slice 24C implementation-candidate delegated subagent exact selector enforcement pending review.
 packages/agent/src/engine/authority/grants/derivation.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/authority/grants/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/authority/grants/model.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1812,7 +1812,7 @@ packages/agent/src/domains/web/web_extraction_tests.rs	retain	phase2 web	P2AER-S
 packages/agent/src/domains/web/web_robots_tests.rs	retain	phase2 web	P2AER-S8E	Web robots policy tests retained for pending-review authority, parser, evidence, safety, metadata-only sitemap, and replay regressions.
 packages/agent/src/domains/web/web_source_tests.rs	retain	phase2 web	P2AER-S8B	Web source inspection focused tests retained for read authority, current-session scope, stale/missing versions, bounded snippets, and no-network read regressions.
 packages/agent/src/engine/durability/resources/web_definitions.rs	retain	phase2 web	P2AER-S8E	Web resource definitions retained for engine-owned web_source and web_robots_policy schema registration.
-packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_tests.rs	retain	phase2 agent	P2AER-S8F	Capability invocation executor grant tests retained for pending-review robots-linked web_fetch runtime grant derivation and engine authorization regressions.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_tests.rs	retain	phase3 agent	P2AER-S8F/P3MSA-INV-011	Capability invocation executor grant tests retained for Slice 24C implementation-candidate delegated subagent runtime grant regressions pending review.
 packages/agent/src/domains/web/robots_link.rs	retain	phase2 web	P2AER-S8F	Web robots link service retained for pending-review fetch-side web_robots_policy evidence validation and bounded robotsPolicyRefs linkage.
 packages/agent/src/domains/web/web_fetch_robots_link_tests.rs	retain	phase2 web	P2AER-S8F	Web fetch robots link tests retained for pending-review allow/deny/stale/wrong-scope/target-mismatch and bounded-ref regressions.
 packages/agent/src/domains/capability/operations/tool_sources.rs	retain	capability execute owner	PCC-10/P2AER-S9A	Slice 9A read-only execute adapter for inert tool-source proposal inspection.
@@ -1828,14 +1828,14 @@ packages/agent/src/domains/worker_lifecycle/inspection/mod.rs	retain	worker_life
 packages/agent/src/domains/worker_lifecycle/inspection/projection.rs	retain	worker_lifecycle owner	PCC-10/P2AER-S9B-FIX1	Slice 9B projection helper split below static file budgets.
 packages/agent/src/domains/worker_lifecycle/inspection_test_support.rs	retain	worker_lifecycle test owner	PCC-10/P2AER-S9B-FIX1	Slice 9B inspection test fixtures split below static file budgets.
 packages/agent/src/domains/worker_lifecycle/inspection_tests.rs	retain	worker_lifecycle test owner	PCC-10/P2AER-S9B	Slice 9B split regression tests for worker lifecycle inspection authority, scope, kind/schema, bounds, and redaction.
-packages/agent/src/domains/capability/operations/subagents.rs	retain	capability execute owner	PCC-10/P2AER-S10A	Slice 10A read-only execute adapter for inert subagent task lifecycle inspection.
-packages/agent/src/domains/subagents/mod.rs	retain	subagents owner	PCC-10/P2AER-S10A	Slice 10A inert subagent task lifecycle domain docs and registration boundary.
-packages/agent/src/domains/subagents/projection.rs	retain	subagents owner	PCC-10/P2AER-S10A-FIX1	Slice 10A fix allowlisted bounded redacted read projection owner.
-packages/agent/src/domains/subagents/execution.rs	retain	subagents owner	PCC-10/P2AER-S10B	Slice 10B controlled subagent launch/status/result/cancel lifecycle service with placeholder worker/job policy and no execution side effects.
-packages/agent/src/domains/subagents/execution_tests.rs	retain	subagents test owner	PCC-10/P2AER-S10B	Slice 10B split regression tests for launch policy, concurrency, cancellation, authority, scope, bounds, and non-goal guards.
+packages/agent/src/domains/capability/operations/subagents.rs	retain	capability execute owner	PCC-10/P3MSA-INV-011	Slice 24C execute adapter composes subagent_task lifecycle evidence with the accepted module_program_execution pack for launch/status/result/cancel.
+packages/agent/src/domains/subagents/mod.rs	retain	subagents owner	PCC-10/P3MSA-INV-011	Slice 24C delegated subagent lifecycle domain docs and registration boundary.
+packages/agent/src/domains/subagents/projection.rs	retain	subagents owner	PCC-10/P3MSA-INV-011	Slice 24C allowlisted bounded redacted projection owner for delegated refs and merge proposals.
+packages/agent/src/domains/subagents/execution.rs	retain	subagents owner	PCC-10/P3MSA-INV-011	Slice 24C controlled subagent launch/status/result/cancel lifecycle service with accepted module-program-execution delegation and no silent parent merge.
+packages/agent/src/domains/subagents/execution_tests.rs	retain	subagents test owner	PCC-10/P3MSA-INV-011	Slice 24C split regression tests for explicit delegation policy, bounded handoff, idempotency, cancellation, authority, scope, bounds, and non-goal guards.
 packages/agent/src/domains/subagents/service.rs	retain	subagents owner	PCC-10/P2AER-S10A	Slice 10A trusted internal lifecycle record service plus read-only scoped projections.
 packages/agent/src/domains/subagents/tests.rs	retain	subagents test owner	PCC-10/P2AER-S10A	Slice 10A regression tests for authority, idempotency, scope, schema, bounds, and non-goal guards.
-packages/agent/src/domains/subagents/validation.rs	retain	subagents owner	PCC-10/P2AER-S10A	Slice 10A bounded summary/ref/placeholder validation and secret/execution-field rejection.
+packages/agent/src/domains/subagents/validation.rs	retain	subagents owner	PCC-10/P3MSA-INV-011	Slice 24C bounded summary/ref/handoff validation plus secret, raw prompt/result/log/path, and execution-field rejection.
 packages/agent/src/engine/durability/resources/subagent_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S10A	Slice 10A built-in subagent_task resource kind/schema definition.
 packages/agent/src/domains/capability/operations/procedural.rs	retain	capability execute owner	PCC-10/P2AER-S11A	Slice 11A read-only execute adapter for inert procedural state provenance inspection.
 packages/agent/src/domains/procedural/mod.rs	retain	procedural owner	PCC-10/P2AER-S11A	Slice 11A inert procedural provenance domain docs and boundary.
@@ -2035,7 +2035,7 @@ packages/agent/src/domains/module_runtime/validation.rs	retain	module-runtime ow
 packages/agent/src/engine/durability/resources/module_runtime_definitions.rs	retain	resource definition owner	PCC-10/P3MSA-S23F	Accepted Slice 23F built-in module_runtime_state resource schema retained.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_program_execution_tests.rs	retain	phase3 agent	PCC-10/P3MSA-INV-010	Accepted Slice 24B module program execution runtime grant regression tests retained for least-privilege authority coverage.
 packages/agent/src/domains/capability/operations/module_program_execution.rs	retain	capability execute owner	PCC-10/P3MSA-INV-010	Accepted Slice 24B execute adapter retained for module-owned jobs and program execution start status cancel cleanup operations.
-packages/agent/src/domains/capability/operations/module_program_execution_tests.rs	retain	capability execute test owner	PCC-10/P3MSA-INV-010	Accepted Slice 24B provider-safety and trace-redaction regression tests retained for module-owned jobs program execution.
+packages/agent/src/domains/capability/operations/module_program_execution_tests.rs	retain	capability execute test owner	PCC-10/P3MSA-INV-010/P3MSA-INV-011	Accepted Slice 24B provider-safety and trace-redaction regression tests plus Slice 24C subagent delegation integration coverage.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_dependencies_tests.rs	retain	phase3 agent	PCC-10/P3MSA-S23G	Accepted Slice 23G module-dependencies runtime grant regression tests retained for least-privilege authority coverage.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_file_git_tests.rs	retain	phase3 agent	PCC-10/P3MSA-S24A	Accepted Slice 24A file/git runtime grant regression tests retained for least-privilege authority coverage.
 packages/agent/src/domains/capability/module_dependencies_contract.rs	retain	capability execute owner	PCC-10/P3MSA-S23G	Accepted Slice 23G module-dependencies request decision and policy schema helper retained outside the broad capability contract file.

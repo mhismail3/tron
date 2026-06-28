@@ -63,6 +63,7 @@ fn projected_task_payload(resource: &EngineResource, payload: &Value) -> Value {
         "refs": projected_refs(payload.get("refs")),
         "result": projected_placeholder(payload.get("result")),
         "error": projected_placeholder(payload.get("error")),
+        "delegation": projected_delegation(payload.get("delegation")),
         "authority": projected_authority(payload.get("authority")),
         "execution": projected_execution(payload.get("execution")),
         "activation": projected_activation(payload.get("activation")),
@@ -133,7 +134,8 @@ fn projected_refs(value: Option<&Value>) -> Value {
         "trace": projected_ref_array(refs.get("trace")),
         "replay": projected_ref_array(refs.get("replay")),
         "evidence": projected_ref_array(refs.get("evidence")),
-        "outputs": projected_ref_array(refs.get("outputs"))
+        "outputs": projected_ref_array(refs.get("outputs")),
+        "handoff": projected_ref_array(refs.get("handoff"))
     })
 }
 
@@ -202,6 +204,12 @@ fn projected_placeholder(value: Option<&Value>) -> Value {
                     projected_ref_array(placeholder.get("outputRefs")),
                 );
             }
+            if placeholder.get("mergeProposal").is_some() {
+                projected.insert(
+                    "mergeProposal".to_owned(),
+                    projected_merge_proposal(placeholder.get("mergeProposal")),
+                );
+            }
             if placeholder.keys().any(|key| {
                 !matches!(
                     key.as_str(),
@@ -213,6 +221,7 @@ fn projected_placeholder(value: Option<&Value>) -> Value {
                         | "resourceRefs"
                         | "evidenceRefs"
                         | "outputRefs"
+                        | "mergeProposal"
                 )
             }) {
                 projected.insert("redacted".to_owned(), json!(true));
@@ -221,6 +230,69 @@ fn projected_placeholder(value: Option<&Value>) -> Value {
         }
         Some(_) => json!({"redacted": true}),
     }
+}
+
+fn projected_delegation(value: Option<&Value>) -> Value {
+    let Some(Value::Object(delegation)) = value else {
+        return Value::Null;
+    };
+    json!({
+        "workerKind": delegation
+            .get("workerKind")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_ID_BYTES))
+            .unwrap_or(Value::Null),
+        "modulePackId": delegation
+            .get("modulePackId")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_ID_BYTES))
+            .unwrap_or(Value::Null),
+        "moduleRuntimeRef": projected_ref_item(delegation.get("moduleRuntimeRef").unwrap_or(&Value::Null)),
+        "jobRef": projected_ref_item(delegation.get("jobRef").unwrap_or(&Value::Null)),
+        "programExecutionRef": projected_ref_item(delegation.get("programExecutionRef").unwrap_or(&Value::Null)),
+        "binding": projected_object_strings(
+            delegation.get("binding"),
+            &["validatedBy"],
+            &["runtimeJobBindingRequired"]
+        ),
+        "providerSafety": projected_object_strings(
+            delegation.get("providerSafety"),
+            &[],
+            &[
+                "rawPromptStored",
+                "rawResultStored",
+                "rawCommandReturned",
+                "rawOutputReturned",
+                "toolLogsStored",
+                "localPathsStored"
+            ]
+        )
+    })
+}
+
+fn projected_merge_proposal(value: Option<&Value>) -> Value {
+    let Some(Value::Object(proposal)) = value else {
+        return Value::Null;
+    };
+    json!({
+        "kind": proposal
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_ID_BYTES))
+            .unwrap_or(Value::Null),
+        "status": proposal
+            .get("status")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_ID_BYTES))
+            .unwrap_or(Value::Null),
+        "reviewRequired": proposal.get("reviewRequired").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
+        "parentConversationMutated": proposal.get("parentConversationMutated").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
+        "moduleRuntimeRef": projected_ref_item(proposal.get("moduleRuntimeRef").unwrap_or(&Value::Null)),
+        "jobRef": projected_ref_item(proposal.get("jobRef").unwrap_or(&Value::Null)),
+        "programExecutionRef": projected_ref_item(proposal.get("programExecutionRef").unwrap_or(&Value::Null)),
+        "rawResultReturned": proposal.get("rawResultReturned").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
+        "rawOutputReturned": proposal.get("rawOutputReturned").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value))
+    })
 }
 
 fn projected_authority(value: Option<&Value>) -> Value {

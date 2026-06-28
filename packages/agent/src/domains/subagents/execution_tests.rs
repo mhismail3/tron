@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::execution::{
     cancel_subagent_value, launch_subagent_value, result_subagent_value, status_subagent_value,
@@ -11,7 +13,7 @@ use crate::engine::{
 use crate::shared::server::test_support::make_test_context;
 
 #[tokio::test]
-async fn launch_records_placeholder_worker_lifecycle_without_side_effects() {
+async fn launch_records_delegated_module_worker_lifecycle_without_parent_merge() {
     let fixture = Fixture::new("launch").await;
     let launched = fixture.launch("launch-key", launch_payload()).await;
     let resource_id = launched["subagentTaskResourceId"].as_str().unwrap();
@@ -19,12 +21,16 @@ async fn launch_records_placeholder_worker_lifecycle_without_side_effects() {
     assert_eq!(launched["status"], json!("running"));
     assert_eq!(
         launched["execution"]["modelPolicy"],
-        json!("bounded_placeholder_v1")
+        json!("accepted_jobs_program_execution_v1")
     );
-    assert_eq!(launched["execution"]["workerStarted"], json!(false));
-    assert_eq!(launched["execution"]["jobStarted"], json!(false));
+    assert_eq!(launched["execution"]["workerStarted"], json!(true));
+    assert_eq!(launched["execution"]["jobStarted"], json!(true));
     assert_eq!(launched["execution"]["toolExecution"], json!(false));
     assert_eq!(launched["network"]["requiredPolicy"], json!("none"));
+    assert_eq!(
+        launched["delegation"]["moduleRuntimeRef"]["kind"],
+        json!("module_runtime_state")
+    );
 
     let status = fixture.status("launch-status", resource_id).await;
     let task = &status["task"]["payload"];
@@ -32,23 +38,24 @@ async fn launch_records_placeholder_worker_lifecycle_without_side_effects() {
     assert_eq!(task["parent"]["sessionId"], json!(fixture.session_id));
     assert_eq!(
         task["execution"]["modelPolicy"],
-        json!("bounded_placeholder_v1")
+        json!("accepted_jobs_program_execution_v1")
     );
-    assert_eq!(task["execution"]["worker"]["started"], json!(false));
-    assert_eq!(task["execution"]["job"]["jobStarted"], json!(false));
+    assert_eq!(task["execution"]["worker"]["started"], json!(true));
+    assert_eq!(task["execution"]["job"]["jobStarted"], json!(true));
     assert_eq!(task["execution"]["sideEffects"]["network"], json!(false));
-    assert_eq!(task["activation"]["workerStarted"], json!(false));
-    assert_eq!(task["activation"]["jobStarted"], json!(false));
+    assert_eq!(task["activation"]["workerStarted"], json!(true));
+    assert_eq!(task["activation"]["jobStarted"], json!(true));
     assert_eq!(task["activation"]["resultMerged"], json!(false));
+    assert_eq!(task["delegation"]["jobRef"]["kind"], json!("job_process"));
 
     let result = fixture.result("launch-result", resource_id).await;
     assert_eq!(result["status"], json!("running"));
-    assert_eq!(result["result"], Value::Null);
+    assert_eq!(result["result"]["status"], json!("running"));
     assert_eq!(result["projection"]["resultMergePerformed"], json!(false));
 }
 
 #[tokio::test]
-async fn launch_requires_explicit_placeholder_policy_and_concurrency_budget() {
+async fn launch_requires_explicit_delegation_policy_and_concurrency_budget() {
     let fixture = Fixture::new("policy").await;
     let mut missing_policy = launch_payload();
     missing_policy
@@ -57,6 +64,11 @@ async fn launch_requires_explicit_placeholder_policy_and_concurrency_budget() {
         .remove("modelPolicy");
     let error = fixture.launch_error("missing-policy", missing_policy).await;
     assert!(error.contains("missing modelPolicy"), "{error}");
+
+    let mut unknown_worker = launch_payload();
+    unknown_worker["workerKind"] = json!("spawn_anything");
+    let error = fixture.launch_error("unknown-worker", unknown_worker).await;
+    assert!(error.contains("workerKind"), "{error}");
 
     let first = fixture.launch("first-running", launch_payload()).await;
     assert_eq!(first["status"], json!("running"));
@@ -142,12 +154,13 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         "{cross_scope}"
     );
 
+    let exact_resource_selector = format!("resource:{resource_id}");
     let read_only = first
         .derive_grant(
             "read-only-cancel",
             &[READ_SCOPE, "resource.read"],
             &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
+            &["kind:subagent_task", exact_resource_selector.as_str()],
             "none",
         )
         .await;
@@ -190,6 +203,7 @@ async fn execution_operations_fail_closed_for_authority_and_scope() {
         &first.deps,
         &wildcard_invocation,
         &wildcard_invocation.payload,
+        &delegated_start_value(),
     )
     .await
     .expect_err("broad selector denied")
@@ -206,9 +220,24 @@ async fn execution_validation_rejects_unbounded_or_execution_shaped_evidence() {
     assert!(large.contains("exceeds"), "{large}");
 
     let mut command = launch_payload();
-    command["evidenceRefs"] = json!([{"command": "run hidden helper"}]);
+    command["handoffRefs"] = json!([{"command": "run hidden helper"}]);
     let command_error = fixture.launch_error("command", command).await;
-    assert!(command_error.contains("execution field"), "{command_error}");
+    assert!(command_error.contains("handoffRefs"), "{command_error}");
+
+    let mut raw_path = launch_payload();
+    raw_path["promptSummary"] = json!("Read /Users/example/private prompt");
+    let path_error = fixture.launch_error("raw-path", raw_path).await;
+    assert!(path_error.contains("summary-only"), "{path_error}");
+
+    let mut scalar_ref_path = launch_payload();
+    scalar_ref_path["sourceRef"] = json!({"kind": "artifact", "path": "/tmp/raw-source"});
+    let scalar_ref_error = fixture
+        .launch_error("scalar-ref-path", scalar_ref_path)
+        .await;
+    assert!(
+        scalar_ref_error.contains("refs/fingerprints"),
+        "{scalar_ref_error}"
+    );
 }
 
 #[test]
@@ -240,8 +269,6 @@ fn static_non_goal_guards_keep_subagent_execution_foundation_narrow() {
 struct Fixture {
     deps: Deps,
     session_id: String,
-    read_grant_id: AuthorityGrantId,
-    write_grant_id: AuthorityGrantId,
 }
 
 impl Fixture {
@@ -251,56 +278,13 @@ impl Fixture {
             engine_host: ctx.engine_host.clone(),
         };
         let session_id = format!("{label}-session");
-        let read_grant_id = derive_grant(
-            &deps,
-            &format!("{label}-read"),
-            &[READ_SCOPE, "resource.read"],
-            &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
-            "none",
-        )
-        .await;
-        let write_grant_id = derive_grant(
-            &deps,
-            &format!("{label}-write"),
-            &[READ_SCOPE, WRITE_SCOPE, "resource.read", "resource.write"],
-            &[SUBAGENT_TASK_KIND],
-            &["kind:subagent_task"],
-            "none",
-        )
-        .await;
-        Self {
-            deps,
-            session_id,
-            read_grant_id,
-            write_grant_id,
-        }
+        Self { deps, session_id }
     }
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
-        let read_grant_id = self
-            .derive_grant(
-                &format!("{session_id}-read"),
-                &[READ_SCOPE, "resource.read"],
-                &[SUBAGENT_TASK_KIND],
-                &["kind:subagent_task"],
-                "none",
-            )
-            .await;
-        let write_grant_id = self
-            .derive_grant(
-                &format!("{session_id}-write"),
-                &[READ_SCOPE, WRITE_SCOPE, "resource.read", "resource.write"],
-                &[SUBAGENT_TASK_KIND],
-                &["kind:subagent_task"],
-                "none",
-            )
-            .await;
         Self {
             deps: self.deps.clone(),
             session_id: session_id.to_owned(),
-            read_grant_id,
-            write_grant_id,
         }
     }
 
@@ -324,29 +308,57 @@ impl Fixture {
     }
 
     async fn launch(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.write_invocation(key, payload);
-        launch_subagent_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect("launch subagent")
+        let resource_id = self.launch_resource_id(key, &payload);
+        let invocation = self
+            .write_invocation(key, payload, Some(&resource_id))
+            .await;
+        launch_subagent_value(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            &delegated_start_value(),
+        )
+        .await
+        .expect("launch subagent")
     }
 
     async fn launch_error(&self, key: &str, payload: Value) -> String {
-        let invocation = self.write_invocation(key, payload);
-        launch_subagent_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("launch should fail")
-            .to_string()
+        let resource_id = self.launch_resource_id(key, &payload);
+        let invocation = self
+            .write_invocation(key, payload, Some(&resource_id))
+            .await;
+        launch_subagent_value(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            &delegated_start_value(),
+        )
+        .await
+        .expect_err("launch should fail")
+        .to_string()
     }
 
     async fn status(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
+        let invocation = self
+            .read_invocation(
+                key,
+                json!({"subagentTaskResourceId": resource_id}),
+                Some(resource_id),
+            )
+            .await;
         status_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("status")
     }
 
     async fn status_error(&self, key: &str, resource_id: &str) -> String {
-        let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
+        let invocation = self
+            .read_invocation(
+                key,
+                json!({"subagentTaskResourceId": resource_id}),
+                Some(resource_id),
+            )
+            .await;
         status_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect_err("status should fail")
@@ -354,47 +366,120 @@ impl Fixture {
     }
 
     async fn result(&self, key: &str, resource_id: &str) -> Value {
-        let invocation = self.read_invocation(key, json!({"subagentTaskResourceId": resource_id}));
+        let invocation = self
+            .read_invocation(
+                key,
+                json!({"subagentTaskResourceId": resource_id}),
+                Some(resource_id),
+            )
+            .await;
         result_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("result")
     }
 
     async fn cancel(&self, key: &str, payload: Value) -> Value {
-        let invocation = self.write_invocation(key, payload);
+        let resource_id = payload
+            .get("subagentTaskResourceId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let invocation = self
+            .write_invocation(key, payload, resource_id.as_deref())
+            .await;
         cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("cancel")
     }
 
     async fn cancel_error(&self, key: &str, payload: Value) -> String {
-        let invocation = self.write_invocation(key, payload);
+        let resource_id = payload
+            .get("subagentTaskResourceId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let invocation = self
+            .write_invocation(key, payload, resource_id.as_deref())
+            .await;
         cancel_subagent_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect_err("cancel should fail")
             .to_string()
     }
 
-    fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
+    async fn read_invocation(
+        &self,
+        key: &str,
+        payload: Value,
+        resource_id: Option<&str>,
+    ) -> Invocation {
+        let grant_id = self
+            .derive_task_grant(
+                &format!("{key}-read"),
+                &[READ_SCOPE, "resource.read"],
+                resource_id,
+            )
+            .await;
         invocation(
             "capability::execute",
             key,
             payload,
-            self.read_grant_id.clone(),
+            grant_id,
             ActorKind::Agent,
             Some(&self.session_id),
         )
     }
 
-    fn write_invocation(&self, key: &str, payload: Value) -> Invocation {
+    async fn write_invocation(
+        &self,
+        key: &str,
+        payload: Value,
+        resource_id: Option<&str>,
+    ) -> Invocation {
+        let grant_id = self
+            .derive_task_grant(
+                &format!("{key}-write"),
+                &[READ_SCOPE, WRITE_SCOPE, "resource.read", "resource.write"],
+                resource_id,
+            )
+            .await;
         invocation(
             "capability::execute",
             key,
             payload,
-            self.write_grant_id.clone(),
+            grant_id,
             ActorKind::Agent,
             Some(&self.session_id),
         )
+    }
+
+    async fn derive_task_grant(
+        &self,
+        suffix: &str,
+        scopes: &[&str],
+        resource_id: Option<&str>,
+    ) -> AuthorityGrantId {
+        let mut selectors = vec!["kind:subagent_task".to_owned()];
+        if let Some(resource_id) = resource_id {
+            selectors.push(format!("resource:{resource_id}"));
+        }
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        self.derive_grant(
+            suffix,
+            scopes,
+            &[SUBAGENT_TASK_KIND],
+            &selector_refs,
+            "none",
+        )
+        .await
+    }
+
+    fn launch_resource_id(&self, key: &str, payload: &Value) -> String {
+        let task_id = payload
+            .get("taskId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("invocation-{key}"));
+        task_resource_id(&self.session_id, &task_id, key)
     }
 }
 
@@ -406,9 +491,13 @@ async fn derive_grant(
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
+    static GRANT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let counter = GRANT_COUNTER.fetch_add(1, Ordering::Relaxed);
     deps.engine_host
         .derive_authority_grant(DeriveGrant {
-            grant_id: Some(AuthorityGrantId::new(format!("subagent-exec-{suffix}")).unwrap()),
+            grant_id: Some(
+                AuthorityGrantId::new(format!("subagent-exec-{suffix}-{counter}")).unwrap(),
+            ),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),
             subject_actor_id: None,
             subject_worker_id: None,
@@ -469,13 +558,55 @@ fn invocation(
     }
 }
 
+fn task_resource_id(session_id: &str, task_id: &str, idempotency_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"session");
+    hasher.update(b":");
+    hasher.update(session_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(task_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(idempotency_key.as_bytes());
+    format!("{SUBAGENT_TASK_KIND}:{}", hex::encode(hasher.finalize()))
+}
+
 fn launch_payload() -> Value {
     json!({
         "taskId": "task-alpha",
         "objectiveSummary": "Investigate a bounded fixture",
         "promptSummary": "Return a summary-only result",
-        "modelPolicy": "bounded_placeholder_v1",
+        "modelPolicy": "accepted_jobs_program_execution_v1",
+        "workerKind": "module_program_execution",
+        "modulePackId": "jobs_program_execution",
+        "moduleLifecycleResourceId": "module_lifecycle_state:subagent-test",
+        "runtimeRequestId": "subagent-runtime-request",
+        "runtimeId": "runtime.shell",
+        "languageId": "language.shell",
+        "programFingerprint": "sha256:subagent-program",
+        "command": "printf subagent",
         "evidenceRefs": [{"kind": "fixture", "id": "evidence-1"}],
+        "handoffRefs": [{"kind": "fingerprint", "id": "handoff-1"}],
         "outputRefs": []
+    })
+}
+
+fn delegated_start_value() -> Value {
+    json!({
+        "status": "running",
+        "moduleRuntime": {
+            "moduleRuntimeResourceId": "module_runtime_state:delegated-runtime",
+            "moduleRuntimeVersionId": "runtime-version-1"
+        },
+        "programExecution": {
+            "programExecutionResourceId": "program_execution_record:delegated-program",
+            "programExecutionVersionId": "program-version-1"
+        },
+        "job": {
+            "job": {
+                "jobResourceId": "job_process:delegated-job",
+                "jobVersionId": "job-version-1",
+                "state": "running"
+            }
+        }
     })
 }

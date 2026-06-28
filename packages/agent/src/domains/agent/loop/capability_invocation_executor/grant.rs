@@ -1,6 +1,6 @@
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
-    TraceId,
+    SUBAGENT_TASK_KIND, TraceId,
 };
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
@@ -81,6 +81,10 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_program_execution_cancel"
             | "module_program_execution_cleanup"
     );
+    let delegated_subagent_operation = matches!(
+        operation,
+        "subagent_launch" | "subagent_status" | "subagent_result" | "subagent_cancel"
+    );
     let file_git_module_operation = is_file_git_module_operation(operation);
     let notification_push_requested = operation == "notification_send"
         && effective_args
@@ -98,6 +102,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
+        || delegated_subagent_operation
         || file_git_module_operation
     {
         vec![target_function_id.as_str().to_owned()]
@@ -120,6 +125,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_lifecycle_operation
         && !module_runtime_operation
         && !module_program_execution_operation
+        && !delegated_subagent_operation
         && !file_git_module_operation
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
@@ -468,6 +474,9 @@ pub(super) async fn derive_capability_runtime_grant(
             allowed_authority_scopes.push("device.read".to_owned());
         }
     }
+    if delegated_subagent_operation {
+        allowed_authority_scopes.extend(delegated_subagent_module_scopes(operation));
+    }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
     let network_policy = if matches!(operation, "web_fetch" | "web_robots_check") {
@@ -483,6 +492,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_lifecycle_operation
         || module_runtime_operation
         || module_program_execution_operation
+        || delegated_subagent_operation
         || file_git_module_operation
     {
         Vec::new()
@@ -676,6 +686,9 @@ pub(super) async fn derive_capability_runtime_grant(
             | "subagent_task_inspect"
     ) {
         allowed_resource_kinds.push("subagent_task".to_owned());
+        if delegated_subagent_operation {
+            allowed_resource_kinds.extend(delegated_subagent_module_resource_kinds(operation));
+        }
     } else if matches!(
         operation,
         "procedural_state_list" | "procedural_state_inspect"
@@ -720,6 +733,40 @@ pub(super) async fn derive_capability_runtime_grant(
     }
     if operation == "module_program_execution_start" {
         push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
+    }
+    if operation == "subagent_launch" {
+        push_resource_selector_arg(
+            &mut resource_selectors,
+            effective_args,
+            "moduleLifecycleResourceId",
+        );
+        push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
+        push_subagent_launch_selector(
+            &mut resource_selectors,
+            session_id,
+            workspace_id,
+            working_directory,
+            invocation_id,
+            model_primitive_name,
+            turn,
+            run_id,
+            effective_args,
+        );
+    } else if matches!(
+        operation,
+        "subagent_status" | "subagent_result" | "subagent_cancel"
+    ) {
+        push_resource_selector_arg(
+            &mut resource_selectors,
+            effective_args,
+            "subagentTaskResourceId",
+        );
+        push_delegated_subagent_followup_selectors(
+            engine_host,
+            &mut resource_selectors,
+            effective_args,
+        )
+        .await?;
     }
     if matches!(
         operation,
@@ -856,6 +903,37 @@ fn is_file_git_module_operation(operation: &str) -> bool {
     )
 }
 
+fn delegated_subagent_module_scopes(operation: &str) -> Vec<String> {
+    let mut scopes = vec![
+        "module_runtime.read".to_owned(),
+        "program_execution.read".to_owned(),
+        "jobs.read".to_owned(),
+    ];
+    if operation == "subagent_launch" {
+        scopes.extend([
+            "module_runtime.write".to_owned(),
+            "program_execution.write".to_owned(),
+            "jobs.write".to_owned(),
+        ]);
+    } else if operation == "subagent_cancel" {
+        scopes.extend(["module_runtime.write".to_owned(), "jobs.write".to_owned()]);
+    }
+    scopes
+}
+
+fn delegated_subagent_module_resource_kinds(operation: &str) -> Vec<String> {
+    let mut kinds = vec![
+        "module_runtime_state".to_owned(),
+        "program_execution_record".to_owned(),
+        "job_process".to_owned(),
+        "execution_output".to_owned(),
+    ];
+    if operation == "subagent_launch" {
+        kinds.push("module_lifecycle_state".to_owned());
+    }
+    kinds
+}
+
 fn push_resource_selector_arg(selectors: &mut Vec<String>, args: &Value, field: &str) {
     if let Some(resource_id) = args
         .get(field)
@@ -864,6 +942,92 @@ fn push_resource_selector_arg(selectors: &mut Vec<String>, args: &Value, field: 
     {
         selectors.push(format!("resource:{resource_id}"));
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_subagent_launch_selector(
+    selectors: &mut Vec<String>,
+    session_id: &str,
+    workspace_id: Option<&str>,
+    working_directory: &str,
+    invocation_id: &str,
+    model_primitive_name: &str,
+    turn: i64,
+    run_id: Option<&str>,
+    args: &Value,
+) {
+    let task_id = args
+        .get("taskId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(invocation_id);
+    let idempotency_key = model_capability_invocation_idempotency_key(
+        run_id,
+        session_id,
+        turn,
+        invocation_id,
+        model_primitive_name,
+        working_directory,
+        workspace_id,
+        args,
+    );
+    selectors.push(format!(
+        "resource:{}",
+        subagent_task_resource_id(session_id, task_id, &idempotency_key)
+    ));
+}
+
+async fn push_delegated_subagent_followup_selectors(
+    engine_host: &EngineHostHandle,
+    selectors: &mut Vec<String>,
+    args: &Value,
+) -> Result<(), FailureEnvelope> {
+    let Some(resource_id) = args
+        .get("subagentTaskResourceId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(());
+    };
+    let Some(inspection) = engine_host
+        .inspect_resource(resource_id)
+        .await
+        .map_err(|error| engine_error_to_failure(&error))?
+    else {
+        return Ok(());
+    };
+    if inspection.resource.kind != SUBAGENT_TASK_KIND {
+        return Ok(());
+    }
+    let Some(payload) = inspection
+        .versions
+        .iter()
+        .find(|version| {
+            inspection
+                .resource
+                .current_version_id
+                .as_ref()
+                .is_some_and(|current| current == &version.version_id)
+        })
+        .or_else(|| inspection.versions.last())
+        .map(|version| &version.payload)
+    else {
+        return Ok(());
+    };
+    for pointer in [
+        "/delegation/moduleRuntimeResourceId",
+        "/delegation/jobResourceId",
+        "/delegation/programExecutionResourceId",
+    ] {
+        if let Some(resource_id) = payload
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            selectors.push(format!("resource:{resource_id}"));
+        }
+    }
+    Ok(())
 }
 
 fn push_module_lifecycle_request_selector(
@@ -932,6 +1096,18 @@ fn module_runtime_state_resource_id(
             format!("session:{session_id}:{lifecycle_resource_id}:{runtime_request_id}").as_bytes()
         )
     )
+}
+
+fn subagent_task_resource_id(session_id: &str, task_id: &str, idempotency_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"session");
+    hasher.update(b":");
+    hasher.update(session_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(task_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(idempotency_key.as_bytes());
+    format!("subagent_task:{:x}", hasher.finalize())
 }
 
 fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'static str)] {

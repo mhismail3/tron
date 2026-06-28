@@ -129,6 +129,69 @@ pub(super) fn validate_refs(label: &str, values: &[Value]) -> Result<(), Capabil
     validate_placeholder_bounds(&Value::Array(values.to_owned()), label)
 }
 
+pub(super) fn validate_context_handoff_refs(values: &[Value]) -> Result<(), CapabilityError> {
+    if values.len() > MAX_REF_ITEMS {
+        return Err(invalid(format!(
+            "handoffRefs may contain at most {MAX_REF_ITEMS} items"
+        )));
+    }
+    walk_json(
+        &Value::Array(values.to_owned()),
+        &mut Vec::new(),
+        &mut |path, value| {
+            if let Some(key) = path.last() {
+                let lowered = key.to_ascii_lowercase();
+                if lowered.contains("prompt")
+                    || lowered.contains("result")
+                    || lowered.contains("command")
+                    || lowered.contains("log")
+                    || lowered.contains("stdout")
+                    || lowered.contains("stderr")
+                    || lowered == "path"
+                    || lowered.ends_with("path")
+                    || lowered == "url"
+                    || lowered == "uri"
+                {
+                    return Err(invalid(format!(
+                        "handoffRefs must contain refs/fingerprints only, not raw {key}"
+                    )));
+                }
+            }
+            if let Value::String(text) = value {
+                validate_summary_is_not_raw_payload("handoffRefs", text)?;
+            }
+            Ok(())
+        },
+    )?;
+    validate_placeholder_bounds(&Value::Array(values.to_owned()), "handoffRefs")
+}
+
+pub(super) fn validate_summary_is_not_raw_payload(
+    field: &str,
+    value: &str,
+) -> Result<(), CapabilityError> {
+    let lowered = value.to_ascii_lowercase();
+    if lowered.contains("bearer ")
+        || lowered.contains("api_key=")
+        || lowered.contains("password=")
+        || lowered.contains("secret=")
+        || lowered.contains("authorization:")
+        || lowered.contains("stdout:")
+        || lowered.contains("stderr:")
+        || lowered.contains("raw prompt")
+        || lowered.contains("raw result")
+        || lowered.contains("tool log")
+        || lowered.contains("file://")
+        || lowered.contains("/users/")
+        || lowered.contains("/private/")
+    {
+        return Err(invalid(format!(
+            "{field} must be summary-only and cannot include raw prompts, results, logs, paths, or secrets"
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn resource_scope(
     invocation: &Invocation,
 ) -> Result<EngineResourceScope, CapabilityError> {

@@ -1,30 +1,35 @@
-//! Subagent task lifecycle and worker-launch foundation.
+//! Subagent task lifecycle and bounded delegated module work.
 //!
-//! Slice 10A restored inert delegation task records. Slice 10B keeps
-//! `subagent_task` as the durable parent causality anchor and adds a controlled
-//! launch/status/result/cancel lifecycle over the same resource. The launch path
-//! records a bounded placeholder worker/job policy, parent refs, concurrency
-//! decision, cancellation path, and replay/evidence refs, but it still does not
-//! start a child process, external worker, package, tool, browser, network
-//! action, scheduler, or result merge.
+//! Slice 24C keeps `subagent_task` as the durable parent causality anchor and
+//! activates a single accepted delegation path: the jobs/program-execution
+//! module pack. Launch records a bounded summary-only handoff, explicit worker
+//! and module-pack selection, delegated module runtime/job/program refs, and a
+//! reviewable result-merge proposal contract. Follow-ups inspect or cancel the
+//! delegated module/job pair through the module runtime binding checks; they do
+//! not silently mutate the parent conversation.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `execution` | Controlled launch/status/result/cancel lifecycle over `subagent_task` |
+//! | `execution` | Controlled launch/status/result/cancel lifecycle over delegated module refs |
 //! | `projection` | Allowlisted, bounded, redacted read projections for list/inspect |
 //! | `service` | Internal lifecycle writes plus read-only list/inspect projection |
 //! | `validation` | Bounded payload readers and redaction/non-goal guards |
 //! | `tests` | Authority, scoping, idempotency, schema, and non-goal guards |
 //!
-//! # INVARIANT: launch records are not child execution
+//! # INVARIANT: delegated execution stays explicit and reviewable
 //!
-//! This domain must never start OS processes, external workers, package
-//! launchers, MCP servers, tool execution, browser/search/network work, trust
-//! promotion, autonomous scheduling, or result merging. Launch means "record a
-//! scoped subagent worker lifecycle resource under explicit placeholder policy",
-//! not "spawn an agent".
+//! This domain must never start arbitrary workers, packages, MCP servers,
+//! browser/search/network work, trust promotion, autonomous scheduling, or
+//! result merging. The only activated path is the accepted
+//! jobs/program-execution module pack selected by exact payload fields and exact
+//! resource selectors. Completion is surfaced as merge-proposal evidence for
+//! review, not as hidden parent-state mutation. Delegated launch and follow-up
+//! grants must include exact module runtime, job, program-execution, lifecycle,
+//! and subagent-task selectors without `agent_state` fallback. Launch replay
+//! must recover the same delegated runtime/job/program refs from module
+//! supervision metadata before creating the parent task, or fail closed.
 
 #![allow(dead_code)]
 

@@ -1184,12 +1184,12 @@ Current primitive operations:
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
 | `tool_source_list` | List current-session inert `tool_source_proposal` records with bounded source identity, provenance, sandbox intent, declared metadata counts, expected linkage, and refs; performs no install, launch, registration, network, or execution. |
 | `tool_source_inspect` | Inspect one scoped `tool_source_proposal` or `tool_source_conformance_report` resource with bounded schema previews and activation proof that no proposed tool was installed, launched, registered, or executed. |
-| `subagent_launch` | Record a scoped `subagent_task` launch lifecycle under explicit `modelPolicy: bounded_placeholder_v1`, one-running-task-per-scope concurrency, parent trace/replay refs, bounded evidence, and proof that no worker, job, process, tool, network, package, or result merge started. |
-| `subagent_status` | Inspect one scoped `subagent_task` status using bounded/redacted task projections with placeholder worker/job policy and no raw prompt/result payload. |
-| `subagent_result` | Read bounded/redacted result/error/refs for one scoped `subagent_task` without merging output into conversation state. |
-| `subagent_cancel` | Cancel one nonterminal scoped `subagent_task` with idempotency and optional expected-version freshness, recording cancellation provenance without signalling any worker, job, or process. |
-| `subagent_task_list` | List scoped `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no child-agent, worker, job, process, network, or result-merge side effects. |
-| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence and activation proof without raw prompts, secrets, process metadata, or network scope. |
+| `subagent_launch` | Slice 24C operation that records a scoped `subagent_task` parent lifecycle and activates only the accepted jobs/program-execution module pack after explicit `modelPolicy: accepted_jobs_program_execution_v1`, `workerKind: module_program_execution`, `modulePackId: jobs_program_execution`, one-running-task-per-scope concurrency, summary-only handoff refs, exact subagent/module runtime selectors, enabled lifecycle authorization, and `networkPolicy: none`; it returns delegated runtime/program/job refs without raw prompts, raw results, logs, paths, or silent parent-result merging. |
+| `subagent_status` | Inspect one scoped `subagent_task`, then inspect the delegated module runtime/job binding through `module_program_execution_status`, returning bounded/redacted task and delegated job refs without raw output payloads. |
+| `subagent_result` | Return a reviewable merge proposal for one scoped delegated subagent task by reading the bound module runtime/job refs; it proves `parentConversationMutated: false` and does not merge output into conversation state. |
+| `subagent_cancel` | Cancel one nonterminal scoped delegated subagent task with idempotency and optional expected subagent version freshness, delegating cancellation through the bound module runtime/job pair before recording subagent cancellation provenance. |
+| `subagent_task_list` | List scoped `subagent_task` lifecycle records with bounded objective/prompt summaries, parent scope/trace refs, lifecycle state, handoff/evidence/output refs, explicit truncation metadata, `networkPolicy: none`, and no raw prompts, raw results, logs, paths, or result-merge side effects. |
+| `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle, delegation, and merge-proposal evidence without raw prompts, secrets, raw process output, local paths, or raw authority ids. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
 | `module_list` | List system-scoped `module_manifest` records as bounded provider-safe module summaries after stored kind/schema/scope/payload revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, network, or write side effects. |
@@ -1554,19 +1554,25 @@ authority plus a matching `kind:subagent_task` selector, stored kind/schema
 revalidation, allowlisted bounded/redacted projection, scope isolation, and
 `networkPolicy: none`.
 
-Slice 10B adds controlled provider-visible subagent lifecycle operation values
+Slice 24C activates provider-visible subagent lifecycle operation values
 `subagent_launch`, `subagent_status`, `subagent_result`, and
 `subagent_cancel` behind the same single `capability::execute` primitive.
 Launch requires trusted current-session context, derived non-bootstrap
 `subagents.read`/`subagents.write` plus `resource.read`/`resource.write`
-authority, exact `kind:subagent_task` selectors, idempotency, explicit
-`modelPolicy: bounded_placeholder_v1`, bounded objective/prompt summaries,
-one running subagent task per current scope, parent session/workspace/trace
-refs, replay refs, and append-only `subagent_task` resource evidence. Status
-and result are read-only bounded projections; cancel uses idempotency plus
-optional expected-version freshness and records cancellation provenance.
-Slice 10B still does not spawn child agents, launch workers or packages, start
-jobs or processes, execute tools, open network/browser/search/login scope,
+authority, exact `resource:<subagent_task_id>` selectors in addition to
+`kind:subagent_task`, idempotency, explicit
+`modelPolicy: accepted_jobs_program_execution_v1`, `workerKind:
+module_program_execution`, `modulePackId: jobs_program_execution`, bounded
+objective/prompt summaries, summary-only handoff refs, one running subagent
+task per current scope, parent session/workspace/trace refs, replay refs, exact
+enabled module lifecycle/runtime selectors, and delegated module
+runtime/program/job refs. Status/result/cancel follow the delegated
+module-runtime/job binding through the accepted `module_program_execution_*`
+adapter and require the exact task resource selector from
+`subagentTaskResourceId`; result returns reviewable merge-proposal evidence and
+explicitly does not mutate parent conversation state. Slice 24C still does not
+spawn hidden child agents, launch arbitrary workers or packages, execute tools
+outside the accepted module pack, open network/browser/search/login scope,
 register catalog entries, promote trust, merge results into conversation state,
 start autonomous work, expand public `/engine` APIs, add settings/profile
 migrations, or add fixed native iOS subagent UI.
@@ -1966,12 +1972,13 @@ catalog/resource truth and writes only append-oriented `catalog_discovery_report
 evidence. Tool-source inspection reads scoped `tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
 writes are provenance evidence and explicitly do not activate external tools.
-Subagent lifecycle operations read and mutate only scoped `subagent_task`
-resources. Launch/status/result/cancel project allowlisted, bounded, redacted
-lifecycle fields and placeholder worker/job policy instead of raw stored
-payloads; internal task writes and provider-visible launch/cancel evidence
-explicitly do not start child agents, launch workers or packages, start jobs or
-processes, run tools, schedule work, or merge results.
+Subagent lifecycle operations read and mutate scoped `subagent_task` resources
+and, for Slice 24C provider-visible launch/status/result/cancel, inspect or
+cancel only the delegated jobs/program-execution module runtime/job refs
+recorded on that task. Projections are allowlisted, bounded, and redacted:
+summary-only handoff refs and merge-proposal refs are visible, while raw
+prompts, raw results, command output, logs, paths, raw authority ids, and
+silent parent conversation mutation remain excluded.
 Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,

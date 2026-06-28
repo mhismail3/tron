@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 use crate::engine::authority::grants::model::{EngineGrant, EngineGrantLifecycle};
@@ -93,6 +94,9 @@ pub(super) fn authorize_with_grant(
     }
     if is_module_program_execution_invocation(invocation) {
         ensure_module_program_execution_grant_is_explicit(grant, invocation)?;
+    }
+    if is_delegated_subagent_invocation(invocation) {
+        ensure_delegated_subagent_grant_is_explicit(grant, invocation)?;
     }
     if is_jobs_invocation(invocation) {
         ensure_jobs_grant_is_explicit(grant, invocation)?;
@@ -332,6 +336,35 @@ fn ensure_module_program_execution_grant_is_explicit(
     }
 }
 
+fn ensure_delegated_subagent_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "delegated subagent operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "delegated subagent operations")?;
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("subagent_launch") => {
+            let resource_id = subagent_launch_resource_id(invocation)?;
+            ensure_exact_resource_selector(
+                grant,
+                &resource_id,
+                "subagentTaskResourceId",
+                "delegated subagent launch",
+            )
+        }
+        Some("subagent_status" | "subagent_result" | "subagent_cancel") => {
+            ensure_exact_payload_resource_selectors(
+                grant,
+                invocation,
+                &["subagentTaskResourceId"],
+                "delegated subagent task operation",
+            )
+        }
+        _ => Ok(()),
+    }
+}
+
 fn ensure_jobs_grant_is_explicit(grant: &EngineGrant, invocation: &Invocation) -> Result<()> {
     ensure_no_wildcard_grant_items(grant, "jobs operations")?;
     let kinds = capability_execute_resource_kinds(invocation);
@@ -381,16 +414,26 @@ fn ensure_exact_payload_resource_selectors(
     label: &str,
 ) -> Result<()> {
     for field in fields {
-        if let Some(resource_id) = invocation.payload.get(field).and_then(Value::as_str)
-            && !allows_resource_id(grant, resource_id)
-        {
-            return Err(EngineError::PolicyViolation(format!(
-                "authority grant {} requires exact selector for {field} resource {resource_id} on {label}",
-                grant.grant_id
-            )));
+        if let Some(resource_id) = invocation.payload.get(field).and_then(Value::as_str) {
+            ensure_exact_resource_selector(grant, resource_id, field, label)?;
         }
     }
     Ok(())
+}
+
+fn ensure_exact_resource_selector(
+    grant: &EngineGrant,
+    resource_id: &str,
+    field: &str,
+    label: &str,
+) -> Result<()> {
+    if allows_resource_id(grant, resource_id) {
+        return Ok(());
+    }
+    Err(EngineError::PolicyViolation(format!(
+        "authority grant {} requires exact selector for {field} resource {resource_id} on {label}",
+        grant.grant_id
+    )))
 }
 
 fn ensure_resource_selectors(
@@ -465,6 +508,17 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
     .map(str::to_owned)
+    .chain(
+        is_delegated_subagent_invocation(invocation)
+            .then(|| {
+                invocation
+                    .payload
+                    .get("subagentTaskResourceId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .flatten(),
+    )
     .collect()
 }
 
@@ -1026,6 +1080,14 @@ fn is_module_program_execution_invocation(invocation: &Invocation) -> bool {
         )
 }
 
+fn is_delegated_subagent_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some("subagent_launch" | "subagent_status" | "subagent_result" | "subagent_cancel")
+        )
+}
+
 fn is_jobs_invocation(invocation: &Invocation) -> bool {
     invocation.function_id.as_str() == "capability::execute"
         && matches!(
@@ -1285,6 +1347,66 @@ fn push_unique(kinds: &mut Vec<String>, kind: &str) {
     if !kinds.iter().any(|existing| existing == kind) {
         kinds.push(kind.to_owned());
     }
+}
+
+fn subagent_launch_resource_id(invocation: &Invocation) -> Result<String> {
+    let scope_kind = if invocation.causal_context.session_id.is_some() {
+        "session"
+    } else if invocation.causal_context.workspace_id.is_some() {
+        "workspace"
+    } else {
+        return Err(EngineError::PolicyViolation(
+            "subagent_launch requires trusted session or workspace scope".to_owned(),
+        ));
+    };
+    let scope_value = invocation
+        .causal_context
+        .session_id
+        .as_deref()
+        .or(invocation.causal_context.workspace_id.as_deref())
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(
+                "subagent_launch requires trusted session or workspace scope".to_owned(),
+            )
+        })?;
+    let task_id = invocation
+        .payload
+        .get("taskId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| invocation.id.as_str());
+    let idempotency_key = invocation
+        .causal_context
+        .idempotency_key
+        .as_deref()
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(
+                "subagent_launch requires trusted idempotency key".to_owned(),
+            )
+        })?;
+    Ok(subagent_task_resource_id(
+        scope_kind,
+        scope_value,
+        task_id,
+        idempotency_key,
+    ))
+}
+
+fn subagent_task_resource_id(
+    scope_kind: &str,
+    scope_value: &str,
+    task_id: &str,
+    idempotency_key: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(scope_kind.as_bytes());
+    hasher.update(b":");
+    hasher.update(scope_value.as_bytes());
+    hasher.update(b":");
+    hasher.update(task_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(idempotency_key.as_bytes());
+    format!("subagent_task:{:x}", hasher.finalize())
 }
 
 #[cfg(test)]
@@ -2289,6 +2411,88 @@ mod tests {
     }
 
     #[test]
+    fn delegated_subagent_operations_require_exact_task_resource_selectors() {
+        let function = test_execute_function();
+        for (operation, payload, scopes) in [
+            (
+                "subagent_launch",
+                json!({
+                    "operation": "subagent_launch",
+                    "taskId": "task-alpha",
+                }),
+                vec![
+                    "capability.execute",
+                    "subagents.read",
+                    "subagents.write",
+                    "resource.read",
+                    "resource.write",
+                ],
+            ),
+            (
+                "subagent_status",
+                json!({
+                    "operation": "subagent_status",
+                    "subagentTaskResourceId": "subagent_task:running"
+                }),
+                vec!["capability.execute", "subagents.read", "resource.read"],
+            ),
+            (
+                "subagent_result",
+                json!({
+                    "operation": "subagent_result",
+                    "subagentTaskResourceId": "subagent_task:running"
+                }),
+                vec!["capability.execute", "subagents.read", "resource.read"],
+            ),
+            (
+                "subagent_cancel",
+                json!({
+                    "operation": "subagent_cancel",
+                    "subagentTaskResourceId": "subagent_task:running"
+                }),
+                vec![
+                    "capability.execute",
+                    "subagents.read",
+                    "subagents.write",
+                    "resource.read",
+                    "resource.write",
+                ],
+            ),
+        ] {
+            let broad_kind_only = test_grant(&scopes, &["subagent_task"], &["kind:subagent_task"]);
+            let invocation = test_invocation(payload.clone());
+            let error = authorize_with_grant(&broad_kind_only, &function, &invocation)
+                .expect_err("broad subagent task kind selector must be denied")
+                .to_string();
+            assert!(
+                error.contains("requires exact selector for subagentTaskResourceId"),
+                "{operation}: {error}"
+            );
+
+            let task_resource_id = payload
+                .get("subagentTaskResourceId")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| {
+                    subagent_task_resource_id(
+                        "session",
+                        "session-update-diagnostic-selector",
+                        payload.get("taskId").and_then(Value::as_str).unwrap(),
+                        "selector-test-key",
+                    )
+                });
+            let exact_selector = format!("resource:{task_resource_id}");
+            let exact = test_grant(
+                &scopes,
+                &["subagent_task"],
+                &["kind:subagent_task", exact_selector.as_str()],
+            );
+            authorize_with_grant(&exact, &function, &invocation)
+                .unwrap_or_else(|error| panic!("{operation} exact selector denied: {error}"));
+        }
+    }
+
+    #[test]
     fn jobs_operations_require_jobs_and_output_authority() {
         let function = test_execute_function();
         let start_grant = test_grant(
@@ -2614,7 +2818,8 @@ mod tests {
         .with_scope("resource.read")
         .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp")
         .with_session_id("session-update-diagnostic-selector")
-        .with_workspace_id("workspace-update-diagnostic-selector");
+        .with_workspace_id("workspace-update-diagnostic-selector")
+        .with_idempotency_key("selector-test-key");
         Invocation {
             id: InvocationId::new("invocation-update-diagnostic-selector").unwrap(),
             function_id: FunctionId::new("capability::execute").unwrap(),
