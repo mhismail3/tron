@@ -1410,10 +1410,10 @@ allow-list entries, SUWRF may fail on unchanged
 `packages/agent/src/domains/program_execution` residue, and SOL may fail on the
 unchanged marker-source backlog outside Slice 24J.
 
-## Implementation Candidate Rejected Shape Slice 24K: Speculative Dependency Restoration
+## Accepted Rejected Shape Slice 24K: Speculative Dependency Restoration
 
-Status: implementation-candidate rejected-shape containment pending
-independent review; TSV status remains `pending_review`.
+Status: accepted rejected-shape containment after independent review and
+mainline integration; TSV status is `current_baseline`.
 
 Discovery thread `019f0e47-4f80-7c92-af27-8f56f8b8d251` selected Slice 24K
 (`P3MSA-INV-019`) with exact final status `implementation may start` from
@@ -1433,16 +1433,16 @@ also requires accepted `P3MSA-INV-007` module dependency governance:
 rationale, risk class, tests, removal path, and `Cargo.toml` / `Cargo.lock`
 parity evidence.
 
-Rejected scope remains deferred or forbidden while this candidate is in
-review: no speculative dependency restoration, no runtime dependency
-restoration, no dependency additions, no `portable-pty`, interpreter,
-embedding/vector, browser automation, APNs transport, signing, or rendering
-package return, no package-manager execution, no manifest or lockfile
-mutation, no network install, no raw dependency artifacts, no package-manager
-output, no public `/engine` expansion, no fixed native panels, no repo-managed
-`packages/agent/skills`, no production deploy/update behavior, and no dependencies are restored.
+Rejected scope remains deferred or forbidden: no speculative dependency
+restoration, no runtime dependency restoration, no dependency additions, no
+`portable-pty`, interpreter, embedding/vector, browser automation, APNs
+transport, signing, or rendering package return, no package-manager execution,
+no manifest or lockfile mutation, no network install, no raw dependency
+artifacts, no package-manager output, no public `/engine` expansion, no fixed
+native panels, no repo-managed `packages/agent/skills`, no production
+deploy/update behavior, and no dependencies are restored.
 
-Implementation-candidate validation evidence:
+Acceptance validation evidence:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
@@ -1456,6 +1456,9 @@ Implementation-candidate validation evidence:
 | `git diff --check` and `git diff --cached --check` | exit 0 | Whitespace checks passed. |
 | `git ls-files -ci --exclude-standard` | exit 0, no output | No tracked ignored files were present. |
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
+| Implementation thread `019f0e4c-057a-7583-b43a-e8a256c3b99c` | exact final status `implementation complete` | Implemented branch `codex/phase-3-slice-24k-speculative-dependency-restoration` from baseline `187dbbeffca35cd7f268ae09dfcff2fd1aa3b0b4` at `af652bf9f9b68a08ce5b05bb01ad6c68c16217d2` with the Phase 3-aware dependency guard and pending-review docs/evidence. |
+| Independent review thread `019f0e53-6930-7680-a70f-645c9820fcd2` | exact verdict `slice accepted` | Review verified `187dbbeffca35cd7f268ae09dfcff2fd1aa3b0b4..af652bf9f9b68a08ce5b05bb01ad6c68c16217d2`, branch/head/ancestry/cleanliness, no dependency restoration, no manifest/lockfile mutation, no package-manager/network side effects, focused guard validation, TPC, DESI, hygiene checks, and caveat-only full PCC failure outside Slice 24K. |
+| Mainline merge `f7518151c98b5a8d5348894a059f131fc9cbafa4` plus closeout validation from `main` | exit 0 with known caveats recorded | Accepted Slice 24K implementation was merged into `main`; focused dependency-restoration guard, static docs, formatting/type-check, TPC, DESI, personal-info, whitespace, tracked ignored-file, and no-managed-skills validation passed before push. Full PCC retains only the unchanged `GeneratedUIDTOTests.swift` retired `Dashboard` caveat outside Slice 24K. |
 
 Known unchanged caveats: existing provider/model/resource-store dead-code
 warnings may remain; DRC may fail on unchanged goals/web/tool-source entropy

@@ -302,9 +302,9 @@ fn speculative_dependency_restoration_requires_phase_three_module_policy() {
     assert_eq!(phase_three_rejection_row[5], "none");
     assert_eq!(
         phase_three_rejection_row[8],
-        "Implementation-candidate Slice 24K records rejected-shape/static containment for dependency reappearance: removed dependencies stay absent unless a selected module owns a module_dependency_request with rationale risk tests removal path parity evidence and approved module_dependency_policy decision"
+        "Accepted Slice 24K records rejected-shape/static containment for dependency reappearance: removed dependencies stay absent unless a selected module owns a module_dependency_request with rationale risk tests removal path parity evidence and approved module_dependency_policy decision"
     );
-    assert_eq!(phase_three_rejection_row[13], "pending_review");
+    assert_eq!(phase_three_rejection_row[13], "current_baseline");
     for required in [
         "P3MSA-INV-007",
         "Accepted Slice 23G",
@@ -342,8 +342,8 @@ fn speculative_dependency_restoration_requires_phase_three_module_policy() {
             "Slice 24K",
             "P3MSA-INV-019",
             "Speculative Dependency Restoration",
-            "implementation-candidate",
-            "pending_review",
+            "Accepted",
+            "current_baseline",
             "P3MSA-INV-007",
             "module_dependency_request",
             "module_dependency_policy",
@@ -354,7 +354,7 @@ fn speculative_dependency_restoration_requires_phase_three_module_policy() {
         ] {
             assert!(
                 contents.contains(required),
-                "{path} must record pending-review Slice 24K Phase 3 dependency containment evidence: {required}"
+                "{path} must record accepted Slice 24K Phase 3 dependency containment evidence: {required}"
             );
         }
     }

@@ -742,7 +742,7 @@ DTOs.
 
 ### Slice 24K: Speculative Dependency Restoration
 
-Objective: close `P3MSA-INV-019` as an implementation-candidate
+Objective: close `P3MSA-INV-019` as an accepted
 rejected-shape/static-containment slice so removed dependencies do not return
 without an approved module-owned dependency request and policy decision.
 
@@ -754,9 +754,9 @@ Minimal shape:
 - static checks that deny reappearance in `Cargo.toml` or `Cargo.lock` without
   a selected module owner, rationale, risk class, tests, removal path,
   manifest/lockfile parity evidence, and approved `module_dependency_policy`;
-- Phase 3, DESI, and evidence wording that keeps this branch
-  `implementation-candidate` / `pending_review` until independent review
-  acceptance.
+- Phase 3, DESI, and evidence wording that records the accepted
+  `current_baseline` rejected shape after independent review and mainline
+  integration.
 
 Out of scope:
 
@@ -769,12 +769,12 @@ Out of scope:
   repo-managed skills, production deploy/update behavior, and no package-manager
   behavior.
 
-Implementation-candidate Slice 24K records the speculative dependency
-restoration rejected shape without adding runtime behavior. `P3MSA-INV-019`
-stays `pending_review`: no dependencies are restored, and any future
-dependency return must pass through `P3MSA-INV-007` with an approved
-`module_dependency_request`, approved `module_dependency_policy`, module owner
-rationale, parity evidence, tests, and removal plan.
+Accepted Slice 24K records the speculative dependency restoration rejected
+shape without adding runtime behavior. `P3MSA-INV-019` is `current_baseline`:
+no dependencies are restored, and any future dependency return must pass
+through `P3MSA-INV-007` with an approved `module_dependency_request`, approved
+`module_dependency_policy`, module owner rationale, parity evidence, tests, and
+removal plan.
 
 ## Execution Protocol
 
