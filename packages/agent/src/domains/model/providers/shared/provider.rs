@@ -11,6 +11,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use super::context_composition::compose_context_audit_blocks;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 use crate::shared::server::failure::{
@@ -389,7 +390,7 @@ pub trait Provider: Send + Sync {
         Ok(ProviderAuditPayload::provider_independent_snapshot(json!({
             "provider": self.provider_type().as_str(),
             "model": self.model(),
-            "context": context,
+            "contextBlocks": compose_context_audit_blocks(context),
             "options": options,
         })))
     }

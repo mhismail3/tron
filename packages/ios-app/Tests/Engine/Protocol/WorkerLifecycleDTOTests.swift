@@ -248,8 +248,8 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.projection.rawPayloadsReturned == false)
     }
 
-    @Test("Module activity overview ignores future fields without product fallback")
-    func moduleActivityOverviewIgnoresFutureFieldsWithoutProductFallback() throws {
+    @Test("Module activity overview ignores future product-specific fields")
+    func moduleActivityOverviewIgnoresFutureProductSpecificFields() throws {
         let json = """
         {
           "schemaVersion": "tron.module_activity.overview.v1",
@@ -307,8 +307,8 @@ struct WorkerLifecycleDTOTests {
             "boundedItems": true,
             "futureProjectionPolicy": "ignored"
           },
-          "productDashboard": {"panel": "legacy"},
-          "productDTO": {"table": "legacy_product_state"}
+          "unknownProductPanel": {"panel": "fixed"},
+          "unknownProductPayload": {"table": "product_state"}
         }
         """
 
@@ -320,8 +320,8 @@ struct WorkerLifecycleDTOTests {
         let encoded = try JSONEncoder().encode(overview)
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         let projection = try #require(object["projection"] as? [String: Any])
-        #expect(object["productDashboard"] == nil)
-        #expect(object["productDTO"] == nil)
+        #expect(object["unknownProductPanel"] == nil)
+        #expect(object["unknownProductPayload"] == nil)
         #expect(projection["futureProjectionPolicy"] == nil)
     }
 

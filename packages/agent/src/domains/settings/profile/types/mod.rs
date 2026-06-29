@@ -361,9 +361,9 @@ mod tests {
     fn retry_unknown_field_rejected() {
         let json = serde_json::json!({
             "maxRetries": 3,
-            "legacyBackoffMode": "linear"
+            "unknownBackoffMode": "linear"
         });
         let err = serde_json::from_value::<RetrySettings>(json).unwrap_err();
-        assert!(err.to_string().contains("legacyBackoffMode"));
+        assert!(err.to_string().contains("unknownBackoffMode"));
     }
 }

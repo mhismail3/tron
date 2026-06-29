@@ -8,7 +8,7 @@
 //!   diff, write preview/commit, and exact-text patch application under the
 //!   trusted working-directory root.
 //!
-//! The toolbox is not a legacy resurrection. It consumes existing engine
+//! The toolbox is not a retired-surface resurrection. It consumes existing engine
 //! primitives for authority roots, resources, idempotency, leases,
 //! compensation, streams, traces, and replay evidence. Phase 3 Slice 24A
 //! declares the existing agent toolbox operations in the pending-review

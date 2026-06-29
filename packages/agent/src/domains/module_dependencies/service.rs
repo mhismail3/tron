@@ -1,9 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use crate::engine::{
-    CreateResource, EngineResourceLocation, EngineResourceScope, Invocation, ListResources,
-};
+use crate::engine::{CreateResource, EngineResourceLocation, Invocation, ListResources};
 use crate::shared::server::errors::CapabilityError;
 
 use super::authority::{
@@ -768,6 +766,3 @@ fn schema_for_kind(kind: &str) -> &'static str {
         _ => "tron.module_dependency.unknown",
     }
 }
-
-#[allow(dead_code)]
-fn _scope_for_docs(_: &EngineResourceScope) {}

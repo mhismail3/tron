@@ -5,6 +5,8 @@ use crate::domains::model::providers::anthropic::types::{
     SseCacheCreation, SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta,
 };
 
+mod stream_handler_content_block_start_tests;
+
 fn usage(input: u64, output: u64, cache_create: u64, cache_read: u64) -> SseUsage {
     SseUsage {
         input_tokens: input,
@@ -100,36 +102,6 @@ fn message_start_extracts_cache_creation_breakdown() {
 }
 
 // ── content_block_start ─────────────────────────────────────────────
-
-#[test]
-fn content_block_start_text() {
-    let mut state = create_stream_state();
-    let event = AnthropicSseEvent::ContentBlockStart {
-        index: 0,
-        content_block: SseContentBlock::Text {
-            text: String::new(),
-        },
-    };
-    let events = process_sse_event(&event, &mut state);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], StreamEvent::TextStart));
-    assert_eq!(state.current_block_type, Some(BlockType::Text));
-}
-
-#[test]
-fn content_block_start_thinking() {
-    let mut state = create_stream_state();
-    let event = AnthropicSseEvent::ContentBlockStart {
-        index: 0,
-        content_block: SseContentBlock::Thinking {
-            thinking: String::new(),
-        },
-    };
-    let events = process_sse_event(&event, &mut state);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], StreamEvent::ThinkingStart));
-    assert_eq!(state.current_block_type, Some(BlockType::Thinking));
-}
 
 #[test]
 fn content_block_start_capability_invocation() {

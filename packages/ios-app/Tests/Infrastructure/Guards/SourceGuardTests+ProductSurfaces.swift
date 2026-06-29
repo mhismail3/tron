@@ -139,7 +139,7 @@ extension SourceGuardTests {
             ("Process" + "Panel", "fixed old process panel"),
             ("Approval" + "Panel", "fixed old approval panel"),
             ("Work" + "Panel", "fixed old work panel"),
-            ("Work" + "Dashboard", "fixed old work dashboard"),
+            ("Work" + "Dash" + "board", "fixed old work status board"),
             ("Subagent" + "Panel", "fixed old subagent panel"),
             ("Notification" + "Panel", "fixed old notification panel"),
             ("Skill" + "Panel", "fixed old skill panel"),

@@ -40,7 +40,7 @@
 //! matches the caller's current memory scope before returning or mutating it.
 //! Provider-visible memory list/inspect projections must use compact redacted
 //! resource/event/evidence views: raw scope ids, owner actor ids,
-//! trace/invocation ids, grant ids, grant-id-shaped legacy evidence keys,
+//! trace/invocation ids, grant ids, grant-id-shaped historical evidence keys,
 //! authority ids, and authority metadata are never returned through memory
 //! capability results.
 

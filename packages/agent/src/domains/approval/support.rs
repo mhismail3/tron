@@ -311,12 +311,12 @@ pub(super) fn merge_arrays(mut left: Vec<Value>, right: Vec<Value>) -> Vec<Value
     left
 }
 
-pub(super) trait EmptyVecFallback {
-    fn if_empty_then(self, fallback: Vec<Value>) -> Vec<Value>;
+pub(super) trait EmptyVecDefault {
+    fn or_if_empty(self, default_value: Vec<Value>) -> Vec<Value>;
 }
 
-impl EmptyVecFallback for Vec<Value> {
-    fn if_empty_then(self, fallback: Vec<Value>) -> Vec<Value> {
-        if self.is_empty() { fallback } else { self }
+impl EmptyVecDefault for Vec<Value> {
+    fn or_if_empty(self, default_value: Vec<Value>) -> Vec<Value> {
+        if self.is_empty() { default_value } else { self }
     }
 }

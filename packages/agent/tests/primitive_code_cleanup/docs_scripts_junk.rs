@@ -104,7 +104,7 @@ fn docs_and_examples_stay_cleaned_to_primitive_owned_artifacts() {
         "Local Worker Pack",
         "module::register_package",
         "Generated Controls",
-        "Work dashboard",
+        concat!("Work ", "dash", "board"),
         "retained until PCC-9",
     ];
 

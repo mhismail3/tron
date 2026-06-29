@@ -199,25 +199,6 @@ impl InMemoryEngineStreamStore {
         })
     }
 
-    /// List stream records carrying one trace id.
-    pub fn list_by_trace(&self, trace_id: &str, limit: usize) -> Result<Vec<EngineStreamEvent>> {
-        let mut events = self
-            .events
-            .iter()
-            .filter(|event| {
-                event
-                    .trace_id
-                    .as_ref()
-                    .map(|id| id.as_str() == trace_id)
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        events.sort_by_key(|event| event.cursor);
-        events.truncate(limit.min(500));
-        Ok(events)
-    }
-
     /// List stream records scoped to one session for replay.
     pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineStreamEvent>> {
         let mut events = self

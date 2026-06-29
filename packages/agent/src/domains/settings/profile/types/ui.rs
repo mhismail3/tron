@@ -326,9 +326,9 @@ mod tests {
     fn ui_unknown_nested_field_rejected() {
         let json = serde_json::json!({
             "primary": "#123524",
-            "legacyAccent": "#ffffff"
+            "unknownAccent": "#ffffff"
         });
         let err = serde_json::from_value::<PaletteSettings>(json).unwrap_err();
-        assert!(err.to_string().contains("legacyAccent"));
+        assert!(err.to_string().contains("unknownAccent"));
     }
 }

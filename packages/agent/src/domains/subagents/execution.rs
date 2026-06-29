@@ -214,6 +214,7 @@ pub(crate) async fn status_subagent_value(
     }))
 }
 
+#[cfg(test)]
 pub(crate) async fn result_subagent_value(
     deps: &Deps,
     invocation: &Invocation,

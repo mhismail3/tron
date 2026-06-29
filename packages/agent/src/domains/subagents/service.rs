@@ -1,25 +1,23 @@
-#![allow(dead_code)]
-
-use chrono::Utc;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    ActorKind, CreateResource, EngineGrant, EngineResource, EngineResourceInspection,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    SUBAGENT_TASK_KIND, SUBAGENT_TASK_SCHEMA_ID, UpdateResource, WorkerId,
-    is_bootstrap_authority_grant_id,
+    EngineGrant, EngineResourceInspection, EngineResourceScope, EngineResourceVersion, Invocation,
+    ListResources, SUBAGENT_TASK_KIND, SUBAGENT_TASK_SCHEMA_ID,
 };
 use crate::shared::server::errors::CapabilityError;
 
 use super::projection::{inspected_task, task_summary};
 use super::validation::*;
-use super::{Deps, READ_SCOPE, SCHEMA_VERSION, SUBAGENT_TASK_TOPIC, WORKER, WRITE_SCOPE};
+use super::{Deps, READ_SCOPE, SCHEMA_VERSION};
+#[cfg(test)]
+use super::{SUBAGENT_TASK_TOPIC, WORKER, WRITE_SCOPE};
 
 const RESOURCE_READ_SCOPE: &str = "resource.read";
+#[cfg(test)]
 const RESOURCE_WRITE_SCOPE: &str = "resource.write";
 
 /// Create an inert subagent task lifecycle record as trusted internal evidence.
+#[cfg(test)]
 pub(crate) async fn create_task_value(
     deps: &Deps,
     invocation: &Invocation,
@@ -27,7 +25,7 @@ pub(crate) async fn create_task_value(
 ) -> Result<Value, CapabilityError> {
     ensure_internal_write_authority(deps, invocation, "subagent task create").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
-    let now = Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().to_rfc3339();
     let task_id = optional_string(payload, "taskId")?
         .map(|value| bounded_text("taskId", &value, 128))
         .transpose()?
@@ -112,7 +110,7 @@ pub(crate) async fn create_task_value(
 
     let resource = deps
         .engine_host
-        .create_resource(CreateResource {
+        .create_resource(crate::engine::CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: SUBAGENT_TASK_KIND.to_owned(),
             schema_id: Some(SUBAGENT_TASK_SCHEMA_ID.to_owned()),
@@ -155,6 +153,7 @@ pub(crate) async fn create_task_value(
 }
 
 /// Update lifecycle metadata for an existing inert subagent task record.
+#[cfg(test)]
 pub(crate) async fn update_task_value(
     deps: &Deps,
     invocation: &Invocation,
@@ -187,7 +186,7 @@ pub(crate) async fn update_task_value(
 
     let mut record = current.clone();
     record["state"] = json!(state);
-    record["updatedAt"] = json!(Utc::now().to_rfc3339());
+    record["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
     record["revision"] = json!(record["revision"].as_u64().unwrap_or(1).saturating_add(1));
     if let Some(result) = optional_object(payload, "result")? {
         record["result"] = Value::Object(result);
@@ -202,7 +201,7 @@ pub(crate) async fn update_task_value(
     validate_update_payload(&record)?;
     let version = deps
         .engine_host
-        .update_resource(UpdateResource {
+        .update_resource(crate::engine::UpdateResource {
             resource_id: resource_id.clone(),
             expected_current_version_id: Some(current_version.version_id.clone()),
             lifecycle: Some(record["state"].as_str().unwrap_or("requested").to_owned()),
@@ -336,6 +335,7 @@ pub(crate) async fn inspect_subagent_task_value(
     }))
 }
 
+#[cfg(test)]
 async fn ensure_internal_write_authority(
     deps: &Deps,
     invocation: &Invocation,
@@ -343,7 +343,7 @@ async fn ensure_internal_write_authority(
 ) -> Result<(), CapabilityError> {
     if !matches!(
         invocation.causal_context.actor_kind,
-        ActorKind::System | ActorKind::Admin
+        crate::engine::ActorKind::System | crate::engine::ActorKind::Admin
     ) {
         return Err(policy(format!(
             "{operation} requires trusted internal system/admin authority"
@@ -356,7 +356,8 @@ async fn ensure_internal_write_authority(
             "{operation} requires {WRITE_SCOPE} and {RESOURCE_WRITE_SCOPE}"
         )));
     }
-    if is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id) {
+    if crate::engine::is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id)
+    {
         return Err(policy(format!(
             "{operation} requires a derived non-bootstrap grant"
         )));
@@ -508,6 +509,7 @@ fn current_payload<'a>(
     Ok((version, &version.payload))
 }
 
+#[cfg(test)]
 fn current_resource_ref(
     inspection: &EngineResourceInspection,
     role: &str,
@@ -516,7 +518,8 @@ fn current_resource_ref(
     Ok(version_ref(&inspection.resource, version, role))
 }
 
-fn resource_ref(resource: &EngineResource, role: &str) -> Value {
+#[cfg(test)]
+fn resource_ref(resource: &crate::engine::EngineResource, role: &str) -> Value {
     json!({
         "resourceId": resource.resource_id,
         "kind": resource.kind,
@@ -525,7 +528,12 @@ fn resource_ref(resource: &EngineResource, role: &str) -> Value {
     })
 }
 
-fn version_ref(resource: &EngineResource, version: &EngineResourceVersion, role: &str) -> Value {
+#[cfg(test)]
+fn version_ref(
+    resource: &crate::engine::EngineResource,
+    version: &EngineResourceVersion,
+    role: &str,
+) -> Value {
     json!({
         "resourceId": resource.resource_id,
         "kind": resource.kind,
@@ -535,15 +543,16 @@ fn version_ref(resource: &EngineResource, version: &EngineResourceVersion, role:
     })
 }
 
+#[cfg(test)]
 async fn publish_lifecycle_event(
     deps: &Deps,
     invocation: &Invocation,
     event_type: &str,
-    resource: &EngineResource,
+    resource: &crate::engine::EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
     deps.engine_host
-        .publish_stream_event(PublishStreamEvent {
+        .publish_stream_event(crate::engine::PublishStreamEvent {
             topic: SUBAGENT_TASK_TOPIC.to_owned(),
             payload: json!({
                 "event": event_type,
@@ -564,7 +573,10 @@ async fn publish_lifecycle_event(
     Ok(())
 }
 
+#[cfg(test)]
 fn task_resource_id(scope: &EngineResourceScope, task_id: &str, idempotency_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+
     let mut hasher = Sha256::new();
     hasher.update(scope.kind().as_bytes());
     hasher.update(b":");
@@ -576,10 +588,12 @@ fn task_resource_id(scope: &EngineResourceScope, task_id: &str, idempotency_key:
     format!("{SUBAGENT_TASK_KIND}:{}", hex::encode(hasher.finalize()))
 }
 
-fn worker_id() -> Result<WorkerId, CapabilityError> {
-    WorkerId::new(WORKER).map_err(engine_error)
+#[cfg(test)]
+fn worker_id() -> Result<crate::engine::WorkerId, CapabilityError> {
+    crate::engine::WorkerId::new(WORKER).map_err(engine_error)
 }
 
+#[cfg(test)]
 fn parent_record(invocation: &Invocation) -> Value {
     json!({
         "sessionId": invocation.causal_context.session_id,
@@ -603,6 +617,7 @@ fn scope_ref(scope: &EngineResourceScope) -> Value {
     scope_record(scope)
 }
 
+#[cfg(test)]
 fn authority_record(invocation: &Invocation) -> Value {
     json!({
         "grantId": invocation.causal_context.authority_grant_id.as_str(),
@@ -611,10 +626,12 @@ fn authority_record(invocation: &Invocation) -> Value {
     })
 }
 
+#[cfg(test)]
 fn trace_refs(invocation: &Invocation) -> Vec<Value> {
     vec![json!({"traceId": invocation.causal_context.trace_id.as_str()})]
 }
 
+#[cfg(test)]
 fn replay_refs(invocation: &Invocation) -> Vec<Value> {
     vec![json!({"invocationId": invocation.id.as_str()})]
 }
@@ -641,6 +658,7 @@ fn engine_error(error: crate::engine::EngineError) -> CapabilityError {
     }
 }
 
+#[cfg(test)]
 fn policy(message: impl Into<String>) -> CapabilityError {
     CapabilityError::Custom {
         code: "SUBAGENT_TASK_POLICY_DENIED".to_owned(),

@@ -160,25 +160,6 @@ impl SqliteEngineResourceStore {
             .map_err(|err| sqlite_err("resource.get_type", err.to_string()))
     }
 
-    /// List registered resource type definitions.
-    pub fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT kind, schema_id, schema_json, lifecycle_states_json, versioning_mode,
-                        allowed_link_relations_json, default_retention_json, redaction_rules_json,
-                        materialization_rules_json, required_capabilities_json, owner_worker_id,
-                        revision, created_at, updated_at
-                 FROM engine_resource_type_definitions ORDER BY kind",
-            )
-            .map_err(|err| sqlite_err("resource.list_types.prepare", err.to_string()))?;
-        let rows = stmt
-            .query_map([], row_to_type_definition)
-            .map_err(|err| sqlite_err("resource.list_types", err.to_string()))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|err| sqlite_err("resource.list_types.row", err.to_string()))
-    }
-
     /// Create a resource.
     pub fn create(&mut self, request: CreateResource) -> Result<EngineResource> {
         validate_create_request(&request)?;

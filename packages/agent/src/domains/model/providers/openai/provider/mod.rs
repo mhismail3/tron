@@ -280,6 +280,7 @@ impl OpenAIProvider {
     }
 
     /// Create a new `OpenAI` provider.
+    #[cfg(test)]
     #[must_use]
     pub fn new(config: OpenAIConfig) -> Self {
         let (api_endpoint, base_url, tokens) = Self::resolve(&config);

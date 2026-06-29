@@ -951,7 +951,7 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
         "PushNotificationService",
         "APNsEnvironment",
         "NotificationDelivery",
-        concat!("Session", "Dashboard", "RowButtonStyle"),
+        concat!("Session", "Dash", "board", "RowButtonStyle"),
         "SessionListRowButtonStyle",
         "rowContainerSurface",
         "rowPressedScale",

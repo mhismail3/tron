@@ -228,6 +228,7 @@ impl StreamAccumulator {
     /// Finish a capability invocation by ID. Parses accumulated args and emits `CapabilityInvocationDraftEnd`.
     ///
     /// Returns the events and removes the capability invocation from the active set.
+    #[cfg(test)]
     pub fn finish_capability_invocation(&mut self, id: &str) -> Vec<StreamEvent> {
         self.finish_capability_invocation_with_provider(id, None)
     }
@@ -269,6 +270,7 @@ impl StreamAccumulator {
     }
 
     /// Finish a capability invocation with pre-parsed arguments and optional thought signature.
+    #[cfg(test)]
     pub fn finish_capability_invocation_with(
         &mut self,
         id: &str,
@@ -343,11 +345,13 @@ impl StreamAccumulator {
     }
 
     /// Get a reference to the accumulated capability invocations.
+    #[cfg(test)]
     pub fn capability_invocations(&self) -> &[CapabilityInvocationAccumulator] {
         &self.capability_invocations
     }
 
     /// Get a mutable reference to a capability invocation by ID.
+    #[cfg(test)]
     pub fn capability_invocation_mut(
         &mut self,
         id: &str,

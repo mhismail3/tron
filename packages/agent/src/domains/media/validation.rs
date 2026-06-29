@@ -158,7 +158,7 @@ pub(super) fn validate_mime_and_size(
         MediaKind::Image => ALLOWED_IMAGE_MIME_TYPES,
         MediaKind::Document => ALLOWED_DOCUMENT_MIME_TYPES,
     };
-    if !allowed.iter().any(|allowed| *allowed == mime_type) {
+    if !allowed.contains(&mime_type) {
         return Err(invalid(format!(
             "mimeType {mime_type} is not allowed for {}",
             media_kind.as_str()

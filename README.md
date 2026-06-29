@@ -1324,7 +1324,7 @@ Legacy `file_read` and `file_write` operation names are not part of the
 provider-visible execute surface; file access goes through the hardened
 `filesystem_*` operation package.
 
-The accepted startup-registration baseline keeps only loop infrastructure domains:
+Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`, `media`,
 `worker_lifecycle`, `web`, `tool_sources`, `subagents`, `procedural`, and model-provider modules. The
@@ -1696,7 +1696,7 @@ as `SkillsRegistry`, `BootstrapSkillsRegistry`, `ManagedSkillsRegistry`,
 metadata-only `procedural_module` registry evidence, not as a skill asset,
 prompt plane, hook runner, or runtime activation path.
 
-The accepted Slice 9B foundation adds read-only worker package lifecycle
+The accepted Slice 9B foundation adds read-only worker-package lifecycle
 inspection under the same `capability::execute` primitive. `worker_package_list` and
 `worker_package_inspect` require trusted current-session context,
 `worker.lifecycle.read`, `resource.read`, explicit non-wildcard lifecycle
@@ -2839,7 +2839,7 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |   +-- archive/                   Archived workspace material
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
-|   +-- workers/                   Approved local worker-package root for `tron.worker_package.v1` manifests
+|   +-- workers/                   Approved local package root for `tron.worker_package.v1` manifests
 +-- memory/                       User-authored memory/rule notes reserved for explicit future import
 |   +-- rules/                     Reserved detail files; not auto-injected by the current memory contract
 |   +-- sessions/                  Reserved session-scoped material; not a hidden prompt plane

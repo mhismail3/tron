@@ -67,7 +67,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn turn_end_payload_decodes_legacy_rows_without_reasoning_status() {
+    fn turn_end_payload_decodes_older_rows_without_reasoning_status() {
         let payload: StreamTurnEndPayload = serde_json::from_value(json!({
             "turn": 1,
             "tokenUsage": {

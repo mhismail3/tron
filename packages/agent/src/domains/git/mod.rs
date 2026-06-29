@@ -10,7 +10,7 @@
 //! symbolic `HEAD` through a guarded ref/OID check in the existing
 //! `capability::execute` primitive. Phase 3 Slice 24A declares these existing
 //! operations in the pending-review `file_git_module` manifest and maps them to
-//! exact Git/resource/file-root authority without broad state fallback.
+//! exact Git/resource/file-root authority without broad implicit state.
 //!
 //! ## Submodules
 //!

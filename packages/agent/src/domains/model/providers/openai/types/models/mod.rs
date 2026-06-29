@@ -387,6 +387,7 @@ pub fn strip_openai_provider_prefix(model_id: &str) -> &str {
 }
 
 /// Resolve a model ID to its canonical registry ID.
+#[cfg(test)]
 #[must_use]
 pub fn canonical_openai_model_id(model_id: &str) -> Option<&'static str> {
     get_openai_model(model_id).map(|info| info.id)
@@ -448,6 +449,7 @@ impl OpenAIModelInfo {
             "id": self.id,
             "canonicalModelId": self.id,
             "name": self.name,
+            "shortName": self.short_name,
             "provider": "openai-codex",
             "providerDisplayName": "OpenAI",
             "providerSortOrder": 1,
@@ -559,6 +561,7 @@ pub fn all_openai_models_api_json_for_auth_path(
 }
 
 /// All `OpenAI` models serialized with the conservative Codex default.
+#[cfg(test)]
 pub fn all_openai_models_api_json() -> Vec<serde_json::Value> {
     all_openai_models_api_json_for_auth_path(OpenAIAuthPath::ChatGptCodex)
 }

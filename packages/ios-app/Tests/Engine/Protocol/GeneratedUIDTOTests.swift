@@ -85,8 +85,8 @@ struct GeneratedUIDTOTests {
         #expect(mutation.resourceRefs.first?.resourceId == "res-ui")
     }
 
-    @Test("ui surface stays generic resource backed without product fallback")
-    func surfaceStaysGenericResourceBackedWithoutProductFallback() throws {
+    @Test("ui surface stays generic resource backed without product-specific fields")
+    func surfaceStaysGenericResourceBackedWithoutProductSpecificFields() throws {
         let inspectJSON = """
         {
           "inspection": {"resource": {"resourceId": "res-ui", "kind": "ui_surface"}},
@@ -113,7 +113,7 @@ struct GeneratedUIDTOTests {
               "futureActionHint": {"placement": "toolbar"}
             }],
             "expiresAt": "2100-01-01T00:00:00Z",
-            "legacyPanel": {"kind": "fixed"}
+            "unknownSurfacePanel": {"kind": "fixed"}
           },
           "resourceRef": {
             "resourceId": "res-ui",
@@ -125,7 +125,7 @@ struct GeneratedUIDTOTests {
           "validationState": "valid",
           "actions": [],
           "lineage": {"versionCount": 1},
-          "legacyDashboard": {"table": "fixed"}
+          "unknownTopLevelPanel": {"table": "fixed"}
         }
         """
 
@@ -143,8 +143,8 @@ struct GeneratedUIDTOTests {
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         let encodedSurface = try #require(object["surface"] as? [String: Any])
         let encodedResourceRef = try #require(object["resourceRef"] as? [String: Any])
-        #expect(object["legacyDashboard"] == nil)
-        #expect(encodedSurface["legacyPanel"] == nil)
+        #expect(object["unknownTopLevelPanel"] == nil)
+        #expect(encodedSurface["unknownSurfacePanel"] == nil)
         #expect(encodedResourceRef["futureResourceHint"] == nil)
     }
 

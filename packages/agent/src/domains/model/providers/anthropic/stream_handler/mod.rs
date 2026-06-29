@@ -27,6 +27,8 @@ pub struct StreamState {
     pub acc: StreamAccumulator,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
+    /// Current provider content block index.
+    pub current_block_index: Option<usize>,
     /// Capability invocation ID for the current Anthropic `tool_use` block.
     pub current_invocation_id: Option<String>,
     /// Cache creation tokens.
@@ -49,6 +51,7 @@ impl Default for StreamState {
             provider_type: crate::shared::protocol::messages::Provider::Anthropic,
             acc: StreamAccumulator::new(),
             current_block_type: None,
+            current_block_index: None,
             current_invocation_id: None,
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
@@ -95,7 +98,9 @@ pub fn create_stream_state() -> StreamState {
 pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> Vec<StreamEvent> {
     match event {
         AnthropicSseEvent::MessageStart { message } => {
-            state.acc.input_tokens = message.usage.input_tokens;
+            state
+                .acc
+                .set_tokens(message.usage.input_tokens, message.usage.output_tokens);
             state.cache_creation_tokens = message.usage.cache_creation_input_tokens;
             state.cache_read_tokens = message.usage.cache_read_input_tokens;
             if let Some(ref cc) = message.usage.cache_creation {
@@ -106,7 +111,11 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             let cache_hit = state.cache_read_tokens > 0;
             let cache_write = state.cache_creation_tokens > 0;
             debug!(
+                message_id = ?message.id,
+                model = ?message.model,
+                stop_reason = ?message.stop_reason,
                 input_tokens = state.acc.input_tokens,
+                output_tokens = state.acc.output_tokens,
                 cache_read = state.cache_read_tokens,
                 cache_write = state.cache_creation_tokens,
                 cache_hit,
@@ -117,20 +126,50 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             vec![]
         }
 
-        AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
-            SseContentBlock::Text { .. } => {
+        AnthropicSseEvent::ContentBlockStart {
+            index,
+            content_block,
+        } => match content_block {
+            SseContentBlock::Text { text } => {
                 state.current_block_type = Some(BlockType::Text);
+                state.current_block_index = Some(*index);
                 // Anthropic has explicit block starts; use mark_ rather than process_.
-                state.acc.text_started = true;
-                vec![StreamEvent::TextStart]
+                let mut events = state
+                    .acc
+                    .mark_text_started()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                if !text.is_empty() {
+                    if let Some(error) = state.acc.accumulate_text(text) {
+                        return vec![error];
+                    }
+                    events.push(StreamEvent::TextDelta {
+                        delta: text.clone(),
+                    });
+                }
+                events
             }
-            SseContentBlock::Thinking { .. } => {
+            SseContentBlock::Thinking { thinking } => {
                 state.current_block_type = Some(BlockType::Thinking);
-                state.acc.thinking_started = true;
-                vec![StreamEvent::ThinkingStart]
+                state.current_block_index = Some(*index);
+                let mut events = state
+                    .acc
+                    .mark_thinking_started()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                if !thinking.is_empty() {
+                    if let Some(error) = state.acc.accumulate_thinking(thinking) {
+                        return vec![error];
+                    }
+                    events.push(StreamEvent::ThinkingDelta {
+                        delta: thinking.clone(),
+                    });
+                }
+                events
             }
             SseContentBlock::CapabilityInvocation { id, name } => {
                 state.current_block_type = Some(BlockType::CapabilityInvocation);
+                state.current_block_index = Some(*index);
                 state.current_invocation_id = Some(id.clone());
                 state
                     .acc
@@ -138,37 +177,44 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             }
         },
 
-        AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
-            SseDelta::TextDelta { text } => {
-                if let Some(error) = state.acc.accumulate_text(text) {
-                    return vec![error];
+        AnthropicSseEvent::ContentBlockDelta { index, delta } => {
+            warn_on_block_index_mismatch(state, *index, "delta");
+            match delta {
+                SseDelta::TextDelta { text } => {
+                    if let Some(error) = state.acc.accumulate_text(text) {
+                        return vec![error];
+                    }
+                    vec![StreamEvent::TextDelta {
+                        delta: text.clone(),
+                    }]
                 }
-                vec![StreamEvent::TextDelta {
-                    delta: text.clone(),
-                }]
-            }
-            SseDelta::ThinkingDelta { thinking } => {
-                if let Some(error) = state.acc.accumulate_thinking(thinking) {
-                    return vec![error];
+                SseDelta::ThinkingDelta { thinking } => {
+                    if let Some(error) = state.acc.accumulate_thinking(thinking) {
+                        return vec![error];
+                    }
+                    vec![StreamEvent::ThinkingDelta {
+                        delta: thinking.clone(),
+                    }]
                 }
-                vec![StreamEvent::ThinkingDelta {
-                    delta: thinking.clone(),
-                }]
-            }
-            SseDelta::SignatureDelta { signature } => {
-                state.acc.accumulate_signature(signature);
-                vec![]
-            }
-            SseDelta::InputJsonDelta { partial_json } => {
-                if let Some(ref id) = state.current_invocation_id {
-                    state.acc.append_tool_args(id, partial_json)
-                } else {
+                SseDelta::SignatureDelta { signature } => {
+                    state.acc.accumulate_signature(signature);
                     vec![]
                 }
+                SseDelta::InputJsonDelta { partial_json } => {
+                    if let Some(ref id) = state.current_invocation_id {
+                        state.acc.append_tool_args(id, partial_json)
+                    } else {
+                        vec![]
+                    }
+                }
             }
-        },
+        }
 
-        AnthropicSseEvent::ContentBlockStop { .. } => handle_content_block_stop(state),
+        AnthropicSseEvent::ContentBlockStop { index } => {
+            warn_on_block_index_mismatch(state, *index, "stop");
+            state.current_block_index = None;
+            handle_content_block_stop(state)
+        }
 
         AnthropicSseEvent::MessageDelta { delta, usage } => {
             state.stop_reason.clone_from(&delta.stop_reason);
@@ -246,6 +292,17 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
             events
         }
         None => vec![],
+    }
+}
+
+fn warn_on_block_index_mismatch(state: &StreamState, actual: usize, phase: &'static str) {
+    if let Some(expected) = state.current_block_index
+        && expected != actual
+    {
+        warn!(
+            expected,
+            actual, phase, "Anthropic content block index mismatch"
+        );
     }
 }
 

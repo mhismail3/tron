@@ -719,14 +719,14 @@ fn redacted_decision_payload(payload: &Value) -> Value {
 fn pick_fields(payload: &Value, fields: &[&str], array_fields: &[&str]) -> Value {
     let mut object = Map::new();
     for field in fields {
-        let fallback = if array_fields.contains(field) {
+        let default_value = if array_fields.contains(field) {
             json!([])
         } else {
             Value::Null
         };
         object.insert(
             (*field).to_owned(),
-            provider_safe_projection(payload.get(*field).unwrap_or(&fallback), 160, 6),
+            provider_safe_projection(payload.get(*field).unwrap_or(&default_value), 160, 6),
         );
     }
     Value::Object(object)

@@ -170,7 +170,7 @@ pub(crate) async fn decide_approval_value(
             optional_array(payload, "evidenceRefs")?,
         ),
         resource_selectors: optional_array(payload, "resourceSelectors")?
-            .if_empty_then(request_record.resource_selectors.clone()),
+            .or_if_empty(request_record.resource_selectors.clone()),
         trace_refs: with_trace_ref(
             merge_arrays(
                 request_record.trace_refs.clone(),

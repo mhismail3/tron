@@ -1,4 +1,6 @@
-use serde_json::{Map, Value};
+#[cfg(test)]
+use serde_json::Map;
+use serde_json::Value;
 
 use crate::engine::{EngineResourceScope, Invocation};
 use crate::shared::server::errors::CapabilityError;
@@ -40,6 +42,7 @@ pub(super) fn optional_string(
     }
 }
 
+#[cfg(test)]
 pub(super) fn optional_object(
     payload: &Value,
     field: &str,

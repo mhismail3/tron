@@ -43,7 +43,7 @@
 //! record, list, and inspect bounded `update_diagnostic_record` signed-release
 //! and provenance facts without live update checks, package bytes, install or
 //! restart execution, package/catalog registration, or deploy automation.
-//! Module-registry operations are read-only resource-backed operations: they
+//! Module-manifest operations are read-only resource-backed operations: they
 //! list and inspect provider-safe `module_manifest` projections without module
 //! install, activation, execution, dependency resolution, network behavior, or
 //! raw manifest exposure.
@@ -95,7 +95,7 @@
 //! `filesystem_*` and selected `git_*` operation values remain inside this
 //! primitive, but derived grants use exact filesystem/Git/resource scopes,
 //! trusted working-directory roots, and existing evidence resource kinds
-//! instead of `agent_state` fallback or new provider-visible tools.
+//! instead of implicit `agent_state` authority or new provider-visible tools.
 //!
 //! ## Submodules
 //!
@@ -117,18 +117,18 @@
 //! can only appear later as agent-owned state or generated helper substrate, not
 //! as checked-in target functions.
 //! File access through this tool must use the hardened `filesystem_*` operation
-//! package; legacy `file_read`/`file_write` operation names are not a supported
+//! package; retired `file_read`/`file_write` operation names are not a supported
 //! model-facing surface.
 //! Agent-launched executions persist trace provider ownership and canonical
 //! working directory from trusted `CausalContext` runtime metadata, not from
 //! model-id string parsing, shell aliases, caller-supplied public context, or
-//! process-cwd fallback. `capability::execute` rejects bootstrap/root grants and
+//! process-cwd inference. `capability::execute` rejects bootstrap/root grants and
 //! runs only with derived scoped grants whose file roots, state authority, and
 //! network policy match the requested primitive operation. Working-directory
 //! metadata is required only for file/process operations; catalog discovery must
 //! remain pure metadata inspection or resource-backed report creation. Replay
 //! manifest reads deliberately bypass trace insertion so the exported manifest
-//! is not changed by the read. Module-registry reads deliberately stay inside
+//! is not changed by the read. Module-manifest reads deliberately stay inside
 //! `capability::execute`; module-authoring proposal records and
 //! module-validation reports deliberately stay inert, resource-backed, and
 //! trace-safe before unsafe payload rejection. None expands the public

@@ -14,7 +14,7 @@
 //! |--------|---------|
 //! | `execution` | Controlled launch/status/result/cancel lifecycle over delegated module refs |
 //! | `projection` | Allowlisted, bounded, redacted read projections for list/inspect |
-//! | `service` | Internal lifecycle writes plus read-only list/inspect projection |
+//! | `service` | Read-only list/inspect projection plus test fixtures for task records |
 //! | `validation` | Bounded payload readers and redaction/non-goal guards |
 //! | `tests` | Authority, scoping, idempotency, schema, and non-goal guards |
 //!
@@ -27,11 +27,9 @@
 //! resource selectors. Completion is surfaced as merge-proposal evidence for
 //! review, not as hidden parent-state mutation. Delegated launch and follow-up
 //! grants must include exact module runtime, job, program-execution, lifecycle,
-//! and subagent-task selectors without `agent_state` fallback. Launch replay
+//! and subagent-task selectors without implicit `agent_state` authority. Launch replay
 //! must recover the same delegated runtime/job/program refs from module
 //! supervision metadata before creating the parent task, or fail closed.
-
-#![allow(dead_code)]
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -46,20 +44,14 @@ pub(crate) const READ_SCOPE: &str = "subagents.read";
 pub(crate) const WRITE_SCOPE: &str = "subagents.write";
 pub(crate) const SCHEMA_VERSION: &str = "tron.subagent_task.v1";
 
+#[cfg(test)]
 pub(crate) const CREATE_TASK_FUNCTION: &str = "subagents::create_task";
+#[cfg(test)]
 pub(crate) const UPDATE_TASK_FUNCTION: &str = "subagents::update_task";
 
 #[derive(Clone)]
 pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
-
-impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
-            engine_host: deps.engine_host.clone(),
-        }
-    }
 }
 
 pub(crate) fn worker_module(

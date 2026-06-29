@@ -8,6 +8,8 @@ const PHASE_TWO_SCORECARD_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md";
 const PHASE_TWO_EVIDENCE_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md";
+// Phase 3 modular self-adapting paths are documentation budget inputs only;
+// this PCC invariant does not add successor runtime behavior.
 const PHASE_THREE_INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv";
 const PHASE_THREE_SCORECARD_PATH: &str =

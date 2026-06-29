@@ -538,7 +538,6 @@ pub(crate) async fn inspect_module_lifecycle_value(
     }))
 }
 
-#[allow(dead_code)]
 pub(crate) async fn ensure_runtime_allowed(
     deps: &Deps,
     scope: &EngineResourceScope,

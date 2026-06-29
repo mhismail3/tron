@@ -13,9 +13,7 @@ use crate::engine::{
 };
 use crate::shared::server::test_support::make_test_context;
 
-#[path = "tool_sources_inspect_tests.rs"]
 mod inspect;
-#[path = "tool_sources_validation_tests.rs"]
 mod validation_tests;
 
 #[tokio::test]
@@ -451,7 +449,7 @@ fn resource_definitions_include_tool_source_required_fields() {
 
 #[test]
 fn static_non_goal_guards_keep_tool_sources_inert() {
-    let service = include_str!("service.rs");
+    let service = include_str!("../service/mod.rs");
     for forbidden in [
         "std::process::Command",
         ".spawn(",

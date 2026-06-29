@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::{
@@ -7,8 +7,8 @@ use crate::engine::{
 };
 use crate::shared::server::errors::CapabilityError;
 
+use super::Deps;
 use super::projection::{ModuleActivityItem, ModuleActivityProjection};
-use super::{Deps, contract};
 
 const DEFAULT_LIMIT: usize = 40;
 const MAX_LIMIT: usize = 100;
@@ -160,9 +160,4 @@ fn invalid(message: impl Into<String>) -> CapabilityError {
     CapabilityError::InvalidParams {
         message: message.into(),
     }
-}
-
-#[allow(dead_code)]
-fn _schema_marker() -> Value {
-    json!({"schemaVersion": contract::SCHEMA_VERSION})
 }

@@ -65,6 +65,8 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
             == "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
         || path == "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
         || path == "packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs"
+        || path == "packages/agent/tests/primitive_code_cleanup/budgets_generated_dependencies.rs"
+        || path == "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
         || source.contains("off-plan-saa-authorship-teardown-cleanup")
         || source.contains("self-sufficient-agent-runtime-readiness")
         || source.contains("self_sufficient_agent_runtime_readiness")

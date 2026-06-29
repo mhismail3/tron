@@ -16,21 +16,6 @@ fn factory_captures_anthropic_settings() {
     assert_eq!(factory.anthropic.client_id, "test-client-id");
 }
 
-#[test]
-fn factory_captures_retry_settings() {
-    let mut settings = crate::domains::settings::TronSettings::default();
-    settings.retry.max_retries = 5;
-    settings.retry.base_delay_ms = 2000;
-    settings.retry.max_delay_ms = 30_000;
-    settings.retry.jitter_factor = 0.3;
-
-    let factory = DefaultProviderFactory::new(&settings);
-    assert_eq!(factory.retry.max_retries, 5);
-    assert_eq!(factory.retry.base_delay_ms, 2000);
-    assert_eq!(factory.retry.max_delay_ms, 30_000);
-    assert!((factory.retry.jitter_factor - 0.3).abs() < f64::EPSILON);
-}
-
 /// Helper: extract the auth error from a factory call that should fail.
 async fn expect_auth_error(factory: &DefaultProviderFactory, model: &str) -> ProviderError {
     match factory.create_for_model(model).await {

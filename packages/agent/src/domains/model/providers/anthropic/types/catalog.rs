@@ -86,16 +86,19 @@ impl ClaudeModelInfo {
         let mut obj = serde_json::json!({
             "id": id,
             "name": self.short_name,
+            "shortName": self.short_name,
             "provider": "anthropic",
             "providerDisplayName": "Anthropic",
             "providerSortOrder": 0,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "supportsImages": self.supports_images,
             "supportsDocuments": true,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
+            "cacheReadCostPerMillion": self.cache_read_cost_per_million,
             "tier": self.tier,
             "family": self.family,
             "description": self.description,
@@ -491,4 +494,5 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
 });
 
 /// Default model ID.
+#[cfg(test)]
 pub const DEFAULT_MODEL: &str = "claude-opus-4-6";

@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{GEMMA4_26B, GEMMA4_E4B};
 
 /// Default base URL for the Ollama API.
@@ -32,8 +31,6 @@ pub struct OllamaConfig {
     pub base_url: Option<String>,
     /// Override max tokens.
     pub max_tokens: Option<u32>,
-    /// Retry configuration.
-    pub retry: Option<StreamRetryConfig>,
 }
 
 /// Ollama model information.
@@ -122,7 +119,9 @@ impl OllamaModelInfo {
         //   is always-on, not configurable).
         serde_json::json!({
             "id": id,
+            "canonicalModelId": self.id,
             "name": self.name,
+            "shortName": self.short_name,
             "provider": "ollama",
             "providerDisplayName": "Ollama",
             "providerSortOrder": 5,
@@ -148,6 +147,7 @@ impl OllamaModelInfo {
 ///
 /// This is the static (sync) version — all models are listed without availability info.
 /// Prefer [`all_ollama_models_api_json_with_availability`] when an async context is available.
+#[cfg(test)]
 pub fn all_ollama_models_api_json() -> Vec<serde_json::Value> {
     let mut entries: Vec<_> = OLLAMA_MODELS.iter().collect();
     entries.sort_by_key(|(_, info)| info.sort_order);

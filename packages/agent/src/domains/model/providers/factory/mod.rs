@@ -26,15 +26,6 @@ struct AnthropicSettings {
     oauth_beta_headers: String,
 }
 
-/// Retry settings captured at startup.
-#[derive(Clone, Debug)]
-struct CapturedRetrySettings {
-    max_retries: u32,
-    base_delay_ms: u64,
-    max_delay_ms: u64,
-    jitter_factor: f64,
-}
-
 /// Default factory that creates a fresh `Provider` for any supported model.
 ///
 /// The factory captures config at startup but re-reads auth on every call
@@ -42,7 +33,6 @@ struct CapturedRetrySettings {
 pub struct DefaultProviderFactory {
     auth_path: PathBuf,
     anthropic: AnthropicSettings,
-    retry: CapturedRetrySettings,
     /// `MiniMax` base URL override from settings.
     minimax_base_url: Option<String>,
     /// Kimi base URL override from settings.
@@ -71,12 +61,6 @@ impl DefaultProviderFactory {
                 token_expiry_buffer_seconds: settings.api.anthropic.token_expiry_buffer_seconds,
                 oauth_beta_headers: settings.api.anthropic.oauth_beta_headers.clone(),
             },
-            retry: CapturedRetrySettings {
-                max_retries: settings.retry.max_retries,
-                base_delay_ms: settings.retry.base_delay_ms,
-                max_delay_ms: settings.retry.max_delay_ms,
-                jitter_factor: settings.retry.jitter_factor,
-            },
             minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
             kimi_base_url: settings.api.kimi.as_ref().map(|k| k.base_url.clone()),
             ollama_base_url: settings.api.ollama.as_ref().map(|o| o.base_url.clone()),
@@ -85,6 +69,7 @@ impl DefaultProviderFactory {
     }
 
     /// Override the auth path (for testing with non-existent auth files).
+    #[cfg(test)]
     #[must_use]
     pub fn with_auth_path(mut self, path: PathBuf) -> Self {
         self.auth_path = path;
@@ -107,6 +92,8 @@ impl DefaultProviderFactory {
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
+        oauth_config.token_expiry_buffer_seconds =
+            self.anthropic.token_expiry_buffer_seconds as i64;
 
         let server_auth =
             match crate::domains::auth::credentials::anthropic::load_server_auth_with_client(
@@ -173,22 +160,9 @@ impl DefaultProviderFactory {
             auth,
             max_tokens: None,
             base_url: None,
-            retry: Some(
-                crate::domains::model::providers::shared::StreamRetryConfig {
-                    retry: crate::shared::foundation::retry::RetryConfig {
-                        max_retries: self.retry.max_retries,
-                        base_delay_ms: self.retry.base_delay_ms,
-                        max_delay_ms: self.retry.max_delay_ms,
-                        jitter_factor: self.retry.jitter_factor,
-                    },
-                    emit_retry_events: true,
-                    cancel_token: None,
-                },
-            ),
             provider_settings:
                 crate::domains::model::providers::anthropic::types::AnthropicProviderSettings {
                     system_prompt_prefix: Some(self.anthropic.system_prompt_prefix.clone()),
-                    token_expiry_buffer_seconds: Some(self.anthropic.token_expiry_buffer_seconds),
                     oauth_beta_headers: self.anthropic.oauth_beta_headers.clone(),
                 },
         };
@@ -395,18 +369,6 @@ impl DefaultProviderFactory {
             auth: crate::domains::model::providers::minimax::types::MiniMaxAuth::ApiKey { api_key },
             max_tokens: None,
             base_url: self.minimax_base_url.clone(),
-            retry: Some(
-                crate::domains::model::providers::shared::StreamRetryConfig {
-                    retry: crate::shared::foundation::retry::RetryConfig {
-                        max_retries: self.retry.max_retries,
-                        base_delay_ms: self.retry.base_delay_ms,
-                        max_delay_ms: self.retry.max_delay_ms,
-                        jitter_factor: self.retry.jitter_factor,
-                    },
-                    emit_retry_events: true,
-                    cancel_token: None,
-                },
-            ),
         };
         Ok(Arc::new(
             crate::domains::model::providers::minimax::provider::MiniMaxProvider::with_client(
@@ -448,18 +410,6 @@ impl DefaultProviderFactory {
             auth: crate::domains::model::providers::kimi::types::KimiAuth::ApiKey { api_key },
             max_tokens: None,
             base_url: self.kimi_base_url.clone(),
-            retry: Some(
-                crate::domains::model::providers::shared::StreamRetryConfig {
-                    retry: crate::shared::foundation::retry::RetryConfig {
-                        max_retries: self.retry.max_retries,
-                        base_delay_ms: self.retry.base_delay_ms,
-                        max_delay_ms: self.retry.max_delay_ms,
-                        jitter_factor: self.retry.jitter_factor,
-                    },
-                    emit_retry_events: true,
-                    cancel_token: None,
-                },
-            ),
         };
         Ok(Arc::new(
             crate::domains::model::providers::kimi::provider::KimiProvider::with_client(
@@ -476,18 +426,6 @@ impl DefaultProviderFactory {
             model: model.to_string(),
             base_url: self.ollama_base_url.clone(),
             max_tokens: None,
-            retry: Some(
-                crate::domains::model::providers::shared::StreamRetryConfig {
-                    retry: crate::shared::foundation::retry::RetryConfig {
-                        max_retries: self.retry.max_retries,
-                        base_delay_ms: self.retry.base_delay_ms,
-                        max_delay_ms: self.retry.max_delay_ms,
-                        jitter_factor: self.retry.jitter_factor,
-                    },
-                    emit_retry_events: true,
-                    cancel_token: None,
-                },
-            ),
         };
         Ok(Arc::new(
             crate::domains::model::providers::ollama::provider::OllamaProvider::with_client(

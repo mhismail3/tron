@@ -1,8 +1,8 @@
 //! Sensitive data redaction for event payloads.
 //!
-//! The event store re-exports the shared foundation redactor so legacy call
-//! sites keep their domain-local import while provider/model surfaces can use
-//! the same policy without depending on the session domain.
+//! The event store re-exports the shared foundation redactor so event-log
+//! repositories keep their domain-local import while provider/model surfaces
+//! can use the same policy without depending on the session domain.
 //!
 //! Delegated auth-secret coverage remains: `access_?token`,
 //! `refresh_?token`, `client_?secret`, and `authorization_?code`.

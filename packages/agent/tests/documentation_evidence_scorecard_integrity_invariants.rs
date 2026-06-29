@@ -13,6 +13,8 @@ const INVENTORY_PATH: &str =
     "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md";
 const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv";
+// Phase 3's modular self-adapting path is a documentation inventory target;
+// this DESI invariant does not add successor runtime behavior.
 const PHASE_THREE_INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv";
 const TARGET_PATH: &str =
@@ -20,6 +22,9 @@ const TARGET_PATH: &str =
 const TARGET_NAME: &str = "documentation_evidence_scorecard_integrity_invariants";
 const BASE_COMMIT: &str = "687dc1e1f4b51701452f2ba25c92f34bc018a950";
 const STALE_BRANCH_HEAD: &str = "f931c3126a2ee62940f42512278715c9c65c2079";
+
+#[path = "documentation_evidence_scorecard_integrity/branch_handoff.rs"]
+mod branch_handoff;
 
 #[derive(Debug)]
 struct ScorecardRow {
@@ -773,32 +778,4 @@ fn closeout_evidence_records_required_commands_without_placeholders() {
             "DESI evidence must not contain placeholder language: {forbidden}"
         );
     }
-}
-
-#[test]
-fn branch_handoff_and_remote_pickup_rules_are_recorded() {
-    let scorecard = read_repo_file(SCORECARD_PATH);
-    let evidence = read_repo_file(EVIDENCE_PATH);
-    let inventory = read_repo_file(INVENTORY_PATH);
-    for required in [
-        "codex/documentation-evidence-scorecard-integrity-current",
-        "codex/documentation-evidence-scorecard-integrity",
-        "quarry-only",
-        BASE_COMMIT,
-        STALE_BRANCH_HEAD,
-        "git status --short",
-        "another thread can continue without chat history",
-    ] {
-        assert!(
-            scorecard.contains(required)
-                || evidence.contains(required)
-                || inventory.contains(required),
-            "DESI branch/handoff docs missing {required}"
-        );
-    }
-    assert!(
-        scorecard.find(BASE_COMMIT).expect("base commit marker")
-            < scorecard.find("quarry-only").expect("quarry-only marker"),
-        "scorecard must establish current lineage before stale-branch quarantine"
-    );
 }

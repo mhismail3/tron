@@ -30,6 +30,7 @@ pub struct SqliteEngineLedgerStore {
 
 impl SqliteEngineLedgerStore {
     /// Open an in-memory SQLite ledger.
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().map_err(|err| sqlite_err("open", err))?;
         Self::from_connection(conn)
@@ -49,6 +50,7 @@ impl SqliteEngineLedgerStore {
     }
 
     /// Borrow the underlying connection for focused tests.
+    #[cfg(test)]
     #[must_use]
     pub fn connection(&self) -> &Connection {
         &self.conn

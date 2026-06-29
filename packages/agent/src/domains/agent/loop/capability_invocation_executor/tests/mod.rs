@@ -18,39 +18,22 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
 
-#[path = "grant_file_git_tests.rs"]
 mod grant_file_git_tests;
-#[path = "grant_import_history_tests.rs"]
 mod grant_import_history_tests;
-#[path = "grant_import_preview_tests.rs"]
 mod grant_import_preview_tests;
-#[path = "grant_module_authoring_tests.rs"]
 mod grant_module_authoring_tests;
-#[path = "grant_module_dependencies_tests.rs"]
 mod grant_module_dependencies_tests;
-#[path = "grant_module_install_tests.rs"]
 mod grant_module_install_tests;
-#[path = "grant_module_lifecycle_tests.rs"]
 mod grant_module_lifecycle_tests;
-#[path = "grant_module_program_execution_tests.rs"]
 mod grant_module_program_execution_tests;
-#[path = "grant_module_runtime_tests.rs"]
 mod grant_module_runtime_tests;
-#[path = "grant_module_validation_tests.rs"]
 mod grant_module_validation_tests;
-#[path = "grant_notification_device_tests.rs"]
 mod grant_notification_device_tests;
-#[path = "grant_program_execution_tests.rs"]
 mod grant_program_execution_tests;
-#[path = "grant_prompt_artifacts_tests.rs"]
 mod grant_prompt_artifacts_tests;
-#[path = "grant_repository_tree_tests.rs"]
 mod grant_repository_tree_tests;
-#[path = "grant_tests.rs"]
 mod grant_tests;
-#[path = "grant_update_diagnostics_tests.rs"]
 mod grant_update_diagnostics_tests;
-#[path = "grant_web_research_tests.rs"]
 mod grant_web_research_tests;
 
 fn empty_surface() -> ResolvedPrimitiveSurface {

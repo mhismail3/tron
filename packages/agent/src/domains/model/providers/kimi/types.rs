@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{
     KIMI_K2_5, KIMI_K2_0711_PREVIEW, KIMI_K2_0905_PREVIEW, KIMI_K2_THINKING,
     KIMI_K2_THINKING_TURBO, KIMI_K2_TURBO_PREVIEW, MOONSHOT_V1_8K, MOONSHOT_V1_32K,
@@ -40,8 +39,6 @@ pub struct KimiConfig {
     pub max_tokens: Option<u32>,
     /// Override base URL.
     pub base_url: Option<String>,
-    /// Retry configuration.
-    pub retry: Option<StreamRetryConfig>,
 }
 
 /// Kimi model information.
@@ -293,13 +290,16 @@ impl KimiModelInfo {
     pub fn to_api_json(&self, id: &str) -> serde_json::Value {
         serde_json::json!({
             "id": id,
+            "canonicalModelId": self.id,
             "name": self.name,
+            "shortName": self.short_name,
             "provider": "kimi",
             "providerDisplayName": "Kimi",
             "providerSortOrder": 4,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,
@@ -311,6 +311,7 @@ impl KimiModelInfo {
             "recommended": self.recommended,
             "isLegacy": self.is_retired_generation,
             "sortOrder": self.sort_order,
+            "cacheReadCostPerMillion": self.cache_read_cost_per_million,
         })
     }
 }

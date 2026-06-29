@@ -8,7 +8,6 @@ fn test_config(auth: AnthropicAuth) -> AnthropicConfig {
         auth,
         max_tokens: None,
         base_url: None,
-        retry: None,
         provider_settings: AnthropicProviderSettings::default(),
     }
 }

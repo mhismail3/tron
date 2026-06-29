@@ -44,6 +44,7 @@ pub struct MiniMaxProvider {
 
 impl MiniMaxProvider {
     /// Create a new `MiniMax` provider.
+    #[cfg(test)]
     #[must_use]
     pub fn new(config: MiniMaxConfig) -> Self {
         Self {
@@ -353,7 +354,6 @@ mod tests {
             },
             max_tokens: None,
             base_url: None,
-            retry: None,
         }
     }
 

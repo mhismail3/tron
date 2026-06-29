@@ -1,4 +1,4 @@
-//! Module registry execute operation adapter.
+//! Module manifest execute operation adapter.
 
 use serde_json::{Value, json};
 

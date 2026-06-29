@@ -35,6 +35,7 @@ pub struct KimiProvider {
 
 impl KimiProvider {
     /// Create a new Kimi provider.
+    #[cfg(test)]
     #[must_use]
     pub fn new(config: KimiConfig) -> Self {
         Self {
@@ -278,7 +279,6 @@ mod tests {
             },
             max_tokens: None,
             base_url: None,
-            retry: None,
         }
     }
 

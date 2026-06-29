@@ -145,7 +145,7 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
     }
 
     for path in [
-        "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs",
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_validation_tests.rs",
         "packages/agent/src/domains/capability/module_validation_contract.rs",
         "packages/agent/src/domains/capability/operations/module_validation.rs",
         "packages/agent/src/domains/module_validation/authority.rs",

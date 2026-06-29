@@ -482,8 +482,11 @@ fn memory_rule_runtime_substrate_is_removed_from_active_sources() {
     }
     assert!(!grants.contains("self_adapting_resource_kinds"));
     assert!(!grants.contains("\"resource::create\""));
-    assert!(!grants.contains("\"resource.read\""));
     assert!(!grants.contains("\"*\""));
+    assert!(
+        grants.contains("\"memory.read\"") && !grants.contains("\"memory.write\""),
+        "current memory inspection grants must remain read-only and module-scoped"
+    );
 }
 
 #[test]
@@ -519,6 +522,9 @@ fn active_readme_and_predecessor_inventories_do_not_claim_saa_complete_current_a
 fn generic_preexisting_resource_substrate_still_has_contract_coverage() {
     let definitions =
         read_repo_file("packages/agent/src/engine/durability/resources/definitions.rs");
+    let goal_definitions =
+        read_repo_file("packages/agent/src/engine/durability/resources/goal_definitions.rs");
+    let definition_sources = format!("{definitions}\n{goal_definitions}");
     let contracts =
         read_repo_file("packages/agent/src/engine/tests/durability/resource_contracts.rs");
     for kind in [
@@ -533,7 +539,7 @@ fn generic_preexisting_resource_substrate_still_has_contract_coverage() {
         "agent_result",
     ] {
         assert!(
-            definitions.contains(&format!("\"{kind}\"")),
+            definition_sources.contains(&format!("\"{kind}\"")),
             "retained generic resource definition missing {kind}"
         );
         assert!(
@@ -631,6 +637,7 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
     match path {
         "README.md"
         | "packages/agent/docs/restoration-retrospective-audit-status.md"
+        | "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
@@ -652,6 +659,9 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
+        | "packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs"
+        | "packages/agent/tests/primitive_code_cleanup/budgets_generated_dependencies.rs"
+        | "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md"
@@ -687,6 +697,9 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
             Some(ResidueClass::FutureReadinessWording)
         }
         _ if path.starts_with("packages/agent/docs/phase-2-agent-execution-restoration-") => {
+            Some(ResidueClass::FutureReadinessWording)
+        }
+        _ if path.starts_with("packages/agent/docs/phase-3-modular-self-adapting-engine-") => {
             Some(ResidueClass::FutureReadinessWording)
         }
         _ => None,

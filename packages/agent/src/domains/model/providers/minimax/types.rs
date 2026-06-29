@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{
     MINIMAX_M2, MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
     MINIMAX_M2_7, MINIMAX_M2_7_HIGHSPEED,
@@ -39,8 +38,6 @@ pub struct MiniMaxConfig {
     pub max_tokens: Option<u32>,
     /// Override base URL.
     pub base_url: Option<String>,
-    /// Retry configuration.
-    pub retry: Option<StreamRetryConfig>,
 }
 
 /// `MiniMax` model information.
@@ -238,13 +235,16 @@ impl MiniMaxModelInfo {
     pub fn to_api_json(&self, id: &str) -> serde_json::Value {
         serde_json::json!({
             "id": id,
+            "canonicalModelId": self.id,
             "name": self.name,
+            "shortName": self.short_name,
             "provider": "minimax",
             "providerDisplayName": "MiniMax",
             "providerSortOrder": 3,
             "contextWindow": self.context_window,
             "maxOutput": self.max_output,
             "supportsThinking": self.supports_thinking,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
             "inputCostPerMillion": self.input_cost_per_million,

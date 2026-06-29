@@ -969,7 +969,5 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
     drop(temp);
 }
 
-#[path = "inspection_test_support.rs"]
 mod inspection_test_support;
-#[path = "inspection_tests.rs"]
 mod inspection_tests;

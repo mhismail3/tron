@@ -44,6 +44,7 @@ pub struct OllamaProvider {
 
 impl OllamaProvider {
     /// Create a new Ollama provider.
+    #[cfg(test)]
     #[must_use]
     pub fn new(config: OllamaConfig) -> Self {
         Self {
@@ -433,7 +434,6 @@ mod tests {
             model: "gemma4:e4b".into(),
             base_url: None,
             max_tokens: None,
-            retry: None,
         }
     }
 

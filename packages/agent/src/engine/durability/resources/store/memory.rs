@@ -61,11 +61,6 @@ impl InMemoryEngineResourceStore {
         Ok(self.type_definitions.get(kind).cloned())
     }
 
-    /// List registered resource type definitions.
-    pub fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
-        Ok(self.type_definitions.values().cloned().collect())
-    }
-
     /// Create a resource.
     pub fn create(&mut self, request: CreateResource) -> Result<EngineResource> {
         validate_create_request(&request)?;

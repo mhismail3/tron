@@ -358,7 +358,6 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
         "packages/ios-app/Sources/UI/Memory",
         "packages/agent/src/domains/mcp",
         "packages/agent/src/domains/skills",
-        "packages/agent/src/domains/program_execution",
     ] {
         assert!(
             !repo_path(forbidden).exists(),
@@ -401,6 +400,37 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
                 !memory_root.join(forbidden).exists()
                     && !memory_root.join(format!("{forbidden}.rs")).exists(),
                 "SUWRF must not restore old memory engine/runtime surface: {forbidden}"
+            );
+        }
+    }
+    let program_execution_root = repo_path("packages/agent/src/domains/program_execution");
+    if program_execution_root.exists() {
+        let phase_two_inventory =
+            read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
+        // Phase 3 modular self-adapting paths are accepted-slice evidence only;
+        // this SUWRF invariant does not add successor runtime behavior.
+        let phase_three_inventory = read_repo_file(
+            "packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv",
+        );
+        let program_execution_docs =
+            read_repo_file("packages/agent/src/domains/program_execution/mod.rs");
+        assert!(
+            phase_two_inventory.contains("P2AER-INV-006\tcode interpreter program execution")
+                && phase_two_inventory.contains("Slice 15A accepted")
+                && phase_two_inventory.contains("current_baseline\tBPRC-FEATURE-15")
+                && phase_three_inventory.contains("P3MSA-INV-010\tSlice 24B Jobs And Program Execution Module Pack Activation")
+                && phase_three_inventory.contains("current_baseline\tP3MSA-INV-006;P3MSA-INV-007;Phase 2 Slice 5A;Phase 2 Slice 15A"),
+            "domains/program_execution is allowed only as the accepted Slice 15A metadata foundation and Slice 24B module evidence path"
+        );
+        for required in [
+            "content-free metadata",
+            "do not accept raw code bodies",
+            "must not be loosened to carry the command",
+            "not executable contents",
+        ] {
+            assert!(
+                program_execution_docs.contains(required),
+                "program_execution docs must preserve metadata-only accepted scope: {required}"
             );
         }
     }

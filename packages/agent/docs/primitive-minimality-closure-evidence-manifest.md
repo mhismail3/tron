@@ -41,7 +41,7 @@ Mac source, or deploy commands.
 | --- | --- | --- | --- |
 | Provider `retry` fields and token-expiry settings warnings | Provider config/settings owners | Config structs deserialize profile/provider settings and are intentionally wider than every current call site. Removing fields would be a settings/auth contract change. | PMC inventory row plus `cargo check` and provider settings tests in broad CI |
 | Provider catalog `id`, `short_name`, `supports_capabilities`, and cache price metadata warnings | Provider catalog owners | Catalog structs back provider model metadata, API JSON, UI/settings display, and provider support flags. Removing fields would be a catalog/API semantics change, not a primitive-minimality refactor. | PMBD/PERF predecessor invariants plus broad CI |
-| Engine `list_by_trace` and resource `list_types` methods | Engine durability owners | Query helpers are retained audit substrate for traces, queues, streams, leases, and resource definitions. Removing them would reduce observability and replay inspection contracts. | ODA/DSEMD/SOL predecessor invariants plus broad CI |
+| Engine trace-list and resource-kind inspection paths | Engine durability owners | Public inspection now goes through accepted trace/log/resource projections; unused lower-level `list_by_trace` and `list_types` helpers were removed after proving no caller remained. | ODA/DSEMD/SOL predecessor invariants plus focused warning cleanup |
 | Historical scorecards and inventories | Docs/proof owners | Historical evidence remains append-only provenance. PMC classifies it rather than deleting proof needed by predecessor static gates. | DESI and PMC predecessor inventory guards |
 
 ## Failed Attempts And Fixes

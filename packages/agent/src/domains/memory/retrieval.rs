@@ -396,11 +396,11 @@ fn exclusion(
     })
 }
 
-fn confidence_projection(confidence: &Value, score: u64, fallback: bool) -> Value {
+fn confidence_projection(confidence: &Value, score: u64, uses_default_order: bool) -> Value {
     let mut projection = Map::new();
     projection.insert(
         "basis".to_owned(),
-        json!(if fallback {
+        json!(if uses_default_order {
             "deterministic_resource_order"
         } else {
             "deterministic_preview_subject_match"
