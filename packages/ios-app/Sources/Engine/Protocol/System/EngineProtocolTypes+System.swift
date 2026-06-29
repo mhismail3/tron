@@ -62,11 +62,47 @@ struct ClientLogEntry: Encodable, Equatable, Sendable {
     let level: String       // "verbose", "debug", "info", "warning", "error"
     let category: String    // "WebSocket", "engine protocol", etc.
     let message: String
+    let sessionId: String?
+    let workspaceId: String?
+    let traceId: String?
+
+    init(
+        timestamp: String,
+        level: String,
+        category: String,
+        message: String,
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        traceId: String? = nil
+    ) {
+        self.timestamp = timestamp
+        self.level = level
+        self.category = category
+        self.message = message
+        self.sessionId = sessionId
+        self.workspaceId = workspaceId
+        self.traceId = traceId
+    }
 }
 
 /// Parameters for logs.ingest
 struct LogsIngestParams: Encodable {
     let entries: [ClientLogEntry]
+    let sessionId: String?
+    let workspaceId: String?
+    let traceId: String?
+
+    init(
+        entries: [ClientLogEntry],
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        traceId: String? = nil
+    ) {
+        self.entries = entries
+        self.sessionId = sessionId
+        self.workspaceId = workspaceId
+        self.traceId = traceId
+    }
 }
 
 /// Result of logs.ingest

@@ -102,8 +102,9 @@ struct ClientLogIngestionServiceTests {
 
         let endpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
-            ingest: { entries, idempotencyKey in
-                state.uploads.append((entries, idempotencyKey))
+            currentSessionId: { state.currentSessionId },
+            ingest: { entries, idempotencyKey, sessionId in
+                state.uploads.append((entries, idempotencyKey, sessionId))
             }
         )
         let service = ClientLogIngestionService(
@@ -120,11 +121,19 @@ struct ClientLogIngestionServiceTests {
         await service.flushNow(reason: "test-duplicate")
         #expect(state.uploads.count == 1)
         #expect(state.uploads[0].entries.map(\.message) == ["initial"])
+        #expect(state.uploads[0].sessionId == "session-1")
+
+        state.currentSessionId = "session-2"
+        await service.flushNow(reason: "test-new-session")
+        #expect(state.uploads.count == 2)
+        #expect(state.uploads[1].entries.map(\.message) == ["initial"])
+        #expect(state.uploads[1].sessionId == "session-2")
+        #expect(state.uploads[0].key.rawValue != state.uploads[1].key.rawValue)
 
         state.logs.append((date.addingTimeInterval(1), .engine, .warning, "next"))
         await service.flushNow(reason: "test-new-log")
-        #expect(state.uploads.count == 2)
-        #expect(state.uploads[1].entries.map(\.message) == ["next"])
+        #expect(state.uploads.count == 3)
+        #expect(state.uploads[2].entries.map(\.message) == ["next"])
     }
 
     @Test("endpoint changes cancel stale scheduled uploads")
@@ -135,13 +144,15 @@ struct ClientLogIngestionServiceTests {
 
         let oldEndpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
-            ingest: { _, _ in
+            currentSessionId: { state.currentSessionId },
+            ingest: { _, _, _ in
                 state.oldEndpointUploads += 1
             }
         )
         let newEndpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
-            ingest: { _, _ in
+            currentSessionId: { state.currentSessionId },
+            ingest: { _, _, _ in
                 state.newEndpointUploads += 1
             }
         )
@@ -167,7 +178,8 @@ struct ClientLogIngestionServiceTests {
 
         let oldEndpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
-            ingest: { _, _ in
+            currentSessionId: { state.currentSessionId },
+            ingest: { _, _, _ in
                 state.oldEndpointStarted = true
                 try await Task.sleep(for: .milliseconds(200))
                 state.oldEndpointUploads += 1
@@ -175,7 +187,8 @@ struct ClientLogIngestionServiceTests {
         )
         let newEndpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
-            ingest: { _, _ in
+            currentSessionId: { state.currentSessionId },
+            ingest: { _, _, _ in
                 state.newEndpointUploads += 1
             }
         )
@@ -200,8 +213,9 @@ struct ClientLogIngestionServiceTests {
 @MainActor
 private final class ClientLogIngestionTestState {
     var connected = false
+    var currentSessionId: String? = "session-1"
     var logs: [(Date, LogCategory, LogLevel, String)]
-    var uploads: [(entries: [ClientLogEntry], key: EngineIdempotencyKey)] = []
+    var uploads: [(entries: [ClientLogEntry], key: EngineIdempotencyKey, sessionId: String?)] = []
     var oldEndpointStarted = false
     var oldEndpointUploads = 0
     var newEndpointUploads = 0

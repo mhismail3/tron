@@ -74,11 +74,19 @@ struct LogsClientTests {
 
         transport.writeHandler = { functionId, payload, _, _ in
             #expect(functionId.rawValue == "logs::ingest")
-            #expect((payload as? LogsIngestParams)?.entries == [entry])
+            let params = try #require(payload as? LogsIngestParams)
+            #expect(params.entries == [entry])
+            #expect(params.sessionId == "session-1")
+            #expect(params.workspaceId == nil)
+            #expect(params.traceId == nil)
             return LogsIngestResult(success: true, inserted: 1)
         }
 
-        let result = try await client.ingestLogs(entries: [entry], idempotencyKey: .userAction("logs.ingest.test"))
+        let result = try await client.ingestLogs(
+            entries: [entry],
+            idempotencyKey: .userAction("logs.ingest.test"),
+            sessionId: "session-1"
+        )
         #expect(result.inserted == 1)
         #expect(transport.lastWriteFunctionId?.rawValue == "logs::ingest")
     }

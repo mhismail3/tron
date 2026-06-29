@@ -24,10 +24,21 @@ final class LogsClient: EngineDomainClient {
     }
 
     /// Ingest structured client logs into the server database.
-    func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult {
+    func ingestLogs(
+        entries: [ClientLogEntry],
+        idempotencyKey: EngineIdempotencyKey,
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        traceId: String? = nil
+    ) async throws -> LogsIngestResult {
         _ = try requireTransport().requireConnection()
 
-        let params = LogsIngestParams(entries: entries)
+        let params = LogsIngestParams(
+            entries: entries,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            traceId: traceId
+        )
         let result: LogsIngestResult = try await invokeWrite(
             "logs::ingest",
             params,

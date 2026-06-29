@@ -404,8 +404,13 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     private static func makeClientLogIngestionEndpoint(client: EngineClient) -> ClientLogIngestionEndpoint {
         ClientLogIngestionEndpoint(
             isConnected: { client.connectionState.isConnected },
-            ingest: { entries, idempotencyKey in
-                _ = try await client.logs.ingestLogs(entries: entries, idempotencyKey: idempotencyKey)
+            currentSessionId: { client.currentSessionId },
+            ingest: { entries, idempotencyKey, sessionId in
+                _ = try await client.logs.ingestLogs(
+                    entries: entries,
+                    idempotencyKey: idempotencyKey,
+                    sessionId: sessionId
+                )
             }
         )
     }

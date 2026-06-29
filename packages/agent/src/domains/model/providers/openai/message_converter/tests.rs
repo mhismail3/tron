@@ -750,6 +750,8 @@ fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("Do not send `target`, `contractId`, `functionId`, or `arguments`"));
     assert!(result.contains("Catalog discovery operations inspect metadata/conformance only"));
+    assert!(result.contains("When the user asks you to extend yourself"));
+    assert!(result.contains("Do not describe raw `process_run`, direct SQLite inspection"));
     assert!(result.contains("Put operation fields at the top level"));
     assert!(result.contains("Use one operation per `execute` call"));
     assert!(result.contains("Use relative paths under the current working directory"));

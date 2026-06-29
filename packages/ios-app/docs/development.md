@@ -291,9 +291,10 @@ When the app is connected to a paired server,
 `TronLogger` buffer into the server `logs` table through `logs::ingest`.
 The upload redacts messages again at the send boundary; the server then applies
 its bearer/API/OAuth redactor before durable `logs` storage. Uploads track entry
-fingerprints for the active server endpoint, use deterministic batch
-idempotency, and still rely on the server's client-log dedupe index as durable
-truth. Endpoint changes cancel stale scheduled uploads, and repeated
+fingerprints for the active server endpoint, attach the active session id to
+each batch, use deterministic session-scoped batch idempotency, and still rely
+on the server's client-log dedupe index as durable truth. Endpoint or active
+session changes cancel stale duplicate suppression, and repeated
 reconnects or foreground transitions do not resend unchanged local buffers or
 create duplicate DB rows. Successful `logs::ingest` transport/debug plumbing is
 filtered before upload so automatic syncing cannot create a self-feeding log

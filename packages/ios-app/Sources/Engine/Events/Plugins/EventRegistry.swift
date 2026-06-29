@@ -88,11 +88,14 @@ final class EventRegistry: @unchecked Sendable {
     func registerAll() {
         // Streaming events
         register(TextDeltaPlugin.self)
+        register(ThinkingStartPlugin.self)
         register(ThinkingDeltaPlugin.self)
+        register(ThinkingEndPlugin.self)
         register(TurnStartPlugin.self)
         register(TurnEndPlugin.self)
 
         // Capability invocation events
+        register(CapabilityInvocationBatchPlugin.self)
         register(CapabilityInvocationGeneratingPlugin.self)
         register(CapabilityInvocationStartedPlugin.self)
         register(CapabilityInvocationOutputPlugin.self)
@@ -101,7 +104,9 @@ final class EventRegistry: @unchecked Sendable {
         register(CapabilityRunStatusPlugin.self)
 
         // Lifecycle events
+        register(AgentStartPlugin.self)
         register(CompletePlugin.self)
+        register(AgentResponseCompletePlugin.self)
         register(AgentReadyPlugin.self)
         register(ErrorPlugin.self)
         register(CompactionStartedPlugin.self)

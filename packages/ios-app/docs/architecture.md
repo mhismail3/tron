@@ -438,9 +438,11 @@ primary accent, and success/warning/error remain separate semantic colors.
 The settings toolbar and the Servers page Diagnostics section expose Logs in
 every build configuration. The Logs sheet shows redacted local iOS log entries;
 the client log ingestion service mirrors bounded client logs into the server
-`logs` table while connected. iOS redacts before buffering and again at the
-send boundary, and the server redacts bearer/API/OAuth fields again before
-durable `logs` storage, so diagnostics do not rely on one client-only scrubber.
+`logs` table while connected, tagging each batch with the active session id so
+server-side `logs::recent` can narrow phone-tested runs by session. iOS redacts
+before buffering and again at the send boundary, and the server redacts
+bearer/API/OAuth fields again before durable `logs` storage, so diagnostics do
+not rely on one client-only scrubber.
 Successful ingest transport chatter is filtered to prevent a self-feeding
 diagnostics loop.
 `DiagnosticsBundleBuilder.swift` owns bundle assembly; DTOs, event sanitization,

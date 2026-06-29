@@ -104,12 +104,13 @@ extension SourceGuardTests {
         #expect(!dependencyProviding.contains("var engineClient: EngineClient { get }"))
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
-        #expect(logsClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
+        #expect(logsClient.contains("func ingestLogs("))
+        #expect(logsClient.contains("sessionId: String? = nil"))
         #expect(!logsClient.contains("getDiagnostics"))
         #expect(!logsClient.contains("system::get_diagnostics"))
         #expect(!logsClient.contains("SystemDiagnosticsResult"))
 
-        let ingestStart = try #require(logsClient.range(of: "func ingestLogs(entries: [ClientLogEntry]"))
+        let ingestStart = try #require(logsClient.range(of: "func ingestLogs("))
         let ingestBlock = logsClient[ingestStart.lowerBound..<logsClient.endIndex]
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))

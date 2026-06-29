@@ -26,12 +26,17 @@ final class EventPluginTests: XCTestCase {
     func testAllPluginsHaveNonEmptyEventType() {
         // Test a sample of plugins
         XCTAssertFalse(TextDeltaPlugin.eventType.isEmpty)
+        XCTAssertFalse(ThinkingStartPlugin.eventType.isEmpty)
         XCTAssertFalse(ThinkingDeltaPlugin.eventType.isEmpty)
+        XCTAssertFalse(ThinkingEndPlugin.eventType.isEmpty)
+        XCTAssertFalse(CapabilityInvocationBatchPlugin.eventType.isEmpty)
         XCTAssertFalse(CapabilityInvocationStartedPlugin.eventType.isEmpty)
         XCTAssertFalse(CapabilityInvocationCompletedPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnStartPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnEndPlugin.eventType.isEmpty)
+        XCTAssertFalse(AgentStartPlugin.eventType.isEmpty)
         XCTAssertFalse(CompletePlugin.eventType.isEmpty)
+        XCTAssertFalse(AgentResponseCompletePlugin.eventType.isEmpty)
         XCTAssertFalse(ErrorPlugin.eventType.isEmpty)
     }
 
@@ -224,8 +229,41 @@ final class EventPluginTests: XCTestCase {
 
     func testRegisteredPluginCount() {
         EventRegistry.shared.registerAll()
-        // Should have all 27+ plugins registered
-        XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 27)
+        // Should have all 32+ plugins registered
+        XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 32)
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.start"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.thinking_start"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.response_complete"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.thinking_end"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "capability.invocation.batch"))
+    }
+
+    func testSessionScopedMarkerPluginsParseWithoutUiResult() {
+        EventRegistry.shared.registerAll()
+
+        for type in [
+            "agent.start",
+            "agent.thinking_start",
+            "agent.response_complete",
+            "agent.thinking_end",
+            "capability.invocation.batch"
+        ] {
+            let json = """
+            {
+                "type": "\(type)",
+                "sessionId": "session-marker",
+                "sequence": 42,
+                "timestamp": "2026-06-29T10:00:00Z",
+                "data": {"ignored": true}
+            }
+            """.data(using: .utf8)!
+
+            let result = EventRegistry.shared.parse(type: type, data: json)
+            XCTAssertEqual(result?.eventType, type)
+            XCTAssertEqual(result?.sessionId, "session-marker")
+            XCTAssertEqual(result?.sequence, 42)
+            XCTAssertNil(result?.getResult())
+        }
     }
 
     // MARK: - Session Archive/Unarchive Plugin Tests

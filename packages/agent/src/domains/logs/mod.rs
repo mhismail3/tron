@@ -5,6 +5,8 @@
 //! translation stays separate from SQL/backend details. Recent-log reads are
 //! bounded and may be narrowed by session, workspace, and trace identifiers;
 //! the event-store owner applies those predicates before rows are returned.
+//! Ingest accepts optional batch-level session/workspace/trace identifiers and
+//! applies them only to entries that do not already carry entry-level scope.
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
@@ -67,7 +69,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
             Some("logs.write"),
         )
-        .request_schema(json!({"additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":false,"properties":{"category":{"type":"string"},"level":{"type":"string"},"message":{"type":"string"},"timestamp":{"type":"string"}},"required":["timestamp","level","category","message"],"type":"object"},"maxItems":10000,"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["entries"],"type":"object"}))
+        .request_schema(json!({"additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":false,"properties":{"category":{"type":"string"},"level":{"type":"string"},"message":{"type":"string"},"sessionId":{"type":"string"},"timestamp":{"type":"string"},"traceId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["timestamp","level","category","message"],"type":"object"},"maxItems":10000,"type":"array"},"sessionId":{"type":"string"},"traceId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["entries"],"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"inserted":{"type":"integer"},"success":{"type":"boolean"}},"required":["success","inserted"],"type":"object"}))
         .idempotency(IdempotencyContract::caller_system_engine_ledger())
         .compensation(CompensationContract::new(
@@ -118,6 +120,18 @@ fn default_recent_limit() -> u32 {
     DEFAULT_RECENT_LIMIT
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IngestLogsParams {
+    entries: Vec<ClientLogEntry>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    trace_id: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RecentLogsResult {
@@ -140,22 +154,32 @@ struct RecentLogEntry {
 }
 
 async fn ingest_logs_value(params: Option<&Value>, deps: &Deps) -> Result<Value, CapabilityError> {
-    let entries_value = params
-        .and_then(|value| value.get("entries"))
-        .ok_or_else(|| CapabilityError::InvalidParams {
-            message: "Missing required parameter: entries".to_owned(),
-        })?;
-    let entries: Vec<ClientLogEntry> =
-        serde_json::from_value(entries_value.clone()).map_err(|error| {
+    let params_value = params.ok_or_else(|| CapabilityError::InvalidParams {
+        message: "Missing required parameter: entries".to_owned(),
+    })?;
+    let mut params: IngestLogsParams =
+        serde_json::from_value(params_value.clone()).map_err(|error| {
             CapabilityError::InvalidParams {
-                message: format!("Invalid entries: {error}"),
+                message: format!("Invalid params: {error}"),
             }
         })?;
+
+    for entry in &mut params.entries {
+        if entry.session_id.is_none() {
+            entry.session_id.clone_from(&params.session_id);
+        }
+        if entry.workspace_id.is_none() {
+            entry.workspace_id.clone_from(&params.workspace_id);
+        }
+        if entry.trace_id.is_none() {
+            entry.trace_id.clone_from(&params.trace_id);
+        }
+    }
 
     let event_store = deps.event_store.clone();
     let result = run_blocking_task("logs::ingest", move || {
         event_store
-            .ingest_client_logs(&entries)
+            .ingest_client_logs(&params.entries)
             .map_err(map_event_store_error)
     })
     .await?;
@@ -301,5 +325,87 @@ mod tests {
         assert_eq!(value["entries"][0]["sessionId"], "sess_current");
         assert_eq!(value["entries"][0]["workspaceId"], "workspace_current");
         assert_eq!(value["entries"][0]["traceId"], "trace_current");
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_applies_batch_scope_to_unscoped_entries() {
+        let deps = make_deps();
+
+        let value = ingest_logs_value(
+            Some(&json!({
+                "sessionId": "sess_current",
+                "workspaceId": "workspace_current",
+                "traceId": "trace_current",
+                "entries": [{
+                    "timestamp": "2026-03-03T14:30:05.100Z",
+                    "level": "info",
+                    "category": "Engine",
+                    "message": "current"
+                }]
+            })),
+            &deps,
+        )
+        .await
+        .expect("ingest logs");
+
+        assert_eq!(value["inserted"], 1);
+
+        let recent = recent_logs_value(
+            Some(json!({
+                "limit": 10,
+                "sessionId": "sess_current",
+                "workspaceId": "workspace_current",
+                "traceId": "trace_current"
+            })),
+            &deps,
+        )
+        .await
+        .expect("recent logs");
+
+        assert_eq!(recent["count"], 1);
+        assert_eq!(recent["entries"][0]["message"], "current");
+        assert_eq!(recent["entries"][0]["sessionId"], "sess_current");
+        assert_eq!(recent["entries"][0]["workspaceId"], "workspace_current");
+        assert_eq!(recent["entries"][0]["traceId"], "trace_current");
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_keeps_entry_scope_when_batch_scope_differs() {
+        let deps = make_deps();
+
+        ingest_logs_value(
+            Some(&json!({
+                "sessionId": "sess_batch",
+                "workspaceId": "workspace_batch",
+                "traceId": "trace_batch",
+                "entries": [{
+                    "timestamp": "2026-03-03T14:30:05.100Z",
+                    "level": "info",
+                    "category": "Engine",
+                    "message": "entry scoped",
+                    "sessionId": "sess_entry",
+                    "workspaceId": "workspace_entry",
+                    "traceId": "trace_entry"
+                }]
+            })),
+            &deps,
+        )
+        .await
+        .expect("ingest logs");
+
+        let recent = recent_logs_value(
+            Some(json!({
+                "limit": 10,
+                "sessionId": "sess_entry",
+                "workspaceId": "workspace_entry",
+                "traceId": "trace_entry"
+            })),
+            &deps,
+        )
+        .await
+        .expect("recent logs");
+
+        assert_eq!(recent["count"], 1);
+        assert_eq!(recent["entries"][0]["message"], "entry scoped");
     }
 }

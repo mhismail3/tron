@@ -9,6 +9,11 @@ struct ClientLogIngestionBatch: Equatable, Sendable {
     var idempotencyKey: EngineIdempotencyKey {
         EngineIdempotencyKey(rawValue: "ios:client-log-ingest:\(fingerprint)")
     }
+
+    func idempotencyKey(sessionId: String?) -> EngineIdempotencyKey {
+        let scope = ClientLogIngestionPlanner.scopeFingerprint(sessionId: sessionId)
+        return EngineIdempotencyKey(rawValue: "ios:client-log-ingest:\(scope):\(fingerprint)")
+    }
 }
 
 enum ClientLogIngestionPlanner {
@@ -67,6 +72,12 @@ enum ClientLogIngestionPlanner {
                 update(&hasher, with: entryFingerprint(for: entry))
                 update(&hasher, with: "\u{1E}")
             }
+        }
+    }
+
+    static func scopeFingerprint(sessionId: String?) -> String {
+        digestHex { hasher in
+            update(&hasher, with: sessionId ?? "global")
         }
     }
 
@@ -157,7 +168,8 @@ enum ClientLogIngestionPlanner {
 
 struct ClientLogIngestionEndpoint {
     let isConnected: @MainActor () -> Bool
-    let ingest: @MainActor ([ClientLogEntry], EngineIdempotencyKey) async throws -> Void
+    let currentSessionId: @MainActor () -> String?
+    let ingest: @MainActor ([ClientLogEntry], EngineIdempotencyKey, String?) async throws -> Void
 }
 
 @MainActor
@@ -175,6 +187,7 @@ final class ClientLogIngestionService {
     private var isUploading = false
     private var endpointGeneration = 0
     private var retryNotBefore: Date?
+    private var lastUploadSessionId: String?
     private(set) var uploadedEntryFingerprints: Set<String> = []
 
     init(
@@ -262,6 +275,11 @@ final class ClientLogIngestionService {
             return
         }
 
+        let sessionId = endpoint.currentSessionId()
+        if sessionId != lastUploadSessionId {
+            uploadedEntryFingerprints = []
+        }
+
         guard let batch = ClientLogIngestionPlanner.makeBatch(
             from: logsProvider(),
             maxEntries: maxEntries,
@@ -276,9 +294,10 @@ final class ClientLogIngestionService {
         defer { isUploading = false }
 
         do {
-            _ = try await endpoint.ingest(batch.entries, batch.idempotencyKey)
+            _ = try await endpoint.ingest(batch.entries, batch.idempotencyKey(sessionId: sessionId), sessionId)
             guard generation == endpointGeneration else { return }
             uploadedEntryFingerprints = batch.visibleEntryFingerprints
+            lastUploadSessionId = sessionId
             retryNotBefore = nil
         } catch {
             guard generation == endpointGeneration else { return }
