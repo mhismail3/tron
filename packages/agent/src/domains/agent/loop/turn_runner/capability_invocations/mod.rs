@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
+use std::sync::{Arc, LazyLock};
 
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::r#loop::capability_invocation_executor;
@@ -10,10 +10,13 @@ use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::Invo
 use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
+use crate::domains::capability::is_supported_operation;
 use crate::domains::session::event_store::EventType;
+use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
-use serde_json::{Value, json};
+use regex::Regex;
+use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
@@ -53,10 +56,14 @@ fn primitive_identity_json(
         "traceId": trace_id.map(|id| id.as_str()),
         "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
     });
-    if let Some(operation) = operation_name_from_map(arguments)
+    if let Some(operation) = validated_operation_name_from_map(arguments)
         && let Some(object) = identity.as_object_mut()
     {
         object.insert("operationName".to_owned(), json!(operation));
+    } else if let Some(requested) = requested_operation_name_from_map(arguments)
+        && let Some(object) = identity.as_object_mut()
+    {
+        object.insert("requestedOperationName".to_owned(), json!(requested));
     }
     identity
 }
@@ -75,6 +82,11 @@ fn result_identity_json(
                 } else {
                     key
                 };
+                if identity_key == "operationName"
+                    && !value.as_str().is_some_and(is_supported_operation)
+                {
+                    continue;
+                }
                 identity.insert(identity_key.to_owned(), value.clone());
             }
         }
@@ -92,7 +104,17 @@ fn result_identity_json(
     Value::Object(identity)
 }
 
-fn operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> Option<String> {
+fn validated_operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> Option<String> {
+    arguments
+        .get("operation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|operation| !operation.is_empty())
+        .filter(|operation| is_supported_operation(operation))
+        .map(ToOwned::to_owned)
+}
+
+fn requested_operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> Option<String> {
     ["operationName", "operation"].iter().find_map(|key| {
         arguments
             .get(*key)
@@ -266,8 +288,11 @@ pub(super) async fn execute_capability_invocation_phase(
                     };
                 let working_dir = working_dir.as_str();
                 async move {
-                    let operation = operation_name_from_map(&capability_invocation.arguments)
-                        .unwrap_or_else(|| "unknown".to_owned());
+                    let operation =
+                        validated_operation_name_from_map(&capability_invocation.arguments)
+                            .unwrap_or_else(|| "unknown".to_owned());
+                    let requested_operation =
+                        requested_operation_name_from_map(&capability_invocation.arguments);
                     info!(
                         component = "agent.capability",
                         agent_event = "capability_invocation_execute_started",
@@ -278,6 +303,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         invocation_id = %capability_invocation.id,
                         primitive_name = %capability_invocation.name,
                         operation = %operation,
+                        requested_operation = requested_operation.as_deref().unwrap_or("none"),
                         "capability invocation execution started"
                     );
                     let result = capability_invocation_executor::execute_capability_invocation(
@@ -504,33 +530,274 @@ fn extract_model_context_result_text(exec_result: &CapabilityInvocationExecution
     }
 }
 
+const MODEL_CONTEXT_EVIDENCE_MAX_CHARS: usize = 12_000;
+const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
+const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
+
 fn extract_result_content(
     exec_result: &CapabilityInvocationExecutionResult,
 ) -> CapabilityResultMessageContent {
+    let projected = model_context_evidence(exec_result.result.details.as_ref());
     match &exec_result.result.content {
         crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
-            CapabilityResultMessageContent::Text(text.clone())
+            CapabilityResultMessageContent::Text(append_model_context_evidence(
+                text.clone(),
+                projected,
+            ))
         }
         crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
             let has_images = blocks
                 .iter()
                 .any(|b| matches!(b, CapabilityResultContent::Image { .. }));
             if has_images {
-                CapabilityResultMessageContent::Blocks(blocks.clone())
+                let mut blocks = blocks.clone();
+                if let Some(projected) = projected {
+                    blocks.push(CapabilityResultContent::text(projected));
+                }
+                CapabilityResultMessageContent::Blocks(blocks)
             } else {
-                CapabilityResultMessageContent::Text(
-                    blocks
-                        .iter()
-                        .filter_map(|b| match b {
-                            CapabilityResultContent::Text { text } => Some(text.as_str()),
-                            CapabilityResultContent::Image { .. } => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
+                let text = blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        CapabilityResultContent::Text { text } => Some(text.as_str()),
+                        CapabilityResultContent::Image { .. } => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                CapabilityResultMessageContent::Text(append_model_context_evidence(text, projected))
             }
         }
     }
+}
+
+fn append_model_context_evidence(text: String, projected: Option<String>) -> String {
+    let Some(projected) = projected else {
+        return text;
+    };
+    if text.is_empty() {
+        projected
+    } else {
+        format!("{text}\n\n{projected}")
+    }
+}
+
+fn model_context_evidence(details: Option<&Value>) -> Option<String> {
+    let details = details?;
+    let operation = details
+        .get("primitiveOperation")
+        .and_then(Value::as_str)
+        .or_else(|| details.get("operation").and_then(Value::as_str))?;
+    let projected = match operation {
+        "catalog_search" | "catalog_inspect" => project_catalog_evidence(details),
+        "log_recent" => project_log_evidence(details),
+        "trace_list" | "trace_get" => project_trace_evidence(details),
+        _ => None,
+    }?;
+    let mut text = serde_json::to_string_pretty(&json!({
+        "modelContextEvidence": projected
+    }))
+    .ok()?;
+    if text.len() > MODEL_CONTEXT_EVIDENCE_MAX_CHARS {
+        text.truncate(MODEL_CONTEXT_EVIDENCE_MAX_CHARS);
+        text.push_str("\n... [model context evidence truncated]");
+    }
+    Some(text)
+}
+
+fn project_catalog_evidence(details: &Value) -> Option<Value> {
+    let discovery = details.get("catalogDiscovery")?;
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    copy_key(&mut projected, discovery, "kind");
+    copy_key(&mut projected, discovery, "id");
+    copy_key(&mut projected, discovery, "aliasResolvedFrom");
+    copy_key(&mut projected, discovery, "summary");
+    copy_key(&mut projected, discovery, "modelFacingGuidance");
+    copy_key(&mut projected, discovery, "modelFacingInvocation");
+    if let Some(functions) = discovery.get("functions").and_then(Value::as_array) {
+        projected.insert(
+            "functions".to_owned(),
+            Value::Array(
+                functions
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_catalog_function)
+                    .collect(),
+            ),
+        );
+        if functions.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+            projected.insert(
+                "functionsOmitted".to_owned(),
+                json!(functions.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            );
+        }
+    }
+    Some(Value::Object(projected))
+}
+
+fn project_catalog_function(function: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "id",
+        "name",
+        "description",
+        "ownerWorkerId",
+        "visibility",
+        "effectClass",
+        "riskLevel",
+        "modelFacingInvocation",
+    ] {
+        copy_key(&mut projected, function, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_log_evidence(details: &Value) -> Option<Value> {
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    let entries = details.get("entries")?.as_array()?;
+    projected.insert(
+        "entries".to_owned(),
+        Value::Array(
+            entries
+                .iter()
+                .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                .map(|entry| {
+                    let mut projected = Map::new();
+                    for key in [
+                        "id",
+                        "timestamp",
+                        "level",
+                        "component",
+                        "message",
+                        "sessionId",
+                        "traceId",
+                        "errorMessage",
+                    ] {
+                        copy_key(&mut projected, entry, key);
+                    }
+                    Value::Object(projected)
+                })
+                .collect(),
+        ),
+    );
+    if entries.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+        projected.insert(
+            "entriesOmitted".to_owned(),
+            json!(entries.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+        );
+    }
+    Some(Value::Object(projected))
+}
+
+fn project_trace_evidence(details: &Value) -> Option<Value> {
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    if let Some(records) = details.get("records").and_then(Value::as_array) {
+        projected.insert(
+            "records".to_owned(),
+            Value::Array(
+                records
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_trace_record)
+                    .collect(),
+            ),
+        );
+        if records.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+            projected.insert(
+                "recordsOmitted".to_owned(),
+                json!(records.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            );
+        }
+    }
+    if let Some(record) = details.get("record") {
+        projected.insert("record".to_owned(), project_trace_record(record));
+    }
+    Some(Value::Object(projected))
+}
+
+fn project_trace_record(record: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "traceRecordId",
+        "traceId",
+        "invocationId",
+        "parentInvocationId",
+        "modelPrimitiveName",
+        "operation",
+        "status",
+        "timestamp",
+        "completedAt",
+        "durationMs",
+        "sessionId",
+        "turn",
+        "error",
+    ] {
+        copy_key(&mut projected, record, key);
+    }
+    Value::Object(projected)
+}
+
+fn copy_key(target: &mut Map<String, Value>, source: &Value, key: &str) {
+    if let Some(value) = source.get(key) {
+        target.insert(key.to_owned(), bounded_model_context_value(value));
+    }
+}
+
+fn bounded_model_context_value(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(truncate_model_context_string(text)),
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                .map(bounded_model_context_value)
+                .collect(),
+        ),
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| (key.clone(), bounded_model_context_value(value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn truncate_model_context_string(text: &str) -> String {
+    let redacted = redact_model_context_string(text);
+    if redacted.chars().count() <= MODEL_CONTEXT_STRING_MAX_CHARS {
+        return redacted;
+    }
+    let mut truncated = redacted
+        .chars()
+        .take(MODEL_CONTEXT_STRING_MAX_CHARS)
+        .collect::<String>();
+    truncated.push_str("... [truncated]");
+    truncated
+}
+
+fn redact_model_context_string(text: &str) -> String {
+    static ABSOLUTE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(^|[\s"'=:,\[])(/(?:Users|home|private|tmp|var|Volumes)/[^\s"',}\]]+)"#)
+            .expect("valid absolute path redaction regex")
+    });
+    static UNSAFE_RELATIVE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(^|[\s"'=:,\[])(\.\.(?:/|\\)[^\s"',}\]]*)"#)
+            .expect("valid relative path redaction regex")
+    });
+
+    let redacted = redact_sensitive_content(text);
+    let redacted = ABSOLUTE_PATHS
+        .replace_all(&redacted, "${1}[redacted-path]")
+        .to_string();
+    UNSAFE_RELATIVE_PATHS
+        .replace_all(&redacted, "${1}[redacted-path]")
+        .to_string()
 }
 
 #[cfg(test)]

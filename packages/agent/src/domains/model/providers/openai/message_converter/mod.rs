@@ -10,6 +10,7 @@
 //! - Capability results → `function_call_output` items (truncated at 16k)
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
+use crate::domains::capability::operation_list_text;
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
@@ -144,14 +145,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         \n\
         ## Execute Operations\n\
         Each `execute` call performs one direct host operation. Set `operation` to exactly one of: \
-        `observe`, `state_get`, `state_set`, `state_list`, `filesystem_read`, \
-        `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
-        `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
-        `filesystem_apply_patch`, `git_status`, `git_diff`, `git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, `git_branch_start`, `process_run`, `job_start`, `job_status`, `job_list`, \
-        `job_log`, `job_cancel`, `goal_create`, `goal_list`, `goal_inspect`, `goal_cancel`, \
-        `question_create`, `question_list`, `question_inspect`, `question_answer`, \
-        `web_fetch`, `web_robots_check`, `web_source_list`, `web_source_inspect`, `web_source_archive`, `web_research_request_record`, `web_research_request_list`, `web_research_request_inspect`, `web_research_review_record`, `web_research_review_list`, `web_research_review_inspect`, `web_research_source_record`, `web_research_source_list`, `web_research_source_inspect`, `media_create`, `media_list`, `media_inspect`, `media_archive`, `import_history_record`, `import_history_list`, `import_history_inspect`, `repository_tree_snapshot`, `repository_tree_list`, `repository_tree_inspect`, `import_preview_record`, `import_preview_list`, `import_preview_inspect`, `program_execution_record`, `program_execution_list`, `program_execution_inspect`, `prompt_artifact_record`, `prompt_artifact_list`, `prompt_artifact_inspect`, `device_register`, `device_unregister`, `device_list`, `device_inspect`, `notification_send`, `notification_list`, `notification_inspect`, `notification_mark_read`, `notification_mark_all_read`, `tool_source_list`, `tool_source_inspect`, `subagent_launch`, `subagent_status`, `subagent_result`, `subagent_cancel`, `subagent_task_list`, `subagent_task_inspect`, `worker_package_list`, `worker_package_inspect`, `module_list`, `module_inspect`, `module_proposal_record`, `module_proposal_list`, `module_proposal_inspect`, `module_validation_record`, `module_validation_list`, `module_validation_inspect`, `module_install_request_record`, `module_install_request_list`, `module_install_request_inspect`, `module_install_decision_record`, `module_install_decision_list`, `module_install_decision_inspect`, `module_dependency_request_record`, `module_dependency_request_list`, `module_dependency_request_inspect`, `module_dependency_decision_record`, `module_dependency_decision_list`, `module_dependency_decision_inspect`, `module_dependency_policy_activate`, `module_dependency_policy_list`, `module_dependency_policy_inspect`, `module_lifecycle_request`, `module_lifecycle_decision`, `module_lifecycle_list`, `module_lifecycle_inspect`, `module_program_execution_start`, `module_program_execution_status`, `module_program_execution_cancel`, `module_program_execution_cleanup`, `module_runtime_request`, `module_runtime_list`, `module_runtime_inspect`, `module_runtime_cancel`, `procedural_definition_record`, `procedural_state_list`, `procedural_state_inspect`, `procedural_activation_request_record`, `procedural_activation_request_list`, `procedural_activation_request_inspect`, `procedural_activation_decision_record`, `procedural_activation_decision_list`, `procedural_activation_decision_inspect`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
-        `catalog_search`, `catalog_inspect`, `catalog_conformance`, `memory_status`, `memory_list`, `memory_inspect`, `memory_query_list`, `memory_query_inspect`, `memory_decision_list`, or `memory_decision_inspect`. \
+        {operation_list}. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
         Catalog discovery operations inspect metadata/conformance only and never execute discovered \
         functions. Put operation fields at the top level of the execute payload. \
@@ -186,7 +180,8 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         4. Prefer small, tested changes and record useful evidence through `observe` or trace inspection\n\
         5. When authority is unavailable, report the blocked state inside the current authority envelope\n\
         6. Be helpful, accurate, and efficient when working with code",
-        tool_list = tool_descriptions.join("\n")
+        tool_list = tool_descriptions.join("\n"),
+        operation_list = operation_list_text()
     )
 }
 

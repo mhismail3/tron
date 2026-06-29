@@ -47,6 +47,7 @@ mod procedural;
 mod process;
 mod program_execution;
 mod prompt_artifacts;
+mod registry;
 mod replay;
 mod repository_tree;
 mod scheduler;
@@ -154,6 +155,10 @@ use web_research::{
     web_research_source_inspect, web_research_source_list, web_research_source_record,
 };
 use worker_packages::{worker_package_inspect, worker_package_list};
+
+#[cfg(test)]
+pub(crate) use registry::supported_operation_names;
+pub(crate) use registry::{is_supported_operation, operation_list_text};
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,

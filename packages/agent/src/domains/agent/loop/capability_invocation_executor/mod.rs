@@ -19,6 +19,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
+use crate::domains::capability::is_supported_operation;
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -63,14 +64,13 @@ fn traced_base(
 }
 
 fn operation_name_from_value(value: &Value) -> Option<String> {
-    ["operationName", "operation"].iter().find_map(|key| {
-        value
-            .get(*key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|operation| !operation.is_empty())
-            .map(ToOwned::to_owned)
-    })
+    value
+        .get("operation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|operation| !operation.is_empty())
+        .filter(|operation| is_supported_operation(operation))
+        .map(ToOwned::to_owned)
 }
 
 fn primitive_capability_identity(

@@ -30,13 +30,19 @@ final class EventPluginTests: XCTestCase {
         XCTAssertFalse(ThinkingDeltaPlugin.eventType.isEmpty)
         XCTAssertFalse(ThinkingEndPlugin.eventType.isEmpty)
         XCTAssertFalse(CapabilityInvocationBatchPlugin.eventType.isEmpty)
+        XCTAssertFalse(CapabilityInvocationArgumentsDeltaPlugin.eventType.isEmpty)
         XCTAssertFalse(CapabilityInvocationStartedPlugin.eventType.isEmpty)
         XCTAssertFalse(CapabilityInvocationCompletedPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnStartPlugin.eventType.isEmpty)
         XCTAssertFalse(TurnEndPlugin.eventType.isEmpty)
         XCTAssertFalse(AgentStartPlugin.eventType.isEmpty)
+        XCTAssertFalse(AgentErrorPlugin.eventType.isEmpty)
+        XCTAssertFalse(AgentInterruptedPlugin.eventType.isEmpty)
+        XCTAssertFalse(AgentRetryPlugin.eventType.isEmpty)
         XCTAssertFalse(CompletePlugin.eventType.isEmpty)
         XCTAssertFalse(AgentResponseCompletePlugin.eventType.isEmpty)
+        XCTAssertFalse(ContextWarningPlugin.eventType.isEmpty)
+        XCTAssertFalse(SessionForkedPlugin.eventType.isEmpty)
         XCTAssertFalse(ErrorPlugin.eventType.isEmpty)
     }
 
@@ -229,13 +235,19 @@ final class EventPluginTests: XCTestCase {
 
     func testRegisteredPluginCount() {
         EventRegistry.shared.registerAll()
-        // Should have all 32+ plugins registered
-        XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 32)
+        // Should have all 38+ plugins registered
+        XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 38)
         XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.start"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.error"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.interrupted"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.retry"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "context.warning"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "session.forked"))
         XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.thinking_start"))
         XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.response_complete"))
         XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "agent.thinking_end"))
         XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "capability.invocation.batch"))
+        XCTAssertTrue(EventRegistry.shared.hasPlugin(for: "capability.invocation.arguments_delta"))
     }
 
     func testSessionScopedMarkerPluginsParseWithoutUiResult() {
@@ -243,10 +255,15 @@ final class EventPluginTests: XCTestCase {
 
         for type in [
             "agent.start",
+            "agent.interrupted",
+            "agent.retry",
+            "context.warning",
+            "session.forked",
             "agent.thinking_start",
             "agent.response_complete",
             "agent.thinking_end",
-            "capability.invocation.batch"
+            "capability.invocation.batch",
+            "capability.invocation.arguments_delta"
         ] {
             let json = """
             {

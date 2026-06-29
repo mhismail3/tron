@@ -96,6 +96,7 @@ final class EventRegistry: @unchecked Sendable {
 
         // Capability invocation events
         register(CapabilityInvocationBatchPlugin.self)
+        register(CapabilityInvocationArgumentsDeltaPlugin.self)
         register(CapabilityInvocationGeneratingPlugin.self)
         register(CapabilityInvocationStartedPlugin.self)
         register(CapabilityInvocationOutputPlugin.self)
@@ -105,12 +106,16 @@ final class EventRegistry: @unchecked Sendable {
 
         // Lifecycle events
         register(AgentStartPlugin.self)
+        register(AgentErrorPlugin.self)
+        register(AgentInterruptedPlugin.self)
+        register(AgentRetryPlugin.self)
         register(CompletePlugin.self)
         register(AgentResponseCompletePlugin.self)
         register(AgentReadyPlugin.self)
         register(ErrorPlugin.self)
         register(CompactionStartedPlugin.self)
         register(CompactionPlugin.self)
+        register(ContextWarningPlugin.self)
         register(ContextClearedPlugin.self)
         register(MessageDeletedPlugin.self)
         register(TurnFailedPlugin.self)
@@ -118,6 +123,7 @@ final class EventRegistry: @unchecked Sendable {
         // Session events
         register(ConnectedPlugin.self)
         register(SessionCreatedPlugin.self)
+        register(SessionForkedPlugin.self)
         register(SessionUpdatedPlugin.self)
         register(SessionArchivedPlugin.self)
         register(SessionUnarchivedPlugin.self)

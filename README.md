@@ -1307,7 +1307,7 @@ Current primitive operations:
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
-| `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
+| `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive; model-context replay includes bounded entry ids, timestamps, levels, components, messages, session ids, and trace ids instead of a count-only summary. |
 | `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled fallback. |
 | `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
 | `memory_inspect` | Inspect one redacted memory record and its version history within the current session. |
@@ -1316,8 +1316,8 @@ Current primitive operations:
 | `memory_decision_list` | Accepted Slice 24D operation that lists redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
 | `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
-| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, and model-facing `capability::execute` operation aliases without invoking catalog targets. |
-| `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution; model-facing aliases such as `log_recent` are normalized to their catalog function ids for inspection only. |
+| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, and model-facing `capability::execute` operation aliases without invoking catalog targets; non-callable metadata targets are marked as such and provider guidance carries the canonical supported execute operation list. |
+| `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution; model-facing aliases such as `log_recent`, `execute::log_recent`, or any supported execute operation name are normalized to the appropriate catalog/execute schema for inspection only. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
 Legacy `file_read` and `file_write` operation names are not part of the
@@ -2073,9 +2073,15 @@ agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 `module_program_execution_*` module-owned job refs; trace operations read durable
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
-snapshot through the same single tool. Catalog discovery reads current
-catalog/resource truth and writes only append-oriented `catalog_discovery_report`
-evidence. Tool-source inspection reads scoped `tool_source_proposal` and
+snapshot through the same single tool. Diagnostic capability results replay
+bounded model-context evidence for catalog, trace, and recent-log reads so the
+agent sees actionable ids/previews instead of count-only summaries, while raw
+command/output/details from unrelated operations stay out of provider context.
+Catalog discovery reads current catalog/resource truth, supplies the canonical
+execute operation registry to model guidance, marks metadata-only catalog
+targets as non-callable, and writes only append-oriented
+`catalog_discovery_report` evidence. Tool-source inspection reads scoped
+`tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
 writes are provenance evidence and explicitly do not activate external tools.
 Subagent lifecycle operations read and mutate scoped `subagent_task` resources
@@ -2165,7 +2171,10 @@ Active runtime/UI identity is primitive-execution native: payloads carry the
 model-visible primitive name, invocation id, trace id, turn, operation
 arguments, result content, error state, and duration. iOS renders active work
 from those primitive fields and does not map deleted built-in names to
-capability identity.
+capability identity. Server-authored capability identity only promotes
+`operationName` after the actual `operation` value matches the canonical
+execute operation registry; caller-supplied aliases or stale names remain
+requested arguments instead of becoming authoritative UI labels.
 Live `agent.turn_failed` and `error` runtime events are emitted through
 canonical server builders. New runtime emissions carry stable code/category,
 retryability, recoverability, origin, and `details.failure`; provider-backed

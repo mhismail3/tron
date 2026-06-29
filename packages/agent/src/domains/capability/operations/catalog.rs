@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use super::ok_result;
+use super::registry::{is_supported_operation, supported_operation_names};
 use crate::domains::capability::Deps;
 use crate::domains::catalog_discovery::service;
 use crate::engine::Invocation;
@@ -87,7 +88,8 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
             "modelFacingGuidance".to_owned(),
             json!({
                 "catalogInspect": "Use functions[].id exactly as catalog_inspect kind=function id.",
-                "capabilityExecute": "When a function includes modelFacingInvocation, invoke that operation through capability::execute instead of using the catalog function id as the primitive operation."
+                "capabilityExecute": "When a function includes modelFacingInvocation, invoke that operation through capability::execute instead of using the catalog function id as the primitive operation.",
+                "supportedExecuteOperations": supported_operation_names()
             }),
         );
     }
@@ -97,11 +99,32 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
             let Some(id) = function.get("id").and_then(Value::as_str) else {
                 continue;
             };
-            let Some(operation) = model_execute_operation_for_function_id(id) else {
-                continue;
-            };
             let catalog_id = id.to_owned();
             if let Some(object) = function.as_object_mut() {
+                if let Some(operation) = model_execute_operation_for_function_id(&catalog_id) {
+                    object.insert(
+                        "modelFacingInvocation".to_owned(),
+                        json!({
+                            "tool": "capability::execute",
+                            "operation": operation,
+                            "arguments": {"operation": operation},
+                            "catalogInspectId": catalog_id
+                        }),
+                    );
+                } else {
+                    mark_catalog_target_non_callable(object);
+                }
+            }
+        }
+    }
+
+    if discovery.get("kind").and_then(Value::as_str) == Some("function") {
+        let Some(id) = discovery.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        let catalog_id = id.to_owned();
+        if let Some(object) = discovery.as_object_mut() {
+            if let Some(operation) = model_execute_operation_for_function_id(&catalog_id) {
                 object.insert(
                     "modelFacingInvocation".to_owned(),
                     json!({
@@ -111,30 +134,22 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
                         "catalogInspectId": catalog_id
                     }),
                 );
+            } else {
+                mark_catalog_target_non_callable(object);
             }
         }
     }
+}
 
-    if discovery.get("kind").and_then(Value::as_str) == Some("function") {
-        let Some(id) = discovery.get("id").and_then(Value::as_str) else {
-            return;
-        };
-        let Some(operation) = model_execute_operation_for_function_id(id) else {
-            return;
-        };
-        let catalog_id = id.to_owned();
-        if let Some(object) = discovery.as_object_mut() {
-            object.insert(
-                "modelFacingInvocation".to_owned(),
-                json!({
-                    "tool": "capability::execute",
-                    "operation": operation,
-                    "arguments": {"operation": operation},
-                    "catalogInspectId": catalog_id
-                }),
-            );
-        }
-    }
+fn mark_catalog_target_non_callable(object: &mut serde_json::Map<String, Value>) {
+    object.insert("providerCallable".to_owned(), Value::Bool(false));
+    object.insert(
+        "providerCallableReason".to_owned(),
+        Value::String(
+            "Catalog target is metadata only for model context; invoke capability::execute with a supported operation instead."
+                .to_owned(),
+        ),
+    );
 }
 
 fn model_execute_operation_for_function_id(id: &str) -> Option<&'static str> {
@@ -156,6 +171,7 @@ fn catalog_function_id_for_model_alias(id: &str) -> Option<&'static str> {
         "catalog_inspect" => Some("catalog_discovery::inspect"),
         "catalog_conformance" => Some("catalog_discovery::conformance_report"),
         "job_log" => Some("jobs::log"),
+        operation if is_supported_operation(operation) => Some("capability::execute"),
         _ => None,
     }
 }
@@ -195,6 +211,17 @@ mod tests {
     }
 
     #[test]
+    fn catalog_inspect_normalizes_other_execute_operation_aliases_to_execute_schema() {
+        let (payload, alias) = normalize_catalog_inspect_payload(&json!({
+            "kind": "function",
+            "id": "module_runtime_request"
+        }));
+
+        assert_eq!(payload["id"], "capability::execute");
+        assert_eq!(alias.as_deref(), Some("module_runtime_request"));
+    }
+
+    #[test]
     fn catalog_search_annotations_bridge_catalog_ids_to_execute_operations() {
         let mut discovery = json!({
             "functions": [
@@ -214,6 +241,21 @@ mod tests {
                 .get("modelFacingInvocation")
                 .is_none()
         );
-        assert!(discovery.get("modelFacingGuidance").is_some());
+        assert_eq!(discovery["functions"][1]["providerCallable"], false);
+        assert!(
+            discovery["functions"][1]["providerCallableReason"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("capability::execute")
+        );
+        assert_eq!(
+            discovery["modelFacingGuidance"]["supportedExecuteOperations"]
+                .as_array()
+                .expect("operations")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            supported_operation_names().to_vec()
+        );
     }
 }

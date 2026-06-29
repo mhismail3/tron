@@ -116,6 +116,10 @@
 //! Provider integrations must expose exactly this one tool. Additional behavior
 //! can only appear later as agent-owned state or generated helper substrate, not
 //! as checked-in target functions.
+//! Supported `execute` operation spellings live in the operations registry and
+//! are reused by provider schema descriptions, provider guidance, catalog
+//! discovery, unsupported-operation diagnostics, and stream/UI operation
+//! identity. Do not duplicate freehand operation lists elsewhere.
 //! File access through this tool must use the hardened `filesystem_*` operation
 //! package; retired `file_read`/`file_write` operation names are not a supported
 //! model-facing surface.
@@ -148,6 +152,10 @@ mod program_execution_contract;
 mod prompt_artifacts_contract;
 mod repository_tree_contract;
 mod scheduler_contract;
+
+#[cfg(test)]
+pub(crate) use operations::supported_operation_names;
+pub(crate) use operations::{is_supported_operation, operation_list_text};
 mod update_diagnostics_contract;
 mod web_research_contract;
 pub(crate) use operations::execute_value;

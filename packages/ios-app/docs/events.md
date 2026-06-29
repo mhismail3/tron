@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-12 (IOSTC-5 generic chat/timeline/runtime rendering; FSC-8 canonical failure parity).
+> Last verified: 2026-06-29 (server stream event-surface coverage; FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -42,6 +42,15 @@ Deleted workflow-specific plugin roots, including prompt queue and hook
 suggestion plugins, must stay absent. Static tests keep their retired names out
 of ordinary source and docs.
 
+Server stream event labels under `packages/agent/src/transport/runtime/streams`
+must have an iOS plugin entry even when they intentionally render no UI. Marker
+plugins such as `agent.interrupted`, `agent.retry`, `context.warning`,
+`session.forked`, and `capability.invocation.arguments_delta` parse only the
+routing envelope when their payload can contain partial arguments or diagnostic
+material. `SourceGuardTests+EventSurface` compares the Rust stream labels with
+`EventRegistry.registerAll()` so new server events cannot silently become
+unknown in the app.
+
 ## DRC-9 replay manifest/event parity
 
 `model.provider_request` is a persisted metadata-only session event used by the
@@ -74,6 +83,9 @@ must flow from the canonical envelope rather than a client taxonomy.
 `EventRegistry.shared.registerAll()` runs at app startup. Registration is the
 only place a live event plugin enters the shell, so deleted roots should be
 removed from both disk and registration instead of left dormant.
+Events that are intentionally diagnostics-only should still register a parser
+that returns no `EventResult`; unknown event types are reserved for genuine
+drift, not for known server markers.
 
 ## Dispatch
 

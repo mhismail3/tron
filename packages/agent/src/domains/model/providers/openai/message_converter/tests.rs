@@ -444,6 +444,12 @@ fn clarification_includes_tron_identity() {
 fn clarification_includes_capability_execution_guidance() {
     let result = generate_capability_instruction_text(&[]);
     assert!(result.contains("Execute Operations"));
+    for operation in crate::domains::capability::supported_operation_names() {
+        assert!(
+            result.contains(operation),
+            "OpenAI guidance missing execute operation {operation}"
+        );
+    }
     assert!(result.contains("state_get"));
     assert!(result.contains("filesystem_read"));
     assert!(result.contains("filesystem_write"));
