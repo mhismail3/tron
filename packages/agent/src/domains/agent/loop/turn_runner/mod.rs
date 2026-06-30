@@ -2,9 +2,9 @@
 //!
 //! Capability result content is the only provider-portable channel back into
 //! the model. Engine/UI/audit metadata stays in `details`, but model-facing
-//! `execute` observations are projected into result text here so every provider
-//! can reason about direct primitive results without gaining a second
-//! capability API.
+//! `execute` observations are projected into result text by
+//! `capability_invocations::projection` so every provider can reason about
+//! direct primitive results without gaining a second capability API.
 
 mod capability_invocations;
 mod failure;

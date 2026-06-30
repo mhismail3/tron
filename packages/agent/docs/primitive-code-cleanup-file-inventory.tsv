@@ -114,6 +114,9 @@ packages/agent/src/domains/agent/loop/stream_message.rs	retain	rust agent	P2AER-
 packages/agent/src/domains/agent/loop/tron_agent/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/tron_agent/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/projection/metadata_operations.rs	retain	rust agent	latest-session-hardening	Provider-visible metadata operation allowlist retained after splitting the capability invocation phase projection owner.
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/projection/mod.rs	retain	rust agent	latest-session-hardening	Provider-visible model-context evidence projection retained after splitting the capability invocation phase.
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/projection/tests.rs	retain	rust agent	latest-session-hardening	Focused provider evidence projection redaction and authority-id suffix denial tests retained with the projection owner.
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/failure.rs	retain	rust agent	P2AER-S2	Turn failure event helper retained after splitting the over-budget turn runner file.

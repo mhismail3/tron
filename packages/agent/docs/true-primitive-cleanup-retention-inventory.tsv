@@ -100,6 +100,9 @@ packages/agent/src/domains/agent/loop/stream_message.rs	implementation	agent_run
 packages/agent/src/domains/agent/loop/tron_agent/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/tron_agent/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/projection/metadata_operations.rs	implementation	agent_runtime	latest-session-hardening	provider-visible metadata operation allowlist split out of the capability invocation phase
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/projection/mod.rs	implementation	agent_runtime	latest-session-hardening	bounded provider-visible model-context evidence projection owner split out of the capability invocation phase
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/projection/tests.rs	test	test_harness	latest-session-hardening	focused provider evidence projection redaction and authority-id suffix denial regression coverage
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/turn_runner/failure.rs	implementation	agent_runtime	P2AER-S2	turn failure helper split to keep turn runner under the TPC hard budget

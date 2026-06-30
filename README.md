@@ -2084,7 +2084,10 @@ repository-tree/import/web/media/memory/state reads, and schema failures so the
 agent sees actionable ids, lifecycle/status, refs, truncation metadata, and
 error paths instead of count-only summaries, while raw commands, output, logs,
 local paths, code, file contents, secrets, grant ids, authority ids, and hidden
-reasoning stay out of provider context. Catalog discovery reads current
+reasoning stay out of provider context. Failure projections omit `actual`
+detail payloads, and metadata projections deny authority-bearing id/version/ref
+suffixes while retaining non-sensitive resource/version refs. Catalog discovery
+reads current
 catalog/resource truth, supplies a bounded canonical execute operation registry
 with total/returned/truncated/omitted metadata to model guidance, marks
 metadata-only catalog targets as non-callable, and writes only append-oriented
