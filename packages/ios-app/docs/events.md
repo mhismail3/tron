@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-29 (server stream event-surface coverage; FSC-8 canonical failure parity).
+> Last verified: 2026-06-30 (server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -44,12 +44,16 @@ of ordinary source and docs.
 
 Server stream event labels under `packages/agent/src/transport/runtime/streams`
 must have an iOS plugin entry even when they intentionally render no UI. Marker
-plugins such as `agent.interrupted`, `agent.retry`, `context.warning`,
-`session.forked`, and `capability.invocation.arguments_delta` parse only the
-routing envelope when their payload can contain partial arguments or diagnostic
-material. `SourceGuardTests+EventSurface` compares the Rust stream labels with
-`EventRegistry.registerAll()` so new server events cannot silently become
-unknown in the app.
+plugins such as `agent.start`, `agent.response_complete`,
+`agent.thinking_start`, `agent.thinking_end`, `agent.interrupted`,
+`agent.retry`, `context.warning`, `session.forked`,
+`capability.invocation.batch`, and `capability.invocation.arguments_delta`
+parse only the routing envelope when their payload can contain partial
+arguments or diagnostic material. A registered plugin returning `nil` after a
+successful parse is a no-op, not a transform warning; malformed payload decode
+still logs at the parser boundary. `SourceGuardTests+EventSurface` compares the
+Rust stream labels with `EventRegistry.registerAll()` so new server events
+cannot silently become unknown in the app.
 
 ## DRC-9 replay manifest/event parity
 
@@ -93,8 +97,8 @@ The dispatch model stays switch-free at the central coordinator:
 
 ```swift
 func dispatch(type: String, transform: () -> (any EventResult)?, context: EventDispatchTarget) {
-    guard let result = transform() else { return }
     guard let box = EventRegistry.shared.pluginBox(for: type) else { return }
+    guard let result = transform() else { return }
     box.dispatch(result: result, context: context)
 }
 ```

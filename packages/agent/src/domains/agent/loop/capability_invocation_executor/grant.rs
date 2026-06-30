@@ -10,6 +10,11 @@ use crate::shared::server::failure::{
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+pub(super) struct CapabilityRuntimeGrant {
+    pub(super) grant_id: AuthorityGrantId,
+    pub(super) authority_scopes: Vec<String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn derive_capability_runtime_grant(
     engine_host: &EngineHostHandle,
@@ -25,7 +30,7 @@ pub(super) async fn derive_capability_runtime_grant(
     turn: i64,
     run_id: Option<&str>,
     effective_args: &Value,
-) -> Result<AuthorityGrantId, FailureEnvelope> {
+) -> Result<CapabilityRuntimeGrant, FailureEnvelope> {
     let operation = effective_args
         .get("operation")
         .and_then(Value::as_str)
@@ -150,7 +155,23 @@ pub(super) async fn derive_capability_runtime_grant(
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     }
-    if operation == "web_fetch" {
+    if matches!(
+        operation,
+        "goal_create" | "goal_cancel" | "question_create" | "question_answer"
+    ) {
+        allowed_authority_scopes.extend(["goals.write".to_owned(), "resource.write".to_owned()]);
+        if matches!(
+            operation,
+            "goal_cancel" | "question_create" | "question_answer"
+        ) {
+            allowed_authority_scopes.extend(["goals.read".to_owned(), "resource.read".to_owned()]);
+        }
+    } else if matches!(
+        operation,
+        "goal_list" | "goal_inspect" | "question_list" | "question_inspect"
+    ) {
+        allowed_authority_scopes.extend(["goals.read".to_owned(), "resource.read".to_owned()]);
+    } else if operation == "web_fetch" {
         allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
         if web_fetch_uses_robots_policy {
             allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
@@ -563,7 +584,21 @@ pub(super) async fn derive_capability_runtime_grant(
     } else {
         vec!["agent_state".to_owned()]
     };
-    if operation == "web_robots_check" {
+    if matches!(
+        operation,
+        "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel"
+    ) {
+        allowed_resource_kinds.push("goal".to_owned());
+    } else if operation == "question_create" {
+        if effective_args.get("goalResourceId").is_some() {
+            allowed_resource_kinds.push("goal".to_owned());
+        }
+        allowed_resource_kinds.push("user_question".to_owned());
+    } else if matches!(operation, "question_list" | "question_inspect") {
+        allowed_resource_kinds.push("user_question".to_owned());
+    } else if operation == "question_answer" {
+        allowed_resource_kinds.extend(["user_question".to_owned(), "goal_answer".to_owned()]);
+    } else if operation == "web_robots_check" {
         allowed_resource_kinds.push("web_robots_policy".to_owned());
     } else if matches!(
         operation,
@@ -902,7 +937,7 @@ pub(super) async fn derive_capability_runtime_grant(
         "subjectActorId": actor_id.as_str(),
         "allowedCapabilities": allowed_capabilities,
         "allowedNamespaces": ["__no_namespace_authority__"],
-        "allowedAuthorityScopes": allowed_authority_scopes,
+        "allowedAuthorityScopes": allowed_authority_scopes.clone(),
         "allowedResourceKinds": allowed_resource_kinds,
         "resourceSelectors": resource_selectors,
         "fileRoots": [working_directory],
@@ -961,7 +996,20 @@ pub(super) async fn derive_capability_runtime_grant(
                 FailureOrigin::Engine,
             )
         })?;
-    AuthorityGrantId::new(grant_id.to_owned()).map_err(|error| engine_error_to_failure(&error))
+    let grant_id = AuthorityGrantId::new(grant_id.to_owned())
+        .map_err(|error| engine_error_to_failure(&error))?;
+    let causal_authority_scopes = allowed_authority_scopes
+        .into_iter()
+        .filter(|scope| {
+            matches!(scope.as_str(), "capability.execute")
+                || operation.starts_with("state_")
+                || !matches!(scope.as_str(), "state.read" | "state.write")
+        })
+        .collect();
+    Ok(CapabilityRuntimeGrant {
+        grant_id,
+        authority_scopes: causal_authority_scopes,
+    })
 }
 
 fn has_non_empty_string(value: &Value, field: &str) -> bool {
@@ -1215,6 +1263,14 @@ fn subagent_task_resource_id(session_id: &str, task_id: &str, idempotency_key: &
 
 fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'static str)] {
     &[
+        (
+            &["goal_inspect", "goal_cancel", "question_create"],
+            "goalResourceId",
+        ),
+        (
+            &["question_inspect", "question_answer"],
+            "questionResourceId",
+        ),
         (&["media_inspect", "media_archive"], "mediaResourceId"),
         (&["import_history_inspect"], "importHistoryResourceId"),
         (&["repository_tree_inspect"], "repositoryTreeResourceId"),

@@ -3,9 +3,11 @@
 //! Each model-launched primitive call first derives a non-delegable child grant
 //! from `agent-capability-runtime` with the current canonical working directory
 //! as its only file root, `networkPolicy none`, no namespace authority, and the
-//! exact target function being invoked. The derived grant id, not the bootstrap
-//! runtime grant, is then placed in the engine causal context for
-//! `capability::execute`.
+//! exact target function being invoked. The derived grant id and its bounded
+//! operation authority scopes, not the bootstrap runtime grant alone, are then
+//! placed in the engine causal context for `capability::execute` so downstream
+//! domains can enforce goal, prompt-artifact, program-execution, resource,
+//! filesystem, and Git contracts without wildcard selectors.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -450,7 +452,7 @@ async fn execute_capability_primitive_via_engine(
         .cloned()
         .unwrap_or_else(TraceId::generate);
     let function_id = target.function_id.clone();
-    let grant_id = match derive_capability_runtime_grant(
+    let runtime_grant = match derive_capability_runtime_grant(
         engine_host,
         &actor_id,
         &function_id,
@@ -481,7 +483,7 @@ async fn execute_capability_primitive_via_engine(
         }
     };
     let mut causal_context = with_agent_working_directory_metadata(
-        CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id),
+        CausalContext::new(actor_id, ActorKind::Agent, runtime_grant.grant_id, trace_id),
         &working_directory,
     )
     .with_scope("capability.execute")
@@ -506,6 +508,11 @@ async fn execute_capability_primitive_via_engine(
     }
     if let Some(parent) = parent_invocation_id {
         causal_context = causal_context.with_parent_invocation(parent.clone());
+    }
+    for scope in &runtime_grant.authority_scopes {
+        if !causal_context.has_scope(scope) {
+            causal_context = causal_context.with_scope(scope.clone());
+        }
     }
     for scope in &target.function.required_authority.scopes {
         if !causal_context.has_scope(scope) {

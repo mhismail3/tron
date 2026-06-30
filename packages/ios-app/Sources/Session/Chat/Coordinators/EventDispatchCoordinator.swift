@@ -12,13 +12,12 @@ final class EventDispatchCoordinator {
         transform: @Sendable () -> (any EventResult)?,
         context: EventDispatchTarget
     ) {
-        guard let result = transform() else {
-            context.logWarning("Failed to transform event: \(type)")
+        guard let box = EventRegistry.shared.pluginBox(for: type) else {
+            context.logDebug("No plugin registered for event type: \(type)")
             return
         }
 
-        guard let box = EventRegistry.shared.pluginBox(for: type) else {
-            context.logDebug("No plugin registered for event type: \(type)")
+        guard let result = transform() else {
             return
         }
 

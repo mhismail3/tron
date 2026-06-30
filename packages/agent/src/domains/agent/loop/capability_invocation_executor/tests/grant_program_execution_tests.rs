@@ -93,4 +93,28 @@ async fn program_execution_write_runtime_grants_are_selector_bounded_and_local_o
             .contains(&"kind:program_execution_record".to_owned())
     );
     assert_eq!(grant.network_policy, "none");
+    assert_invocation_scopes(
+        &invocation,
+        &[
+            "capability.execute",
+            "program_execution.read",
+            "program_execution.write",
+            "resource.read",
+            "resource.write",
+        ],
+    );
+    assert!(
+        !grant
+            .allowed_authority_scopes
+            .iter()
+            .any(|scope| scope == "*"),
+        "runtime grant must not use wildcard authority scopes"
+    );
+    assert!(
+        !grant
+            .resource_selectors
+            .iter()
+            .any(|selector| selector == "*"),
+        "runtime grant must not use wildcard resource selectors"
+    );
 }

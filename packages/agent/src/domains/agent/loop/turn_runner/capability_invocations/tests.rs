@@ -157,6 +157,202 @@ fn extract_result_content_projects_catalog_ids_for_model_context() {
 }
 
 #[test]
+fn extract_result_content_projects_catalog_operation_truncation_metadata() {
+    let operations = (0..25)
+        .map(|index| json!(format!("operation_{index}")))
+        .collect::<Vec<_>>();
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Catalog search returned 1 visible functions.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "catalog_search",
+            "status": "ok",
+            "catalogDiscovery": {
+                "summary": {"functions": {"visible": 1}},
+                "functions": [],
+                "modelFacingGuidance": {
+                    "catalogInspect": "Use functions[].id exactly.",
+                    "capabilityExecute": "Use capability::execute.",
+                    "supportedExecuteOperations": operations
+                }
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("\"total\": 25"));
+    assert!(text.contains("\"returned\""));
+    assert!(text.contains("\"truncated\": true"));
+    assert!(text.contains("\"omitted\": 5"));
+    assert!(text.contains("operation_19"));
+    assert!(!text.contains("operation_20"));
+}
+
+#[test]
+fn extract_result_content_projects_metadata_ids_without_raw_payload() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Procedural definition metadata recorded.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "procedural_definition_record",
+            "status": "recorded",
+            "procedural": {
+                "proceduralRecordResourceId": "procedural_record:abc123",
+                "proceduralRecordVersionId": "ver_abc123",
+                "status": "draft",
+                "summary": "Bounded metadata summary",
+                "description": {
+                    "title": "nested raw object must not be projected",
+                    "rawPromptBody": "nested raw prompt must not be projected"
+                },
+                "rawPromptBody": "must not be projected",
+                "authorityGrantId": "grant_secret",
+                "activation": {
+                    "performed": false,
+                    "processStarted": false
+                }
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("modelContextEvidence"));
+    assert!(text.contains("procedural_record:abc123"));
+    assert!(text.contains("ver_abc123"));
+    assert!(text.contains("Bounded metadata summary"));
+    assert!(!text.contains("must not be projected"));
+    assert!(!text.contains("nested raw object"));
+    assert!(!text.contains("grant_secret"));
+    assert!(!text.contains("authorityGrantId"));
+}
+
+#[test]
+fn extract_result_content_projects_schema_error_code_and_path() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "domain server_capability failed",
+        )]),
+        Some(json!({
+            "failure": {
+                "code": "ENGINE_SCHEMA_VIOLATION",
+                "category": "invalid_request",
+                "message": "expected type string at /Users/example/Workspace/tron/secret.txt",
+                "origin": "engine",
+                "retryable": false,
+                "recoverable": true,
+                "details": {
+                    "functionId": "resource::payload",
+                    "path": "$.baseContentHash",
+                    "direction": "resource_payload",
+                    "rawCommand": "cat secret.txt"
+                }
+            },
+            "modelPrimitiveName": "execute",
+            "providerInvocationId": "call_123"
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
+    assert!(text.contains("$.baseContentHash"));
+    assert!(text.contains("resource::payload"));
+    assert!(text.contains("[redacted-path]"));
+    assert!(!text.contains("/Users/example"));
+    assert!(!text.contains("cat secret.txt"));
+}
+
+#[test]
+fn extract_result_content_projects_filesystem_resource_refs_without_diff_or_content() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "filesystem_write preview: new-note.txt",
+        )]),
+        Some(json!({
+            "primitiveOperation": "filesystem_write",
+            "status": "preview",
+            "filesystem": {
+                "path": {"root": "working_directory", "relativePath": "new-note.txt"},
+                "diff": "--- raw diff must stay out",
+                "after": {"preview": "raw file content must stay out"},
+                "resourceRefs": [{
+                    "kind": "patch_proposal",
+                    "resourceId": "patch_proposal:provider-call",
+                    "versionId": "ver_patch",
+                    "lifecycle": "proposed"
+                }]
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("patch_proposal:provider-call"));
+    assert!(text.contains("ver_patch"));
+    assert!(!text.contains("--- raw diff"));
+    assert!(!text.contains("raw file content"));
+}
+
+#[test]
+fn extract_result_content_projects_trace_metadata_ids() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text("Trace records: 1.")]),
+        Some(json!({
+            "primitiveOperation": "trace_list",
+            "status": "ok",
+            "records": [{
+                "id": "019f-trace-record",
+                "timestamp": "2026-06-30T07:30:00Z",
+                "metadata": {
+                    "dev.tron": {
+                        "traceId": "trace_nested",
+                        "invocationId": "inv_nested",
+                        "providerInvocationId": "provider_nested",
+                        "operation": "procedural_definition_record",
+                        "error": {
+                            "code": "ENGINE_SCHEMA_VIOLATION",
+                            "message": "failed at /Users/example/secret",
+                            "details": {
+                                "path": "$.field",
+                                "rawCommand": "cat hidden"
+                            }
+                        },
+                        "authority": {
+                            "authorityGrantId": "grant_must_not_project",
+                            "scopes": ["capability.execute"]
+                        }
+                    }
+                }
+            }]
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("019f-trace-record"));
+    assert!(text.contains("trace_nested"));
+    assert!(text.contains("inv_nested"));
+    assert!(text.contains("provider_nested"));
+    assert!(text.contains("procedural_definition_record"));
+    assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
+    assert!(text.contains("$.field"));
+    assert!(text.contains("[redacted-path]"));
+    assert!(!text.contains("grant_must_not_project"));
+    assert!(!text.contains("authorityGrantId"));
+    assert!(!text.contains("/Users/example"));
+    assert!(!text.contains("cat hidden"));
+}
+
+#[test]
 fn extract_result_content_projects_recent_logs_for_model_context() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text("Log entries: 1.")]),

@@ -50,6 +50,38 @@ async fn status_reports_clean_repo() {
 }
 
 #[tokio::test]
+async fn readonly_status_and_branch_inventory_degrade_when_index_tree_is_truncated() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    let long_suffix = "x".repeat(180);
+    for index in 0..1_100 {
+        write_file(
+            repo.path(),
+            &format!("tracked_{index:04}_{long_suffix}.txt"),
+            "content\n",
+        );
+    }
+    git(repo.path(), ["add", "."]);
+    commit(repo.path(), "large index");
+
+    let value = status(repo.path(), json!({})).await;
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["repository"]["branch"], "main");
+    assert!(value["repository"]["indexTreeOid"].is_null());
+    assert_eq!(value["repository"]["indexTreeTruncated"], true);
+    assert_eq!(value["repository"]["indexTreeOidUnavailable"], true);
+    assert_eq!(value["dirty"], false);
+
+    let inventory = branch_inventory(repo.path(), json!({})).await;
+    assert_eq!(inventory["status"], "ok");
+    assert_eq!(inventory["repository"]["branch"], "main");
+    assert!(inventory["repository"]["indexTreeOid"].is_null());
+    assert_eq!(inventory["repository"]["indexTreeTruncated"], true);
+    assert_eq!(inventory["repository"]["indexTreeOidUnavailable"], true);
+    assert_eq!(inventory["currentBranch"]["name"], "main");
+}
+
+#[tokio::test]
 async fn status_reports_unstaged_staged_and_untracked_changes() {
     let repo = tempdir().expect("repo");
     init_repo(repo.path());
