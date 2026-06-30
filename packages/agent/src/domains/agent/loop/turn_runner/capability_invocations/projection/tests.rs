@@ -470,3 +470,58 @@ fn extract_result_content_denies_authority_version_and_resource_ids() {
     assert!(!text.contains("ref_authority_version_secret"));
     assert!(!text.contains("ref_authority_resource_secret"));
 }
+
+#[test]
+fn extract_result_content_drops_authority_containers_before_recursing() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Module runtime metadata recorded.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "module_runtime_request",
+            "status": "recorded",
+            "authority": {
+                "id": "authority_top_level_secret",
+                "resourceId": "authority_top_level_resource_secret",
+                "versionId": "authority_top_level_version_secret"
+            },
+            "moduleRuntime": {
+                "moduleRuntimeResourceId": "module_runtime:safe",
+                "moduleRuntimeVersionId": "ver_module_runtime_safe",
+                "authority": {
+                    "id": "authority_nested_secret",
+                    "resourceId": "authority_nested_resource_secret",
+                    "versionId": "authority_nested_version_secret"
+                },
+                "resourceRefs": [{
+                    "kind": "module_runtime_snapshot",
+                    "resourceId": "module_runtime_ref:safe",
+                    "versionId": "ver_module_runtime_ref_safe",
+                    "authority": {
+                        "id": "authority_ref_secret",
+                        "resourceId": "authority_ref_resource_secret",
+                        "versionId": "authority_ref_version_secret"
+                    }
+                }]
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("module_runtime:safe"));
+    assert!(text.contains("ver_module_runtime_safe"));
+    assert!(text.contains("module_runtime_ref:safe"));
+    assert!(text.contains("ver_module_runtime_ref_safe"));
+    assert!(!text.contains("\"authority\""));
+    assert!(!text.contains("authority_top_level_secret"));
+    assert!(!text.contains("authority_top_level_resource_secret"));
+    assert!(!text.contains("authority_top_level_version_secret"));
+    assert!(!text.contains("authority_nested_secret"));
+    assert!(!text.contains("authority_nested_resource_secret"));
+    assert!(!text.contains("authority_nested_version_secret"));
+    assert!(!text.contains("authority_ref_secret"));
+    assert!(!text.contains("authority_ref_resource_secret"));
+    assert!(!text.contains("authority_ref_version_secret"));
+}

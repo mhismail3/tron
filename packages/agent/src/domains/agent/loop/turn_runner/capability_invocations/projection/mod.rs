@@ -569,7 +569,8 @@ fn safe_id_like_metadata_key(lower: &str) -> bool {
 
 fn denied_model_context_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
-    lower.contains("grant")
+    lower == "authority"
+        || lower.contains("grant")
         || lower.contains("authoritygrant")
         || lower.contains("secret")
         || lower.contains("token")
