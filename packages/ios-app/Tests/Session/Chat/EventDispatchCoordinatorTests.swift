@@ -298,19 +298,41 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
     // MARK: - Edge Case Tests
 
-    func testDispatch_transformFailure_logsWarning() {
-        // Given: A transform that returns nil
+    func testDispatch_registeredNilTransformIsNoOpWithoutWarning() {
+        // Given: A registered plugin whose transform returns nil
         let nilTransform: @Sendable () -> (any EventResult)? = { nil }
 
         // When: Dispatching
         coordinator.dispatch(
-            type: TextDeltaPlugin.eventType,
+            type: AgentResponseCompletePlugin.eventType,
             transform: nilTransform,
             context: mockContext
         )
 
-        // Then: Warning should be logged
-        XCTAssertTrue(mockContext.logWarningCalled)
+        // Then: nil transform is an intentional no-op
+        XCTAssertFalse(mockContext.logWarningCalled)
+        XCTAssertFalse(mockContext.logDebugCalled)
+    }
+
+    func testDispatch_markerNoOpEventsDoNotLogWarnings() {
+        for eventType in [
+            AgentStartPlugin.eventType,
+            AgentResponseCompletePlugin.eventType,
+            ThinkingStartPlugin.eventType,
+            ThinkingEndPlugin.eventType,
+            CapabilityInvocationBatchPlugin.eventType
+        ] {
+            mockContext.resetLogs()
+
+            coordinator.dispatch(
+                type: eventType,
+                transform: { nil },
+                context: mockContext
+            )
+
+            XCTAssertFalse(mockContext.logWarningCalled, "\(eventType) should be a no-op")
+            XCTAssertFalse(mockContext.logDebugCalled, "\(eventType) should be a no-op")
+        }
     }
 
     func testDispatch_unknownType_logsDebug() {
@@ -470,5 +492,11 @@ final class MockEventDispatchContext: EventDispatchTarget {
     func logDebug(_ message: String) {
         logDebugCalled = true
         logDebugCalledWith = message
+    }
+
+    func resetLogs() {
+        logWarningCalled = false
+        logDebugCalled = false
+        logDebugCalledWith = nil
     }
 }

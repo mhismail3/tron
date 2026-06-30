@@ -44,7 +44,7 @@ pub(crate) async fn diff_value(
 
 fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, CapabilityError> {
     let target = resolve_target(invocation, payload)?;
-    let repository = repository_facts(&target)?;
+    let repository = repository_facts_readonly(&target)?;
     let max_status_bytes = optional_usize(payload, "maxStatusBytes")?
         .unwrap_or(DEFAULT_STATUS_BYTES)
         .min(MAX_STATUS_BYTES);
@@ -89,7 +89,7 @@ fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, 
 
 fn diff_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, CapabilityError> {
     let target = resolve_target(invocation, payload)?;
-    let repository = repository_facts(&target)?;
+    let repository = repository_facts_readonly(&target)?;
     let max_diff_bytes = optional_usize(payload, "maxDiffBytes")?
         .unwrap_or(DEFAULT_DIFF_BYTES)
         .min(MAX_DIFF_BYTES);
@@ -206,6 +206,25 @@ where
 pub(super) fn repository_facts(
     target: &ResolvedTarget,
 ) -> Result<RepositoryFacts, CapabilityError> {
+    repository_facts_with_index_policy(target, IndexTreePolicy::Strict)
+}
+
+pub(super) fn repository_facts_readonly(
+    target: &ResolvedTarget,
+) -> Result<RepositoryFacts, CapabilityError> {
+    repository_facts_with_index_policy(target, IndexTreePolicy::BestEffort)
+}
+
+#[derive(Clone, Copy)]
+enum IndexTreePolicy {
+    Strict,
+    BestEffort,
+}
+
+fn repository_facts_with_index_policy(
+    target: &ResolvedTarget,
+    index_tree_policy: IndexTreePolicy,
+) -> Result<RepositoryFacts, CapabilityError> {
     let git_dir = if target.canonical.is_dir() {
         target.canonical.as_path()
     } else {
@@ -232,7 +251,15 @@ pub(super) fn repository_facts(
     let head_oid = git_optional_stdout(&worktree_root, ["rev-parse", "--verify", "HEAD"])?;
     let head_tree_oid =
         git_optional_stdout(&worktree_root, ["rev-parse", "--verify", "HEAD^{tree}"])?;
-    let index_tree_oid = staged_index_tree_oid(&worktree_root)?;
+    let index_tree = match index_tree_policy {
+        IndexTreePolicy::Strict => IndexTreeFacts {
+            oid: staged_index_tree_oid(&worktree_root)?,
+            truncated: false,
+        },
+        IndexTreePolicy::BestEffort => {
+            staged_index_tree_facts_with_limit(&worktree_root, MAX_STATUS_BYTES)?
+        }
+    };
     let upstream = git_optional_stdout(
         &worktree_root,
         [
@@ -268,7 +295,9 @@ pub(super) fn repository_facts(
         branch,
         head_oid,
         head_tree_oid,
-        index_tree_oid,
+        index_tree_oid_unavailable: index_tree.oid.is_none(),
+        index_tree_truncated: index_tree.truncated,
+        index_tree_oid: index_tree.oid,
         upstream,
         ahead,
         behind,
@@ -727,15 +756,34 @@ fn staged_index_tree_oid(worktree_root: &Path) -> Result<Option<String>, Capabil
     staged_index_tree_oid_with_limit(worktree_root, MAX_STATUS_BYTES)
 }
 
+struct IndexTreeFacts {
+    oid: Option<String>,
+    truncated: bool,
+}
+
 fn staged_index_tree_oid_with_limit(
     worktree_root: &Path,
     stdout_limit: usize,
 ) -> Result<Option<String>, CapabilityError> {
-    let output = git_output_bounded(worktree_root, ["ls-files", "-s", "-z"], stdout_limit)?;
-    if output.stdout_truncated {
+    let facts = staged_index_tree_facts_with_limit(worktree_root, stdout_limit)?;
+    if facts.truncated {
         return Err(invalid(
             "git index tree calculation refused truncated index listing",
         ));
+    }
+    Ok(facts.oid)
+}
+
+fn staged_index_tree_facts_with_limit(
+    worktree_root: &Path,
+    stdout_limit: usize,
+) -> Result<IndexTreeFacts, CapabilityError> {
+    let output = git_output_bounded(worktree_root, ["ls-files", "-s", "-z"], stdout_limit)?;
+    if output.stdout_truncated {
+        return Ok(IndexTreeFacts {
+            oid: None,
+            truncated: true,
+        });
     }
     let mut root = TreeNode::default();
     for record in output.stdout.split(|byte| *byte == 0) {
@@ -760,11 +808,17 @@ fn staged_index_tree_oid_with_limit(
             .next()
             .ok_or_else(|| internal("parse git index entry stage"))?;
         if stage != "0" {
-            return Ok(None);
+            return Ok(IndexTreeFacts {
+                oid: None,
+                truncated: false,
+            });
         }
         root.insert(&record[tab_index + 1..], mode, oid)?;
     }
-    hash_tree_node(worktree_root, &root).map(Some)
+    Ok(IndexTreeFacts {
+        oid: Some(hash_tree_node(worktree_root, &root)?),
+        truncated: false,
+    })
 }
 
 fn hash_tree_node(worktree_root: &Path, node: &TreeNode) -> Result<String, CapabilityError> {
@@ -1231,6 +1285,8 @@ pub(super) fn repository_value(target: &ResolvedTarget, repository: &RepositoryF
         "headOid": repository.head_oid,
         "headTreeOid": repository.head_tree_oid,
         "indexTreeOid": repository.index_tree_oid,
+        "indexTreeTruncated": repository.index_tree_truncated,
+        "indexTreeOidUnavailable": repository.index_tree_oid_unavailable,
         "upstream": repository.upstream,
         "hasUpstream": repository.upstream.is_some(),
         "ahead": repository.ahead,

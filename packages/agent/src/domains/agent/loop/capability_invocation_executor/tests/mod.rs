@@ -678,6 +678,16 @@ fn payload_object(value: &Value) -> serde_json::Map<String, Value> {
     value.as_object().expect("payload object").clone()
 }
 
+fn assert_invocation_scopes(invocation: &Invocation, expected_scopes: &[&str]) {
+    for scope in expected_scopes {
+        assert!(
+            invocation.causal_context.has_scope(*scope),
+            "missing invocation scope {scope}: {:?}",
+            invocation.causal_context.authority_scopes
+        );
+    }
+}
+
 async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostHandle, Invocation) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
     engine_host

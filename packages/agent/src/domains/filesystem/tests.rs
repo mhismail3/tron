@@ -310,6 +310,49 @@ async fn write_preview_then_commit_records_patch_and_materialized_resources() {
 }
 
 #[tokio::test]
+async fn write_preview_for_new_file_omits_absent_base_hash_in_patch_payload() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let target = root.path().join("new-note.txt");
+
+    let preview = invoke_ok(
+        &ctx,
+        contract::WRITE_FUNCTION,
+        json!({
+            "path": "new-note.txt",
+            "content": "new content\n",
+            "reason": "preview new file"
+        }),
+        client_context(root.path(), "write-preview-new-file", true),
+    )
+    .await;
+
+    assert_eq!(preview["status"], "preview");
+    assert!(!target.exists(), "preview must not create the new file");
+    assert_eq!(preview["path"]["relativePath"], "new-note.txt");
+    assert_eq!(preview["resourceRefs"][0]["kind"], "patch_proposal");
+    let patch_resource_id = preview["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .expect("patch resource id");
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(patch_resource_id)
+        .await
+        .expect("inspect patch resource")
+        .expect("patch resource exists");
+    let payload = &inspection.versions.last().expect("patch version").payload;
+
+    assert_eq!(payload["targetPath"], "new-note.txt");
+    assert!(
+        payload.get("baseContentHash").is_none(),
+        "new-file patch payload must omit absent optional string fields: {payload}"
+    );
+    let rendered = serde_json::to_string(&preview).expect("preview json");
+    assert!(!rendered.contains(root.path().to_str().unwrap()));
+    assert!(rendered.contains("new-note.txt"));
+}
+
+#[tokio::test]
 async fn apply_patch_requires_hash_match_and_exact_single_match() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");

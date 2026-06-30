@@ -453,6 +453,18 @@ async fn create_patch_resource(
     plan: &MutationPlan,
     operation: &str,
 ) -> Result<EngineResource, CapabilityError> {
+    let mut patch_payload = serde_json::Map::new();
+    patch_payload.insert("targetPath".to_owned(), json!(plan.path.relative));
+    if let Some(base_content_hash) = plan.before.content_hash.as_deref() {
+        patch_payload.insert("baseContentHash".to_owned(), json!(base_content_hash));
+    }
+    patch_payload.insert("diff".to_owned(), json!(plan.diff));
+    patch_payload.insert(
+        "status".to_owned(),
+        json!(if plan.commit { "applied" } else { "proposed" }),
+    );
+    patch_payload.insert("result".to_owned(), result_metadata(plan, operation));
+
     engine_host
         .create_resource(CreateResource {
             resource_id: Some(format!(
@@ -471,13 +483,7 @@ async fn create_patch_resource(
                 "networkPolicy": "none",
                 "approvalPolicy": "explicit commit and idempotency required; package-wide approval trigger deferred"
             }),
-            initial_payload: Some(json!({
-                "targetPath": plan.path.relative,
-                "baseContentHash": plan.before.content_hash,
-                "diff": plan.diff,
-                "status": if plan.commit { "applied" } else { "proposed" },
-                "result": result_metadata(plan, operation)
-            })),
+            initial_payload: Some(Value::Object(patch_payload)),
             locations: Vec::new(),
             trace_id: invocation.causal_context.trace_id.clone(),
             invocation_id: Some(invocation.id.clone()),

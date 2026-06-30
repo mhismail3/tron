@@ -90,4 +90,28 @@ async fn prompt_artifacts_write_runtime_grants_are_selector_bounded_and_local_on
             .contains(&"kind:prompt_artifact".to_owned())
     );
     assert_eq!(grant.network_policy, "none");
+    assert_invocation_scopes(
+        &invocation,
+        &[
+            "capability.execute",
+            "prompt_artifacts.read",
+            "prompt_artifacts.write",
+            "resource.read",
+            "resource.write",
+        ],
+    );
+    assert!(
+        !grant
+            .allowed_authority_scopes
+            .iter()
+            .any(|scope| scope == "*"),
+        "runtime grant must not use wildcard authority scopes"
+    );
+    assert!(
+        !grant
+            .resource_selectors
+            .iter()
+            .any(|selector| selector == "*"),
+        "runtime grant must not use wildcard resource selectors"
+    );
 }

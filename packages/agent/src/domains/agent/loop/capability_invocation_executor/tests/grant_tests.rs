@@ -3,6 +3,56 @@ use crate::engine::{CreateResource, EngineResourceScope, SUBAGENT_TASK_KIND};
 use sha2::{Digest, Sha256};
 
 #[tokio::test]
+async fn goal_create_runtime_grant_propagates_write_scopes_without_wildcards() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "goal_create",
+        "objective": "Record bounded durable goal metadata",
+        "idempotencyKey": "goal-create-runtime-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    for scope in ["goals.write", "resource.write"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "goal_create grant missing {scope}: {:?}",
+            grant.allowed_authority_scopes
+        );
+    }
+    assert!(
+        grant.allowed_resource_kinds.contains(&"goal".to_owned()),
+        "goal_create grant missing goal resource kind"
+    );
+    assert!(
+        grant.resource_selectors.contains(&"kind:goal".to_owned()),
+        "goal_create grant missing kind:goal selector"
+    );
+    assert_eq!(grant.network_policy, "none");
+    assert_invocation_scopes(
+        &invocation,
+        &["capability.execute", "goals.write", "resource.write"],
+    );
+    assert!(
+        !grant
+            .allowed_authority_scopes
+            .iter()
+            .any(|scope| scope == "*"),
+        "runtime grant must not use wildcard authority scopes"
+    );
+    assert!(
+        !grant
+            .resource_selectors
+            .iter()
+            .any(|selector| selector == "*"),
+        "runtime grant must not use wildcard resource selectors"
+    );
+}
+
+#[tokio::test]
 async fn web_fetch_runtime_grant_stays_source_only_without_robots_evidence() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "web_fetch",
@@ -520,7 +570,7 @@ async fn subagent_followup_grant_reads_existing_task_for_exact_delegated_refs() 
         "subagentTaskResourceId": "subagent_task:delegated-runtime-grant",
         "idempotencyKey": "subagent-status-delegated-grant"
     });
-    let grant_id = derive_capability_runtime_grant(
+    let runtime_grant = derive_capability_runtime_grant(
         &engine_host,
         &ActorId::new("agent:session-grant").expect("actor id"),
         &FunctionId::new("capability::execute").expect("function id"),
@@ -538,7 +588,7 @@ async fn subagent_followup_grant_reads_existing_task_for_exact_delegated_refs() 
     .await
     .expect("derive delegated subagent grant");
     let grant = engine_host
-        .inspect_authority_grant(&grant_id)
+        .inspect_authority_grant(&runtime_grant.grant_id)
         .await
         .expect("inspect grant")
         .expect("derived grant");

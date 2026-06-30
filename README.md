@@ -1193,9 +1193,9 @@ Current primitive operations:
 | `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
 | `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
-| `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, and bounded porcelain evidence. |
-| `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
-| `git_branch_inventory` | Return bounded read-only local branch inventory evidence: current/detached state, sorted local branch refs, OIDs, upstream/ahead-behind when locally available, and last-commit metadata. |
+| `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, bounded porcelain evidence, and explicit `indexTreeTruncated` / `indexTreeOidUnavailable` evidence when the read-only staged-index hash is too large to compute. |
+| `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers; oversized staged-index hashing degrades to explicit unavailable evidence instead of failing the read. |
+| `git_branch_inventory` | Return bounded read-only local branch inventory evidence: current/detached state, sorted local branch refs, OIDs, upstream/ahead-behind when locally available, last-commit metadata, and staged-index availability flags. |
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
@@ -1305,7 +1305,7 @@ Current primitive operations:
 | `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
 | `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
-| `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
+| `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id; provider-visible projections include safe trace/invocation ids from stored metadata without raw prompts, logs, commands, code, paths, or file contents. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive; model-context replay includes bounded entry ids, timestamps, levels, components, messages, session ids, and trace ids instead of a count-only summary. |
 | `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled fallback. |
@@ -1316,7 +1316,7 @@ Current primitive operations:
 | `memory_decision_list` | Accepted Slice 24D operation that lists redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
 | `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
-| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, and model-facing `capability::execute` operation aliases without invoking catalog targets; non-callable metadata targets are marked as such and provider guidance carries the canonical supported execute operation list. |
+| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, and model-facing `capability::execute` operation aliases without invoking catalog targets; non-callable metadata targets are marked as such and provider guidance carries a bounded canonical supported-execute-operation list with total/returned/truncated/omitted metadata. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution; model-facing aliases such as `log_recent`, `execute::log_recent`, or any supported execute operation name are normalized to the appropriate catalog/execute schema for inspection only. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
@@ -1855,8 +1855,11 @@ in the pending-review `file_git_module` manifest and maps them to exact
 trusted working-directory metadata, rejects path traversal and worktree-root
 escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty summaries,
 returns bounded status/diff and branch-inventory evidence, exposes the staged
-index tree without writing repository tree objects, and requires idempotency
-key, human/action reason, and expected HEAD for mutation. Successful stage/unstage
+index tree without writing repository tree objects, degrades read-only
+status/diff/inventory reads to explicit `indexTreeTruncated` /
+`indexTreeOidUnavailable` evidence when exact staged-index hashing exceeds the
+local byte limit, and requires idempotency key, human/action reason, and
+expected HEAD for mutation. Successful stage/unstage
 operations create `git_index_change` resources and publish `git.lifecycle`
 stream evidence. Accepted Slice 6C `git_commit` creates exactly one single-parent commit
 from the already-staged index on the current named branch after expected HEAD and
@@ -1880,8 +1883,9 @@ Slice 6E `git_branch_inventory` enumerates only local `refs/heads/*`, reports
 the current branch or detached HEAD, serializes sorted branch names/refs/OIDs,
 computes ahead/behind only from already-present local upstream refs, retains
 bounded last-commit metadata, keeps oversized metadata rows as truncated
-evidence, and records explicit count/byte truncation metadata without adding a
-durable resource kind.
+evidence, reports unavailable staged-index-tree hashes through explicit
+truncation flags, and records explicit count/byte truncation metadata without
+adding a durable resource kind.
 Merges, rebases, resets, pushes, arbitrary branch checkout, branch
 deletion/rename, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
@@ -2074,16 +2078,26 @@ agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
 snapshot through the same single tool. Diagnostic capability results replay
-bounded model-context evidence for catalog, trace, and recent-log reads so the
-agent sees actionable ids/previews instead of count-only summaries, while raw
-command/output/details from unrelated operations stay out of provider context.
-Catalog discovery reads current catalog/resource truth, supplies the canonical
-execute operation registry to model guidance, marks metadata-only catalog
-targets as non-callable, and writes only append-oriented
+bounded model-context evidence for catalog, trace, recent-log, safe
+metadata-record/list/inspect operations, module/procedural/prompt/program/
+repository-tree/import/web/media/memory/state reads, and schema failures so the
+agent sees actionable ids, lifecycle/status, refs, truncation metadata, and
+error paths instead of count-only summaries, while raw commands, output, logs,
+local paths, code, file contents, secrets, grant ids, authority ids, and hidden
+reasoning stay out of provider context. Failure projections omit `actual`
+detail payloads, and metadata projections deny authority-bearing id/version/ref
+suffixes while retaining non-sensitive resource/version refs. Catalog discovery
+reads current
+catalog/resource truth, supplies a bounded canonical execute operation registry
+with total/returned/truncated/omitted metadata to model guidance, marks
+metadata-only catalog targets as non-callable, and writes only append-oriented
 `catalog_discovery_report` evidence. Tool-source inspection reads scoped
 `tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
 writes are provenance evidence and explicitly do not activate external tools.
+Failures rejected before an effectful trace record is inserted still rely on
+the direct capability failure result projection for bounded error code/path
+evidence; durable pre-trace failure records remain a deferred tracing slice.
 Subagent lifecycle operations read and mutate scoped `subagent_task` resources
 and, for Slice 24C provider-visible launch/status/result/cancel, inspect or
 cancel only the delegated jobs/program-execution module runtime/job refs
@@ -2467,7 +2481,11 @@ idempotency.
 Trace reads are backed by `trace_records`; effectful `execute` calls insert a
 running record before the effect runs and update that same record with status,
 duration, result/error hashes, authority, provider/model metadata, VCS revision
-when available, and file attribution/content hashes after completion. The
+when available, and file attribution/content hashes after completion. Provider
+projections for `trace_list` and `trace_get` copy only bounded safe ids and
+status/timing fields from those rows, including nested `metadata.dev.tron`
+trace/invocation/provider-invocation ids, and omit raw prompts, logs, commands,
+code, file contents, local paths, and secrets. The
 agent backend logs run/turn/provider/stream/capability/execute lifecycle
 metadata to the `logs` table with stable `component`, `agent_event`, session,
 workspace, trace, run, turn, invocation, resource, and status fields where those
@@ -2541,7 +2559,7 @@ packages/ios-app/Sources/
 
 - **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
-- **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`.
+- **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`; registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
 - **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows

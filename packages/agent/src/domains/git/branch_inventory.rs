@@ -33,9 +33,9 @@ fn branch_inventory_sync(
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     let target = service::resolve_target(invocation, payload)?;
-    let repository = service::repository_facts(&target)?;
+    let repository = service::repository_facts_readonly(&target)?;
     let trusted_root = service::resolve_target(invocation, &json!({"path": "."}))?;
-    let trusted_repository = service::repository_facts(&trusted_root)?;
+    let trusted_repository = service::repository_facts_readonly(&trusted_root)?;
     if repository.worktree_root != trusted_repository.worktree_root {
         return Err(invalid(
             "git_branch_inventory path must belong to the trusted working-directory repository",

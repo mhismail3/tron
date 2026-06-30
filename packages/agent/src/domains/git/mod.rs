@@ -42,11 +42,15 @@
 //! checkout, hooks, remotes, index mutation, or worktree file updates; if
 //! symbolic `HEAD` movement fails, the just-created ref is removed only when it
 //! still points at the expected OID. Caller-controlled status/diff byte limits
-//! affect evidence only, never mutation eligibility. Branch inventory is
-//! read-only: it enumerates local `refs/heads/*`, computes ahead/behind only
-//! against already-present local upstream refs, reports oversized last-commit
-//! metadata as truncated row evidence, and never fetches, switches, creates,
-//! deletes, renames, or contacts remotes.
+//! affect read-only evidence only, never mutation eligibility. Status, diff,
+//! and branch inventory degrade to explicit `indexTreeTruncated` /
+//! `indexTreeOidUnavailable` evidence if the staged-index listing is too large
+//! to hash exactly; stage, unstage, commit, and branch-start keep strict
+//! expected HEAD/index freshness checks. Branch inventory is read-only: it
+//! enumerates local `refs/heads/*`, computes ahead/behind only against
+//! already-present local upstream refs, reports oversized last-commit metadata
+//! as truncated row evidence, and never fetches, switches, creates, deletes,
+//! renames, or contacts remotes.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

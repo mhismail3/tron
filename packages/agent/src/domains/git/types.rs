@@ -36,6 +36,8 @@ pub(super) struct RepositoryFacts {
     pub(super) head_oid: Option<String>,
     pub(super) head_tree_oid: Option<String>,
     pub(super) index_tree_oid: Option<String>,
+    pub(super) index_tree_truncated: bool,
+    pub(super) index_tree_oid_unavailable: bool,
     pub(super) upstream: Option<String>,
     pub(super) ahead: Option<u64>,
     pub(super) behind: Option<u64>,
