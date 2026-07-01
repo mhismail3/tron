@@ -9,6 +9,7 @@ import UIKit
 struct OnboardingFlowView: View {
     @State var state: OnboardingState
     let dependencies: DependencyContainer
+    @Binding private var selectedDetent: PresentationDetent
     let allowsDismiss: Bool
     let onDismiss: () -> Void
     let onComplete: () -> Void
@@ -16,12 +17,14 @@ struct OnboardingFlowView: View {
     init(
         state: OnboardingState,
         dependencies: DependencyContainer,
+        selectedDetent: Binding<PresentationDetent> = .constant(OnboardingSheetPresentation.initialDetent),
         allowsDismiss: Bool = false,
         onDismiss: @escaping () -> Void = {},
         onComplete: @escaping () -> Void
     ) {
         _state = State(initialValue: state)
         self.dependencies = dependencies
+        _selectedDetent = selectedDetent
         self.allowsDismiss = allowsDismiss
         self.onDismiss = onDismiss
         self.onComplete = onComplete
@@ -104,6 +107,7 @@ struct OnboardingFlowView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .environment(\.onboardingScrollsEnabled, onboardingScrollsEnabled)
 
                 OnboardingPageDots(currentStep: state.currentStep)
                 .padding(.horizontal, TronSpacing.xlarge)
@@ -181,6 +185,10 @@ struct OnboardingFlowView: View {
                 state.selectStep(nextStep)
             }
         )
+    }
+
+    private var onboardingScrollsEnabled: Bool {
+        selectedDetent == .large || UIDevice.current.userInterfaceIdiom == .pad
     }
 
     private func toolbarNavigationButton(

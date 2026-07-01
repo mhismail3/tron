@@ -42,6 +42,8 @@ struct TronMobileApp: App {
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--tron-ui-test-onboarding-complete") {
             UserDefaults.standard.set(true, forKey: OnboardingState.completionStorageKey)
+        } else if ProcessInfo.processInfo.arguments.contains("--tron-ui-test-onboarding-incomplete") {
+            UserDefaults.standard.set(false, forKey: OnboardingState.completionStorageKey)
         }
 #endif
         TronFontLoader.registerFonts()
@@ -143,6 +145,7 @@ struct TronMobileApp: App {
                 OnboardingFlowView(
                     state: onboardingState,
                     dependencies: container,
+                    selectedDetent: $onboardingDetent,
                     allowsDismiss: onboardingAllowsDismiss,
                     onDismiss: dismissOnboardingFromSettings,
                     onComplete: {
@@ -154,7 +157,8 @@ struct TronMobileApp: App {
                 )
                 .environment(\.dependencies, container)
                 .environment(\.interactionPolicy, container.interactionPolicy)
-                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)
+                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear, dragIndicator: .visible)
+                .presentationContentInteraction(.resizes)
                 .interactiveDismissDisabled(!onboardingComplete && !onboardingAllowsDismiss)
             }
             .onAppear(perform: syncOnboardingSheetPresentation)

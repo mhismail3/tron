@@ -96,7 +96,7 @@ final class IPadSheetPresentationTests: XCTestCase {
         let expected: [(path: [String], fragment: String)] = [
             (
                 ["Sources", "App", "Lifecycle", "TronMobileApp.swift"],
-                ".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"
+                ".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear, dragIndicator: .visible)"
             ),
             (
                 ["Sources", "UI", "Chat", "Composer", "CameraCaptureSheet.swift"],

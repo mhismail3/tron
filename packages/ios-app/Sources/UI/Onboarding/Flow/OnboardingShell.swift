@@ -7,9 +7,21 @@ import UIKit
 /// a short paged overlay: three lightweight preparation pages, then
 /// the pairing form that performs the actual connection.
 
+private struct OnboardingScrollsEnabledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var onboardingScrollsEnabled: Bool {
+        get { self[OnboardingScrollsEnabledKey.self] }
+        set { self[OnboardingScrollsEnabledKey.self] = newValue }
+    }
+}
+
 struct OnboardingPage<Content: View>: View {
     let subtitle: String
     let content: Content
+    @Environment(\.onboardingScrollsEnabled) private var onboardingScrollsEnabled
 
     init(
         subtitle: String,
@@ -35,6 +47,7 @@ struct OnboardingPage<Content: View>: View {
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollDisabled(!onboardingScrollsEnabled)
         .scrollDismissesKeyboard(.interactively)
     }
 }

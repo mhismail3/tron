@@ -24,7 +24,7 @@ enum OnboardingLaunchSource: Equatable {
 }
 
 enum OnboardingSheetPresentation {
-    static let detents: Set<PresentationDetent> = [.medium]
+    static let detents: Set<PresentationDetent> = [.medium, .large]
     static let initialDetent: PresentationDetent = .medium
 
     static func shouldAutoPresent(

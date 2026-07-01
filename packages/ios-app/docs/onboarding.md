@@ -1,14 +1,17 @@
 # Onboarding (iOS sheet)
 
-> Last verified: 2026-06-18 (IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IOSTC-3 pairing/auth custody and connection robustness; PCC-6 iOS source consolidation).
+> Last verified: 2026-07-01 (medium-first onboarding sheet expansion and scroll policy; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IOSTC-3 pairing/auth custody and connection robustness; PCC-6 iOS source consolidation).
 
 The iOS app always opens to the normal session shell after initialization.
-`TronMobileApp` presents one medium-detent onboarding sheet for first-run setup,
-Server-page pairing, and pairing URLs. The sheet is a paged flow: welcome,
-install Tailscale on iPhone, install Tron Server on Mac, connect, then a short
-settings setup flow for workspace, credentials, services, and default model.
+`TronMobileApp` presents one medium-first onboarding sheet for first-run setup,
+Server-page pairing, and pairing URLs. The user can pull it to the large detent
+when a form needs more room. Page scrolling is disabled at the medium detent,
+the native sheet drag indicator remains visible for expansion, and content only
+scrolls once the sheet is large. The sheet is a paged flow: welcome, install
+Tailscale on iPhone, install Tron Server on Mac, connect, then a short settings
+setup flow for workspace, credentials, services, and default model.
 Setup pages are locked until the Mac connection succeeds. The sheet follows the
-app's standard Liquid Glass chrome: hidden drag handle, principal toolbar title,
+app's standard Liquid Glass chrome: visible native drag handle, principal toolbar title,
 Back/Next controls in the top sheet toolbar for paged navigation, and a compact
 floating progress-dot indicator that sits low at the bottom of the sheet.
 

@@ -204,9 +204,12 @@ input so the old input does not make `canAddInput` fail.
 
 The shell mounts `ContentView` even before onboarding is complete.
 `TronMobileApp` owns one onboarding presenter for first-run setup, Server-page
-pairing, and pairing URLs. `OnboardingSheetPresentation` keeps that flow on a
-medium detent with compact iPad sizing so the connect form, QR-first pairing
-card, and setup pages share one geometry. When
+pairing, and pairing URLs. `OnboardingSheetPresentation` starts that flow on a
+medium detent, allows expansion to large when content needs more room, and uses
+compact iPad sizing so the connect form, QR-first pairing card, and setup pages
+share one geometry. On iPhone, onboarding pages do not scroll at the medium
+detent; the native sheet drag indicator stays visible so the sheet can be pulled
+to large before page scrolling is enabled. When
 `onboardingComplete` is true but no active paired server exists, the shell stays
 visible.
 

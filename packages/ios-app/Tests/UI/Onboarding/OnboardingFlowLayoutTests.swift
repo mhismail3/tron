@@ -36,7 +36,7 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         )
     }
 
-    func testOnboardingLaunchesUseOneMediumSheetPresenter() throws {
+    func testOnboardingLaunchesUseOneMediumFirstExpandableSheetPresenter() throws {
         let app = try source(pathComponents: [
             "Sources",
             "App",
@@ -52,8 +52,8 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         ])
 
         XCTAssertTrue(
-            presentation.contains("static let detents: Set<PresentationDetent> = [.medium]"),
-            "Onboarding and pairing should share one medium sheet policy"
+            presentation.contains("static let detents: Set<PresentationDetent> = [.medium, .large]"),
+            "Onboarding and pairing should share one medium-first expandable sheet policy"
         )
         XCTAssertTrue(
             presentation.contains("static let initialDetent: PresentationDetent = .medium"),
@@ -76,16 +76,24 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             "Pairing URLs should use the central presenter"
         )
         XCTAssertTrue(
+            app.contains("selectedDetent: $onboardingDetent"),
+            "The onboarding view should know whether the sheet is medium or large"
+        )
+        XCTAssertTrue(
             app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents"),
             "The sheet modifier should consume the central onboarding detent policy"
         )
         XCTAssertTrue(
-            app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"),
+            app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear, dragIndicator: .visible)"),
             "Onboarding should use the compact iPad form now that the flow is medium-first"
+        )
+        XCTAssertTrue(
+            app.contains(".presentationContentInteraction(.resizes)"),
+            "Onboarding should prefer native sheet resizing before content scrolling"
         )
         XCTAssertFalse(
             app.contains(".adaptivePresentationDetents([.medium, .large]"),
-            "Onboarding should not reintroduce a mixed medium/large connect flow"
+            "Onboarding should not bypass the central medium/large detent policy"
         )
         XCTAssertFalse(
             app.contains("ipadSizing: .largeForm, phoneBackground: .clear"),
@@ -94,6 +102,58 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         XCTAssertFalse(
             app.contains("onboardingComplete = false\n        return true"),
             "Pairing URLs should not fake first-run onboarding completion state"
+        )
+    }
+
+    func testOnboardingPagesOnlyScrollAtLargeDetent() throws {
+        let app = try source(pathComponents: [
+            "Sources",
+            "App",
+            "Lifecycle",
+            "TronMobileApp.swift",
+        ])
+        let flow = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Onboarding",
+            "Flow",
+            "OnboardingFlowView.swift",
+        ])
+        let shell = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Onboarding",
+            "Flow",
+            "OnboardingShell.swift",
+        ])
+
+        XCTAssertTrue(
+            flow.contains("selectedDetent: Binding<PresentationDetent>"),
+            "The flow should receive the selected sheet detent instead of guessing from content height"
+        )
+        XCTAssertTrue(
+            flow.contains(#".environment(\.onboardingScrollsEnabled, onboardingScrollsEnabled)"#),
+            "The selected detent should drive page scroll policy through the onboarding environment"
+        )
+        XCTAssertTrue(
+            flow.contains("selectedDetent == .large"),
+            "Phone onboarding pages should only allow scroll once the sheet is expanded"
+        )
+        XCTAssertTrue(
+            shell.contains(#"@Environment(\.onboardingScrollsEnabled)"#),
+            "Shared onboarding pages should read the central scroll policy"
+        )
+        XCTAssertTrue(
+            shell.contains(".scrollDisabled(!onboardingScrollsEnabled)"),
+            "Medium onboarding pages should not consume drag gestures as scroll"
+        )
+        XCTAssertTrue(
+            app.contains("dragIndicator: .visible"),
+            "The native drag indicator should remain visible so users can pull the medium sheet to large"
+        )
+        XCTAssertFalse(
+            flow.contains("DragGesture(") || shell.contains("DragGesture("),
+            "Onboarding should not use custom drag recognizers for native sheet resizing"
         )
     }
 
