@@ -73,14 +73,14 @@ struct NewSessionSetupCard: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(isDisabled)
         .glassEffect(
             .regular.tint(color.opacity(0.15)).interactive(),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        .tronHitTarget(.roundedRectangle(cornerRadius: 12))
+        .disabled(isDisabled)
         .opacity(isDisabled ? 0.62 : 1)
     }
 }

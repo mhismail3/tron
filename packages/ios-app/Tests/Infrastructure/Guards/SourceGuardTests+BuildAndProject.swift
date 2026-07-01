@@ -76,7 +76,9 @@ extension SourceGuardTests {
         )
 
         #expect(settingsView.contains("@State private var showLogViewer = false"))
-        #expect(settingsView.contains("Button { showLogViewer = true }"))
+        #expect(settingsView.contains("TronToolbarIconButton("))
+        #expect(settingsView.contains(#"accessibilityLabel: "Logs""#))
+        #expect(settingsView.contains("showLogViewer = true"))
         #expect(settingsView.contains("LogViewer()"))
         #expect(!settingsView.contains("#if DEBUG || BETA"))
         #expect(connectionSettingsPage.contains("@State private var activeDiagnosticsSheet: ConnectionSettingsDiagnosticsSheet?"))

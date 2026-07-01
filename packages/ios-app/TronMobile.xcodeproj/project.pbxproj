@@ -455,6 +455,7 @@
 		AA1A318F52464EF6F817DBEB /* ThinkingStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 628BB6501B6D959CB5096764 /* ThinkingStateTests.swift */; };
 		AB3CA6DC8E3D863D3ECFA35B /* DatabaseActorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6469E9ED404D471C14199A49 /* DatabaseActorTests.swift */; };
 		AB6DE7D2714915112BB47365 /* ContextClearedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C6ACC707D19C26BCD3086AA /* ContextClearedPlugin.swift */; };
+		AB70FE7517817F94DF5284B0 /* TronHitTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F60314F25A65F96B0A400B /* TronHitTarget.swift */; };
 		AB79D63E9E119CCFC8AFDE19 /* ContextStatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A62BC012249969A256811D /* ContextStatusPill.swift */; };
 		AB899E66D0EF7D082EF0B874 /* EngineProtocolChildErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 985DA0E69CEA1E9093248743 /* EngineProtocolChildErrorTests.swift */; };
 		ABAC9D1E46B5D8FBA2C40BB8 /* ProviderAssetIconsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2836EC052824ADA4744C31CF /* ProviderAssetIconsTests.swift */; };
@@ -480,6 +481,7 @@
 		B1692881E6C5CF340CD0BC24 /* CapabilityInvocationDetailViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD34424A94CB523A91E77C60 /* CapabilityInvocationDetailViewTests.swift */; };
 		B2427258323B0EF0D97DE4DE /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E2BD88CA4C5DB0E2864FD8 /* AppConstants.swift */; };
 		B249A2488B25952BC353A780 /* SettingsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12A4B686B0F6D853EF93D614 /* SettingsCard.swift */; };
+		B309429016C08A08002A4934 /* HitTargetContainerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86627669277DBE888E627397 /* HitTargetContainerUITests.swift */; };
 		B31FAF135DE1D05CD952F4ED /* ModelFilteringServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EDE2809C7C585F51233F9F /* ModelFilteringServiceTests.swift */; };
 		B34AECECD4450B3E378BD6E3 /* NewSessionFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F0D3AFD5F3738E2AE14448 /* NewSessionFlow.swift */; };
 		B390D427C5108F55C84A7E3A /* ChatViewModel+EventDispatchContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C4085707B31D715E167771 /* ChatViewModel+EventDispatchContext.swift */; };
@@ -598,6 +600,7 @@
 		DCB3FF33E969E64ACB4F24A1 /* TronShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F0AA1A9F9B42CCBC0E6BD0EB /* TronShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DCBC25C78368EC258F942618 /* CameraModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9719FD824CD882F23D82A01 /* CameraModel.swift */; };
 		DD002FE36CABAFABA305060C /* CapabilityInvocationProgressPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0362EED7DB42199CD8F9488 /* CapabilityInvocationProgressPlugin.swift */; };
+		DD863D94F458A2EFA3B58956 /* SourceGuardTests+HitTargets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CBA3A91A43F56CC28915DE4 /* SourceGuardTests+HitTargets.swift */; };
 		DD90D8CD3E5A2615B18D91C1 /* GeneratedUIDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ED08C86F97B7AB2E9F39204 /* GeneratedUIDTOTests.swift */; };
 		DDAB67A07B947338C65454F3 /* IPadSheetPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF91A42FA41A7B4DCE8F447 /* IPadSheetPresentationTests.swift */; };
 		DEED372E2B670ABD019B13B7 /* OnboardingSetupSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B1ACD91FD7275A31C60EC8 /* OnboardingSetupSnapshot.swift */; };
@@ -987,6 +990,7 @@
 		5B9AADD360AF29B9DFC6AF52 /* TronSearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronSearchBar.swift; sourceTree = "<group>"; };
 		5C1335A743455D6DD09C3158 /* StreamingRecoverySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRecoverySnapshot.swift; sourceTree = "<group>"; };
 		5C8DE18E43FFC5A642EEF4F1 /* SystemClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemClientTests.swift; sourceTree = "<group>"; };
+		5CBA3A91A43F56CC28915DE4 /* SourceGuardTests+HitTargets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SourceGuardTests+HitTargets.swift"; sourceTree = "<group>"; };
 		5D226E5EFAA7C3521C6EB0E3 /* ChatTranscriptionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptionCoordinator.swift; sourceTree = "<group>"; };
 		5DAC1D06ECD97480BDD4CEAA /* SessionSwitchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSwitchingTests.swift; sourceTree = "<group>"; };
 		5DEC24B935D9C62FE066A094 /* SessionBriefingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBriefingUITests.swift; sourceTree = "<group>"; };
@@ -1105,6 +1109,7 @@
 		85C4E93D71975ECBFA964E56 /* ProvidersStatusHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersStatusHelpersTests.swift; sourceTree = "<group>"; };
 		85FF1103106FDEE9F9512F2E /* CapabilityDetailSheetContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityDetailSheetContainer.swift; sourceTree = "<group>"; };
 		86484F106452BD2F9F8D75B1 /* TurnLifecycleContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnLifecycleContext.swift; sourceTree = "<group>"; };
+		86627669277DBE888E627397 /* HitTargetContainerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HitTargetContainerUITests.swift; sourceTree = "<group>"; };
 		86CA4F369A729139A934FAC7 /* AgentCockpitDiscoveryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCockpitDiscoveryState.swift; sourceTree = "<group>"; };
 		87370A5D814F48375236F358 /* Prod.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Prod.xcconfig; sourceTree = "<group>"; };
 		874D8D9176D3C8958F3E8F01 /* background-white.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "background-white.png"; sourceTree = "<group>"; };
@@ -1337,6 +1342,7 @@
 		E37420555D0E1D6D3153CF1A /* SessionArchivedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionArchivedPlugin.swift; sourceTree = "<group>"; };
 		E379E8FE7A21A9648248DAF4 /* CapabilityCodeBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityCodeBlock.swift; sourceTree = "<group>"; };
 		E3C1647D4DF05590CB117FFC /* SourceGuardTests+Hierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SourceGuardTests+Hierarchy.swift"; sourceTree = "<group>"; };
+		E4F60314F25A65F96B0A400B /* TronHitTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronHitTarget.swift; sourceTree = "<group>"; };
 		E51BF93C5DEE387CFA22AEC6 /* View+Accessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+Accessibility.swift"; sourceTree = "<group>"; };
 		E5281B0360F46F5C0F92FBEC /* ChatViewModel+DeepLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+DeepLinks.swift"; sourceTree = "<group>"; };
 		E5F420953C3F49A004681EBB /* WorkspaceSelectorVisualRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSelectorVisualRenderTests.swift; sourceTree = "<group>"; };
@@ -1831,6 +1837,7 @@
 				1D33A0D35DB61BD2E2A8E99F /* SessionTitleIcons.swift */,
 				2B0E7C3FED594F6CAAD96A2A /* SheetComponents.swift */,
 				A8F53C77ABCF92E1167ED98D /* ToastBanner.swift */,
+				E4F60314F25A65F96B0A400B /* TronHitTarget.swift */,
 				5B9AADD360AF29B9DFC6AF52 /* TronSearchBar.swift */,
 				81AD924BA9F025361962AF5E /* TronSegmentedControl.swift */,
 				0460F632DF2682BBC1DEF807 /* TypewriterAnimationState.swift */,
@@ -1926,6 +1933,7 @@
 		55F43C559E7F1F4FD8FE8598 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				86627669277DBE888E627397 /* HitTargetContainerUITests.swift */,
 				5DEC24B935D9C62FE066A094 /* SessionBriefingUITests.swift */,
 			);
 			path = UITests;
@@ -2552,6 +2560,7 @@
 				B65C985BDA08943B5AE7B50F /* SourceGuardTests+ComposerKeyboard.swift */,
 				F2A2E2077DF30E9C7E6E0E39 /* SourceGuardTests+EventSurface.swift */,
 				E3C1647D4DF05590CB117FFC /* SourceGuardTests+Hierarchy.swift */,
+				5CBA3A91A43F56CC28915DE4 /* SourceGuardTests+HitTargets.swift */,
 				8A68E24D8765ECC9B78EEC67 /* SourceGuardTests+PrimitiveShellAbsence.swift */,
 				3BCE63E1606E8E2C25519F91 /* SourceGuardTests+ProductSurfaces.swift */,
 				BF47307606A99021208901FD /* SourceGuardTests+Support.swift */,
@@ -4030,6 +4039,7 @@
 				A4B8C27BAD591CB446F25462 /* TranscriptionClient.swift in Sources */,
 				EC736CE36275A33DAFB3FDE6 /* TronColors.swift in Sources */,
 				53CA2D9467AA4873E2684AC8 /* TronFontLoader.swift in Sources */,
+				AB70FE7517817F94DF5284B0 /* TronHitTarget.swift in Sources */,
 				F49E7619E7ADCBC8A8E7E6A4 /* TronIcons.swift in Sources */,
 				48EC4001D96A6DDECC2BCB71 /* TronLogger.swift in Sources */,
 				265E6B7ED8365A20575CCACD /* TronMobileApp.swift in Sources */,
@@ -4064,6 +4074,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B309429016C08A08002A4934 /* HitTargetContainerUITests.swift in Sources */,
 				AFC5CD68D350725AF13C45FA /* SessionBriefingUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -4256,6 +4267,7 @@
 				6BF41D6029234EF212308E76 /* SourceGuardTests+ComposerKeyboard.swift in Sources */,
 				67AF96A035C3AC79731D40D7 /* SourceGuardTests+EventSurface.swift in Sources */,
 				51161336A7A9DF04A900998A /* SourceGuardTests+Hierarchy.swift in Sources */,
+				DD863D94F458A2EFA3B58956 /* SourceGuardTests+HitTargets.swift in Sources */,
 				2CF87B6F4FD10B6733D888A0 /* SourceGuardTests+PrimitiveShellAbsence.swift in Sources */,
 				B5A03DC51914C86B5BEEAE76 /* SourceGuardTests+ProductSurfaces.swift in Sources */,
 				7F6B3E93A6B58B6514AD0DF3 /* SourceGuardTests+Support.swift in Sources */,

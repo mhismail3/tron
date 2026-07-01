@@ -59,10 +59,11 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
+                    TronToolbarIconButton(
+                        systemImage: "checkmark",
+                        accessibilityLabel: "Close"
+                    ) {
+                        dismiss()
                     }
                 }
             }

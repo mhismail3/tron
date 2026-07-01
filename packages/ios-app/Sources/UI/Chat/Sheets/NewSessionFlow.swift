@@ -93,8 +93,11 @@ struct NewSessionFlow: View {
                             Text("Create")
                         }
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
                     }
                     .foregroundStyle(canCreateSession ? .tronEmerald : .tronTextDisabled)
+                    .tronHitTarget(.capsule)
                     .disabled(!canCreateSession)
                 }
             }
@@ -186,6 +189,7 @@ struct NewSessionFlow: View {
                         .tronEmerald,
                         tintOpacity: isSelected ? 0.3 : 0.15
                     )
+                    .tronHitTarget(.capsule)
                     .disabled(isCreating)
                 }
             }

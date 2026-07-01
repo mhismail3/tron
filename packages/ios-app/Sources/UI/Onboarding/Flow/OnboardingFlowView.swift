@@ -112,39 +112,41 @@ struct OnboardingFlowView: View {
             .animation(.snappy(duration: 0.28), value: state.currentStep)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    if allowsDismiss {
-                        Button(action: onDismiss) {
-                            Image(systemName: "xmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronEmerald)
+            .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .top) {
+                TronNavigationTopBarOverlay {
+                    ZStack {
+                        SheetTitle(title: state.currentStep.toolbarTitle, color: .tronEmerald)
+
+                        HStack(spacing: 8) {
+                            if allowsDismiss {
+                                TronToolbarIconButton(
+                                    systemImage: "xmark",
+                                    accessibilityLabel: "Dismiss onboarding",
+                                    action: onDismiss
+                                )
+                            }
+
+                            if state.canNavigateBackward {
+                                toolbarNavigationButton(
+                                    title: "Back",
+                                    systemImage: "chevron.left",
+                                    accessibilityLabel: "Back",
+                                    action: state.goBack
+                                )
+                            }
+
+                            Spacer()
+
+                            if state.canNavigateForward {
+                                toolbarNavigationButton(
+                                    title: "Next",
+                                    systemImage: "chevron.right",
+                                    accessibilityLabel: "Next",
+                                    action: state.goForward
+                                )
+                            }
                         }
-                        .accessibilityLabel("Dismiss onboarding")
-                    }
-
-                    if state.canNavigateBackward {
-                        toolbarNavigationButton(
-                            title: "Back",
-                            systemImage: "chevron.left",
-                            accessibilityLabel: "Back",
-                            action: state.goBack
-                        )
-                    }
-                }
-
-                ToolbarItem(placement: .principal) {
-                    SheetTitle(title: state.currentStep.toolbarTitle, color: .tronEmerald)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    if state.canNavigateForward {
-                        toolbarNavigationButton(
-                            title: "Next",
-                            systemImage: "chevron.right",
-                            accessibilityLabel: "Next",
-                            action: state.goForward
-                        )
                     }
                 }
             }
@@ -197,8 +199,11 @@ struct OnboardingFlowView: View {
             Label(title, systemImage: systemImage)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
         }
         .buttonStyle(.plain)
+        .tronHitTarget(.capsule)
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -435,12 +440,12 @@ private struct OnboardingLinkButton: View {
             .frame(maxWidth: width == nil ? .infinity : nil)
             .frame(width: width)
             .padding(.vertical, 12)
-            .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
         }
         .buttonStyle(.plain)
         .glassEffect(
             .regular.tint(Color.tronEmerald.opacity(tintOpacity)).interactive(),
             in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
         )
+        .tronHitTarget(.roundedRectangle(cornerRadius: TronSpacing.cornerMD))
     }
 }

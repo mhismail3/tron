@@ -275,18 +275,25 @@ struct ContentView: View {
             .geometryGroup()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: toggleSidebar) {
-                        Image(systemName: "sidebar.leading")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+            .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .top) {
+                TronNavigationTopBarOverlay {
+                    ZStack {
+                        Text("Tron")
+                            .font(TronTypography.sans(size: 20, weight: .bold))
                             .foregroundStyle(.tronEmerald)
+
+                        HStack {
+                            TronToolbarIconButton(
+                                systemImage: "sidebar.leading",
+                                accessibilityLabel: "Show sidebar",
+                                font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium),
+                                action: toggleSidebar
+                            )
+
+                            Spacer()
+                        }
                     }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Tron")
-                        .font(TronTypography.sans(size: 20, weight: .bold))
-                        .foregroundStyle(.tronEmerald)
                 }
             }
         }
@@ -428,8 +435,9 @@ struct WelcomePage: View {
             .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ShellToolbarContent(
+            .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .top) {
+                ShellTopBarOverlay(
                     title: "Tron",
                     accent: .tronEmerald,
                     actions: actions,

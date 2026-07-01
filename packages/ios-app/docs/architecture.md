@@ -234,6 +234,16 @@ shell composition; message-list scrolling, pagination, composer, and sheet
 rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
 extensions.
 
+Button-like glass, pill, circular, and card controls use shared hit-target
+primitives so the semantic tap region matches the visible control container.
+Toolbar glyph buttons use `TronToolbarIconButton`, which owns a fixed circular
+background and content shape instead of SwiftUI navigation toolbar chrome.
+Dashboard, chat, and onboarding top-bar controls render through
+`TronNavigationTopBarOverlay` so iOS cannot stretch visible circular controls
+into wider navigation toolbar platters. Rows, cards, pills, and
+onboarding/new-session navigation use `tronHitTarget` with the matching visible
+shape.
+
 ## Chat Visual Affordances
 
 The chat timeline owns only truthful local/session presentation state:

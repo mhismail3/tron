@@ -67,11 +67,11 @@ struct CompactActionSheetButton: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: CompactActionSheetLayout.tileMinHeight)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .sectionFill(accent, interactive: true)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .tronHitTarget(.roundedRectangle(cornerRadius: 12))
         .accessibilityLabel(title)
     }
 }
@@ -99,12 +99,13 @@ struct SheetDismissButton: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "checkmark")
-                .font(TronTypography.buttonSM)
-                .foregroundStyle(color)
+        TronToolbarIconButton(
+            systemImage: "checkmark",
+            accessibilityLabel: "Close",
+            color: color
+        ) {
+            dismiss()
         }
-        .accessibilityLabel("Close")
     }
 }
 
@@ -117,12 +118,13 @@ struct SheetCloseButton: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "xmark")
-                .font(TronTypography.buttonSM)
-                .foregroundStyle(color)
+        TronToolbarIconButton(
+            systemImage: "xmark",
+            accessibilityLabel: "Close",
+            color: color
+        ) {
+            dismiss()
         }
-        .accessibilityLabel("Close")
     }
 }
 
@@ -140,19 +142,14 @@ struct SheetPrimaryActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            if isBusy {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .tint(accent)
-            } else {
-                Image(systemName: icon)
-                    .font(TronTypography.buttonSM)
-                    .foregroundStyle(isEnabled ? accent : .tronTextMuted.opacity(0.5))
-            }
-        }
-        .disabled(!isEnabled || isBusy)
-        .accessibilityLabel(accessibilityLabel)
+        TronToolbarIconButton(
+            systemImage: icon,
+            accessibilityLabel: accessibilityLabel,
+            color: accent,
+            isBusy: isBusy,
+            isEnabled: isEnabled,
+            action: action
+        )
     }
 }
 
@@ -209,6 +206,7 @@ struct LoadingToolbarButton: View {
             }
             .foregroundStyle(isEnabled ? color : .tronTextMuted)
         }
+        .tronHitTarget(.capsule)
         .disabled(!isEnabled || isLoading)
     }
 }
