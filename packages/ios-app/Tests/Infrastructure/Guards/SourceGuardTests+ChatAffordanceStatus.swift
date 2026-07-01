@@ -78,10 +78,25 @@ extension SourceGuardTests {
         #expect(sidebar.contains("briefingRefreshKey"))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
         #expect(sidebar.contains(".task(id: briefingRefreshKey)"))
+        #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
+        #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
         #expect(!sidebar.contains("AgentCockpitSheet("))
+        #expect(!sidebar.contains("DashboardV2"))
         #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
         #expect(briefingViews.contains("Deep diagnostics remain in Servers"))
+        #expect(briefingViews.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"))
         #expect(!briefingViews.contains(#"SheetTitle(title: "Runtime Cockpit""#))
+
+        let retiredDashboardV2Paths = [
+            "Sources/UI/Chat/Shell/DashboardV2Components.swift",
+            "Sources/UI/Chat/Shell/DashboardV2LabSheet.swift",
+            "Sources/UI/Chat/Shell/DashboardV2View.swift",
+            "UITests/DashboardV2UITests.swift",
+            "Tests/Infrastructure/Guards/SourceGuardTests+DashboardV2.swift",
+        ]
+        for path in retiredDashboardV2Paths {
+            #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(path).path))
+        }
     }
 
     @Test("Chat pill sheet is canonically named Session Briefing")

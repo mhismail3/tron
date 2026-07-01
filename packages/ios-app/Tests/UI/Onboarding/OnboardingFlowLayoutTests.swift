@@ -36,7 +36,7 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         )
     }
 
-    func testOnboardingLaunchesUseOneLargeSheetPresenter() throws {
+    func testOnboardingLaunchesUseOneMediumSheetPresenter() throws {
         let app = try source(pathComponents: [
             "Sources",
             "App",
@@ -52,8 +52,12 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         ])
 
         XCTAssertTrue(
-            presentation.contains("static let detents: Set<PresentationDetent> = [.large]"),
-            "Onboarding and pairing should share one large sheet policy"
+            presentation.contains("static let detents: Set<PresentationDetent> = [.medium]"),
+            "Onboarding and pairing should share one medium sheet policy"
+        )
+        XCTAssertTrue(
+            presentation.contains("static let initialDetent: PresentationDetent = .medium"),
+            "Onboarding should initially present at the medium detent"
         )
         XCTAssertTrue(
             app.contains("private func presentOnboarding("),
@@ -75,9 +79,17 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents"),
             "The sheet modifier should consume the central onboarding detent policy"
         )
+        XCTAssertTrue(
+            app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"),
+            "Onboarding should use the compact iPad form now that the flow is medium-first"
+        )
         XCTAssertFalse(
             app.contains(".adaptivePresentationDetents([.medium, .large]"),
-            "Onboarding should not reintroduce a separate medium-detent connect flow"
+            "Onboarding should not reintroduce a mixed medium/large connect flow"
+        )
+        XCTAssertFalse(
+            app.contains("ipadSizing: .largeForm, phoneBackground: .clear"),
+            "Onboarding should not silently return to the large iPad form"
         )
         XCTAssertFalse(
             app.contains("onboardingComplete = false\n        return true"),

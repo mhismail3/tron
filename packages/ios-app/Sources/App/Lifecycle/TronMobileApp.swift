@@ -39,6 +39,11 @@ struct TronMobileApp: App {
     @State private var deepLinkScrollTarget: ScrollTarget?
 
     init() {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--tron-ui-test-onboarding-complete") {
+            UserDefaults.standard.set(true, forKey: OnboardingState.completionStorageKey)
+        }
+#endif
         TronFontLoader.registerFonts()
 
         // Register all event plugins for the new event system
@@ -149,7 +154,7 @@ struct TronMobileApp: App {
                 )
                 .environment(\.dependencies, container)
                 .environment(\.interactionPolicy, container.interactionPolicy)
-                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .largeForm, phoneBackground: .clear)
+                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)
                 .interactiveDismissDisabled(!onboardingComplete && !onboardingAllowsDismiss)
             }
             .onAppear(perform: syncOnboardingSheetPresentation)

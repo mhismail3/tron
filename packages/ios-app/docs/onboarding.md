@@ -3,7 +3,7 @@
 > Last verified: 2026-06-18 (IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IOSTC-3 pairing/auth custody and connection robustness; PCC-6 iOS source consolidation).
 
 The iOS app always opens to the normal session shell after initialization.
-`TronMobileApp` presents one large-detent onboarding sheet for first-run setup,
+`TronMobileApp` presents one medium-detent onboarding sheet for first-run setup,
 Server-page pairing, and pairing URLs. The sheet is a paged flow: welcome,
 install Tailscale on iPhone, install Tron Server on Mac, connect, then a short
 settings setup flow for workspace, credentials, services, and default model.
@@ -21,7 +21,7 @@ connected. The Mac installer page tells the user to install Tron on the Mac and
 use the pairing screen shown by the Mac app, then shows full-width actions with
 `Copy Link` above `Open Releases page`.
 
-When Settings launches onboarding for a new server, the same large sheet opens
+When Settings launches onboarding for a new server, the same medium sheet opens
 directly on the connect step with a top-left dismiss button and still requires
 a QR scan, pasted pairing link, or manual token before Connect is enabled. When
 Settings launches onboarding from an already paired server row, the connect page
@@ -85,7 +85,7 @@ handled in three places:
 
 - `TronMobileApp.onOpenURL` accepts QR/deep-link launches, fills the
   pairing form, jumps to the connect page, and presents through the same
-  large-detent onboarding presenter without mutating first-run completion state.
+  medium-detent onboarding presenter without mutating first-run completion state.
 - `QRCodeScannerSheet` scans the Mac QR code, parses the same URL shape,
   fills the connect page, and starts the same Connect validation after
   the camera sheet dismisses.

@@ -136,12 +136,14 @@ struct SessionSidebar: View {
             selectedSessionId = session.id
         } label: {
             SessionListRow(session: session, isSelected: isSelected)
+                .contentShape(shape)
                 .glassEffect(
                     .regular.tint(Color.tronEmerald.opacity(isSelected ? 0.22 : 0.14)).interactive(),
                     in: shape
                 )
         }
         .buttonStyle(.plain)
+        .contentShape(shape)
         .tag(session.id)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

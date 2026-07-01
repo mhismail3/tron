@@ -204,9 +204,9 @@ input so the old input does not make `canAddInput` fail.
 
 The shell mounts `ContentView` even before onboarding is complete.
 `TronMobileApp` owns one onboarding presenter for first-run setup, Server-page
-pairing, and pairing URLs. `OnboardingSheetPresentation` keeps that flow on the
-large detent so the connect form, QR-first pairing card, and setup pages share
-one geometry instead of splitting into separate medium/full variants. When
+pairing, and pairing URLs. `OnboardingSheetPresentation` keeps that flow on a
+medium detent with compact iPad sizing so the connect form, QR-first pairing
+card, and setup pages share one geometry. When
 `onboardingComplete` is true but no active paired server exists, the shell stays
 visible.
 
@@ -218,7 +218,7 @@ commit path stores bearer tokens only in `PairedServerTokenStore`, rolls back
 failed setup hydration by restoring the previous token or removing the
 candidate token, and forgetting a server deletes the Keychain token before
 removing metadata. Settings-launched repair for an existing paired server uses
-the same large onboarding sheet, stays on the connect step, and closes after a
+the same medium onboarding sheet, stays on the connect step, and closes after a
 successful token refresh when the host and port still match that local server;
 edited host/port values are treated as a new pairing and continue into setup.
 
@@ -233,24 +233,6 @@ when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
 shell composition; message-list scrolling, pagination, composer, and sheet
 rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
 extensions.
-
-## Dashboard 2.0 Proving Ground
-
-Dashboard 2.0 is a siloed surface reachable from the dashboard root's Tron logo
-selector. The classic dashboard, chat toolbar, onboarding flow, settings shell,
-and existing sheets stay on their original native chrome. The only classic-side
-hook is an invisible selector hit area over the dashboard logo; it does not turn
-the original toolbar logo into a custom glass button. Custom glass component
-work lives under `Sources/UI/Chat/Shell/DashboardV2*.swift`.
-
-The Dashboard 2.0 surface mirrors session dashboard data but owns its view
-stack, top chrome, circular glass controls, session rows, and component-lab
-bottom sheet. The lab overlay intentionally avoids SwiftUI `ToolbarItem`,
-`List`, and `.sheet` presentation chrome so design experiments can validate
-app-owned Liquid Glass geometry before any pattern graduates back to shipping
-screens. Small Dashboard 2.0 icon buttons stay independent glass surfaces
-instead of `GlassEffectContainer` groups because grouped tiny controls over-fuse
-and blur in the dark shell.
 
 ## Chat Visual Affordances
 

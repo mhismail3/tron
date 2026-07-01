@@ -5,7 +5,7 @@ import SwiftUI
 /// The app has several entry points into pairing: first-run bootstrap, Server
 /// settings repair/add-server, and pairing URLs. They must all present the same
 /// `OnboardingFlowView` with the same sheet geometry so the connect form does
-/// not become a separate medium-detent flow.
+/// not drift into a separate sheet policy.
 enum OnboardingLaunchSource: Equatable {
     case firstRun
     case serverSettings
@@ -24,8 +24,8 @@ enum OnboardingLaunchSource: Equatable {
 }
 
 enum OnboardingSheetPresentation {
-    static let detents: Set<PresentationDetent> = [.large]
-    static let initialDetent: PresentationDetent = .large
+    static let detents: Set<PresentationDetent> = [.medium]
+    static let initialDetent: PresentationDetent = .medium
 
     static func shouldAutoPresent(
         onboardingComplete: Bool,
