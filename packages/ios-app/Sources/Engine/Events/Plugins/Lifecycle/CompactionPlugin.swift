@@ -23,6 +23,8 @@ enum CompactionPlugin: DispatchableEventPlugin {
             let estimatedContextTokens: Int?
             let preservedTurns: Int?
             let summarizedTurns: Int?
+            let contextControlActionResourceId: String?
+            let contextControlSnapshotResourceId: String?
         }
     }
 
@@ -38,8 +40,36 @@ enum CompactionPlugin: DispatchableEventPlugin {
         let estimatedContextTokens: Int?
         let preservedTurns: Int?
         let summarizedTurns: Int?
+        let contextControlActionResourceId: String?
+        let contextControlSnapshotResourceId: String?
 
         var tokensSaved: Int { tokensBefore - tokensAfter }
+
+        init(
+            success: Bool,
+            tokensBefore: Int,
+            tokensAfter: Int,
+            compressionRatio: Double,
+            reason: String,
+            summary: String?,
+            estimatedContextTokens: Int?,
+            preservedTurns: Int?,
+            summarizedTurns: Int?,
+            contextControlActionResourceId: String? = nil,
+            contextControlSnapshotResourceId: String? = nil
+        ) {
+            self.success = success
+            self.tokensBefore = tokensBefore
+            self.tokensAfter = tokensAfter
+            self.compressionRatio = compressionRatio
+            self.reason = reason
+            self.summary = summary
+            self.estimatedContextTokens = estimatedContextTokens
+            self.preservedTurns = preservedTurns
+            self.summarizedTurns = summarizedTurns
+            self.contextControlActionResourceId = contextControlActionResourceId
+            self.contextControlSnapshotResourceId = contextControlSnapshotResourceId
+        }
     }
 
     // MARK: - Protocol Implementation
@@ -56,7 +86,9 @@ enum CompactionPlugin: DispatchableEventPlugin {
             summary: event.data.summary,
             estimatedContextTokens: event.data.estimatedContextTokens,
             preservedTurns: event.data.preservedTurns,
-            summarizedTurns: event.data.summarizedTurns
+            summarizedTurns: event.data.summarizedTurns,
+            contextControlActionResourceId: event.data.contextControlActionResourceId,
+            contextControlSnapshotResourceId: event.data.contextControlSnapshotResourceId
         )
     }
 

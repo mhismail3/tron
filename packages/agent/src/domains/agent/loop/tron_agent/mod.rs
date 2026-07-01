@@ -312,6 +312,10 @@ impl TronAgent {
         self.persister = persister;
     }
 
+    pub(crate) fn set_context_control(&mut self, deps: crate::domains::context_control::Deps) {
+        self.compaction.set_context_control(deps);
+    }
+
     pub fn set_sequence_counter(&mut self, counter: Arc<AtomicI64>) {
         self.sequence_counter = Some(counter);
     }

@@ -94,6 +94,11 @@ final class SheetCoordinator {
         present(.thinkingDetail(content))
     }
 
+    /// Show context-control overview or a specific action audit detail.
+    func showContextControl(actionResourceId: String? = nil) {
+        present(.contextControl(ContextControlSheetData(initialActionResourceId: actionResourceId)))
+    }
+
     /// Show capability invocation detail sheet
     func showCapabilityInvocationDetail(_ data: CapabilityInvocationData) {
         present(.capabilityInvocationDetail(data))

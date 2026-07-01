@@ -102,6 +102,11 @@ pub(super) fn validate_execute_context(
             | "notification_inspect"
             | "notification_mark_read"
             | "notification_mark_all_read"
+            | "context_control_snapshot"
+            | "context_control_compact"
+            | "context_control_clear"
+            | "context_control_action_list"
+            | "context_control_action_inspect"
     ) {
         require_current_session(invocation, operation)?;
     }
@@ -121,6 +126,8 @@ pub(super) fn validate_execute_context(
         | "memory_query_inspect"
         | "memory_decision_list"
         | "memory_decision_inspect"
+        | "context_control_action_list"
+        | "context_control_action_inspect"
         | "module_list"
         | "module_inspect"
         | "module_program_execution_status"
@@ -163,6 +170,9 @@ pub(super) fn validate_execute_context(
         | "notification_send"
         | "notification_mark_read"
         | "notification_mark_all_read"
+        | "context_control_snapshot"
+        | "context_control_compact"
+        | "context_control_clear"
         | "subagent_launch"
         | "subagent_cancel" => require_idempotency_key(invocation, operation),
         _ if requires_scheduler_idempotency(operation) => {

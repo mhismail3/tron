@@ -22,6 +22,7 @@ pub struct CompactionHandler {
     persister: Mutex<
         Option<Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>>,
     >,
+    context_control: Mutex<Option<crate::domains::context_control::Deps>>,
     trigger: Mutex<CompactionTrigger>,
 }
 
@@ -43,6 +44,7 @@ impl CompactionHandler {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             persister: Mutex::new(None),
+            context_control: Mutex::new(None),
             trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
         }
     }
@@ -54,6 +56,10 @@ impl CompactionHandler {
         >,
     ) {
         *self.persister.lock().unwrap() = Some(persister);
+    }
+
+    pub(crate) fn set_context_control(&self, deps: crate::domains::context_control::Deps) {
+        *self.context_control.lock().unwrap() = Some(deps);
     }
 
     pub fn is_compacting(&self) -> bool {
@@ -164,6 +170,7 @@ impl CompactionHandler {
         }
 
         let persister = self.persister.lock().unwrap().clone();
+        let context_control = self.context_control.lock().unwrap().clone();
         Ok(Self::emit_compaction_events(
             result,
             compaction_start,
@@ -172,6 +179,7 @@ impl CompactionHandler {
             session_id,
             emitter,
             reason,
+            context_control.as_ref(),
             persister.as_ref(),
             sequence_counter,
         )
@@ -189,6 +197,7 @@ impl CompactionHandler {
         session_id: &str,
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
+        context_control: Option<&crate::domains::context_control::Deps>,
         persister: Option<
             &Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
         >,
@@ -215,13 +224,49 @@ impl CompactionHandler {
                 let duration = compaction_start.elapsed().as_millis();
                 counter!("compaction_total", "status" => "success").increment(1);
                 histogram!("compaction_duration_seconds").record(duration as f64 / 1000.0);
+                let reason_label = compaction_reason_label(&reason);
 
-                if let Some(persister) = persister {
+                let persisted_with_context_control = if let (Some(deps), Some(persister)) =
+                    (context_control, persister)
+                {
+                    match crate::domains::context_control::service::record_runtime_compaction_action(
+                        deps,
+                        crate::domains::context_control::service::RuntimeCompactionInput {
+                            session_id,
+                            reason: &reason_label,
+                            summary: &compaction_result.summary,
+                            tokens_before,
+                            tokens_after,
+                            compression_ratio: compaction_result.compression_ratio,
+                            persister,
+                            sequence_counter,
+                            operation_at: chrono::Utc::now(),
+                        },
+                    )
+                    .await
+                    {
+                        Ok(()) => true,
+                        Err(error) => {
+                            warn!(
+                                session_id,
+                                error = %error,
+                                "failed to record automatic compaction context-control action"
+                            );
+                            false
+                        }
+                    }
+                } else {
+                    false
+                };
+
+                if !persisted_with_context_control && let Some(persister) = persister {
                     let payload = serde_json::json!({
                         "summary": compaction_result.summary,
-                        "tokensBefore": tokens_before,
-                        "tokensAfter": tokens_after,
-                        "reason": format!("{reason:?}")
+                        "originalTokens": tokens_before,
+                        "compactedTokens": tokens_after,
+                        "compressionRatio": compaction_result.compression_ratio,
+                        "reason": reason_label,
+                        "estimatedContextTokens": tokens_after
                     });
                     let _ = persister
                         .append_with_runtime_sequence(
@@ -269,6 +314,13 @@ fn is_effective_compaction_result(
     result: &crate::domains::agent::context::types::CompactionResult,
 ) -> bool {
     result.success && result.summarized_turns > 0 && result.tokens_after < result.tokens_before
+}
+
+fn compaction_reason_label(reason: &CompactionReason) -> String {
+    serde_json::to_value(reason)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("{reason:?}"))
 }
 
 fn emit_start(

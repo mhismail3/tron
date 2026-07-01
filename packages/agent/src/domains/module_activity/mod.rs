@@ -29,7 +29,7 @@ use crate::domains::registration::worker::{DomainRegistrationContext, DomainWork
 
 pub(crate) mod contract;
 mod projection;
-mod service;
+pub(crate) mod service;
 
 #[derive(Clone)]
 pub(crate) struct Deps {

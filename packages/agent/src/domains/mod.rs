@@ -12,7 +12,8 @@
 //! authoring records, inert module validation report records, metadata-only
 //! module install review-gate records, metadata-only module dependency request
 //! and policy records, inspect-only generic module activity cockpit projection,
-//! metadata-only web research request/review/source custody,
+//! read-only agent briefing projection, metadata-only web research
+//! request/review/source custody,
 //! durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
@@ -25,9 +26,11 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `agent_briefing` | Read-only chief-of-staff briefing projection |
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `approval` | Approval request/decision evidence and reusable freshness checks |
 //! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
+//! | `context_control` | Context snapshots, compact/clear action records, and epochs |
 //! | `device` | Server-owned device registration and redacted APNs token custody |
 //! | `memory` | Memory contract resources, prompt traces, and migration envelopes |
 //! | `media` | Durable media/voice-note resources with blob refs and redacted projections |
@@ -157,7 +160,11 @@
 //! security/license/runtime needs, removal plans, Cargo.toml/Cargo.lock parity
 //! evidence, decisions, and active policy metadata without package-manager
 //! execution, dependency restoration, manifest/lockfile mutation, raw package
-//! artifacts, network access, or runtime execution. Module lifecycle restoration is metadata-only
+//! artifacts, network access, or runtime execution. Context control is
+//! provider-safe context visibility and boundary custody: it stores bounded
+//! composition snapshots, compact/clear action records, and context epochs
+//! without raw prompt bodies, secrets, local paths, commands, logs, grant ids,
+//! authority ids, or hidden reasoning. Module lifecycle restoration is metadata-only
 //! state custody: it stores enable, disable, quarantine, and rollback
 //! transitions for current install-candidate decisions with fresh approval,
 //! rollback proof refs, current-version guards, and fail-closed
@@ -174,9 +181,14 @@
 //! from current module resource facts and returns bounded metadata summaries
 //! only, without raw payloads, local paths, command/log output,
 //! grant/authority ids, trace/invocation ids, activation, install, dependency
-//! restore, package-manager use, or network access. New domain behavior must add a
-//! contract, deps narrowing, handler binding, tests, and README/domain-doc
-//! updates together.
+//! restore, package-manager use, or network access. Agent briefing restoration
+//! is a read-only dashboard projection over existing module activity facts: it
+//! creates named narrative sections, empty states, and evidence labels for
+//! native UI without creating autonomy behavior, new durable state, diagnostics
+//! panels, raw ids, paths, commands, logs, prompt bodies, secrets, or
+//! provider-visible sensitive material. New domain behavior must add a contract,
+//! deps narrowing, handler binding, tests, and README/domain-doc updates
+//! together.
 //!
 //! ## Test Ownership
 //!
@@ -186,11 +198,13 @@
 //! integration/static tests rather than a broad domain root test.
 
 pub mod agent;
+pub mod agent_briefing;
 pub mod approval;
 pub mod auth;
 pub mod blob;
 pub mod capability;
 pub mod catalog_discovery;
+pub mod context_control;
 pub mod device;
 pub mod filesystem;
 pub mod git;

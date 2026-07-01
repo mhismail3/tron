@@ -126,6 +126,7 @@ pub struct DomainWorkerModule {
 #[cfg(test)]
 fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     let mut specs = super::agent::contract::capabilities()?;
+    specs.extend(super::agent_briefing::contract::capabilities()?);
     specs.extend(super::approval::contract::capabilities()?);
     specs.extend(super::auth::contract::capabilities()?);
     specs.extend(super::blob::capabilities()?);

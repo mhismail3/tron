@@ -377,6 +377,17 @@ fn is_module_runtime_operation(operation: &str) -> bool {
     )
 }
 
+fn is_context_control_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "context_control_snapshot"
+            | "context_control_compact"
+            | "context_control_clear"
+            | "context_control_action_list"
+            | "context_control_action_inspect"
+    )
+}
+
 fn is_module_program_execution_operation(operation: &str) -> bool {
     matches!(
         operation,
@@ -390,6 +401,7 @@ fn is_module_program_execution_operation(operation: &str) -> bool {
 fn is_module_safe_operation(operation: &str) -> bool {
     is_module_proposal_operation(operation)
         || is_module_runtime_operation(operation)
+        || is_context_control_operation(operation)
         || is_module_program_execution_operation(operation)
 }
 

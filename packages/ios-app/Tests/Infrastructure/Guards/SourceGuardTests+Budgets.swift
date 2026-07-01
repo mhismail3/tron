@@ -12,7 +12,7 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Sources/Engine/Transport/Clients",
                 minimumFileCount: 21,
-                maximumFileCount: 26,
+                maximumFileCount: 27,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: ["Repositories"],
                 requiredFiles: [

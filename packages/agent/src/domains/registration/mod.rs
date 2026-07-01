@@ -30,12 +30,12 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, approval, auth, blob, capability, catalog_discovery, device, filesystem, git,
-    import_history, import_preview, jobs, logs, media, memory, message, model, module_activity,
-    module_authoring, module_dependencies, module_install, module_lifecycle, module_registry,
-    module_runtime, module_validation, notifications, program_execution, prompt_artifacts,
-    repository_tree, scheduler, session, settings, subagents, system, tool_sources, transcription,
-    update_diagnostics, web, web_research, worker_lifecycle,
+    agent, agent_briefing, approval, auth, blob, capability, catalog_discovery, context_control,
+    device, filesystem, git, import_history, import_preview, jobs, logs, media, memory, message,
+    model, module_activity, module_authoring, module_dependencies, module_install,
+    module_lifecycle, module_registry, module_runtime, module_validation, notifications,
+    program_execution, prompt_artifacts, repository_tree, scheduler, session, settings, subagents,
+    system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -63,11 +63,13 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
     let deps = DomainRegistrationContext::from_context(ctx);
     let mut modules = vec![
         system::worker_module(&deps)?,
+        agent_briefing::worker_module(&deps)?,
         capability::worker_module(&deps)?,
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
         device::worker_module(&deps)?,
         notifications::worker_module(&deps)?,
+        context_control::worker_module(&deps)?,
         media::worker_module(&deps)?,
         import_history::worker_module(&deps)?,
         repository_tree::worker_module(&deps)?,

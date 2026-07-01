@@ -19,6 +19,7 @@
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
 //! the in-memory and SQLite persistence implementations.
 
+mod context_control_definitions;
 mod definitions;
 mod git_definitions;
 mod goal_definitions;
@@ -56,6 +57,10 @@ mod versions;
 mod web_definitions;
 mod web_research_definitions;
 
+pub(crate) use context_control_definitions::{
+    CONTEXT_CONTROL_ACTION_PAYLOAD_SCHEMA_VERSION, CONTEXT_CONTROL_EPOCH_PAYLOAD_SCHEMA_VERSION,
+    CONTEXT_CONTROL_SNAPSHOT_PAYLOAD_SCHEMA_VERSION,
+};
 pub use definitions::builtin_resource_type_definitions;
 pub(crate) use module_authoring_definitions::MODULE_PROPOSAL_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_dependencies_definitions::{

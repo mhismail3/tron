@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-27 (Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-01 (Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -11,8 +11,13 @@ is intentionally a shell: it pairs with a local Tron server, sends prompts,
 keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
-runtime surfaces emitted by the engine. The current user-facing Agent cockpit is
-a diagnostics surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
+runtime surfaces emitted by the engine. The session dashboard keeps its
+workspace-grouped chat list and adds a small Agent Briefing band backed by the
+server-owned `agent_briefing::overview` projection. The full Agent Briefing
+sheet presents activity, adaptation, active work, user-needed work, weak
+points/failures, memory/learned-state, and audit sections with drill-down
+evidence and empty/degraded states. The Runtime Cockpit remains a diagnostics
+surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
 surfaces live worker lifecycle catalog entries, capability discovery families,
 schema/health gaps, durable `catalog_discovery_report` history,
 package/resource status, confirmation-backed lifecycle actions, activity, and
@@ -26,6 +31,15 @@ being silently omitted from counts or verified/no-catalog summaries. The app
 does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
+Session Briefing is the first restored chat pill affordance: tapping the chat
+timeline/model pill opens a server-backed sheet with narrative session context
+status, model switching, a
+provider-safe Context Breakdown, compact, clear, read-only memory status, and
+recent context action audit detail. Its context section renders
+`context_control` records and timeline action refs through first-party
+`context_control::ui_*` wrappers; model/provider access remains behind
+`capability::execute`. It does not restore memory retain/edit, skill activation,
+source control, prompt-library controls, or raw logs.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
@@ -57,7 +71,8 @@ and matching database/event/settings/dependency work.
   selection.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
-- Grouped session dashboard with collapsible workspace headers and compact
+- Grouped session dashboard with a scoped Agent Briefing band, collapsible
+  workspace headers and compact
   inset liquid-glass one-line session rows, session creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
   recent session workspaces, and manual Mac paths, prompt composer with a
@@ -68,6 +83,9 @@ and matching database/event/settings/dependency work.
   rendering with quiet blank empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
+- Chat timeline/model pill Session Briefing sheet for model switching,
+  server-owned context snapshots, manual compact/clear actions, read-only memory
+  refs, and durable context action audit refs.
 - Servers diagnostics Runtime Cockpit row and sheet for catalog discovery,
   worker lifecycle catalog/resource state, package actions, server-owned module
   activity, and dynamic runtime surfaces. The primary chat shell does not mount
@@ -129,6 +147,8 @@ New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector 
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
+Context: ContextStatusPill/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
+Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
 Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> invocation-scoped module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 

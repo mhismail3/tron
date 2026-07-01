@@ -16,7 +16,8 @@ enum SystemEventProjection {
             role: .system,
             content: .contextCleared(
                 tokensBefore: parsed.tokensBefore,
-                tokensAfter: parsed.tokensAfter
+                tokensAfter: parsed.tokensAfter,
+                contextControlActionResourceId: parsed.contextControlActionResourceId
             ),
             timestamp: timestamp
         )
@@ -39,7 +40,8 @@ enum SystemEventProjection {
                 reason: parsed.reason,
                 summary: parsed.summary,
                 preservedTurns: parsed.preservedTurns,
-                summarizedTurns: parsed.summarizedTurns
+                summarizedTurns: parsed.summarizedTurns,
+                contextControlActionResourceId: parsed.contextControlActionResourceId
             ),
             timestamp: timestamp
         )

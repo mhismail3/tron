@@ -149,13 +149,52 @@ final class UnifiedEventTransformerMapsAndCompactionTests: UnifiedEventTransform
 
         XCTAssertNotNil(message)
         guard case .systemEvent(let systemEvent) = message?.content,
-              case .compaction(let tokensBefore, let tokensAfter, let reason, _, _, _) = systemEvent else {
+              case .compaction(let tokensBefore, let tokensAfter, let reason, _, _, _, _) = systemEvent else {
             XCTFail("Expected .compaction system event")
             return
         }
         XCTAssertEqual(tokensBefore, 1000)
         XCTAssertEqual(tokensAfter, 100)
         XCTAssertEqual(reason, "manual")
+    }
+
+    func testTransformCompactBoundaryPreservesContextControlActionRef() {
+        let event = rawEvent(
+            type: "compact.boundary",
+            payload: [
+                "originalTokens": AnyCodable(1000),
+                "compactedTokens": AnyCodable(100),
+                "reason": AnyCodable("manual"),
+                "contextControlActionResourceId": AnyCodable("resource:context-control-action:test")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        guard case .systemEvent(let systemEvent) = message?.content else {
+            XCTFail("Expected context-control-backed compaction event")
+            return
+        }
+        XCTAssertEqual(systemEvent.contextControlActionResourceId, "resource:context-control-action:test")
+    }
+
+    func testTransformContextClearedPreservesContextControlActionRef() {
+        let event = rawEvent(
+            type: "context.cleared",
+            payload: [
+                "tokensBefore": AnyCodable(1000),
+                "tokensAfter": AnyCodable(0),
+                "contextControlActionResourceId": AnyCodable("resource:context-control-action:clear")
+            ]
+        )
+
+        let message = UnifiedEventTransformer.transformPersistedEvent(event)
+
+        guard case .systemEvent(let systemEvent) = message?.content else {
+            XCTFail("Expected context-control-backed clear event")
+            return
+        }
+        XCTAssertEqual(systemEvent.contextControlActionResourceId, "resource:context-control-action:clear")
     }
 
     /// Strict wire contract: `reason` is required. Mirrors the Rust

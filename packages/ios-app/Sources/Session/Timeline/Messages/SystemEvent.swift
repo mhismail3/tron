@@ -15,9 +15,9 @@ enum SystemEvent: Equatable, Hashable {
     /// Context compaction started (in-progress spinner)
     case compactionInProgress(reason: String)
     /// Context was compacted to save tokens
-    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
+    case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?, contextControlActionResourceId: String?)
     /// Context was cleared
-    case contextCleared(tokensBefore: Int, tokensAfter: Int)
+    case contextCleared(tokensBefore: Int, tokensAfter: Int, contextControlActionResourceId: String?)
     /// A message was deleted from context
     case messageDeleted(targetType: String)
     /// Catching up to in-progress session
@@ -53,10 +53,10 @@ enum SystemEvent: Equatable, Hashable {
             return "Session interrupted"
         case .compactionInProgress:
             return "Compacting context..."
-        case .compaction(let before, let after, _, _, _, _):
+        case .compaction(let before, let after, _, _, _, _, _):
             let saved = before - after
             return "Context compacted: \(TokenFormatter.format(saved)) tokens saved"
-        case .contextCleared(let before, let after):
+        case .contextCleared(let before, let after, _):
             let freed = before - after
             return "Context cleared: \(TokenFormatter.format(freed)) tokens freed"
         case .messageDeleted(let targetType):
@@ -90,13 +90,13 @@ enum SystemEvent: Equatable, Hashable {
 
     /// Tokens before compaction (0 for in-progress)
     var compactionTokensBefore: Int {
-        if case .compaction(let before, _, _, _, _, _) = self { return before }
+        if case .compaction(let before, _, _, _, _, _, _) = self { return before }
         return 0
     }
 
     /// Tokens after compaction (0 for in-progress)
     var compactionTokensAfter: Int {
-        if case .compaction(_, let after, _, _, _, _) = self { return after }
+        if case .compaction(_, let after, _, _, _, _, _) = self { return after }
         return 0
     }
 
@@ -104,27 +104,40 @@ enum SystemEvent: Equatable, Hashable {
     var compactionReason: String {
         switch self {
         case .compactionInProgress(let reason): return reason
-        case .compaction(_, _, let reason, _, _, _): return reason
+        case .compaction(_, _, let reason, _, _, _, _): return reason
         default: return ""
         }
     }
 
     /// Compaction summary (nil for in-progress)
     var compactionSummary: String? {
-        if case .compaction(_, _, _, let summary, _, _) = self { return summary }
+        if case .compaction(_, _, _, let summary, _, _, _) = self { return summary }
         return nil
     }
 
     /// Number of turns preserved during compaction
     var compactionPreservedTurns: Int? {
-        if case .compaction(_, _, _, _, let preserved, _) = self { return preserved }
+        if case .compaction(_, _, _, _, let preserved, _, _) = self { return preserved }
         return nil
     }
 
     /// Number of turns summarized during compaction
     var compactionSummarizedTurns: Int? {
-        if case .compaction(_, _, _, _, _, let summarized) = self { return summarized }
+        if case .compaction(_, _, _, _, _, let summarized, _) = self { return summarized }
         return nil
+    }
+
+    /// Context-control action resource backing a context timeline pill, when
+    /// emitted by the primitive context-control path.
+    var contextControlActionResourceId: String? {
+        switch self {
+        case .compaction(_, _, _, _, _, _, let resourceId):
+            return resourceId
+        case .contextCleared(_, _, let resourceId):
+            return resourceId
+        default:
+            return nil
+        }
     }
 
     private static func reasoningLabel(_ level: String) -> String {

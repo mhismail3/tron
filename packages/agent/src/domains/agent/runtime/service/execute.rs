@@ -185,6 +185,11 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
 
     agent.set_abort_token(cancel_token);
     agent.set_persister(Some(persister.clone()));
+    agent.set_context_control(crate::domains::context_control::Deps {
+        engine_host: engine_host.clone(),
+        event_store: event_store.clone(),
+        session_manager: session_manager.clone(),
+    });
     agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
     let mut user_event_payload = build_user_event_payload(&prompt, attachments.as_deref());

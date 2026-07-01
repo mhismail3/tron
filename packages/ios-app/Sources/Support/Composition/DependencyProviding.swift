@@ -50,6 +50,9 @@ protocol DependencyProviding: AnyObject {
     /// Worker lifecycle repository for the agent cockpit.
     var workerLifecycleRepository: any WorkerLifecycleRepository { get }
 
+    /// Session context-control repository for Session Briefing.
+    var contextControlRepository: any ContextControlRepository { get }
+
     /// Protocol-typed dependency bundle for chat sessions.
     var chatSessionServices: ChatSessionServices { get }
 

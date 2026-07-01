@@ -29,6 +29,18 @@ struct ChatSheetTests {
         #expect(sheet1.id == "compaction")
     }
 
+    @Test("Context control sheet distinguishes overview and action detail")
+    func testContextControlSheetId() {
+        let overview = ChatSheet.contextControl(ContextControlSheetData())
+        let actionDetail = ChatSheet.contextControl(ContextControlSheetData(
+            initialActionResourceId: "resource:context-control-action:test"
+        ))
+
+        #expect(overview.id == "contextControl-overview")
+        #expect(actionDetail.id == "contextControl-resource:context-control-action:test")
+        #expect(overview != actionDetail)
+    }
+
     @Test("Thinking detail has consistent id regardless of content")
     func testThinkingDetailId() {
         let sheet1 = ChatSheet.thinkingDetail("content 1")
@@ -56,6 +68,7 @@ struct ChatSheetTests {
         let sheets: [ChatSheet] = [
             .settings,
             .compactionDetail(compactionData),
+            .contextControl(ContextControlSheetData()),
             .thinkingDetail("content"),
             .capabilityInvocationDetail(capabilityData),
             .providerErrorDetail(providerErrorData)
@@ -172,6 +185,32 @@ struct SheetCoordinatorTests {
         coordinator.present(.thinkingDetail("second"))
 
         #expect(coordinator.activeSheet == .thinkingDetail("second"))
+    }
+
+    @Test("Show context control presents overview")
+    func testShowContextControlOverview() {
+        let coordinator = SheetCoordinator()
+
+        coordinator.showContextControl()
+
+        if case .contextControl(let data) = coordinator.activeSheet {
+            #expect(data.initialActionResourceId == nil)
+        } else {
+            Issue.record("Expected context control overview sheet")
+        }
+    }
+
+    @Test("Show context control action presents detail")
+    func testShowContextControlActionDetail() {
+        let coordinator = SheetCoordinator()
+
+        coordinator.showContextControl(actionResourceId: "resource:context-control-action:test")
+
+        if case .contextControl(let data) = coordinator.activeSheet {
+            #expect(data.initialActionResourceId == "resource:context-control-action:test")
+        } else {
+            Issue.record("Expected context control action detail sheet")
+        }
     }
 
     @Test("Present replaces onDismiss callback")

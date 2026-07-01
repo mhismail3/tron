@@ -69,6 +69,14 @@ struct LocalErrorDetailData: Equatable, Hashable {
     let suggestion: String?
 }
 
+struct ContextControlSheetData: Equatable, Hashable {
+    let initialActionResourceId: String?
+
+    init(initialActionResourceId: String? = nil) {
+        self.initialActionResourceId = initialActionResourceId
+    }
+}
+
 /// Identifiable enum representing all possible sheets in ChatView.
 /// Uses single sheet(item:) modifier pattern per SwiftUI best practices.
 /// This avoids Swift compiler type-checking timeout with multiple .sheet() modifiers.
@@ -81,6 +89,7 @@ enum ChatSheet: Identifiable, Equatable {
     case thinkingDetail(String)
     case providerErrorDetail(ProviderErrorDetailData)
     case localErrorDetail(LocalErrorDetailData)
+    case contextControl(ContextControlSheetData)
 
     // Capability detail
     case capabilityInvocationDetail(CapabilityInvocationData)
@@ -100,6 +109,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "providerError"
         case .localErrorDetail(let data):
             return "localError-\(data.title)-\(data.message)"
+        case .contextControl(let data):
+            return "contextControl-\(data.initialActionResourceId ?? "overview")"
         }
     }
 
@@ -118,6 +129,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
         case (.localErrorDetail(let data1), .localErrorDetail(let data2)):
+            return data1 == data2
+        case (.contextControl(let data1), .contextControl(let data2)):
             return data1 == data2
         default:
             return false

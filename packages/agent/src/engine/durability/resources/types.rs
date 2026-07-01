@@ -205,6 +205,18 @@ pub const MODULE_LIFECYCLE_STATE_SCHEMA_ID: &str = "tron.resource.module_lifecyc
 pub const MODULE_RUNTIME_STATE_KIND: &str = "module_runtime_state";
 /// Built-in supervised module runtime state resource schema id.
 pub const MODULE_RUNTIME_STATE_SCHEMA_ID: &str = "tron.resource.module_runtime_state.v1";
+/// Built-in context-control snapshot resource kind.
+pub const CONTEXT_CONTROL_SNAPSHOT_KIND: &str = "context_control_snapshot";
+/// Built-in context-control snapshot resource schema id.
+pub const CONTEXT_CONTROL_SNAPSHOT_SCHEMA_ID: &str = "tron.resource.context_control_snapshot.v1";
+/// Built-in context-control action resource kind.
+pub const CONTEXT_CONTROL_ACTION_KIND: &str = "context_control_action";
+/// Built-in context-control action resource schema id.
+pub const CONTEXT_CONTROL_ACTION_SCHEMA_ID: &str = "tron.resource.context_control_action.v1";
+/// Built-in context-control epoch resource kind.
+pub const CONTEXT_CONTROL_EPOCH_KIND: &str = "context_control_epoch";
+/// Built-in context-control epoch resource schema id.
+pub const CONTEXT_CONTROL_EPOCH_SCHEMA_ID: &str = "tron.resource.context_control_epoch.v1";
 /// Built-in metadata-only web research request resource kind.
 pub const WEB_RESEARCH_REQUEST_KIND: &str = "web_research_request";
 /// Built-in metadata-only web research request resource schema id.

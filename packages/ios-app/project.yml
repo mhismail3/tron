@@ -108,6 +108,21 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
 
+  TronMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+        createIntermediateGroups: true
+        optional: true
+    dependencies:
+      - target: TronMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TronMobile
+
 schemes:
   Tron:
     build:
@@ -146,6 +161,25 @@ schemes:
       config: Beta
       targets:
         - TronMobileTests
+    profile:
+      config: Beta
+    analyze:
+      config: Beta
+    archive:
+      config: Beta
+
+  Tron UI Validation:
+    build:
+      targets:
+        TronMobile: all
+        TronShareExtension: all
+        TronMobileUITests: [test]
+    run:
+      config: Beta
+    test:
+      config: Beta
+      targets:
+        - TronMobileUITests
     profile:
       config: Beta
     analyze:

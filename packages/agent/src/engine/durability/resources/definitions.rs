@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use super::context_control_definitions::context_control_resource_type_definitions;
 use super::git_definitions::git_resource_type_definitions;
 use super::goal_definitions::goal_question_resource_type_definitions;
 use super::import_history_definitions::import_history_resource_type_definitions;
@@ -683,6 +684,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(module_dependencies_resource_type_definitions());
     definitions.extend(module_lifecycle_resource_type_definitions());
     definitions.extend(module_runtime_resource_type_definitions());
+    definitions.extend(context_control_resource_type_definitions());
     definitions.extend(web_research_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions.extend(media_resource_type_definitions());

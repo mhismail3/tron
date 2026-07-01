@@ -382,6 +382,7 @@ mod session_event_tests {
                 assert_eq!(range.to, "evt-10");
                 assert_eq!(p.original_tokens, 50000);
                 assert_eq!(p.reason, "threshold_exceeded");
+                assert!(p.context_control_action_resource_id.is_none());
             }
             other => panic!("expected CompactBoundary, got {other:?}"),
         }

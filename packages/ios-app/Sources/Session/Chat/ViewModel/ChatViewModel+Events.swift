@@ -244,7 +244,8 @@ extension ChatViewModel {
         // Add context cleared notification pill to chat
         let clearedMessage = ChatMessage.contextCleared(
             tokensBefore: pluginResult.tokensBefore,
-            tokensAfter: pluginResult.tokensAfter
+            tokensAfter: pluginResult.tokensAfter,
+            contextControlActionResourceId: pluginResult.contextControlActionResourceId
         )
         appendToMessages(clearedMessage)
 

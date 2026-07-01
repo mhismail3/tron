@@ -46,7 +46,10 @@ extension ChatView {
                             viewModel.appendLocalError(dedupKey: "attachment.error.\(title)", title: title, message: message)
                         },
                         onMicTap: viewModel.toggleRecording,
-                        onHistoryNavigate: { newText in viewModel.inputText = newText }
+                        onHistoryNavigate: { newText in viewModel.inputText = newText },
+                        onContextTap: {
+                            sheetCoordinator.showContextControl()
+                        }
                     )
                 )
                 .id(sessionId)
@@ -69,6 +72,8 @@ extension ChatView {
                 preservedTurns: preservedTurns,
                 summarizedTurns: summarizedTurns
             )
+        case .contextControlAction(let resourceId):
+            sheetCoordinator.showContextControl(actionResourceId: resourceId)
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
         case .cancelCapabilityInvocation(let id):

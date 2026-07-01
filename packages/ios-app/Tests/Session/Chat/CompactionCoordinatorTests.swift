@@ -110,7 +110,7 @@ final class CompactionCoordinatorTests: XCTestCase {
 
         // Should mutate in-place (same message count)
         XCTAssertEqual(mockContext.messages.count, 1)
-        if case .systemEvent(.compaction(let before, let after, _, _, _, _)) = mockContext.messages[0].content {
+        if case .systemEvent(.compaction(let before, let after, _, _, _, _, _)) = mockContext.messages[0].content {
             XCTAssertEqual(before, 10000)
             XCTAssertEqual(after, 5000)
         } else {
@@ -166,6 +166,22 @@ final class CompactionCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.contextState.lastTurnInputTokens, 29000)
     }
 
+    func testCompactionStoresContextControlActionRefInTimelinePill() {
+        let result = makeCompactionResult(
+            tokensBefore: 10000,
+            tokensAfter: 5000,
+            contextControlActionResourceId: "resource:context-control-action:test"
+        )
+
+        coordinator.handleCompaction(result, context: mockContext)
+
+        guard case .systemEvent(let event) = mockContext.messages.first?.content else {
+            XCTFail("Expected compaction system event")
+            return
+        }
+        XCTAssertEqual(event.contextControlActionResourceId, "resource:context-control-action:test")
+    }
+
     // MARK: - Helpers
 
     private func makeCompactionResult(
@@ -173,7 +189,8 @@ final class CompactionCoordinatorTests: XCTestCase {
         tokensBefore: Int,
         tokensAfter: Int,
         summary: String = "Summarized conversation",
-        estimatedContextTokens: Int? = nil
+        estimatedContextTokens: Int? = nil,
+        contextControlActionResourceId: String? = nil
     ) -> CompactionPlugin.Result {
         CompactionPlugin.Result(
             success: success,
@@ -184,7 +201,8 @@ final class CompactionCoordinatorTests: XCTestCase {
             summary: summary,
             estimatedContextTokens: estimatedContextTokens,
             preservedTurns: 3,
-            summarizedTurns: 5
+            summarizedTurns: 5,
+            contextControlActionResourceId: contextControlActionResourceId
         )
     }
 }

@@ -69,13 +69,13 @@ extension ChatMessage {
     }
 
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) -> ChatMessage {
-        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil, preservedTurns: Int? = nil, summarizedTurns: Int? = nil, contextControlActionResourceId: String? = nil) -> ChatMessage {
+        ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns, contextControlActionResourceId: contextControlActionResourceId))
     }
 
     /// In-chat notification for context clearing
-    static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> ChatMessage {
-        ChatMessage(role: .system, content: .contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
+    static func contextCleared(tokensBefore: Int, tokensAfter: Int, contextControlActionResourceId: String? = nil) -> ChatMessage {
+        ChatMessage(role: .system, content: .contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter, contextControlActionResourceId: contextControlActionResourceId))
     }
 
     /// In-chat notification for message deletion from context

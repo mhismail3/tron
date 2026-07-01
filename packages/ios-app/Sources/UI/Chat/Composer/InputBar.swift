@@ -252,7 +252,8 @@ struct InputBar: View {
                 contextPercentage: config.contextPercentage,
                 modelName: config.currentModelInfo?.name,
                 hasAppeared: hasAppeared,
-                readOnly: config.readOnly
+                readOnly: config.readOnly,
+                onTap: actions.onContextTap
             )
             .opacity(shouldShowStatusPills ? 1 : 0)
         }

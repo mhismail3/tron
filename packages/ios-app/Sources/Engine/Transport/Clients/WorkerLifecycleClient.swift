@@ -64,6 +64,20 @@ final class WorkerLifecycleClient: EngineDomainClient {
         )
     }
 
+    func agentBriefingOverview(
+        limit: UInt64 = 12,
+        sessionId: String? = nil,
+        workspaceId: String? = nil
+    ) async throws -> AgentBriefingOverviewDTO {
+        _ = try requireTransport().requireConnection()
+
+        return try await invokeRead(
+            "agent_briefing::overview",
+            AgentBriefingOverviewRequestDTO(limit: limit),
+            context: invocationContext(sessionId: sessionId, workspaceId: workspaceId)
+        )
+    }
+
     func proposePackageChange(
         manifest: [String: AnyCodable],
         summary: String,

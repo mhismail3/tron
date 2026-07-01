@@ -295,6 +295,7 @@ struct CompactionNotificationView: View {
 struct ContextClearedNotificationView: View {
     let tokensBefore: Int
     let tokensAfter: Int
+    var onTap: (() -> Void)? = nil
 
     private var tokensFreed: Int {
         tokensBefore - tokensAfter
@@ -308,7 +309,7 @@ struct ContextClearedNotificationView: View {
     }
 
     var body: some View {
-        NotificationPill(tint: .tronSky) {
+        NotificationPill(tint: .tronSky, interactive: onTap != nil, onTap: onTap) {
             HStack(spacing: 8) {
                 Image(systemName: "xmark.circle.fill")
                     .font(TronTypography.codeSM)

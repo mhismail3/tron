@@ -95,6 +95,9 @@ pub(super) fn authorize_with_grant(
     if is_module_runtime_invocation(invocation) {
         ensure_module_runtime_grant_is_explicit(grant)?;
     }
+    if is_context_control_invocation(invocation) {
+        ensure_context_control_grant_is_explicit(grant, invocation)?;
+    }
     if is_module_program_execution_invocation(invocation) {
         ensure_module_program_execution_grant_is_explicit(grant, invocation)?;
     }
@@ -488,6 +491,43 @@ fn ensure_memory_module_grant_is_explicit(
     }
 }
 
+fn ensure_context_control_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "context-control operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "context-control operations")?;
+    let session_id = invocation
+        .causal_context
+        .session_id
+        .as_deref()
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(
+                "context-control operations require session context".to_owned(),
+            )
+        })?;
+    let session_selector = format!("session:{session_id}");
+    if !grant
+        .resource_selectors
+        .iter()
+        .any(|selector| selector == &session_selector)
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "context-control operations require exact {session_selector} selector"
+        )));
+    }
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("context_control_action_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["contextControlActionResourceId"],
+            "context-control action inspect",
+        ),
+        _ => Ok(()),
+    }
+}
+
 fn ensure_no_wildcard_grant_items(grant: &EngineGrant, label: &str) -> Result<()> {
     for (item_label, items) in [
         (
@@ -612,6 +652,7 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "recordResourceId",
         "queryResourceId",
         "decisionResourceId",
+        "contextControlActionResourceId",
         "moduleManifestResourceId",
         "moduleProposalResourceId",
         "moduleValidationReportResourceId",
@@ -883,6 +924,16 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
+        Some("context_control_action_list" | "context_control_action_inspect") => {
+            push_unique(&mut scopes, "context_control.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some("context_control_snapshot" | "context_control_compact" | "context_control_clear") => {
+            push_unique(&mut scopes, "context_control.read");
+            push_unique(&mut scopes, "context_control.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
         Some("module_program_execution_start") => {
             push_unique(&mut scopes, "module_runtime.read");
             push_unique(&mut scopes, "module_runtime.write");
@@ -1118,6 +1169,17 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("module_runtime_list" | "module_runtime_inspect" | "module_runtime_cancel") => {
             vec!["module_runtime_state"]
         }
+        Some(
+            "context_control_snapshot"
+            | "context_control_compact"
+            | "context_control_clear"
+            | "context_control_action_list"
+            | "context_control_action_inspect",
+        ) => vec![
+            "context_control_snapshot",
+            "context_control_action",
+            "context_control_epoch",
+        ],
         Some("module_program_execution_start") => vec![
             "module_runtime_state",
             "module_lifecycle_state",
@@ -1280,6 +1342,20 @@ fn is_module_runtime_invocation(invocation: &Invocation) -> bool {
                     | "module_runtime_list"
                     | "module_runtime_inspect"
                     | "module_runtime_cancel"
+            )
+        )
+}
+
+fn is_context_control_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "context_control_snapshot"
+                    | "context_control_compact"
+                    | "context_control_clear"
+                    | "context_control_action_list"
+                    | "context_control_action_inspect"
             )
         )
 }
@@ -1465,6 +1541,16 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         }
         Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
         Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),
+        Some("context_control_snapshot") => push_unique(&mut kinds, "context_control_snapshot"),
+        Some("context_control_compact") => {
+            push_unique(&mut kinds, "context_control_snapshot");
+            push_unique(&mut kinds, "context_control_action");
+        }
+        Some("context_control_clear") => {
+            push_unique(&mut kinds, "context_control_snapshot");
+            push_unique(&mut kinds, "context_control_action");
+            push_unique(&mut kinds, "context_control_epoch");
+        }
         Some("module_program_execution_start") => {
             push_unique(&mut kinds, "module_runtime_state");
             push_unique(&mut kinds, "program_execution_record");
@@ -2557,6 +2643,174 @@ mod tests {
                 &test_invocation(json!({"operation": "module_runtime_request"})),
             ) {
                 Ok(()) => panic!("module runtime {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn context_control_operations_require_exact_session_and_action_authority() {
+        let function = test_execute_function();
+        let read_grant = test_grant(
+            &[
+                "capability.execute",
+                "context_control.read",
+                "resource.read",
+            ],
+            &[
+                "context_control_snapshot",
+                "context_control_action",
+                "context_control_epoch",
+            ],
+            &[
+                "kind:context_control_snapshot",
+                "kind:context_control_action",
+                "kind:context_control_epoch",
+                "session:session-update-diagnostic-selector",
+                "resource:context_control_action:first",
+            ],
+        );
+
+        authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({"operation": "context_control_action_list"})),
+        )
+        .expect("context-control action list exact grant accepted");
+
+        authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "context_control_action_inspect",
+                "contextControlActionResourceId": "context_control_action:first"
+            })),
+        )
+        .expect("context-control action inspect exact grant accepted");
+
+        let denied = authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "context_control_action_inspect",
+                "contextControlActionResourceId": "context_control_action:second"
+            })),
+        )
+        .expect_err("same-kind context action without exact selector denied")
+        .to_string();
+        assert!(
+            denied.contains(
+                "requires exact selector for contextControlActionResourceId resource context_control_action:second"
+            ),
+            "{denied}"
+        );
+
+        let missing_session_selector = test_grant(
+            &[
+                "capability.execute",
+                "context_control.read",
+                "context_control.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &[
+                "context_control_snapshot",
+                "context_control_action",
+                "context_control_epoch",
+            ],
+            &[
+                "kind:context_control_snapshot",
+                "kind:context_control_action",
+                "kind:context_control_epoch",
+            ],
+        );
+        let error = authorize_with_grant(
+            &missing_session_selector,
+            &function,
+            &test_invocation(json!({"operation": "context_control_compact"})),
+        )
+        .expect_err("missing exact session selector denied")
+        .to_string();
+        assert!(
+            error.contains(
+                "context-control operations require exact session:session-update-diagnostic-selector selector"
+            ),
+            "{error}"
+        );
+
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "context_control.read", "resource.read"],
+                    &[
+                        "context_control_snapshot",
+                        "context_control_action",
+                        "context_control_epoch",
+                    ],
+                    &[
+                        "kind:context_control_snapshot",
+                        "kind:context_control_action",
+                        "kind:context_control_epoch",
+                        "session:session-update-diagnostic-selector",
+                    ],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "context_control.read",
+                        "resource.read",
+                    ],
+                    &[
+                        "*",
+                        "context_control_snapshot",
+                        "context_control_action",
+                        "context_control_epoch",
+                    ],
+                    &[
+                        "kind:context_control_snapshot",
+                        "kind:context_control_action",
+                        "kind:context_control_epoch",
+                        "session:session-update-diagnostic-selector",
+                    ],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "context_control.read",
+                        "resource.read",
+                    ],
+                    &[
+                        "context_control_snapshot",
+                        "context_control_action",
+                        "context_control_epoch",
+                    ],
+                    &[
+                        "*",
+                        "kind:context_control_snapshot",
+                        "kind:context_control_action",
+                        "kind:context_control_epoch",
+                        "session:session-update-diagnostic-selector",
+                    ],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "context_control_action_list"})),
+            ) {
+                Ok(()) => panic!("context-control {name} wildcard grant must be denied"),
                 Err(error) => error.to_string(),
             };
             assert!(error.contains(expected), "{error}");

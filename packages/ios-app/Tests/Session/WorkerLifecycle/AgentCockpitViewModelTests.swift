@@ -287,7 +287,7 @@ struct AgentCockpitViewModelTests {
         )
     }
 
-    fileprivate static func moduleActivityOverview() -> ModuleActivityOverviewDTO {
+    static func moduleActivityOverview() -> ModuleActivityOverviewDTO {
         ModuleActivityOverviewDTO(
             schemaVersion: "tron.module_activity.overview.v1",
             operation: "module_activity_overview",
@@ -343,6 +343,72 @@ struct AgentCockpitViewModelTests {
             )
         )
     }
+
+    static func agentBriefingOverview() -> AgentBriefingOverviewDTO {
+        AgentBriefingOverviewDTO(
+            schemaVersion: "tron.agent_briefing.overview.v1",
+            operation: "agent_briefing_overview",
+            summary: AgentBriefingSummaryDTO(
+                title: "Tron has active work",
+                detail: "1 active, 0 waiting on review, 0 blocked, 1 total records.",
+                activeWorkCount: 1,
+                needsYouCount: 0,
+                weakPointCount: 0,
+                activityCount: 1,
+                degraded: false
+            ),
+            sections: [
+                AgentBriefingSectionDTO(
+                    id: "active_work",
+                    title: "Active work",
+                    question: "What is currently in motion?",
+                    narrative: "Active module runtime work is in progress.",
+                    items: [
+                        AgentBriefingItemDTO(
+                            id: "briefing-item-1",
+                            title: "Active module runtime",
+                            detail: "Server-owned projection",
+                            status: "active",
+                            evidence: AgentBriefingEvidenceDTO(
+                                label: "Evidence 1",
+                                resourceKind: "module_runtime_state",
+                                updatedAt: "2026-06-20T12:00:00Z",
+                                providerSafe: true
+                            )
+                        )
+                    ],
+                    emptyState: "No active work is in progress.",
+                    drilldownAvailable: true
+                )
+            ],
+            scope: AgentBriefingScopeDTO(
+                sessionScoped: true,
+                workspaceScoped: false,
+                exactScopeRequired: true,
+                payloadScopeTrusted: false
+            ),
+            projection: AgentBriefingProjectionPolicyDTO(
+                allowlist: "agent_briefing_metadata_redacted_v1",
+                serverOwnedTruth: true,
+                projectionOnly: true,
+                autonomyBehaviorCreated: false,
+                metadataOnly: true,
+                rawPayloadsReturned: false,
+                rawCommandsReturned: false,
+                rawLogsReturned: false,
+                promptBodiesReturned: false,
+                fileContentsReturned: false,
+                absolutePathsReturned: false,
+                grantIdsReturned: false,
+                authorityIdsReturned: false,
+                traceIdsReturned: false,
+                invocationIdsReturned: false,
+                tokenLikeMaterialReturned: false,
+                boundedItems: true,
+                sourceProjection: "module_activity_overview"
+            )
+        )
+    }
 }
 
 @MainActor
@@ -358,11 +424,15 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
     var listErrorsByKind: [WorkerLifecycleResourceKind: Error] = [:]
     var inspections: [String: ResourceInspectResultDTO] = [:]
     var moduleActivity = AgentCockpitViewModelTests.moduleActivityOverview()
+    var agentBriefing = AgentCockpitViewModelTests.agentBriefingOverview()
 
     var overviewCallCount = 0
     var moduleActivityOverviewCallCount = 0
     var lastModuleActivitySessionId: String?
     var lastModuleActivityWorkspaceId: String?
+    var agentBriefingOverviewCallCount = 0
+    var lastAgentBriefingSessionId: String?
+    var lastAgentBriefingWorkspaceId: String?
     var listedKinds: [WorkerLifecycleResourceKind] = []
     var inspectCallIds: [String] = []
     var installedManifest: [String: AnyCodable]?
@@ -403,6 +473,17 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         lastModuleActivitySessionId = sessionId
         lastModuleActivityWorkspaceId = workspaceId
         return moduleActivity
+    }
+
+    func agentBriefingOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> AgentBriefingOverviewDTO {
+        agentBriefingOverviewCallCount += 1
+        lastAgentBriefingSessionId = sessionId
+        lastAgentBriefingWorkspaceId = workspaceId
+        return agentBriefing
     }
 
     func proposePackageChange(

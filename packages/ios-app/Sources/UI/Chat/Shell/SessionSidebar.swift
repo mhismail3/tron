@@ -9,6 +9,8 @@ struct SessionSidebar: View {
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
     @State private var workspaceExpansion = SessionListWorkspaceExpansion()
+    @State private var agentBriefing = AgentBriefingViewModel()
+    @State private var showAgentBriefing = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     let onNewSession: () -> Void
@@ -19,9 +21,32 @@ struct SessionSidebar: View {
         SessionListWorkspaceGroup.groups(from: eventStoreManager.sortedSessions)
     }
 
+    private var briefingSessionId: String? {
+        selectedSessionId ?? eventStoreManager.sortedSessions.first?.id
+    }
+
+    private var briefingRefreshKey: AgentBriefingDashboardRefreshKey {
+        AgentBriefingDashboardRefreshKey(
+            sessionId: briefingSessionId,
+            isConnected: dependencies.connectionRepository.connectionState.isConnected
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
+                Section {
+                    AgentBriefingDashboardBand(
+                        state: agentBriefing.state,
+                        isRefreshing: agentBriefing.isRefreshing
+                    ) {
+                        showAgentBriefing = true
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(SessionListLayout.briefingInsets)
+                }
+
                 ForEach(workspaceGroups) { group in
                     Section {
                         if workspaceExpansion.isExpanded(group.id) {
@@ -72,11 +97,33 @@ struct SessionSidebar: View {
         .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-        .toolbar(removing: .sidebarToggle)
+                .toolbar(removing: .sidebarToggle)
         .toolbar {
             ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
         }
+        .task(id: briefingRefreshKey) {
+            await refreshBriefing()
+        }
+        .sheet(isPresented: $showAgentBriefing) {
+            AgentBriefingSheet(
+                viewModel: agentBriefing,
+                repository: dependencies.workerLifecycleRepository,
+                sessionId: briefingSessionId,
+                workspaceId: nil,
+                connectionState: dependencies.connectionRepository.connectionState
+            )
+        }
     }
+
+    private func refreshBriefing() async {
+        await agentBriefing.refresh(
+            repository: dependencies.workerLifecycleRepository,
+            sessionId: briefingSessionId,
+            workspaceId: nil,
+            connectionState: dependencies.connectionRepository.connectionState
+        )
+    }
+
     @ViewBuilder
     private func sessionRow(_ session: CachedSession) -> some View {
         let isSelected = session.id == selectedSessionId
@@ -118,4 +165,9 @@ struct SessionSidebar: View {
             .tint(.tronEmerald)
         }
     }
+}
+
+private struct AgentBriefingDashboardRefreshKey: Equatable {
+    let sessionId: String?
+    let isConnected: Bool
 }

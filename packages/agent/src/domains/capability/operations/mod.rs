@@ -24,6 +24,7 @@ use tracing::{info, warn};
 mod catalog;
 mod common;
 mod context;
+mod context_control;
 mod device;
 mod filesystem;
 mod git;
@@ -69,6 +70,10 @@ use common::{
 };
 use common::{error_capability_result, observe, result_value, unsupported_operation};
 use context::validate_execute_context;
+use context_control::{
+    context_control_action_inspect, context_control_action_list, context_control_clear,
+    context_control_compact, context_control_snapshot,
+};
 use device::{device_inspect, device_list, device_register, device_unregister};
 use filesystem::{
     filesystem_apply_patch, filesystem_diff, filesystem_edit, filesystem_find, filesystem_glob,
@@ -330,6 +335,17 @@ async fn execute_operation(
         "memory_query_inspect" => memory_query_inspect(invocation, deps).await?,
         "memory_decision_list" => memory_decision_list(invocation, deps).await?,
         "memory_decision_inspect" => memory_decision_inspect(invocation, deps).await?,
+        "context_control_snapshot" => {
+            context_control_snapshot(invocation, deps, operation_at).await?
+        }
+        "context_control_compact" => {
+            context_control_compact(invocation, deps, operation_at).await?
+        }
+        "context_control_clear" => context_control_clear(invocation, deps, operation_at).await?,
+        "context_control_action_list" => context_control_action_list(invocation, deps).await?,
+        "context_control_action_inspect" => {
+            context_control_action_inspect(invocation, deps).await?
+        }
         "media_create" => media_create(invocation, deps, operation_at).await?,
         "media_list" => media_list(invocation, deps).await?,
         "media_inspect" => media_inspect(invocation, deps).await?,

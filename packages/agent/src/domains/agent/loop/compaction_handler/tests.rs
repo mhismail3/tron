@@ -34,6 +34,7 @@ async fn skipped_event_reports_no_durable_reduction() {
         CompactionReason::ThresholdExceeded,
         None,
         None,
+        None,
     )
     .await;
     assert!(!success);

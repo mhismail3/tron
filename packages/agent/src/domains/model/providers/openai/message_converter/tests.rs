@@ -603,6 +603,14 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("deterministic retrieval and prompt-inclusion evidence"));
     assert!(result.contains("bounded preview snippets only when policy allowed"));
     assert!(result.contains("never raw body refs"));
+    assert!(result.contains("context_control_snapshot"));
+    assert!(result.contains("context_control_compact"));
+    assert!(result.contains("context_control_clear"));
+    assert!(result.contains("context_control_action_list"));
+    assert!(result.contains("context_control_action_inspect"));
+    assert!(result.contains("contextControlActionResourceId"));
+    assert!(result.contains("current-session context snapshots"));
+    assert!(result.contains("hidden system/soul prompt text"));
     for non_goal in [
         "web_search",
         "web_sitemap_traverse",

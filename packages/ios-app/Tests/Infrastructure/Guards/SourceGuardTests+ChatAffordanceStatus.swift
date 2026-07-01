@@ -25,6 +25,7 @@ extension SourceGuardTests {
         let chatSources = [
             "Sources/UI/Chat/Shell/ChatView.swift",
             "Sources/UI/Chat/Shell/ChatSheetContent.swift",
+            "Sources/UI/Chat/Shell/SessionSidebar.swift",
             "Sources/UI/Chat/Shell/ChatSheetModifier.swift",
             "Sources/Session/Chat/Coordinators/SheetCoordinator.swift",
             "Sources/Session/Chat/State/ChatSheet.swift",
@@ -57,6 +58,96 @@ extension SourceGuardTests {
         )
         #expect(serverSettings.contains("ConnectionSettingsDiagnosticsSheet"))
         #expect(serverSettings.contains("AgentCockpitSheet("))
+    }
+
+    @Test("Dashboard allows high-signal agent briefing without fixed cockpit")
+    func testDashboardAllowsAgentBriefingBand() throws {
+        let iosRoot = iosAppRoot()
+        let sidebar = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
+            encoding: .utf8
+        )
+        let briefingViews = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentBriefing/AgentBriefingViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(sidebar.contains("AgentBriefingDashboardBand("))
+        #expect(sidebar.contains("AgentBriefingSheet("))
+        #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
+        #expect(sidebar.contains("briefingRefreshKey"))
+        #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
+        #expect(sidebar.contains(".task(id: briefingRefreshKey)"))
+        #expect(!sidebar.contains("AgentCockpitSheet("))
+        #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
+        #expect(briefingViews.contains("Deep diagnostics remain in Servers"))
+        #expect(!briefingViews.contains(#"SheetTitle(title: "Runtime Cockpit""#))
+    }
+
+    @Test("Chat pill sheet is canonically named Session Briefing")
+    func testChatPillSheetUsesSessionBriefingName() throws {
+        let iosRoot = iosAppRoot()
+        let repoRoot = iosRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let retiredSurfaceName = "Agent " + "Control"
+        let retiredIdentifierPrefix = "agent-" + "control"
+        let readme = try String(
+            contentsOf: repoRoot.appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+        let contextPill = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/ContextStatusPill.swift"),
+            encoding: .utf8
+        )
+        let contextSheet = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Sheets/ContextControlSheet.swift"),
+            encoding: .utf8
+        )
+        let contextModels = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Sheets/ContextControlSheetModels.swift"),
+            encoding: .utf8
+        )
+        let contextContract = try String(
+            contentsOf: repoRoot.appendingPathComponent("packages/agent/src/domains/context_control/contract.rs"),
+            encoding: .utf8
+        )
+        let contextContractTests = try String(
+            contentsOf: repoRoot.appendingPathComponent("packages/agent/src/domains/context_control/tests.rs"),
+            encoding: .utf8
+        )
+        let contextAudit = try String(
+            contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/context-control-primitive-ui-audit.md"),
+            encoding: .utf8
+        )
+        let uiTest = iosRoot.appendingPathComponent("UITests/SessionBriefingUITests.swift")
+
+        #expect(FileManager.default.fileExists(atPath: uiTest.path))
+        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/AgentControlUITests.swift").path))
+        #expect(readme.contains("Session Briefing sheet opened from the timeline/model pill"))
+        #expect(!readme.contains(retiredSurfaceName + " sheet opened from the timeline/model pill"))
+        #expect(contextPill.contains("Opens Session Briefing"))
+        #expect(!contextPill.contains("Opens " + retiredSurfaceName))
+        #expect(contextSheet.contains("session-briefing-context-summary"))
+        #expect(contextSheet.contains("session-briefing-composition-card"))
+        #expect(contextSheet.contains("session-briefing-model-card"))
+        #expect(contextSheet.contains("Session Briefing payload"))
+        #expect(!contextSheet.contains(retiredSurfaceName + " payload"))
+        #expect(!contextSheet.contains(retiredIdentifierPrefix + "-context-summary"))
+        #expect(!contextSheet.contains(retiredIdentifierPrefix + "-composition-card"))
+        #expect(contextModels.contains("Memory refs only in Session Briefing"))
+        #expect(contextContract.contains("First-party Session Briefing UI wrapper"))
+        #expect(contextContract.contains(#""session-briefing""#))
+        #expect(!contextContract.contains("First-party " + retiredSurfaceName + " UI wrapper"))
+        #expect(!contextContract.contains(#"""# + retiredIdentifierPrefix + #"""#))
+        #expect(!contextContractTests.contains(retiredSurfaceName))
+        #expect(contextAudit.contains("restored Session Briefing surface"))
+        #expect(contextAudit.contains("Implemented Candidate: Session Briefing / Context Control"))
+        #expect(contextAudit.contains("retired " + retiredSurfaceName))
+        #expect(contextAudit.contains("Old surface history: the retired " + retiredSurfaceName))
+        #expect(!contextAudit.contains("restored " + retiredSurfaceName + " surface"))
+        #expect(!contextAudit.contains("Implemented Candidate: " + retiredSurfaceName + " / Context Control"))
+        #expect(!contextAudit.contains("inside an " + retiredSurfaceName + " host surface"))
     }
 
     @Test("Session list rows use inset liquid glass containers")

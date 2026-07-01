@@ -37,12 +37,12 @@ enum MessageContent: Equatable {
         .systemEvent(.compactionInProgress(reason: reason))
     }
     /// In-chat notification for context compaction
-    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil) -> MessageContent {
-        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns))
+    static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int? = nil, summarizedTurns: Int? = nil, contextControlActionResourceId: String? = nil) -> MessageContent {
+        .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary, preservedTurns: preservedTurns, summarizedTurns: summarizedTurns, contextControlActionResourceId: contextControlActionResourceId))
     }
     /// In-chat notification for context clearing
-    static func contextCleared(tokensBefore: Int, tokensAfter: Int) -> MessageContent {
-        .systemEvent(.contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter))
+    static func contextCleared(tokensBefore: Int, tokensAfter: Int, contextControlActionResourceId: String? = nil) -> MessageContent {
+        .systemEvent(.contextCleared(tokensBefore: tokensBefore, tokensAfter: tokensAfter, contextControlActionResourceId: contextControlActionResourceId))
     }
     /// In-chat notification for message deletion from context
     static func messageDeleted(targetType: String) -> MessageContent {

@@ -40,6 +40,13 @@ pub struct CompactBoundaryPayload {
     /// Number of messages preserved after compaction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preserved_messages: Option<i64>,
+    /// Context-control action resource backing this boundary, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_control_action_resource_id: Option<String>,
+    /// Context-control preflight snapshot resource backing this boundary, when
+    /// available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_control_snapshot_resource_id: Option<String>,
 }
 
 /// Event range for a compaction boundary.
@@ -136,6 +143,26 @@ mod tests {
         assert_eq!(parsed.compacted_tokens, 10);
         assert_eq!(parsed.reason, "manual");
         assert!(parsed.range.is_none());
+    }
+
+    #[test]
+    fn compact_boundary_accepts_context_control_audit_refs() {
+        let ok = serde_json::json!({
+            "originalTokens": 100,
+            "compactedTokens": 10,
+            "reason": "threshold_exceeded",
+            "contextControlActionResourceId": "context_control_action:test",
+            "contextControlSnapshotResourceId": "context_control_snapshot:test",
+        });
+        let parsed: CompactBoundaryPayload = serde_json::from_value(ok).unwrap();
+        assert_eq!(
+            parsed.context_control_action_resource_id.as_deref(),
+            Some("context_control_action:test")
+        );
+        assert_eq!(
+            parsed.context_control_snapshot_resource_id.as_deref(),
+            Some("context_control_snapshot:test")
+        );
     }
 
     #[test]

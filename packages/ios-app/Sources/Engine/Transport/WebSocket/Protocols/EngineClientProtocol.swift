@@ -28,6 +28,7 @@ protocol EngineClientProtocol: AnyObject {
     var message: MessageClient { get }
     var logs: LogsClient { get }
     var workerLifecycle: WorkerLifecycleClient { get }
+    var contextControl: ContextControlClient { get }
 
     // MARK: - Connection
     func connect() async

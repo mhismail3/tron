@@ -330,6 +330,18 @@ final class DefaultWorkerLifecycleRepository: WorkerLifecycleRepository {
         )
     }
 
+    func agentBriefingOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> AgentBriefingOverviewDTO {
+        try await client.agentBriefingOverview(
+            limit: limit,
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+    }
+
     func proposePackageChange(
         manifest: [String: AnyCodable],
         summary: String,

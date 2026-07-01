@@ -7,6 +7,7 @@ struct ContextStatusPill: View {
     var modelName: String?
     let hasAppeared: Bool
     var readOnly: Bool = false
+    var onTap: (() -> Void)? = nil
 
     private var contextPercentageColor: Color {
         if contextPercentage >= 95 {
@@ -22,6 +23,20 @@ struct ContextStatusPill: View {
     }
 
     var body: some View {
+        Button {
+            guard !readOnly else { return }
+            onTap?()
+        } label: {
+            pillContent
+        }
+        .buttonStyle(.plain)
+        .disabled(readOnly || onTap == nil)
+        .accessibilityLabel("Context status")
+        .accessibilityValue(readOnly ? "Read only" : "\(displayModelName), \(contextPercentage)%")
+        .accessibilityHint(readOnly || onTap == nil ? "" : "Opens Session Briefing")
+    }
+
+    private var pillContent: some View {
         HStack(spacing: 0) {
             Text(readOnly ? "-" : displayModelName)
                 .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
@@ -36,7 +51,5 @@ struct ContextStatusPill: View {
         .scaleEffect(hasAppeared ? 1 : 0.3, anchor: .bottom)
         .opacity(hasAppeared ? (readOnly ? 0.5 : 1.0) : 0)
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: hasAppeared)
-        .accessibilityLabel("Context status")
-        .accessibilityValue(readOnly ? "Read only" : "\(displayModelName), \(contextPercentage)%")
     }
 }

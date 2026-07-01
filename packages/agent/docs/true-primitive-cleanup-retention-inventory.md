@@ -42,10 +42,10 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 112 |
-| implementation | 823 |
+| implementation | 849 |
 | support | 385 |
-| test | 581 |
-| docs | 135 |
+| test | 587 |
+| docs | 136 |
 | delete | 0 |
 
 ## Owner Summary
@@ -57,9 +57,10 @@ The TSV covers tracked and newly introduced files under:
 | `app_bootstrap` | 11 |
 | `auth` | 19 |
 | `capability` | 4 |
-| `capability_execute` | 49 |
+| `capability_execute` | 54 |
 | `catalog_discovery` | 8 |
-| `docs/static gates` | 127 |
+| `context_control` | 9 |
+| `docs/static gates` | 128 |
 | `device` | 6 |
 | `domain_worker` | 7 |
 | `engine` | 109 |
@@ -70,7 +71,9 @@ The TSV covers tracked and newly introduced files under:
 | `import_preview` | 6 |
 | `jobs` | 8 |
 | `ios` | 98 |
+| `ios_chat_ui` | 3 |
 | `ios_engine` | 139 |
+| `ios_events` | 8 |
 | `ios_session` | 75 |
 | `ios_ui` | 141 |
 | `mac` | 76 |
@@ -94,7 +97,7 @@ The TSV covers tracked and newly introduced files under:
 | `program_execution` | 6 |
 | `prompt_artifacts` | 6 |
 | `repository_tree` | 6 |
-| `resource_kernel` | 24 |
+| `resource_kernel` | 25 |
 | `rust_crate` | 2 |
 | `scheduler` | 7 |
 | `scripts` | 22 |
@@ -106,7 +109,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 579 |
+| `test_harness` | 585 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

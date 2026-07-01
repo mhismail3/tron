@@ -720,6 +720,32 @@ text and raw body pointers. It does not implement semantic retrieval,
 embeddings, vector stores, generated summaries, episodic event retrieval,
 procedural rules, hidden prompt memory, automatic retention, or network-backed
 memory behavior.
+`domains/context_control` is the implementation-candidate owner for user and
+agent context-management visibility. It records `context_control_snapshot`,
+`context_control_action`, and `context_control_epoch` resources with provider
+safe projections only. `context_control_snapshot`, `context_control_compact`,
+`context_control_clear`, `context_control_action_list`, and
+`context_control_action_inspect` stay behind `capability::execute` for model
+use, with explicit `context_control.read` / `context_control.write` plus
+`resource.read` / `resource.write` authority, exact current-session selectors,
+exact action-resource inspect selectors, idempotency for write actions,
+`networkPolicy: none`, no wildcard selectors, no `agent_state`, and no state
+inheritance. Snapshots expose bounded composition metadata, token estimates,
+memory/resource/execution refs, redaction proof, truncation proof, and epoch
+freshness without raw prompt bodies, hidden chain-of-thought, secrets, env
+values, local paths, commands, logs, grant ids, or authority ids. Compact and
+clear write durable preflight/action/timeline evidence; clear creates a new
+context epoch while keeping chat history, resources, traces, and durable refs
+inspectable. The iOS Session Briefing sheet renders this substrate from the chat
+timeline/model pill and audited timeline pills as a Context Breakdown section,
+alongside the same model picker used by new-session setup. Native Session Briefing
+uses first-party `context_control::ui_*` wrappers that validate the current
+session and record through the same server-owned context-control service instead
+of widening model-facing authority. It does not restore memory retain/edit,
+skill activation, source-control controls, or prompt-library controls. Broader
+pre-primitive UI families are tracked as review-gated
+candidate cards in
+`packages/agent/docs/context-control-primitive-ui-audit.md`.
 `domains/filesystem` owns two separate surfaces: the iOS workspace-browser
 functions for home/list/create-dir selection and the Phase 2 agent filesystem
 toolbox. Agent operations resolve only from trusted working-directory metadata,
@@ -935,6 +961,18 @@ semantics in iOS, add fixed product panels, or expose raw payloads, paths,
 commands, logs, stdout/stderr, env values, secrets, code, file contents, raw
 grant ids, raw authority ids, trace/invocation ids, token-like material, or
 personal-info literals.
+`domains/agent_briefing` owns the implementation-candidate read-only Agent
+Briefing projection for the iOS dashboard and briefing sheet. It is deliberately
+thin: `agent_briefing::overview` delegates to the accepted, invocation-scoped
+`module_activity::overview` server truth, then reshapes those already-redacted
+facts into chief-of-staff sections: what Tron has been doing, how Tron adapted,
+active work, needs you, weak points/failures, memory and learned state, and
+audit trail. The projection exists server-side so the dashboard and full sheet
+share identical scope, redaction, empty-state, drill-down, and evidence
+semantics; it does not create resources, compact/clear context, schedule work,
+learn, activate modules, install packages, execute runtime code, add autonomy
+behavior, expose raw ids, paths, commands, logs, prompt bodies, secrets, or
+replace Runtime Cockpit diagnostics.
 Accepted Phase 3 Slice 24I records fixed old iOS product panels as an
 accepted rejected-shape baseline: the iOS source guard explicitly rejects old
 approval/work panels and work dashboards alongside the existing source-control,
@@ -1242,6 +1280,11 @@ Current primitive operations:
 | `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle, delegation, and merge-proposal evidence without raw prompts, secrets, raw process output, local paths, or raw authority ids. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
+| `context_control_snapshot` | Implementation-candidate operation that records and returns a provider-safe current-session context snapshot with bounded composition blocks, token estimates, memory/resource/execution refs, epoch freshness, redaction/truncation proof, exact session-scoped authority, idempotency evidence, `networkPolicy: none`, and no raw prompt bodies, hidden chain-of-thought, secrets, env values, local paths, commands, logs, grant ids, or authority ids. |
+| `context_control_compact` | Implementation-candidate operation that records a durable preflight snapshot, writes a bounded compact-boundary timeline event when context is summarizable, and stores a context-control action record with actor, reason, expected effect, result, audit refs, and provider-safe proof without deleting history/resources/traces or exposing raw prior context. |
+| `context_control_clear` | Implementation-candidate operation that records a durable preflight snapshot, writes a context-cleared timeline event, creates a new `context_control_epoch`, and stores a context-control action record proving prior turns are excluded from future provider context while chat history, resources, traces, and durable refs remain inspectable. |
+| `context_control_action_list` | Implementation-candidate operation that lists current-session context-control action summaries as bounded provider-safe audit rows after stored kind/schema/scope revalidation, with no raw prompt/log/command/grant/authority material. |
+| `context_control_action_inspect` | Implementation-candidate operation that inspects one context-control action through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning provider-safe preflight, result, audit refs, and proof only. |
 | `module_list` | List system-scoped `module_manifest` records as bounded provider-safe module summaries after stored kind/schema/scope/payload revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, network, or write side effects. |
 | `module_inspect` | Inspect one system-scoped `module_manifest` after stored kind/schema/scope/version/payload revalidation, returning bounded provider-safe identity, declarations, authority/settings/dependency intents, validation, provenance, distinct resource and manifest lifecycle fields, refs, and redaction proof without raw manifests, local paths, env values, commands, secrets, token-like strings, raw grant ids, or personal-info literals. |
 | `module_proposal_record` | Accepted Slice 23B operation that records one scoped `module_proposal` resource for bounded module authoring metadata only, with title/summary identity, intended module refs, bounded source/doc/test refs, validation placeholder status, lifecycle evidence, trace/replay fingerprints, idempotency fingerprint, and explicit proof of no install, execution, dependency restore, package manager, network, physical workspace directory, repo-managed skills, raw prompt/proposal/code/command/file-content storage, raw grant/authority ids, or token-like provider-visible proposal metadata. |
@@ -1274,6 +1317,7 @@ Current primitive operations:
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
 | `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
+| `agent_briefing::overview` | Implementation-candidate system-visible pure-read function that returns a bounded Agent Briefing projection for dashboard and sheet clients by reshaping the accepted `module_activity::overview` facts into scoped narrative sections, empty states, and evidence labels; it is not provider-visible and has no write, autonomy, compact/clear, learn, schedule, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
 | `procedural_definition_record` | Accepted Slice 24E operation that records one scoped `procedural_record` for metadata-only skill/rule/hook/procedure definitions, including validation evidence, review state, trigger declarations, conflict/ordering metadata, scoped-authority proof, trace/replay refs, bounded refs, content hash, and idempotency fingerprint without storing raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, trigger registration, prompt injection, dependency restoration, or code execution. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
 | `procedural_state_inspect` | Inspect one scoped `procedural_record` after stored kind/schema/version/status, eval scalar, and content-hash revalidation, returning bounded/redacted skill/rule/hook/procedure provenance, eval, refs, and activation-proof evidence without secrets, grant ids, env values, unsafe paths, raw manifests/logs, or private nested metadata. |
@@ -2569,6 +2613,9 @@ packages/ios-app/Sources/
   shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
   inline folder creation, prompt input with clearable
   device-local recent-input reuse, the
+  Session Briefing sheet opened from the timeline/model pill for model switching,
+  provider-safe context breakdown, compact, clear, read-only memory status, and
+  recent action audit detail,
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic
   input backed by the local transcription domain after a readiness check and
@@ -2583,7 +2630,15 @@ packages/ios-app/Sources/
   panels, extension-source surfaces, voice-note storage, memory-retain, rules,
   skills, prompt-library panels, prompt queues, and parallel tree-only
   projections are removed from the primary source tree.
-- **Agent cockpit**: Servers -> Diagnostics exposes a compact Runtime Cockpit
+- **Agent briefing and cockpit**: the session dashboard keeps the existing
+  workspace-grouped chat list and adds a small Agent Briefing band above the
+  groups. The band opens an Agent Briefing sheet backed by
+  `agent_briefing::overview`, with narrative sections for activity,
+  adaptation, active work, user-needed work, weak points/failures, memory and
+  learned state, and audit evidence. The sheet uses the standard Tron
+  typography, theme, and sheet chrome, includes empty/degraded states and
+  drill-down evidence rows, and avoids raw paths, commands, logs, grants,
+  authority ids, and secrets at top level. Servers -> Diagnostics exposes a compact Runtime Cockpit
   row that opens the cockpit sheet. The sheet renders live worker lifecycle
   catalog rows, capability discovery families, schema/health gaps, durable
   `catalog_discovery_report` history, package/resource status,
@@ -2660,6 +2715,7 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
+Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
 Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> invocation-scoped module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 

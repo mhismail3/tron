@@ -119,6 +119,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Worker lifecycle repository for the agent cockpit.
     private(set) var workerLifecycleRepository: any WorkerLifecycleRepository
 
+    /// Session context-control repository for Session Briefing.
+    private(set) var contextControlRepository: any ContextControlRepository
+
     var chatSessionServices: ChatSessionServices {
         ChatSessionServices(
             connection: connectionRepository,
@@ -239,6 +242,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         transcriptionRepository = DefaultTranscriptionRepository(client: client.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: client.workspaceBrowser)
         workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: client.workerLifecycle)
+        contextControlRepository = client.contextControl
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -486,6 +490,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         transcriptionRepository = DefaultTranscriptionRepository(client: newClient.transcription)
         workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: newClient.workspaceBrowser)
         workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: newClient.workerLifecycle)
+        contextControlRepository = newClient.contextControl
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)

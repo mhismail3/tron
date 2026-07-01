@@ -91,6 +91,14 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_runtime_inspect"
             | "module_runtime_cancel"
     );
+    let context_control_operation = matches!(
+        operation,
+        "context_control_snapshot"
+            | "context_control_compact"
+            | "context_control_clear"
+            | "context_control_action_list"
+            | "context_control_action_inspect"
+    );
     let module_program_execution_operation = matches!(
         operation,
         "module_program_execution_start"
@@ -121,6 +129,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || web_research_operation
         || module_lifecycle_operation
         || module_runtime_operation
+        || context_control_operation
         || module_program_execution_operation
         || procedural_module_operation
         || memory_module_operation
@@ -147,6 +156,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !web_research_operation
         && !module_lifecycle_operation
         && !module_runtime_operation
+        && !context_control_operation
         && !module_program_execution_operation
         && !procedural_module_operation
         && !memory_module_operation
@@ -427,6 +437,24 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if matches!(
+        operation,
+        "context_control_action_list" | "context_control_action_inspect"
+    ) {
+        allowed_authority_scopes.extend([
+            "context_control.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if matches!(
+        operation,
+        "context_control_snapshot" | "context_control_compact" | "context_control_clear"
+    ) {
+        allowed_authority_scopes.extend([
+            "context_control.read".to_owned(),
+            "context_control.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if operation == "module_program_execution_start" {
         allowed_authority_scopes.extend([
             "module_runtime.read".to_owned(),
@@ -574,6 +602,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || web_research_operation
         || module_lifecycle_operation
         || module_runtime_operation
+        || context_control_operation
         || module_program_execution_operation
         || procedural_module_operation
         || memory_module_operation
@@ -740,6 +769,12 @@ pub(super) async fn derive_capability_runtime_grant(
         if operation == "module_runtime_request" {
             allowed_resource_kinds.push("module_lifecycle_state".to_owned());
         }
+    } else if context_control_operation {
+        allowed_resource_kinds.extend([
+            "context_control_snapshot".to_owned(),
+            "context_control_action".to_owned(),
+            "context_control_epoch".to_owned(),
+        ]);
     } else if operation == "module_program_execution_start" {
         allowed_resource_kinds.extend([
             "module_runtime_state".to_owned(),
@@ -837,6 +872,9 @@ pub(super) async fn derive_capability_runtime_grant(
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect::<Vec<_>>();
+    if context_control_operation {
+        resource_selectors.push(format!("session:{session_id}"));
+    }
     for (operations, field) in exact_resource_selector_fields() {
         if operations.contains(&operation) {
             push_resource_selector_arg(&mut resource_selectors, effective_args, field);
@@ -1281,6 +1319,10 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (&["memory_inspect"], "recordResourceId"),
         (&["memory_query_inspect"], "queryResourceId"),
         (&["memory_decision_inspect"], "decisionResourceId"),
+        (
+            &["context_control_action_inspect"],
+            "contextControlActionResourceId",
+        ),
         (&["module_inspect"], "moduleManifestResourceId"),
         (&["module_proposal_inspect"], "moduleProposalResourceId"),
         (

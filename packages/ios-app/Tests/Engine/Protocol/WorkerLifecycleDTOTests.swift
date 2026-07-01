@@ -248,6 +248,84 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.projection.rawPayloadsReturned == false)
     }
 
+    @Test("Agent briefing overview decodes server-owned projection")
+    func agentBriefingOverviewDecodesServerProjection() throws {
+        let json = """
+        {
+          "schemaVersion": "tron.agent_briefing.overview.v1",
+          "operation": "agent_briefing_overview",
+          "summary": {
+            "title": "Tron has active work",
+            "detail": "1 active, 0 waiting on review, 0 blocked, 1 total records.",
+            "activeWorkCount": 1,
+            "needsYouCount": 0,
+            "weakPointCount": 0,
+            "activityCount": 1,
+            "degraded": false
+          },
+          "sections": [
+            {
+              "id": "active_work",
+              "title": "Active work",
+              "question": "What is currently in motion?",
+              "narrative": "Active module runtime work is in progress.",
+              "items": [
+                {
+                  "id": "briefing-item-1",
+                  "title": "Runtime envelope",
+                  "detail": "Server-owned projection",
+                  "status": "active",
+                  "evidence": {
+                    "label": "Evidence 1",
+                    "resourceKind": "module_runtime_state",
+                    "updatedAt": "2026-06-20T12:00:00Z",
+                    "providerSafe": true
+                  }
+                }
+              ],
+              "emptyState": "No active work is in progress.",
+              "drilldownAvailable": true
+            }
+          ],
+          "scope": {
+            "sessionScoped": true,
+            "workspaceScoped": false,
+            "exactScopeRequired": true,
+            "payloadScopeTrusted": false
+          },
+          "projection": {
+            "allowlist": "agent_briefing_metadata_redacted_v1",
+            "serverOwnedTruth": true,
+            "projectionOnly": true,
+            "autonomyBehaviorCreated": false,
+            "metadataOnly": true,
+            "rawPayloadsReturned": false,
+            "rawCommandsReturned": false,
+            "rawLogsReturned": false,
+            "promptBodiesReturned": false,
+            "fileContentsReturned": false,
+            "absolutePathsReturned": false,
+            "grantIdsReturned": false,
+            "authorityIdsReturned": false,
+            "traceIdsReturned": false,
+            "invocationIdsReturned": false,
+            "tokenLikeMaterialReturned": false,
+            "boundedItems": true,
+            "sourceProjection": "module_activity_overview"
+          }
+        }
+        """
+
+        let overview = try JSONDecoder().decode(AgentBriefingOverviewDTO.self, from: Data(json.utf8))
+
+        #expect(overview.operation == "agent_briefing_overview")
+        #expect(overview.summary.activeWorkCount == 1)
+        #expect(overview.sections.first?.id == "active_work")
+        #expect(overview.sections.first?.items.first?.evidence?.providerSafe == true)
+        #expect(overview.projection.autonomyBehaviorCreated == false)
+        #expect(overview.projection.rawCommandsReturned == false)
+    }
+
     @Test("Module activity overview ignores future product-specific fields")
     func moduleActivityOverviewIgnoresFutureProductSpecificFields() throws {
         let json = """

@@ -102,6 +102,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
+//! | `context_control_contract` | Context-control snapshot/action/epoch schema fields |
 //! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
 //! | `web_research_contract` | Web research request/review/source schema fields |
 //! | `module_install_contract` | Module-install review request schema fields |
@@ -138,6 +139,7 @@
 //! trace-safe before unsafe payload rejection. None expands the public
 //! `/engine` protocol.
 
+mod context_control_contract;
 pub(crate) mod contract;
 mod import_history_contract;
 mod import_preview_contract;
@@ -162,6 +164,7 @@ pub(crate) use operations::execute_value;
 
 use std::sync::Arc;
 
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::jobs;
 use crate::domains::registration::catalog::{CapabilitySpec, function_definition_for_capability};
 use crate::domains::registration::worker::{
@@ -177,6 +180,7 @@ use serde_json::Value;
 pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
     pub(crate) event_store: Arc<EventStore>,
+    pub(crate) session_manager: Arc<SessionManager>,
     pub(crate) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
     pub(crate) jobs_reconcile: jobs::service::ReconcileContext,
@@ -187,6 +191,7 @@ impl Deps {
         Self {
             engine_host: deps.engine_host.clone(),
             event_store: Arc::clone(&deps.event_store),
+            session_manager: Arc::clone(&deps.session_manager),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
             jobs_reconcile: jobs::service::ReconcileContext {
                 startup_cutoff: Utc::now(),
