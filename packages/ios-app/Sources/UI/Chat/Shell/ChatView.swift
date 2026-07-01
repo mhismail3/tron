@@ -222,21 +222,10 @@ struct ChatView: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
-        .toolbar(.hidden, for: .navigationBar)
-        .overlay(alignment: .top) {
-            TronNavigationTopBarOverlay {
-                ZStack {
-                    topBarTitle
-
-                    HStack {
-                        leadingTopBarButton
-
-                        Spacer()
-
-                        trailingTopBarButtons
-                    }
-                }
-            }
+        .toolbar {
+            leadingToolbarItem
+            principalToolbarItem
+            trailingToolbarItem
         }
     }
 

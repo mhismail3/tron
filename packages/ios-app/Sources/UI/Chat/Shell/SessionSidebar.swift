@@ -97,10 +97,9 @@ struct SessionSidebar: View {
         .tronScreenBackground()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-        .toolbar(removing: .sidebarToggle)
-        .toolbar(.hidden, for: .navigationBar)
-        .overlay(alignment: .top) {
-            ShellTopBarOverlay(title: "Tron", accent: .tronEmerald, actions: actions)
+                .toolbar(removing: .sidebarToggle)
+        .toolbar {
+            ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
         }
         .task(id: briefingRefreshKey) {
             await refreshBriefing()
@@ -141,7 +140,6 @@ struct SessionSidebar: View {
                     .regular.tint(Color.tronEmerald.opacity(isSelected ? 0.22 : 0.14)).interactive(),
                     in: shape
                 )
-                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .tag(session.id)

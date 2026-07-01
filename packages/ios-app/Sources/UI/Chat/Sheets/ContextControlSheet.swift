@@ -530,14 +530,19 @@ private struct AgentControlToolbarButton: View {
     let action: () -> Void
 
     var body: some View {
-        TronToolbarIconButton(
-            systemImage: icon,
-            accessibilityLabel: accessibilityLabel,
-            color: color,
-            isBusy: isBusy,
-            isEnabled: isEnabled,
-            action: action
-        )
+        Button(action: action) {
+            if isBusy {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(color)
+            } else {
+                Image(systemName: icon)
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(isEnabled ? color : .tronTextDisabled)
+            }
+        }
+        .disabled(!isEnabled || isBusy)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

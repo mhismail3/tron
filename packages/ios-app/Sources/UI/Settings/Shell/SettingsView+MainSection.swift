@@ -75,7 +75,6 @@ extension SettingsView {
                 )
             }
             .buttonStyle(.plain)
-            .tronHitTarget(.roundedRectangle(cornerRadius: 12))
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.4)
             .accessibilityHint(destination.accessibilityHint)
@@ -225,7 +224,6 @@ extension SettingsView {
                 )
             }
             .buttonStyle(.plain)
-            .tronHitTarget(.roundedRectangle(cornerRadius: 12))
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.4)
         }
@@ -327,7 +325,11 @@ extension SettingsView {
     }
 
     var feedbackFooterButton: some View {
-        Button {
+        let shape = RoundedRectangle(
+            cornerRadius: MainSettingsFooterLayout.feedbackButtonCornerRadius,
+            style: .continuous
+        )
+        return Button {
             prepareAndPresentFeedback()
         } label: {
             Text("Send Feedback")
@@ -337,10 +339,10 @@ extension SettingsView {
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .footerFeedbackButtonChrome()
-        .tronHitTarget(.roundedRectangle(cornerRadius: MainSettingsFooterLayout.feedbackButtonCornerRadius))
         .disabled(isPreparingFeedback)
         .opacity(isPreparingFeedback ? 0.55 : 1)
     }

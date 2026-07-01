@@ -51,6 +51,8 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
+    @State private var dashboardMode: DashboardSurfaceMode = .classic
+    @State private var isDashboardModeMenuPresented = false
     @State private var deferredServerOnboardingLaunch = DeferredServerOnboardingLaunch()
 
     // Scroll target for deep link navigation (passed to ChatView)
@@ -60,6 +62,9 @@ struct ContentView: View {
         mainContent
             .tronScreenBackground()
             .tint(.tronEmerald)
+            .overlay(alignment: .topLeading) {
+                dashboardModeSelectorOverlay
+            }
             #if BETA
             .overlay(alignment: .bottomTrailing) {
                 Text("BETA")
@@ -197,16 +202,88 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarContent: some View {
-        SessionSidebar(
-            selectedSessionId: $selectedSessionId,
-            onNewSession: { showNewSessionSheet = true },
-            onDeleteSession: { sessionId in
-                deleteSession(sessionId)
-            },
-            actions: sessionListActions
-        )
-        // Remove default gray sidebar toggle - we'll add a custom emerald one to detail views
-        .toolbar(removing: .sidebarToggle)
+        switch dashboardMode {
+        case .classic:
+            SessionSidebar(
+                selectedSessionId: $selectedSessionId,
+                onNewSession: { showNewSessionSheet = true },
+                onDeleteSession: { sessionId in
+                    deleteSession(sessionId)
+                },
+                actions: sessionListActions
+            )
+            // Remove default gray sidebar toggle - we'll add a custom emerald one to detail views
+            .toolbar(removing: .sidebarToggle)
+        case .dashboardV2:
+            DashboardV2View(
+                selectedSessionId: $selectedSessionId,
+                surfaceMode: $dashboardMode,
+                onNewSession: { showNewSessionSheet = true },
+                onDeleteSession: { sessionId in
+                    deleteSession(sessionId)
+                },
+                actions: sessionListActions
+            )
+            .toolbar(removing: .sidebarToggle)
+        }
+    }
+
+    @ViewBuilder
+    private var dashboardModeSelectorOverlay: some View {
+        if shouldShowClassicDashboardSelector {
+            GeometryReader { proxy in
+                ZStack(alignment: .topLeading) {
+                    if isDashboardModeMenuPresented {
+                        Color.black.opacity(0.001)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation(DashboardV2Motion.menuDismiss) {
+                                    isDashboardModeMenuPresented = false
+                                }
+                            }
+                    }
+
+                    Color.black.opacity(0.001)
+                        .frame(width: 132, height: 132)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            toggleDashboardModeMenu()
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction {
+                            toggleDashboardModeMenu()
+                        }
+                        .accessibilityIdentifier("dashboard-mode-selector")
+                        .accessibilityLabel("Dashboard selector")
+                        .accessibilityValue("Current Dashboard")
+                        .padding(.leading, 8)
+                        .padding(.top, proxy.safeAreaInsets.top + 24)
+
+                    if isDashboardModeMenuPresented {
+                        DashboardModePopupMenu(
+                            selectedMode: $dashboardMode,
+                            isPresented: $isDashboardModeMenuPresented
+                        )
+                        .padding(.leading, 20)
+                        .padding(.top, proxy.safeAreaInsets.top + 146)
+                    }
+                }
+            }
+            .ignoresSafeArea()
+            .transition(.opacity)
+            .zIndex(200)
+        }
+    }
+
+    private var shouldShowClassicDashboardSelector: Bool {
+        dashboardMode == .classic && (horizontalSizeClass == .regular || selectedSessionId == nil)
+    }
+
+    private func toggleDashboardModeMenu() {
+        withAnimation(DashboardV2Motion.menuPresent) {
+            isDashboardModeMenuPresented.toggle()
+        }
     }
 
     @ViewBuilder
@@ -275,25 +352,18 @@ struct ContentView: View {
             .geometryGroup()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .top) {
-                TronNavigationTopBarOverlay {
-                    ZStack {
-                        Text("Tron")
-                            .font(TronTypography.sans(size: 20, weight: .bold))
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: toggleSidebar) {
+                        Image(systemName: "sidebar.leading")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
-
-                        HStack {
-                            TronToolbarIconButton(
-                                systemImage: "sidebar.leading",
-                                accessibilityLabel: "Show sidebar",
-                                font: TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium),
-                                action: toggleSidebar
-                            )
-
-                            Spacer()
-                        }
                     }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Tron")
+                        .font(TronTypography.sans(size: 20, weight: .bold))
+                        .foregroundStyle(.tronEmerald)
                 }
             }
         }
@@ -435,9 +505,8 @@ struct WelcomePage: View {
             .geometryGroup() // Ensures geometry changes animate together with NavigationSplitView
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .top) {
-                ShellTopBarOverlay(
+            .toolbar {
+                ShellToolbarContent(
                     title: "Tron",
                     accent: .tronEmerald,
                     actions: actions,

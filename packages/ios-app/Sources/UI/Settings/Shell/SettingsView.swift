@@ -90,11 +90,10 @@ struct SettingsView: View {
 
     private var settingsBaseView: some View {
         SettingsPageContainer(title: "Settings") {
-            TronToolbarIconButton(
-                systemImage: "doc.text.magnifyingglass",
-                accessibilityLabel: "Logs"
-            ) {
-                showLogViewer = true
+            Button { showLogViewer = true } label: {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(TronTypography.buttonSM)
+                    .foregroundStyle(.tronEmerald)
             }
         } content: {
             mainSettingsSection

@@ -234,15 +234,23 @@ shell composition; message-list scrolling, pagination, composer, and sheet
 rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
 extensions.
 
-Button-like glass, pill, circular, and card controls use shared hit-target
-primitives so the semantic tap region matches the visible control container.
-Toolbar glyph buttons use `TronToolbarIconButton`, which owns a fixed circular
-background and content shape instead of SwiftUI navigation toolbar chrome.
-Dashboard, chat, and onboarding top-bar controls render through
-`TronNavigationTopBarOverlay` so iOS cannot stretch visible circular controls
-into wider navigation toolbar platters. Rows, cards, pills, and
-onboarding/new-session navigation use `tronHitTarget` with the matching visible
-shape.
+## Dashboard 2.0 Proving Ground
+
+Dashboard 2.0 is a siloed surface reachable from the dashboard root's Tron logo
+selector. The classic dashboard, chat toolbar, onboarding flow, settings shell,
+and existing sheets stay on their original native chrome. The only classic-side
+hook is an invisible selector hit area over the dashboard logo; it does not turn
+the original toolbar logo into a custom glass button. Custom glass component
+work lives under `Sources/UI/Chat/Shell/DashboardV2*.swift`.
+
+The Dashboard 2.0 surface mirrors session dashboard data but owns its view
+stack, top chrome, circular glass controls, session rows, and component-lab
+bottom sheet. The lab overlay intentionally avoids SwiftUI `ToolbarItem`,
+`List`, and `.sheet` presentation chrome so design experiments can validate
+app-owned Liquid Glass geometry before any pattern graduates back to shipping
+screens. Small Dashboard 2.0 icon buttons stay independent glass surfaces
+instead of `GlassEffectContainer` groups because grouped tiny controls over-fuse
+and blur in the dark shell.
 
 ## Chat Visual Affordances
 

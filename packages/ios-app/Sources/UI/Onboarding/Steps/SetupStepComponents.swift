@@ -198,13 +198,13 @@ struct SetupActionButton: View {
             .frame(maxWidth: width == nil ? .infinity : nil)
             .frame(width: width)
             .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
         }
         .buttonStyle(.plain)
         .glassEffect(
             .regular.tint(Color.tronEmerald.opacity(0.16)).interactive(),
             in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
         )
-        .tronHitTarget(.roundedRectangle(cornerRadius: TronSpacing.cornerMD))
     }
 }
 

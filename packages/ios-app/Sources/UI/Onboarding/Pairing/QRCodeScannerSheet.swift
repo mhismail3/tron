@@ -129,8 +129,6 @@ struct QRCodeScannerSheet: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.tint(Color.tronOverlay(0.25)).interactive(), in: Circle())
-            .tronHitTarget(.circle)
-            .accessibilityLabel("Close scanner")
 
             Button {
                 scannerModel.toggleTorch()
@@ -145,10 +143,8 @@ struct QRCodeScannerSheet: View {
                 .regular.tint(scannerModel.isTorchOn ? Color.tronEmerald.opacity(0.4) : Color.tronOverlay(0.25)).interactive(),
                 in: Circle()
             )
-            .tronHitTarget(.circle)
             .disabled(!scannerModel.isAuthorized || !scannerModel.hasTorch)
             .opacity(scannerModel.isAuthorized && scannerModel.hasTorch ? 1 : 0.3)
-            .accessibilityLabel(scannerModel.isTorchOn ? "Turn flashlight off" : "Turn flashlight on")
         }
     }
 }

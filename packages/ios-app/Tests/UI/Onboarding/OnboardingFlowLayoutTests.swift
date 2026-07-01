@@ -5,7 +5,7 @@ import XCTest
 /// floating over compact sheet content.
 final class OnboardingFlowLayoutTests: XCTestCase {
 
-    func testBackAndNextUseTopBarOverlay() throws {
+    func testBackAndNextStayInSheetToolbar() throws {
         let content = try source(pathComponents: [
             "Sources",
             "UI",
@@ -15,24 +15,16 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         ])
 
         XCTAssertTrue(
-            content.contains("TronNavigationTopBarOverlay"),
-            "Back/Next navigation should use the app-owned top bar overlay"
+            content.contains("ToolbarItemGroup(placement: .topBarLeading)"),
+            "Back navigation should live in the sheet toolbar leading group"
         )
         XCTAssertTrue(
-            content.contains(".toolbar(.hidden, for: .navigationBar)"),
-            "The native navigation bar should stay hidden so it cannot intercept top-bar taps"
+            content.contains("ToolbarItem(placement: .topBarTrailing)"),
+            "Next navigation should live in the sheet toolbar trailing item"
         )
         XCTAssertTrue(
             content.contains("toolbarNavigationButton("),
             "Back/Next should share the toolbar navigation button helper"
-        )
-        XCTAssertFalse(
-            content.contains("ToolbarItemGroup(placement: .topBarLeading)"),
-            "Back navigation should not use the native toolbar host that can deform circular buttons"
-        )
-        XCTAssertFalse(
-            content.contains("ToolbarItem(placement: .topBarTrailing)"),
-            "Next navigation should not use the native toolbar host that can deform button containers"
         )
         XCTAssertFalse(
             content.contains("OnboardingNavigationControls(state: state)"),

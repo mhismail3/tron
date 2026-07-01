@@ -50,11 +50,8 @@ struct PairingStep: View {
                         } else {
                             Text("Connect")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
                         }
                     }
-                    .tronHitTarget(.capsule)
                     .disabled(!state.canAttemptPairing)
                     .opacity(state.canAttemptPairing ? 1 : 0.45)
                     .accessibilityLabel(state.isConnecting ? "Connecting" : "Connect to Mac")
@@ -84,13 +81,13 @@ struct PairingStep: View {
                         .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
                         .frame(width: 76, height: 76)
                         .foregroundStyle(Color.tronEmerald)
+                        .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .glassEffect(
                     .regular.tint(Color.tronEmerald.opacity(0.18)).interactive(),
                     in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
                 )
-                .tronHitTarget(.roundedRectangle(cornerRadius: TronSpacing.cornerMD))
                 .accessibilityLabel("Scan QR code")
             }
         }
@@ -110,7 +107,6 @@ struct PairingStep: View {
                 .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
-        .tronHitTarget(.capsule)
         .padding(.top, TronSpacing.sm)
     }
 

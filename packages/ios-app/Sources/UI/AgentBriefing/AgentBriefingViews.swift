@@ -39,11 +39,9 @@ struct AgentBriefingDashboardBand: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .sectionFill(accent, cornerRadius: 12, subtle: true, interactive: true)
         }
         .buttonStyle(.plain)
-        .sectionFill(accent, cornerRadius: 12, subtle: true, interactive: true)
-        .tronHitTarget(.roundedRectangle(cornerRadius: 12))
         .accessibilityIdentifier("agent-briefing-dashboard-band")
         .accessibilityLabel("Agent Briefing")
     }
@@ -294,7 +292,6 @@ private struct AgentBriefingSectionView: View {
                             AgentBriefingItemRow(item: item)
                         }
                         .buttonStyle(.plain)
-                        .tronHitTarget(.rectangle)
                         if selectedItem?.id == item.id {
                             AgentBriefingEvidenceView(item: item)
                         }

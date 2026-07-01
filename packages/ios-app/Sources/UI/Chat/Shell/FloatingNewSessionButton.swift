@@ -19,10 +19,10 @@ struct FloatingNewSessionButton: View {
                 .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                 .foregroundStyle(accent)
                 .frame(width: size, height: size)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(accent.opacity(0.25)).interactive(), in: .circle)
-        .tronHitTarget(.circle)
         .accessibilityLabel(FloatingNewSessionButtonAccessibility.label)
         .accessibilityHint(FloatingNewSessionButtonAccessibility.hint)
         .onLongPressGesture(minimumDuration: 0.5) {

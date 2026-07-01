@@ -12,10 +12,9 @@ extension SourceGuardTests {
         )
 
         #expect(toolbar.contains(#"Image("TronLogoVector")"#))
-        #expect(toolbar.contains(#"systemImage: "gearshape""#))
-        #expect(toolbar.contains(#"accessibilityLabel: "Show sidebar""#))
-        #expect(toolbar.contains(#"accessibilityLabel: "Settings""#))
-        #expect(toolbar.contains("TronToolbarIconButton("))
+        #expect(toolbar.contains(#"Image(systemName: "gearshape")"#))
+        #expect(toolbar.contains(#".accessibilityLabel("Show sidebar")"#))
+        #expect(toolbar.contains(#".accessibilityLabel("Settings")"#))
         #expect(!toolbar.contains(#"Label("Settings", systemImage:"#))
         #expect(!toolbar.contains(#"Text("Navigation")"#))
     }
