@@ -2281,7 +2281,9 @@ The iOS chat timeline autoloads earlier pages from a noninteractive top detent
 after initial load and real user scroll-away; it does not show a manual
 history-loading pill. Older pages are transformed with already-loaded adjacent
 event context so capability chips remain completed when assistant and
-capability lifecycle events are split across page boundaries.
+capability lifecycle events are split across page boundaries. A server
+reconstruction failure closes the server-history source for that pagination
+epoch so the top detent cannot immediately retry the same failed cursor.
 `session::replay_manifest` is a separate pure-read audit export. It returns
 `format: "tron.replay.v1"` with resolved session events, provider request audit
 events, trace records, `engineIdempotencyEntries`, engine invocation rows,

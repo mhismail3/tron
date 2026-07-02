@@ -165,6 +165,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
     func testTopDetentAutoloadServerErrorEmitsDedupedLocalError() async {
         let (viewModel, sessions) = makeViewModel()
         viewModel.hasMoreMessages = true
+        viewModel.hasOlderServerReconstructionPages = true
         viewModel.reconstructionOldestEventId = "cursor-1"
         sessions.reconstructHandler = { _, _, _ in
             throw EngineConnectionError.invalidResponse
@@ -175,6 +176,9 @@ final class ChatViewModelPaginationTests: XCTestCase {
 
         XCTAssertEqual(firstLoaded, 0)
         XCTAssertEqual(secondLoaded, 0)
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["cursor-1"])
+        XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
+        XCTAssertFalse(viewModel.hasMoreMessages)
         XCTAssertEqual(viewModel.localNotificationIdsByDedupKey.keys.filter { $0 == "session.loadEarlier.failed" }.count, 1)
         let localErrorCount = viewModel.messages.filter {
             if case .localNotification = $0.content { return true }

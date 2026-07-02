@@ -257,6 +257,8 @@ The chat timeline owns only truthful local/session presentation state:
   initial load and real user scroll-away. The timeline does not expose a manual
   load control; loading state is limited to a small `ProgressView` with an
   accessibility label, and prepends preserve the previously visible top row.
+  Server reconstruction failures close the server-history source for that
+  pagination epoch so the top detent does not retry the same failed cursor.
 - Thinking fallback is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.

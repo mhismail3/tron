@@ -233,6 +233,8 @@ extension ChatViewModel {
                 return olderMessages.count
             } catch {
                 logger.warning("Failed to load earlier messages: \(error)", category: .session)
+                hasOlderServerReconstructionPages = false
+                recomputeHasMoreMessages()
                 appendLocalError(
                     dedupKey: "session.loadEarlier.failed",
                     title: "Could not load earlier messages",
