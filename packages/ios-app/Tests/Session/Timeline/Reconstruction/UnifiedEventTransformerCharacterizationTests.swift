@@ -6,8 +6,8 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
 
     func testEmptyContentBlocksAreSkipped() {
         // Empty text blocks should not produce messages
-        let events = [
-            sessionEvent(type: "message.assistant", payload: [
+        let events: [RawEvent] = [
+            rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "text", "text": ""],  // Empty text block
                     ["type": "text", "text": "Hello"]  // Non-empty
@@ -29,8 +29,8 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
 
     func testThinkingBlocksAreTransformed() {
         // Thinking blocks should produce thinking messages
-        let events = [
-            sessionEvent(type: "message.assistant", payload: [
+        let events: [RawEvent] = [
+            rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "thinking", "thinking": "Let me think about this..."],
                     ["type": "text", "text": "Here's my response"]
@@ -57,6 +57,51 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             XCTAssertEqual(text, "Here's my response")
         } else {
             XCTFail("Expected text content")
+        }
+    }
+
+    func testDuplicateThinkingSnapshotsInOneAssistantMessageAreSkipped() {
+        let events: [RawEvent] = [
+            rawEvent(type: "capability.invocation.started", payload: [
+                "modelPrimitiveName": AnyCodable("process_run"),
+                "invocationId": AnyCodable("tc_1"),
+                "arguments": AnyCodable(["command": "sleep 15"]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "capability.invocation.completed", payload: [
+                "invocationId": AnyCodable("tc_1"),
+                "content": AnyCodable("done"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(15_000)
+            ], timestamp: timestamp(1), sequence: 2),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "thinking", "thinking": "Planning a short task"],
+                    ["type": "capability_invocation", "id": "tc_1", "name": "process_run", "input": ["command": "sleep 15"]],
+                    ["type": "thinking", "thinking": " Planning a short task\n"],
+                    ["type": "text", "text": "Done"]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 3)
+        if case .thinking(let visible, _, _) = messages[0].content {
+            XCTAssertEqual(visible, "Planning a short task")
+        } else {
+            XCTFail("Expected one thinking block")
+        }
+        if case .capabilityInvocation(let invocation) = messages[1].content {
+            XCTAssertEqual(invocation.id, "tc_1")
+        } else {
+            XCTFail("Expected capability invocation")
+        }
+        if case .text(let text) = messages[2].content {
+            XCTAssertEqual(text, "Done")
+        } else {
+            XCTFail("Expected final text")
         }
     }
 

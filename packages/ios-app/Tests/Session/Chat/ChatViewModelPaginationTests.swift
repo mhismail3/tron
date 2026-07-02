@@ -217,6 +217,90 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(invocation.result, "done")
     }
 
+    func testReconnectReconstructionPreservesExpandedVisibleWindow() async {
+        let (viewModel, _) = makeViewModel()
+        let previousEvents = rawMessageEvents(range: 1...180)
+        viewModel.loadedReconstructionEvents = previousEvents
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(previousEvents, presorted: true)
+        viewModel.replaceAllMessages(with: Array(viewModel.allReconstructedMessages.suffix(150)))
+        viewModel.displayedMessageCount = 150
+        viewModel.hasInitiallyLoaded = true
+        viewModel.hasOlderServerReconstructionPages = false
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: rawMessageEvents(range: 131...200),
+                hasMoreEvents: true,
+                oldestEventId: "event-131"
+            )
+        )
+
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 200)
+        XCTAssertEqual(viewModel.allReconstructedMessages.count, 200)
+        XCTAssertEqual(viewModel.displayedMessageCount, 150)
+        XCTAssertEqual(viewModel.messages.count, 150)
+        XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
+        XCTAssertTrue(viewModel.hasMoreMessages)
+        XCTAssertEqual(textContent(viewModel.messages.first), "message 51")
+    }
+
+    func testReconnectReconstructionBackfillsGapBeforeRebuildingMessages() async {
+        let (viewModel, sessions) = makeViewModel()
+        let previousEvents = rawMessageEvents(range: 1...100)
+        viewModel.loadedReconstructionEvents = previousEvents
+        viewModel.allReconstructedMessages = UnifiedEventTransformer.transformPersistedEvents(previousEvents, presorted: true)
+        viewModel.replaceAllMessages(with: viewModel.allReconstructedMessages)
+        viewModel.displayedMessageCount = 100
+        viewModel.hasInitiallyLoaded = true
+        viewModel.hasOlderServerReconstructionPages = false
+
+        sessions.reconstructHandler = { _, _, beforeEventId in
+            XCTAssertEqual(beforeEventId, "event-181")
+            return self.reconstructResult(
+                events: self.rawMessageEvents(range: 101...180),
+                hasMoreEvents: true,
+                oldestEventId: "event-101"
+            )
+        }
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: rawMessageEvents(range: 181...200),
+                hasMoreEvents: true,
+                oldestEventId: "event-181"
+            )
+        )
+
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["event-181"])
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 200)
+        XCTAssertEqual(viewModel.allReconstructedMessages.count, 200)
+        XCTAssertEqual(viewModel.displayedMessageCount, 100)
+        XCTAssertEqual(viewModel.messages.count, 100)
+        XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
+        XCTAssertTrue(viewModel.hasMoreMessages)
+        XCTAssertEqual(textContent(viewModel.messages.first), "message 101")
+        XCTAssertEqual(textContent(viewModel.messages.last), "message 200")
+    }
+
+    func testSuccessfulReconnectReconstructionClearsStalePrunedLiveBuffer() async {
+        let (viewModel, _) = makeViewModel()
+        viewModel.loadedReconstructionEvents = rawMessageEvents(range: 1...100)
+        viewModel.prunedLiveMessages = (0..<20).map { makeMessage("stale live \($0)") }
+        viewModel.hasInitiallyLoaded = true
+        viewModel.displayedMessageCount = 100
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: rawMessageEvents(range: 1...120),
+                hasMoreEvents: false,
+                oldestEventId: "event-1"
+            )
+        )
+
+        XCTAssertTrue(viewModel.prunedLiveMessages.isEmpty)
+        XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 120)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel() -> (ChatViewModel, TestSessionRepository) {
@@ -243,6 +327,24 @@ final class ChatViewModelPaginationTests: XCTestCase {
 
     private func makeMessage(_ text: String) -> ChatMessage {
         ChatMessage(role: .assistant, content: .text(text), timestamp: Date())
+    }
+
+    private func textContent(_ message: ChatMessage?) -> String? {
+        guard let message, case .text(let text) = message.content else {
+            return nil
+        }
+        return text
+    }
+
+    private func rawMessageEvents(range: ClosedRange<Int>) -> [RawEvent] {
+        range.map { sequence in
+            rawEvent(
+                id: "event-\(sequence)",
+                type: "message.user",
+                content: "message \(sequence)",
+                sequence: sequence
+            )
+        }
     }
 
     private func reconstructResult(

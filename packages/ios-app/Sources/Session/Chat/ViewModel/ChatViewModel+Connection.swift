@@ -28,6 +28,18 @@ extension ChatViewModel: ConnectionContext {
         try await services.sessions.reconstruct(sessionId: sessionId, limit: limit, beforeEventId: beforeEventId)
     }
 
+    var reconstructionEventLimit: Int {
+        guard hasInitiallyLoaded else {
+            return Self.initialReconstructionEventLimit
+        }
+
+        let loadedDepth = max(loadedReconstructionEvents.count, displayedMessageCount, messages.count)
+        return min(
+            Self.maxReconstructionEventLimit,
+            max(Self.initialReconstructionEventLimit, loadedDepth + Self.additionalMessageBatchSize)
+        )
+    }
+
     /// Clear state that refers to an in-flight turn (streaming text,
     /// thinking, running capabilities) so reconstruction can rebuild it from
     /// the event log without double-rendering.

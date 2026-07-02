@@ -2281,9 +2281,19 @@ The iOS chat timeline autoloads earlier pages from a noninteractive top detent
 after initial load and real user scroll-away; it does not show a manual
 history-loading pill. Older pages are transformed with already-loaded adjacent
 event context so capability chips remain completed when assistant and
-capability lifecycle events are split across page boundaries. A server
-reconstruction failure closes the server-history source for that pagination
-epoch so the top detent cannot immediately retry the same failed cursor.
+capability lifecycle events are split across page boundaries. Prepends preserve
+the first visible row identity and restore it to the top after insertion; the
+timeline intentionally does not replay viewport-relative offsets as SwiftUI
+target anchors because that can strand lazy content in empty space. Earlier
+history has two automatic triggers: a one-shot scroll-phase prefetch starts as
+soon as the user leaves the bottom, and a viewport-relative top-detent loader
+requests additional pages before the 1px top sentinel must materialize.
+Returning to the bottom arms the prefetch again. Reconnect reconstruction keeps
+the user's already-expanded visible history window, merges it with the latest
+server-authoritative suffix, and performs bounded older-page backfill if that
+suffix would otherwise leave an event-sequence gap. A server reconstruction
+failure closes the server-history source for that pagination epoch so the top
+detent cannot immediately retry the same failed cursor.
 `session::replay_manifest` is a separate pure-read audit export. It returns
 `format: "tron.replay.v1"` with resolved session events, provider request audit
 events, trace records, `engineIdempotencyEntries`, engine invocation rows,
@@ -2621,7 +2631,7 @@ packages/ios-app/Sources/
 - **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`; registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
-- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries.
+- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries, persisted duplicate thinking snapshots inside one assistant message are collapsed defensively, and reconnect reconstruction preserves expanded visible history and backfills bounded event gaps before rebuilding the displayed window.
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session

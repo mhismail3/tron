@@ -670,6 +670,65 @@ fn completed_done_content_follows_response_output_order() {
 }
 
 #[test]
+fn completed_done_content_dedupes_repeated_thinking_snapshot() {
+    let mut state = create_stream_state();
+    state.acc.thinking_started = true;
+    state.acc.accumulated_thinking = "same reasoning".into();
+
+    let event = completed_event(
+        vec![
+            ResponsesOutputItem {
+                item_type: OutputItemType::Reasoning,
+                summary: Some(vec![OutputContent {
+                    content_type: "summary_text".into(),
+                    text: Some("same reasoning".into()),
+                }]),
+                ..Default::default()
+            },
+            ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_mid".into()),
+                name: Some("execute".into()),
+                arguments: Some(r#"{"operation":"process_run","command":"sleep 1"}"#.into()),
+                ..Default::default()
+            },
+            ResponsesOutputItem {
+                item_type: OutputItemType::Reasoning,
+                summary: Some(vec![OutputContent {
+                    content_type: "summary_text".into(),
+                    text: Some("same reasoning".into()),
+                }]),
+                ..Default::default()
+            },
+        ],
+        Some(ResponsesUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..Default::default()
+        }),
+    );
+
+    let events = process_stream_event(&event, &mut state);
+    let done = events
+        .iter()
+        .find_map(|event| match event {
+            StreamEvent::Done { message, .. } => Some(message),
+            _ => None,
+        })
+        .expect("done event");
+
+    assert_eq!(done.content.len(), 2);
+    assert!(matches!(
+        &done.content[0],
+        AssistantContent::Thinking { thinking, .. } if thinking == "same reasoning"
+    ));
+    assert!(matches!(
+        &done.content[1],
+        AssistantContent::CapabilityInvocation { id, .. } if id == "call_mid"
+    ));
+}
+
+#[test]
 fn completed_toolcall_end_uses_first_seen_capability_order() {
     let mut state = create_stream_state();
     let _ = process_stream_event(

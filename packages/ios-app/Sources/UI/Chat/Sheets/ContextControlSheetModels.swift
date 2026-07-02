@@ -36,7 +36,7 @@ struct ContextControlSnapshotDisplay: Equatable {
         self.currentEpoch = session.string("currentEpoch") ?? "epoch-0"
         self.createdAt = response.projection.dictionary("snapshot")?.dictionary("resource")?.string("versionId") ?? "Current"
         self.promptBlocks = composition?
-            .array("promptBlocks")?
+            .dictArray("promptBlocks")?
             .compactMap { ContextControlPromptBlock(raw: $0) } ?? []
         self.resourceRefCount = composition?.array("resourceRefs")?.count ?? 0
         self.executionRefCount = composition?.array("executionRefs")?.count ?? 0
@@ -113,7 +113,7 @@ struct ContextControlActionSummaryDisplay: Identifiable, Equatable {
     }
 
     static func actions(from response: ContextControlResponseDTO) -> [Self] {
-        response.projection.array("actions")?.compactMap { Self(raw: $0) } ?? []
+        response.projection.dictArray("actions")?.compactMap { Self(raw: $0) } ?? []
     }
 
     init?(raw: [String: Any]) {
@@ -169,10 +169,6 @@ extension Dictionary where Key == String, Value == AnyCodable {
     func dictionary(_ key: String) -> [String: Any]? {
         self[key]?.dictionaryValue
     }
-
-    func array(_ key: String) -> [[String: Any]]? {
-        self[key]?.arrayValue?.compactMap { $0 as? [String: Any] }
-    }
 }
 
 extension Dictionary where Key == String, Value == Any {
@@ -180,8 +176,18 @@ extension Dictionary where Key == String, Value == Any {
         self[key] as? [String: Any]
     }
 
-    func array(_ key: String) -> [[String: Any]]? {
-        self[key] as? [[String: Any]]
+    func array(_ key: String) -> [Any]? {
+        if let array = self[key] as? [Any] {
+            return array
+        }
+        if let array = self[key] as? NSArray {
+            return array.map { $0 }
+        }
+        return nil
+    }
+
+    func dictArray(_ key: String) -> [[String: Any]]? {
+        array(key)?.compactMap { $0 as? [String: Any] }
     }
 
     func string(_ key: String) -> String? {

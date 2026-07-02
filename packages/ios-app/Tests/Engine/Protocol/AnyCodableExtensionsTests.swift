@@ -229,6 +229,12 @@ struct AnyCodableExtensionsTests {
         #expect(d.array("k")?.count == 2)
     }
 
+    @Test("array unwraps nested AnyCodable values")
+    func arrayUnwrapsAnyCodableValues() {
+        let d = make(("k", [AnyCodable("a"), AnyCodable("b")]))
+        #expect(d.array("k")?.compactMap { $0 as? String } == ["a", "b"])
+    }
+
     @Test("array returns empty array for empty input")
     func arrayEmpty() {
         let d = make(("k", [] as [Any]))
@@ -238,6 +244,14 @@ struct AnyCodableExtensionsTests {
     @Test("array returns nil for missing key")
     func arrayMissing() {
         #expect(make().array("other") == nil)
+    }
+
+    @Test("dict unwraps nested AnyCodable values")
+    func dictUnwrapsAnyCodableValues() {
+        let d = make(("k", ["a": AnyCodable(1), "b": AnyCodable("two")]))
+        let dict = d.dict("k")
+        #expect(dict?["a"] as? Int == 1)
+        #expect(dict?["b"] as? String == "two")
     }
 
     @Test("stringArray filters non-strings via compactMap")

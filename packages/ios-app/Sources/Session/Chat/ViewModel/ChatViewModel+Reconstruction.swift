@@ -11,14 +11,29 @@ extension ChatViewModel {
     func processReconstructionResult(_ result: SessionReconstructResult) async {
         logger.info("[RECONSTRUCT] Processing: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), hasMore=\(result.hasMoreEvents), inFlight=\(result.inFlight != nil)", category: .session)
 
+        let previousEvents = loadedReconstructionEvents
+        let previousDisplayedMessageCount = displayedMessageCount
+        let previousHadInitialLoad = hasInitiallyLoaded
+        let previousHadOlderServerPages = hasOlderServerReconstructionPages
+        let eventWindow = await reconstructionEventWindow(
+            from: result,
+            previousEvents: previousEvents,
+            previousHadOlderServerPages: previousHadOlderServerPages
+        )
+        let mergedEvents = mergeReconstructionEvents(previousEvents, eventWindow.events)
+
         // 1. Reconstruct full session state (messages + config)
         //    Uses reconstructSessionState() as single source of truth.
-        let state = UnifiedEventTransformer.reconstructSessionState(from: result.events, presorted: true)
+        let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)
         applyReconstructedConfig(state)
 
         // 2. Rebuild the full timeline before selecting the visible slice.
         allReconstructedMessages = state.messages
-        let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
+        let batchSize = visibleMessageCountAfterReconstruction(
+            totalMessages: allReconstructedMessages.count,
+            previousDisplayedMessageCount: previousDisplayedMessageCount,
+            previousHadInitialLoad: previousHadInitialLoad
+        )
         displayedMessageCount = batchSize
 
         if batchSize > 0 {
@@ -29,10 +44,11 @@ extension ChatViewModel {
         }
 
         // 3. Track oldest sequence for load-more pagination
-        reconstructionOldestEventId = result.oldestEventId
-        hasOlderServerReconstructionPages = result.hasMoreEvents && result.oldestEventId != nil
+        reconstructionOldestEventId = mergedEvents.first?.id ?? eventWindow.oldestEventId
+        hasOlderServerReconstructionPages = eventWindow.hasMoreEvents
         recomputeHasMoreMessages()
-        loadedReconstructionEvents = result.events
+        loadedReconstructionEvents = mergedEvents
+        prunedLiveMessages.removeAll()
 
         // 4. Update session metadata from reconstruction
         if let turnCount = result.metadata.turnCount {
@@ -108,7 +124,110 @@ extension ChatViewModel {
             streamingRecoverySnapshot = nil
         }
 
-        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
+        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), loadedEvents=\(loadedReconstructionEvents.count), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil)", category: .session)
+    }
+
+    private struct ReconstructionEventWindow {
+        let events: [RawEvent]
+        let oldestEventId: String?
+        let hasMoreEvents: Bool
+    }
+
+    private func reconstructionEventWindow(
+        from result: SessionReconstructResult,
+        previousEvents: [RawEvent],
+        previousHadOlderServerPages: Bool
+    ) async -> ReconstructionEventWindow {
+        var events = result.events
+        var oldestEventId = result.oldestEventId
+        var hasMoreEvents = result.hasMoreEvents && result.oldestEventId != nil
+
+        if hasInitiallyLoaded,
+           let previousHighestSequence = previousEvents.map(\.sequence).max(),
+           let firstIncomingSequence = events.first?.sequence,
+           firstIncomingSequence > previousHighestSequence + 1 {
+            logger.info(
+                "[RECONSTRUCT] gap detected between previous seq \(previousHighestSequence) and incoming seq \(firstIncomingSequence); backfilling",
+                category: .session
+            )
+
+            var pageCount = 0
+            while hasMoreEvents,
+                  let firstSequence = events.first?.sequence,
+                  firstSequence > previousHighestSequence + 1,
+                  pageCount < Self.maxReconstructionGapBackfillPages {
+                guard let cursor = oldestEventId else { break }
+
+                do {
+                    let page = try await services.sessions.reconstruct(
+                        sessionId: sessionId,
+                        limit: Self.additionalMessageBatchSize,
+                        beforeEventId: cursor
+                    )
+
+                    guard page.oldestEventId != cursor else {
+                        logger.warning("[RECONSTRUCT] gap backfill cursor did not advance; stopping", category: .session)
+                        hasMoreEvents = false
+                        break
+                    }
+
+                    events.insert(contentsOf: page.events, at: 0)
+                    oldestEventId = page.oldestEventId
+                    hasMoreEvents = page.hasMoreEvents && page.oldestEventId != nil
+                    pageCount += 1
+                } catch {
+                    logger.warning("[RECONSTRUCT] gap backfill failed: \(error.localizedDescription)", category: .session)
+                    break
+                }
+            }
+
+            if pageCount >= Self.maxReconstructionGapBackfillPages {
+                logger.warning("[RECONSTRUCT] gap backfill reached page cap", category: .session)
+            }
+        }
+
+        if let previousFirst = previousEvents.first,
+           let currentFirst = events.first,
+           previousFirst.sequence < currentFirst.sequence {
+            return ReconstructionEventWindow(
+                events: events,
+                oldestEventId: previousFirst.id,
+                hasMoreEvents: previousHadOlderServerPages
+            )
+        }
+
+        return ReconstructionEventWindow(
+            events: events,
+            oldestEventId: oldestEventId,
+            hasMoreEvents: hasMoreEvents
+        )
+    }
+
+    private func mergeReconstructionEvents(_ previous: [RawEvent], _ incoming: [RawEvent]) -> [RawEvent] {
+        var byId: [String: RawEvent] = [:]
+        for event in previous {
+            byId[event.id] = event
+        }
+        for event in incoming {
+            byId[event.id] = event
+        }
+        return EventSorter.sortBySequence(Array(byId.values))
+    }
+
+    private func visibleMessageCountAfterReconstruction(
+        totalMessages: Int,
+        previousDisplayedMessageCount: Int,
+        previousHadInitialLoad: Bool
+    ) -> Int {
+        guard totalMessages > 0 else { return 0 }
+
+        let initialVisibleCount = min(Self.initialMessageBatchSize, totalMessages)
+        guard previousHadInitialLoad else {
+            return initialVisibleCount
+        }
+
+        let preservedVisibleCount = max(previousDisplayedMessageCount, messages.count, initialVisibleCount)
+        return min(totalMessages, preservedVisibleCount)
     }
 
     /// Reconcile transient live-turn state after a server-authoritative

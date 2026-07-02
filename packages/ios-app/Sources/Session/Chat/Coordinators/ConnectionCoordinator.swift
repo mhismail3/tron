@@ -23,6 +23,9 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     /// Highest processed event sequence (for WebSocket dedup)
     var sequenceHighWaterMark: Int64 { get set }
 
+    /// Event count to request for this reconstruction pass.
+    var reconstructionEventLimit: Int { get }
+
     /// Connect to the server
     func connect() async
 
@@ -105,7 +108,7 @@ final class ConnectionCoordinator {
         do {
             let result = try await context.reconstructSession(
                 sessionId: context.sessionId,
-                limit: 50,
+                limit: context.reconstructionEventLimit,
                 beforeEventId: nil
             )
 

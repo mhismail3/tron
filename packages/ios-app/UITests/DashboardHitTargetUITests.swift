@@ -92,6 +92,47 @@ final class DashboardHitTargetUITests: XCTestCase {
     }
 
     @MainActor
+    func testChatHistoryScrollKeepsMessageViewportPopulated() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("--tron-ui-test-onboarding-complete")
+        app.launch()
+
+        if !app.scrollViews["chat-message-scroll-view"].waitForExistence(timeout: 5) {
+            let recentSession = app.buttons.matching(
+                NSPredicate(format: "label CONTAINS[c] %@", "last active")
+            ).firstMatch
+
+            guard recentSession.waitForExistence(timeout: 20) else {
+                throw XCTSkip("No session rows are available for chat history scroll validation")
+            }
+            recentSession.tap()
+        }
+
+        let messageScrollView = app.scrollViews["chat-message-scroll-view"].firstMatch
+        XCTAssertTrue(
+            messageScrollView.waitForExistence(timeout: 20),
+            "Chat should expose a stable message scroll view for history validation"
+        )
+
+        XCTAssertGreaterThan(
+            visibleMessageElementCount(in: app),
+            0,
+            "Chat should render at least one visible message before history scrolling"
+        )
+
+        messageScrollView.swipeDown()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+
+        XCTAssertGreaterThan(
+            visibleMessageElementCount(in: app),
+            0,
+            "History scrolling must not leave the message viewport blank"
+        )
+        XCTAssertTrue(app.textViews["Message input"].exists || app.textFields["Message input"].exists)
+        keepScreenshot(named: "chat-history-scroll-populated")
+    }
+
+    @MainActor
     private func keepScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -107,5 +148,20 @@ final class DashboardHitTargetUITests: XCTestCase {
             withIntermediateDirectories: true
         )
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
+    }
+
+    @MainActor
+    private func visibleMessageElementCount(in app: XCUIApplication) -> Int {
+        app.descendants(matching: .any)
+            .matching(
+                NSPredicate(
+                    format: "label BEGINSWITH %@ OR label == %@",
+                    "You:",
+                    "Assistant message"
+                )
+            )
+            .allElementsBoundByIndex
+            .filter(\.isHittable)
+            .count
     }
 }

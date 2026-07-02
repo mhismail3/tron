@@ -109,9 +109,46 @@ struct AnyCodable: Codable, Equatable, Hashable, @unchecked Sendable {
     var intValue: Int? { value as? Int }
     var doubleValue: Double? { value as? Double }
     var boolValue: Bool? { value as? Bool }
-    var arrayValue: [Any]? { value as? [Any] }
-    var dictionaryValue: [String: Any]? { value as? [String: Any] }
+    var arrayValue: [Any]? { Self.arrayValue(from: value) }
+    var dictionaryValue: [String: Any]? { Self.dictionaryValue(from: value) }
     var isNull: Bool { value is NSNull }
+
+    private static func arrayValue(from value: Any) -> [Any]? {
+        if let array = value as? NSArray {
+            return array.map(unwrap)
+        }
+        let mirror = Mirror(reflecting: value)
+        guard mirror.displayStyle == .collection else { return nil }
+        return mirror.children.map { unwrap($0.value) }
+    }
+
+    private static func dictionaryValue(from value: Any) -> [String: Any]? {
+        if let dictionary = value as? NSDictionary {
+            var result: [String: Any] = [:]
+            for (key, value) in dictionary {
+                guard let key = key as? String else { return nil }
+                result[key] = unwrap(value)
+            }
+            return result
+        }
+
+        let mirror = Mirror(reflecting: value)
+        guard mirror.displayStyle == .dictionary else { return nil }
+
+        var result: [String: Any] = [:]
+        for child in mirror.children {
+            let pair = Array(Mirror(reflecting: child.value).children)
+            guard pair.count == 2, let key = pair[0].value as? String else {
+                return nil
+            }
+            result[key] = unwrap(pair[1].value)
+        }
+        return result
+    }
+
+    private static func unwrap(_ value: Any) -> Any {
+        (value as? AnyCodable)?.value ?? value
+    }
 }
 
 extension AnyCodable: ExpressibleByNilLiteral {

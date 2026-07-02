@@ -15,6 +15,18 @@ import SwiftUI
 ///    the bottom of the content. The threshold is computed in the view layer and
 ///    accounts for `contentInsets.bottom` (input bar + safe area).
 ///
+/// Earlier-history loading has two paths:
+///
+/// - **Eager prefetch** when a real user gesture leaves the bottom. This keeps older
+///   history warm before the user hits the loaded boundary.
+/// - **Top-detent load** from view-layer top geometry. This is the boundary backup and
+///   does not depend on `userScrolledAway`, because SwiftUI can report "near top"
+///   before phase/bottom callbacks have settled.
+///
+/// Eager prefetch is one-shot per scroll-away interval. The interval resets only when
+/// the viewport returns to bottom, which prevents phase and geometry callbacks from
+/// requesting multiple pages for a single drag.
+///
 /// The key invariant: **auto-scroll is suppressed whenever the user is interacting OR
 /// has scrolled away.** This prevents programmatic `scrollTo` calls from fighting the
 /// user's gesture during streaming.
@@ -40,6 +52,10 @@ final class ScrollStateCoordinator {
     /// Drives the "New content" pill independently of processing state.
     private(set) var hasUnseenContent = false
 
+    /// Whether the current away-from-bottom interval already requested an eager
+    /// earlier-history page.
+    private var didPrefetchEarlierHistoryDuringScrollAway = false
+
     /// True while the user is physically interacting with the scroll view
     /// (touching, tracking, or decelerating from a flick).
     private var isUserInteracting = false
@@ -55,7 +71,7 @@ final class ScrollStateCoordinator {
     /// the "New content" pill would flash while older rows are inserted.
     var isPrependingHistory = false
 
-    private var anchoredItemId: UUID?
+    private var prependAnchor: ScrollViewportAnchor?
     private var targetNavigationSnapshot: TargetNavigationSnapshot?
 
     // MARK: - Scroll Phase
@@ -153,15 +169,15 @@ final class ScrollStateCoordinator {
 
     // MARK: - History Loading
 
-    func willPrependHistory(firstVisibleId: UUID?) {
-        anchoredItemId = firstVisibleId
+    func willPrependHistory(anchor: ScrollViewportAnchor?) {
+        prependAnchor = anchor
         isPrependingHistory = true
     }
 
     func didPrependHistory(using proxy: ScrollViewProxy?) {
-        if let id = anchoredItemId {
-            proxy?.scrollTo(id, anchor: .top)
-            anchoredItemId = nil
+        if let anchor = prependAnchor {
+            proxy?.scrollTo(anchor.messageId, anchor: .top)
+            prependAnchor = nil
         }
         isPrependingHistory = false
     }
@@ -189,14 +205,44 @@ final class ScrollStateCoordinator {
     func shouldAutoloadEarlierMessages(
         hasMoreMessages: Bool,
         initialLoadComplete: Bool,
+        isLoadingMoreMessages: Bool,
+        isNearTop: Bool
+    ) -> Bool {
+        hasMoreMessages
+            && initialLoadComplete
+            && isNearTop
+            && !isLoadingMoreMessages
+            && !isPrependingHistory
+    }
+
+    func shouldPrefetchEarlierMessages(
+        hasMoreMessages: Bool,
+        initialLoadComplete: Bool,
         isLoadingMoreMessages: Bool
     ) -> Bool {
         hasMoreMessages
             && initialLoadComplete
             && userScrolledAway
-            && !isAtBottom
             && !isLoadingMoreMessages
             && !isPrependingHistory
+            && !didPrefetchEarlierHistoryDuringScrollAway
+    }
+
+    func beginEarlierHistoryPrefetchIfNeeded(
+        hasMoreMessages: Bool,
+        initialLoadComplete: Bool,
+        isLoadingMoreMessages: Bool
+    ) -> Bool {
+        guard shouldPrefetchEarlierMessages(
+            hasMoreMessages: hasMoreMessages,
+            initialLoadComplete: initialLoadComplete,
+            isLoadingMoreMessages: isLoadingMoreMessages
+        ) else {
+            return false
+        }
+
+        didPrefetchEarlierHistoryDuringScrollAway = true
+        return true
     }
 
     // MARK: - Private
@@ -207,6 +253,7 @@ final class ScrollStateCoordinator {
         userScrolledAway = false
         hasUnseenContent = false
         hadUserInteraction = false
+        didPrefetchEarlierHistoryDuringScrollAway = false
     }
 
     private struct TargetNavigationSnapshot {

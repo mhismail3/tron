@@ -264,21 +264,21 @@ struct ScrollStateCoordinatorTests {
 
     // MARK: - History Loading
 
-    @Test("willPrependHistory saves anchor ID")
+    @Test("willPrependHistory saves viewport anchor")
     func testWillPrependHistory() {
         let coordinator = ScrollStateCoordinator()
         let anchorId = UUID()
 
-        coordinator.willPrependHistory(firstVisibleId: anchorId)
+        coordinator.willPrependHistory(anchor: ScrollViewportAnchor(messageId: anchorId))
 
         #expect(!coordinator.userScrolledAway)
     }
 
-    @Test("willPrependHistory with nil handles gracefully")
+    @Test("willPrependHistory with nil anchor handles gracefully")
     func testWillPrependHistoryNil() {
         let coordinator = ScrollStateCoordinator()
 
-        coordinator.willPrependHistory(firstVisibleId: nil)
+        coordinator.willPrependHistory(anchor: nil)
         coordinator.didPrependHistory(using: nil)
 
         #expect(!coordinator.userScrolledAway)
@@ -289,7 +289,7 @@ struct ScrollStateCoordinatorTests {
         let coordinator = ScrollStateCoordinator()
         let anchorId = UUID()
 
-        coordinator.willPrependHistory(firstVisibleId: anchorId)
+        coordinator.willPrependHistory(anchor: ScrollViewportAnchor(messageId: anchorId))
         coordinator.didPrependHistory(using: nil)
 
         coordinator.didPrependHistory(using: nil)
@@ -409,7 +409,7 @@ struct ScrollStateCoordinatorTests {
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
         #expect(coordinator.userScrolledAway)
 
-        coordinator.willPrependHistory(firstVisibleId: UUID())
+        coordinator.willPrependHistory(anchor: ScrollViewportAnchor(messageId: UUID()))
 
         // No contentDidArrive during history load → no pill
         #expect(!coordinator.shouldShowNewContentPill)
@@ -574,62 +574,6 @@ struct ScrollStateCoordinatorTests {
         #expect(!coordinator.shouldAutoScroll)
     }
 
-    @Test("Top autoload policy waits for initial load")
-    func testTopAutoloadPolicyWaitsForInitialLoad() {
-        let coordinator = ScrollStateCoordinator()
-
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
-        coordinator.geometryChanged(isNearBottom: false)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
-
-        #expect(!coordinator.shouldAutoloadEarlierMessages(
-            hasMoreMessages: true,
-            initialLoadComplete: false,
-            isLoadingMoreMessages: false
-        ))
-    }
-
-    @Test("Top autoload policy does not trigger at bottom")
-    func testTopAutoloadPolicyDoesNotTriggerAtBottom() {
-        let coordinator = ScrollStateCoordinator()
-
-        #expect(!coordinator.shouldAutoloadEarlierMessages(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: false
-        ))
-    }
-
-    @Test("Top autoload policy does not trigger while loading")
-    func testTopAutoloadPolicyDoesNotTriggerWhileLoading() {
-        let coordinator = ScrollStateCoordinator()
-
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
-        coordinator.geometryChanged(isNearBottom: false)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
-
-        #expect(!coordinator.shouldAutoloadEarlierMessages(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: true
-        ))
-    }
-
-    @Test("Top autoload policy triggers after user scrolls away with more history")
-    func testTopAutoloadPolicyTriggersAfterUserScrollsAway() {
-        let coordinator = ScrollStateCoordinator()
-
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
-        coordinator.geometryChanged(isNearBottom: false)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
-
-        #expect(coordinator.shouldAutoloadEarlierMessages(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: false
-        ))
-    }
-
     @Test("Failed target navigation restores prior bottom state")
     func testFailedTargetNavigationRestoresPriorState() {
         let coordinator = ScrollStateCoordinator()
@@ -642,4 +586,5 @@ struct ScrollStateCoordinatorTests {
         #expect(!coordinator.hasUnseenContent)
         #expect(coordinator.shouldAutoScroll)
     }
+
 }

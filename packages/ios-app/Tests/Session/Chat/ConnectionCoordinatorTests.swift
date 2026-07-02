@@ -44,6 +44,15 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.reconstructSessionCalled)
     }
 
+    func testConnectAndReconstructUsesContextReconstructionLimit() async {
+        mockContext.isConnected = true
+        mockContext.reconstructionEventLimit = 250
+
+        await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertEqual(mockContext.lastReconstructLimit, 250)
+    }
+
     func testConnectAndReconstructSetsShouldDismissOnSessionNotFound() async {
         mockContext.isConnected = true
         mockContext.resumeSessionError = ConnectionTestError.sessionNotFound
@@ -210,6 +219,7 @@ final class MockConnectionContext: ConnectionContext {
     var isConnected: Bool = false
     var isReconstructing: Bool = false
     var sequenceHighWaterMark: Int64 = -1
+    var reconstructionEventLimit: Int = 100
 
     // MARK: - Tracking
     var connectCalled = false
@@ -217,6 +227,7 @@ final class MockConnectionContext: ConnectionContext {
     var resumeSessionCalled = false
     var lastResumeSessionId: String?
     var reconstructSessionCalled = false
+    var lastReconstructLimit: Int?
     var processReconstructionResultCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
@@ -263,6 +274,7 @@ final class MockConnectionContext: ConnectionContext {
 
     func reconstructSession(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
         reconstructSessionCalled = true
+        lastReconstructLimit = limit
         if reconstructShouldFail { throw ConnectionTestError.generic }
 
         let json = """

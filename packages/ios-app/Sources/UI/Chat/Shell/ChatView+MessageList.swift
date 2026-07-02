@@ -108,6 +108,7 @@ extension ChatView {
                                 onTap: { action in handleBubbleTap(action) }
                             )
                             .id(message.id)
+                            .background(MessageViewportProbe(id: message.id))
                             // Per-message entrance animation - fade in with slight upward movement
                             // Visibility managed by AnimationCoordinator bottom-up cascade
                             .opacity(messageIsVisible(at: index, total: viewModel.messages.count) ? 1 : 0)
@@ -144,10 +145,15 @@ extension ChatView {
                     }
                     .padding()
                 }
+                .accessibilityIdentifier("chat-message-scroll-view")
                 // NOTE: We intentionally do NOT use .defaultScrollAnchor(.bottom) here.
                 // It causes content to jump off-screen when keyboard appears with long content,
                 // because it tries to re-anchor when container size changes.
                 // Instead, we manually scroll to bottom on initial load and when keyboard appears.
+                .coordinateSpace(name: ChatMessageScrollCoordinateSpace.name)
+                .onPreferenceChange(MessageViewportFramePreferenceKey.self) { frames in
+                    messageViewportFrames = frames
+                }
                 .scrollDismissesKeyboard(.interactively)
                 // Track scroll phases — definitively know user vs programmatic scroll
                 .onScrollPhaseChange { oldPhase, newPhase in
@@ -155,6 +161,7 @@ extension ChatView {
                         logger.debug("[INIT] phase: \(oldPhase) → \(newPhase)", category: .ui)
                     }
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
+                    scheduleEarlierHistoryPrefetchIfNeeded()
 
                 }
                 // Track near-bottom geometry — fires only when the Bool changes.
@@ -168,6 +175,9 @@ extension ChatView {
                 } action: { _, isNearBottom in
                     guard initialLoadComplete else { return }
                     scrollCoordinator.geometryChanged(isNearBottom: isNearBottom)
+                    if !isNearBottom {
+                        scheduleEarlierHistoryPrefetchIfNeeded()
+                    }
                 }
                 // Track content height during initial load for convergence detection.
                 // The scroll loop reads initContentHeight to know when LazyVStack
@@ -177,6 +187,23 @@ extension ChatView {
                 } action: { _, contentH in
                     guard !initialLoadComplete else { return }
                     initContentHeight = contentH
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.containerSize.height
+                } action: { _, height in
+                    messageViewportHeight = height
+                }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
+                    return topDistance < ChatHistoryAutoloadPolicy.topDistanceThreshold(
+                        viewportHeight: geometry.containerSize.height
+                    )
+                } action: { _, isNearTop in
+                    guard initialLoadComplete else { return }
+                    isNearTopHistoryDetent = isNearTop
+                    if isNearTop {
+                        scheduleAutoloadEarlierMessages()
+                    }
                 }
                 .onAppear {
                     scrollProxy = proxy
@@ -294,8 +321,72 @@ extension ChatView {
 
     // MARK: - Earlier Message Autoload
 
-    func autoloadEarlierMessages() async {
-        guard scrollCoordinator.shouldAutoloadEarlierMessages(
+    @discardableResult
+    func autoloadEarlierMessages(requireNearTop: Bool = true) async -> Int {
+        let shouldLoad: Bool
+        if requireNearTop {
+            shouldLoad = scrollCoordinator.shouldAutoloadEarlierMessages(
+                hasMoreMessages: viewModel.hasMoreMessages,
+                initialLoadComplete: initialLoadComplete,
+                isLoadingMoreMessages: viewModel.isLoadingMoreMessages,
+                isNearTop: isNearTopHistoryDetent
+            )
+        } else {
+            shouldLoad = scrollCoordinator.beginEarlierHistoryPrefetchIfNeeded(
+                hasMoreMessages: viewModel.hasMoreMessages,
+                initialLoadComplete: initialLoadComplete,
+                isLoadingMoreMessages: viewModel.isLoadingMoreMessages
+            )
+        }
+        guard shouldLoad else {
+            return 0
+        }
+
+        let anchor = ScrollViewportAnchorResolver.capture(
+            frames: messageViewportFrames,
+            viewportHeight: messageViewportHeight,
+            orderedMessageIds: viewModel.messages.map(\.id)
+        )
+        logger.debug(
+            "[HISTORY] autoload requested anchor=\(anchor?.messageId.uuidString ?? "none") displayed=\(viewModel.messages.count)",
+            category: .ui
+        )
+        scrollCoordinator.willPrependHistory(anchor: anchor)
+        let insertedCount = await viewModel.loadEarlierMessagesForTopDetent()
+
+        if insertedCount > 0 {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        scrollCoordinator.didPrependHistory(using: scrollProxy)
+        if insertedCount > 0, anchor != nil {
+            // Re-anchoring to the old first visible row puts newly loaded rows
+            // above the viewport. Require fresh geometry or another upward drag
+            // before fetching the next page.
+            isNearTopHistoryDetent = false
+        }
+        return insertedCount
+    }
+
+    func scheduleAutoloadEarlierMessages(requireNearTop: Bool = true) {
+        guard autoloadEarlierTask == nil else { return }
+        autoloadEarlierTask = Task { @MainActor in
+            defer { autoloadEarlierTask = nil }
+
+            guard requireNearTop else {
+                _ = await autoloadEarlierMessages(requireNearTop: false)
+                return
+            }
+
+            repeat {
+                let insertedCount = await autoloadEarlierMessages()
+                if insertedCount == 0 { break }
+                try? await Task.sleep(for: .milliseconds(80))
+            } while isNearTopHistoryDetent && viewModel.hasMoreMessages
+        }
+    }
+
+    func scheduleEarlierHistoryPrefetchIfNeeded() {
+        guard scrollCoordinator.shouldPrefetchEarlierMessages(
             hasMoreMessages: viewModel.hasMoreMessages,
             initialLoadComplete: initialLoadComplete,
             isLoadingMoreMessages: viewModel.isLoadingMoreMessages
@@ -303,13 +394,7 @@ extension ChatView {
             return
         }
 
-        scrollCoordinator.willPrependHistory(firstVisibleId: viewModel.messages.first?.id)
-        let insertedCount = await viewModel.loadEarlierMessagesForTopDetent()
-
-        if insertedCount > 0 {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-        scrollCoordinator.didPrependHistory(using: scrollProxy)
+        scheduleAutoloadEarlierMessages(requireNearTop: false)
     }
 
     var topAutoloadSentinel: some View {
@@ -327,12 +412,40 @@ extension ChatView {
             }
         }
         .onAppear {
-            guard autoloadEarlierTask == nil else { return }
-            autoloadEarlierTask = Task { @MainActor in
-                await autoloadEarlierMessages()
-                autoloadEarlierTask = nil
-            }
+            isNearTopHistoryDetent = true
+            scheduleAutoloadEarlierMessages()
         }
         .padding(.bottom, 8)
+    }
+}
+
+enum ChatHistoryAutoloadPolicy {
+    static func topDistanceThreshold(viewportHeight: CGFloat) -> CGFloat {
+        min(1_800, max(700, viewportHeight * 2.0))
+    }
+}
+
+private enum ChatMessageScrollCoordinateSpace {
+    static let name = "chat-message-scroll-viewport"
+}
+
+private struct MessageViewportProbe: View {
+    let id: UUID
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: MessageViewportFramePreferenceKey.self,
+                value: [id: proxy.frame(in: .named(ChatMessageScrollCoordinateSpace.name))]
+            )
+        }
+    }
+}
+
+private struct MessageViewportFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }

@@ -56,12 +56,17 @@ enum InterleavedContentProcessor {
         }
 
         var messages: [ChatMessage] = []
+        var emittedThinkingSnapshots = Set<String>()
 
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
 
             if blockType == ContentBlockType.thinking.rawValue {
-                if let message = processThinkingBlock(block, timestamp: timestamp) {
+                if let message = processThinkingBlock(
+                    block,
+                    timestamp: timestamp,
+                    emittedSnapshots: &emittedThinkingSnapshots
+                ) {
                     messages.append(message)
                 }
             } else if blockType == ContentBlockType.text.rawValue {
@@ -111,9 +116,14 @@ enum InterleavedContentProcessor {
     /// Process a thinking content block.
     private static func processThinkingBlock(
         _ block: [String: Any],
-        timestamp: Date
+        timestamp: Date,
+        emittedSnapshots: inout Set<String>
     ) -> ChatMessage? {
         guard let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty else {
+            return nil
+        }
+        let normalized = thinkingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, emittedSnapshots.insert(normalized).inserted else {
             return nil
         }
 

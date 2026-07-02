@@ -87,7 +87,7 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Tests/Session/Chat",
                 minimumFileCount: 36,
-                maximumFileCount: 42,
+                maximumFileCount: 45,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: [
                     "Coordinators",

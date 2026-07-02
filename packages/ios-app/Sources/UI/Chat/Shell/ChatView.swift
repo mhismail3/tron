@@ -46,6 +46,11 @@ struct ChatView: View {
     /// Content height reported by scroll geometry during initial load.
     /// Used by the scroll convergence loop to detect when LazyVStack heights stabilize.
     @State var initContentHeight: Int = 0
+    /// Visible message frames in the scroll viewport coordinate space.
+    /// Used only to preserve the user's reading position when older history is prepended.
+    @State var messageViewportFrames: [UUID: CGRect] = [:]
+    @State var messageViewportHeight: CGFloat = 0
+    @State var isNearTopHistoryDetent = false
 
     // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?

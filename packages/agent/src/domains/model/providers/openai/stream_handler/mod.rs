@@ -458,6 +458,7 @@ fn build_done_event(
     let mut has_valid_capability_invocation = false;
     let mut saw_reasoning_item = false;
     let mut saw_message_item = false;
+    let mut emitted_thinking_snapshots: HashSet<String> = HashSet::new();
 
     for item in &response.output {
         match item.item_type {
@@ -478,7 +479,9 @@ fn build_done_event(
                 } else {
                     state.acc.accumulated_thinking.clone()
                 };
-                if !thinking.is_empty() {
+                if !thinking.is_empty()
+                    && emitted_thinking_snapshots.insert(normalize_thinking_snapshot(&thinking))
+                {
                     content.push(AssistantContent::Thinking {
                         thinking,
                         signature: None,
@@ -529,13 +532,16 @@ fn build_done_event(
     }
 
     if !saw_reasoning_item && !state.acc.accumulated_thinking.is_empty() {
-        content.insert(
-            0,
-            AssistantContent::Thinking {
-                thinking: state.acc.accumulated_thinking.clone(),
-                signature: None,
-            },
-        );
+        let thinking = state.acc.accumulated_thinking.clone();
+        if emitted_thinking_snapshots.insert(normalize_thinking_snapshot(&thinking)) {
+            content.insert(
+                0,
+                AssistantContent::Thinking {
+                    thinking,
+                    signature: None,
+                },
+            );
+        }
     }
 
     if !saw_message_item && !state.acc.accumulated_text.is_empty() {
@@ -595,6 +601,10 @@ fn build_done_event(
 
 fn nonzero(value: u64) -> Option<u64> {
     (value > 0).then_some(value)
+}
+
+fn normalize_thinking_snapshot(thinking: &str) -> String {
+    thinking.trim().to_owned()
 }
 
 fn parse_openai_capability_arguments(

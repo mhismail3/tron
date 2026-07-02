@@ -51,6 +51,11 @@ struct KeychainItem {
 
     /// Persist `value` to the Keychain. Replaces any existing item with the
     /// same `service` + `account`. Throws `KeychainError` on failure.
+    ///
+    /// INVARIANT: after this method returns, a fresh `get()` for the same
+    /// service/account must return exactly `value`. Pairing relies on that
+    /// postcondition after bearer-token rotation; a stale duplicate Keychain
+    /// row must not survive an apparent successful update.
     func set(_ value: String) throws {
         guard let data = value.data(using: .utf8) else {
             throw KeychainError.unexpectedItemData
@@ -62,11 +67,29 @@ struct KeychainItem {
             baseQuery as CFDictionary,
             updateAttributes as CFDictionary
         )
-        if updateStatus == errSecSuccess { return }
+        if updateStatus == errSecSuccess {
+            if get() == value {
+                return
+            }
+            try replace(data)
+            return
+        }
         if updateStatus != errSecItemNotFound {
             throw KeychainError.unhandled(updateStatus)
         }
 
+        try add(data)
+    }
+
+    private func replace(_ data: Data) throws {
+        let deleteStatus = SecItemDelete(baseQuery as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            throw KeychainError.unhandled(deleteStatus)
+        }
+        try add(data)
+    }
+
+    private func add(_ data: Data) throws {
         var addQuery = baseQuery
         addQuery[kSecValueData as String] = data
         addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock

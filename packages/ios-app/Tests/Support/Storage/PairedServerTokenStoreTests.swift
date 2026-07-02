@@ -72,6 +72,19 @@ struct PairedServerTokenStoreTests {
         }
     }
 
+    @Test("rotated token is what a fresh store reads after relaunch")
+    func overwriteSurvivesStoreRecreation() throws {
+        try runIfKeychainAvailable {
+            let id = makeServerId()
+            defer { try? PairedServerTokenStore().remove(serverId: id) }
+
+            try PairedServerTokenStore().setToken("old-token", forServerId: id)
+            try PairedServerTokenStore().setToken("rotated-token", forServerId: id)
+
+            #expect(PairedServerTokenStore().token(forServerId: id) == "rotated-token")
+        }
+    }
+
     @Test("remove(serverId:) deletes the stored token")
     func removal() throws {
         try runIfKeychainAvailable {

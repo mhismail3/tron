@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-02 (chat top-detent history autoload; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-02 (chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -253,12 +253,20 @@ The chat timeline owns only truthful local/session presentation state:
   local and session processing before appending their deduped local
   notification; server-accepted stream/event failures continue through the
   server-authored event path.
-- Earlier chat history autoloads from a noninteractive top paging detent after
-  initial load and real user scroll-away. The timeline does not expose a manual
-  load control; loading state is limited to a small `ProgressView` with an
-  accessibility label, and prepends preserve the previously visible top row.
-  Server reconstruction failures close the server-history source for that
-  pagination epoch so the top detent does not retry the same failed cursor.
+- Earlier chat history autoloads from noninteractive scroll intent after
+  initial load. The timeline does not expose a manual load control; loading
+  state is limited to a small `ProgressView` with an accessibility label. A
+  one-shot scroll-phase prefetch starts as soon as the user leaves the bottom,
+  then a viewport-relative top-detent loader requests additional pages before
+  the 1px top sentinel must appear. Returning to the bottom re-arms the prefetch.
+  Prepends preserve the first visible row identity by restoring it to `.top`;
+  viewport-relative offsets are not replayed as SwiftUI target anchors because
+  that can strand lazy content in empty space. Reconnect reconstruction preserves
+  the user's already-expanded visible history window, merges it with the new
+  server-authoritative suffix, and performs bounded older-page backfill when the
+  suffix would otherwise leave an event-sequence gap. Server reconstruction
+  failures close the server-history source for that pagination epoch so the top
+  detent does not retry the same failed cursor.
 - Thinking fallback is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.
@@ -336,6 +344,9 @@ or resource surface exists: worker lifecycle catalog/resources,
 `module_activity::overview`, and generic `ui_surface` schemas. Unknown fields
 may be ignored for wire compatibility, but iOS must not preserve product-shaped
 fallback fields as client-owned truth.
+Dynamic `AnyCodable` payload accessors preserve both JSON-decoded arrays and
+directly wrapped typed Swift collections so generic UI/resource projections do
+not lose schema rows, option lists, or nested evidence during reconstruction.
 `Engine/Persistence` owns the local SQLite cache, repositories, and sync cursor
 coordination. `Engine/Events` owns live event dispatch, payload decoding,
 plugin registration, and stored-event reconstruction helpers.
