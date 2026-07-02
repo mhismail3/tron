@@ -471,6 +471,10 @@ The Settings footer stays in the sheet content flow after the maintenance
 actions. It uses a subtle material fade, but it is not a pinned overlay; the
 footer appears naturally when the sheet is expanded or scrolled to the bottom.
 
+Chat compaction notifications display token savings and label the percentage as
+reduction. The percentage is not a context-window usage value; durable compact
+actions and `compact.boundary` records remain the server-owned source of truth.
+
 `ModelPickerSheet.swift` owns the model-picker sheet frame and loading/error
 state. Provider, family, model-card, reasoning-visibility, and reasoning
 popover rendering live in `ModelPickerSheet+Sections.swift`. `TronColors.swift`

@@ -34,6 +34,18 @@ extension SourceGuardTests {
         }
     }
 
+    @Test("Compaction pill labels saved percentage as reduction")
+    func testCompactionPillLabelsReductionPercentage() throws {
+        let iosRoot = iosAppRoot()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Messages/NotificationViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains(#""\(compressionPercent)% reduction""#))
+        #expect(!source.contains(#""(\(compressionPercent)%)""#))
+    }
+
     @Test("Chat conversation does not mount passive engine cockpit")
     func testChatConversationDoesNotMountPassiveEngineCockpit() throws {
         let iosRoot = iosAppRoot()

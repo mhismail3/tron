@@ -279,7 +279,7 @@ struct CompactionNotificationView: View {
                         .foregroundStyle(.tronSky.opacity(0.7))
                         .transition(.blurReplace)
 
-                    Text("(\(compressionPercent)%)")
+                    Text("\(compressionPercent)% reduction")
                         .font(TronTypography.codeSM)
                         .foregroundStyle(.tronSky.opacity(0.5))
                         .transition(.blurReplace)

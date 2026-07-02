@@ -2488,7 +2488,7 @@ When context crosses the proactive trigger (default
 `triggerTokenThreshold: 0.70` of the model context window), compaction runs
 before the next provider call:
 
-1. **Summarize**: A deterministic keyword summarizer condenses older messages.
+1. **Summarize**: The loop handler invokes an explicit compaction summarizer strategy; the default primitive strategy is the deterministic keyword summarizer.
 2. **Stage**: A `compact.summary_staging` event durably records the summary before commit.
 3. **Boundary**: A `compact.boundary` event commits the cutoff and carries the summary used by server-side reconstruction.
 4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
@@ -2503,6 +2503,10 @@ a false boundary.
 Compaction is internal prompt-loop infrastructure. It is observable through
 session events and primitive trace records, not through public `context::*`
 capabilities.
+The loop owns the strategy injection boundary, while context-control records own
+manual and automatic compact action audit. A future engine-owned compaction
+strategy can replace the summarizer without changing session persistence,
+context-control records, or the iOS notification surface.
 
 ### Context Assembly Order
 

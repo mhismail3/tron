@@ -8,7 +8,7 @@ use tokio::sync::Notify;
 
 use crate::domains::agent::context::compaction_trigger::CompactionTrigger;
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::agent::context::summarizer::KeywordSummarizer;
+use crate::domains::agent::context::summarizer::{KeywordSummarizer, Summarizer};
 use crate::domains::agent::context::types::{CompactionTriggerConfig, CompactionTriggerInput};
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
@@ -24,6 +24,7 @@ pub struct CompactionHandler {
     >,
     context_control: Mutex<Option<crate::domains::context_control::Deps>>,
     trigger: Mutex<CompactionTrigger>,
+    summarizer: Arc<dyn Summarizer>,
 }
 
 struct CompactionGuard<'a> {
@@ -40,12 +41,26 @@ impl Drop for CompactionGuard<'_> {
 
 impl CompactionHandler {
     pub fn new(trigger_config: CompactionTriggerConfig) -> Self {
+        Self::with_summarizer(trigger_config, Arc::new(KeywordSummarizer::new()))
+    }
+
+    /// Build a compaction handler with an explicit summarizer strategy.
+    ///
+    /// Production uses [`KeywordSummarizer`] through [`Self::new`]. This
+    /// constructor keeps the loop boundary replaceable so a future
+    /// engine-owned compaction strategy can be injected without changing
+    /// context-control records, session persistence, or iOS presentation code.
+    pub fn with_summarizer(
+        trigger_config: CompactionTriggerConfig,
+        summarizer: Arc<dyn Summarizer>,
+    ) -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             persister: Mutex::new(None),
             context_control: Mutex::new(None),
             trigger: Mutex::new(CompactionTrigger::new(trigger_config)),
+            summarizer,
         }
     }
 
@@ -157,8 +172,9 @@ impl CompactionHandler {
         );
 
         let compaction_start = std::time::Instant::now();
-        let summarizer = KeywordSummarizer;
-        let result = context_manager.execute_compaction(&summarizer, None).await;
+        let result = context_manager
+            .execute_compaction(self.summarizer.as_ref(), None)
+            .await;
         let effective_result = result.as_ref().is_ok_and(is_effective_compaction_result);
         let tokens_after = context_manager.get_current_tokens();
 
