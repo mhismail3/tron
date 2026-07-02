@@ -118,7 +118,7 @@ quietly become oversized modules.
 | Path | Current LOC | Owner | Warning-band action | Status |
 |------|-------------|-------|---------------------|--------|
 | `packages/ios-app/Sources/UI/Chat/Composer/CameraCaptureSheet.swift` | 662 | chat composer camera owner | Split camera model, controls, or preview helpers into focused files before adding more capture-sheet behavior. | watch |
-| `packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift` | 651 | chat event-routing test owner | Split new event-routing coverage into coordinator- or event-family tests before expanding this file. | watch |
+| `packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift` | 667 | chat event-routing test owner | Split new event-routing coverage into coordinator- or event-family tests before expanding this file. | watch |
 | `packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+PrimitiveShellAbsence.swift` | 649 | iOS source-guard owner | Move new primitive-shell absence checks into feature-specific guard files before expanding this broad static guard further. | watch |
 | `packages/ios-app/Tests/Engine/Persistence/EventDatabaseTests.swift` | 646 | event database test owner | Add new persistence cases under behavior-specific test files before growing the broad database suite. | watch |
 | `packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTests.swift` | 627 | engine protocol test owner | Move new DTO encoding/decoding cases into type-family test files before growing this broad protocol suite. | watch |
@@ -129,4 +129,4 @@ quietly become oversized modules.
 | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift` | 596 | worker lifecycle projection owner | Split action/package helpers or schema formatting into focused cockpit projection extensions before adding more presentation fields. | watch |
 | `packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift` | 594 | worker lifecycle test owner | Put new briefing-specific coverage in `AgentBriefingViewModelTests.swift` or DTO tests instead of growing this broad cockpit suite. | watch |
 | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift` | 593 | cockpit capabilities UI owner | Move operation detail/schema blocks into focused capability-detail view files before adding more progressive disclosure layers. | watch |
-| `packages/ios-app/Tests/Session/Chat/Navigation/ScrollStateCoordinatorTests.swift` | 590 | chat navigation test owner | Move new scroll-state cases into focused navigation tests before this threshold row grows further. | watch |
+| `packages/ios-app/Tests/Session/Chat/Navigation/ScrollStateCoordinatorTests.swift` | 646 | chat navigation test owner | Move new scroll-state cases into focused navigation tests before this threshold row grows further. | watch |
