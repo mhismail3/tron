@@ -117,7 +117,11 @@ extension ChatViewModel {
         // Cap the buffer to bound raw memory
         if prunedLiveMessages.count > Self.maxPrunedBufferSize {
             let overflow = prunedLiveMessages.count - Self.maxPrunedBufferSize
+            let discarded = Array(prunedLiveMessages.prefix(overflow))
             prunedLiveMessages.removeFirst(overflow)
+            let reconstructedIds = Set(allReconstructedMessages.map(\.id))
+            let discardedReconstructedCount = discarded.filter { reconstructedIds.contains($0.id) }.count
+            displayedMessageCount = max(0, displayedMessageCount - discardedReconstructedCount)
         }
 
         let kept = Array(messages.suffix(Self.liveSessionPruneTarget))
@@ -125,7 +129,7 @@ extension ChatViewModel {
         // Replace display array (rebuilds MessageIndex)
         replaceAllMessages(with: kept)
 
-        displayedMessageCount = messages.count
+        displayedMessageCount = min(displayedMessageCount, allReconstructedMessages.count)
         recomputeHasMoreMessages()
         prunedVersion += 1
 
@@ -240,6 +244,8 @@ extension ChatViewModel {
 
         if emptyPageCount >= Self.maxEmptyAutoloadServerPages {
             logger.warning("[RECONSTRUCT] loadMore: reached empty page limit", category: .session)
+            hasOlderServerReconstructionPages = false
+            recomputeHasMoreMessages()
         }
         return 0
     }

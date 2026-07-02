@@ -136,7 +136,7 @@ final class LiveSessionPruningTests: XCTestCase {
         XCTAssertTrue(viewModel.hasMoreMessages)
     }
 
-    func test_pruneUpdatesDisplayedMessageCount() {
+    func test_pruneKeepsDisplayedMessageCountBoundedToReconstructedHistory() {
         // Given
         populateMessages(count: 250)
         viewModel.displayedMessageCount = 250
@@ -145,7 +145,7 @@ final class LiveSessionPruningTests: XCTestCase {
         viewModel.pruneOldMessagesIfNeeded()
 
         // Then
-        XCTAssertEqual(viewModel.displayedMessageCount, viewModel.messages.count)
+        XCTAssertEqual(viewModel.displayedMessageCount, 0)
     }
 
     func test_pruneKeepsMessageIndexValid_byUUID() {

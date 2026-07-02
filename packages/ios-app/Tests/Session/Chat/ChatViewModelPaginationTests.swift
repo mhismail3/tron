@@ -45,6 +45,40 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertFalse(viewModel.hasMoreMessages)
     }
 
+    func testTopDetentAutoloadLoadsHiddenReconstructedRowsAfterPrunedLiveBufferDrains() async {
+        let (viewModel, sessions) = makeViewModel()
+        let reconstructed = (0..<80).map { index in
+            makeMessage("history \(index)")
+        }
+        viewModel.allReconstructedMessages = reconstructed
+        viewModel.replaceAllMessages(with: Array(reconstructed.suffix(40)))
+        viewModel.displayedMessageCount = 40
+
+        for index in 0..<170 {
+            viewModel.appendToMessages(makeMessage("live \(index)"))
+        }
+
+        viewModel.reconstructionOldestEventId = "cursor-history"
+        viewModel.hasOlderServerReconstructionPages = true
+        viewModel.recomputeHasMoreMessages()
+        viewModel.pruneOldMessagesIfNeeded()
+
+        XCTAssertEqual(viewModel.messages.count, ChatViewModel.liveSessionPruneTarget)
+        XCTAssertEqual(viewModel.prunedLiveMessages.count, 110)
+        XCTAssertEqual(viewModel.displayedMessageCount, 40)
+
+        let firstPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
+        let finalPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
+        let inMemoryLoad = await viewModel.loadEarlierMessagesForTopDetent()
+
+        XCTAssertEqual(firstPrunedLoad, ChatViewModel.additionalMessageBatchSize)
+        XCTAssertEqual(finalPrunedLoad, 10)
+        XCTAssertEqual(inMemoryLoad, 40)
+        XCTAssertEqual(sessions.reconstructCalls.count, 0)
+        XCTAssertEqual(viewModel.messages.first?.id, reconstructed.first?.id)
+        XCTAssertTrue(viewModel.hasMoreMessages)
+    }
+
     func testTopDetentAutoloadLoadsFromInMemoryReconstruction() async {
         let (viewModel, _) = makeViewModel()
         let reconstructed = (0..<150).map { index in
@@ -96,6 +130,36 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(viewModel.reconstructionOldestEventId, "cursor-0")
         XCTAssertFalse(viewModel.hasMoreMessages)
         XCTAssertEqual(viewModel.messages.count, 1)
+    }
+
+    func testTopDetentAutoloadEmptyServerPageLimitStopsAdvertisingMoreHistory() async {
+        let (viewModel, sessions) = makeViewModel()
+        viewModel.hasMoreMessages = true
+        viewModel.hasOlderServerReconstructionPages = true
+        viewModel.reconstructionOldestEventId = "cursor-3"
+
+        sessions.reconstructHandler = { _, _, beforeEventId in
+            switch beforeEventId {
+            case "cursor-3":
+                return self.reconstructResult(events: [], hasMoreEvents: true, oldestEventId: "cursor-2")
+            case "cursor-2":
+                return self.reconstructResult(events: [], hasMoreEvents: true, oldestEventId: "cursor-1")
+            case "cursor-1":
+                return self.reconstructResult(events: [], hasMoreEvents: true, oldestEventId: "cursor-0")
+            default:
+                XCTFail("Unexpected cursor: \(String(describing: beforeEventId))")
+                return self.reconstructResult(events: [], hasMoreEvents: false, oldestEventId: nil)
+            }
+        }
+
+        let loaded = await viewModel.loadEarlierMessagesForTopDetent()
+
+        XCTAssertEqual(loaded, 0)
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["cursor-3", "cursor-2", "cursor-1"])
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, "cursor-0")
+        XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
+        XCTAssertFalse(viewModel.hasMoreMessages)
+        XCTAssertTrue(viewModel.messages.isEmpty)
     }
 
     func testTopDetentAutoloadServerErrorEmitsDedupedLocalError() async {
