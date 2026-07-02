@@ -51,8 +51,8 @@ final class ScrollStateCoordinator {
     // MARK: - History Loading
 
     /// Suppresses scroll-away detection during history prepend.
-    /// The button tap registers as user interaction, and the prepend shifts the viewport
-    /// away from bottom — without this guard, the "New content" pill would flash.
+    /// Prepending shifts the viewport away from bottom; without this guard,
+    /// the "New content" pill would flash while older rows are inserted.
     var isPrependingHistory = false
 
     private var anchoredItemId: UUID?
@@ -184,6 +184,19 @@ final class ScrollStateCoordinator {
 
     var shouldShowNewContentPill: Bool {
         userScrolledAway && hasUnseenContent
+    }
+
+    func shouldAutoloadEarlierMessages(
+        hasMoreMessages: Bool,
+        initialLoadComplete: Bool,
+        isLoadingMoreMessages: Bool
+    ) -> Bool {
+        hasMoreMessages
+            && initialLoadComplete
+            && userScrolledAway
+            && !isAtBottom
+            && !isLoadingMoreMessages
+            && !isPrependingHistory
     }
 
     // MARK: - Private

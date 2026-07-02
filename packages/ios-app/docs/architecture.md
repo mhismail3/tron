@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-01 (Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-02 (chat top-detent history autoload; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -253,6 +253,10 @@ The chat timeline owns only truthful local/session presentation state:
   local and session processing before appending their deduped local
   notification; server-accepted stream/event failures continue through the
   server-authored event path.
+- Earlier chat history autoloads from a noninteractive top paging detent after
+  initial load and real user scroll-away. The timeline does not expose a manual
+  load control; loading state is limited to a small `ProgressView` with an
+  accessibility label, and prepends preserve the previously visible top row.
 - Thinking fallback is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.

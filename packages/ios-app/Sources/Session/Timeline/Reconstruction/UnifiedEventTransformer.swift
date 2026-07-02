@@ -65,10 +65,30 @@ struct UnifiedEventTransformer {
     ///   - presorted: Whether `events` already arrive in chronological chain order.
     /// - Returns: Array of ChatMessages in chronological order
     static func transformPersistedEvents<E: EventTransformable>(_ events: [E], presorted: Bool = false) -> [ChatMessage] {
+        transformPersistedEvents(events, presorted: presorted, capabilityMaps: nil)
+    }
+
+    /// Transform a page of persisted events with additional capability lifecycle
+    /// context from already-loaded neighboring pages.
+    static func transformPersistedEvents<E: EventTransformable, C: EventTransformable>(
+        _ events: [E],
+        presorted: Bool = false,
+        capabilityContextEvents: [C]
+    ) -> [ChatMessage] {
+        var maps = buildCapabilityInvocationMaps(from: events)
+        maps.merge(buildCapabilityInvocationMaps(from: capabilityContextEvents))
+        return transformPersistedEvents(events, presorted: presorted, capabilityMaps: maps)
+    }
+
+    private static func transformPersistedEvents<E: EventTransformable>(
+        _ events: [E],
+        presorted: Bool,
+        capabilityMaps: CapabilityInvocationMapResult?
+    ) -> [ChatMessage] {
         let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
         // Build maps for capability invocation rendering.
-        let maps = buildCapabilityInvocationMaps(from: sorted)
+        let maps = capabilityMaps ?? buildCapabilityInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
 
@@ -177,6 +197,11 @@ struct UnifiedEventTransformer {
     struct CapabilityInvocationMapResult {
         var startedInvocations: [String: CapabilityInvocationStartedPayload] = [:]
         var completedInvocations: [String: CapabilityInvocationCompletedPayload] = [:]
+
+        mutating func merge(_ other: CapabilityInvocationMapResult) {
+            startedInvocations.merge(other.startedInvocations) { current, _ in current }
+            completedInvocations.merge(other.completedInvocations) { current, _ in current }
+        }
     }
 
     /// Single-pass collection of started/completed capability invocations from a sorted event array.

@@ -2277,6 +2277,11 @@ ordered ancestor chain ending at the child head so inherited parent history and
 child events arrive in one server-authored timeline. `tree::get_ancestors`
 returns resolved wire `events` for the same reason: clients inspect lineage
 without maintaining a second tree-only event shape.
+The iOS chat timeline autoloads earlier pages from a noninteractive top detent
+after initial load and real user scroll-away; it does not show a manual
+history-loading pill. Older pages are transformed with already-loaded adjacent
+event context so capability chips remain completed when assistant and
+capability lifecycle events are split across page boundaries.
 `session::replay_manifest` is a separate pure-read audit export. It returns
 `format: "tron.replay.v1"` with resolved session events, provider request audit
 events, trace records, `engineIdempotencyEntries`, engine invocation rows,
@@ -2610,7 +2615,7 @@ packages/ios-app/Sources/
 - **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`; registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
-- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`
+- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries.
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session

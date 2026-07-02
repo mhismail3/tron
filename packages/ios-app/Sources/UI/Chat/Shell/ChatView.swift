@@ -42,6 +42,7 @@ struct ChatView: View {
 
     // MARK: - Message Loading State (internal for extension access)
     @State var initialLoadComplete = false
+    @State var autoloadEarlierTask: Task<Void, Never>?
     /// Content height reported by scroll geometry during initial load.
     /// Used by the scroll convergence loop to detect when LazyVStack heights stabilize.
     @State var initContentHeight: Int = 0

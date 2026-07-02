@@ -97,12 +97,9 @@ extension ChatView {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        // Load more messages button (like iOS Messages)
                         if viewModel.hasMoreMessages {
-                            loadMoreButton
-                                .opacity(initialLoadComplete ? 1 : 0)
-                                .animation(.smooth(duration: 0.3), value: initialLoadComplete)
-                                .id("loadMore")
+                            topAutoloadSentinel
+                                .id("topAutoloadSentinel")
                         }
 
                         ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
@@ -227,12 +224,6 @@ extension ChatView {
                         }
                     }
                 }
-                // Restore scroll position after loading older messages
-                .onChange(of: viewModel.isLoadingMoreMessages) { wasLoading, isLoading in
-                    if wasLoading && !isLoading {
-                        scrollCoordinator.didPrependHistory(using: proxy)
-                    }
-                }
                 // Re-anchor scroll position after live session pruning
                 .onChange(of: viewModel.prunedVersion) { _, _ in
                     guard scrollCoordinator.shouldAutoScroll else { return }
@@ -301,68 +292,47 @@ extension ChatView {
         return true
     }
 
-    // MARK: - Load More Button
+    // MARK: - Earlier Message Autoload
 
-    /// Load earlier messages and scroll to the top to show the new content.
-    /// Handles both in-memory pagination and async server pagination.
-    func loadEarlierMessages() async {
-        let countBefore = viewModel.messages.count
+    func autoloadEarlierMessages() async {
+        guard scrollCoordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: viewModel.hasMoreMessages,
+            initialLoadComplete: initialLoadComplete,
+            isLoadingMoreMessages: viewModel.isLoadingMoreMessages
+        ) else {
+            return
+        }
 
-        // Suppress "New content" pill during the entire load
         scrollCoordinator.willPrependHistory(firstVisibleId: viewModel.messages.first?.id)
+        let insertedCount = await viewModel.loadEarlierMessagesForTopDetent()
 
-        // Try in-memory first, then async server fetch — called directly
-        // instead of via loadMoreMessages() to avoid fire-and-forget Task issues
-        viewModel.loadMoreMessagesSync()
-
-        if viewModel.messages.count == countBefore {
-            // In-memory had nothing — fetch from server (awaited, not fire-and-forget)
-            await viewModel.loadMoreMessagesFromServer()
-        }
-
-        // Scroll to the top of the new content.
-        // Yield a frame so LazyVStack materializes the newly prepended items.
-        // scrollTo has no effect if the target isn't rendered yet.
-        // NOTE: isPrependingHistory stays true until AFTER the scroll completes.
-        // The onChange(messages.count) handler fires during the yield and calls
-        // contentDidArrive() — if the flag were already cleared, it would set
-        // hasUnseenContent and flash the "New content" pill.
-        let countAfter = viewModel.messages.count
-        if countAfter > countBefore, let firstId = viewModel.messages.first?.id {
+        if insertedCount > 0 {
             try? await Task.sleep(for: .milliseconds(50))
-            withAnimation(.easeOut(duration: 0.3)) {
-                scrollProxy?.scrollTo(firstId, anchor: .top)
-            }
         }
-
-        // Clear prepend guard after scroll is dispatched
-        scrollCoordinator.isPrependingHistory = false
+        scrollCoordinator.didPrependHistory(using: scrollProxy)
     }
 
-    var loadMoreButton: some View {
-        Button {
-            Task {
-                await loadEarlierMessages()
+    var topAutoloadSentinel: some View {
+        Group {
+            if viewModel.isLoadingMoreMessages {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .tint(.tronTextMuted)
+                    .accessibilityLabel("Loading earlier messages")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            } else {
+                Color.clear
+                    .frame(height: 1)
             }
-        } label: {
-            HStack(spacing: 8) {
-                if viewModel.isLoadingMoreMessages {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .tint(.tronTextMuted)
-                } else {
-                    Image(systemName: "arrow.up.circle")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                }
-                Text(viewModel.isLoadingMoreMessages ? "Loading..." : "Load Earlier Messages")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .foregroundStyle(.tronTextSecondary)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 16)
-            .background(Color.tronOverlay(0.1), in: Capsule())
         }
-        .disabled(viewModel.isLoadingMoreMessages)
+        .onAppear {
+            guard autoloadEarlierTask == nil else { return }
+            autoloadEarlierTask = Task { @MainActor in
+                await autoloadEarlierMessages()
+                autoloadEarlierTask = nil
+            }
+        }
         .padding(.bottom, 8)
     }
 }

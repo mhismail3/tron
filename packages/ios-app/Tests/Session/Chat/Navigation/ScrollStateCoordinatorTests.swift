@@ -574,6 +574,62 @@ struct ScrollStateCoordinatorTests {
         #expect(!coordinator.shouldAutoScroll)
     }
 
+    @Test("Top autoload policy waits for initial load")
+    func testTopAutoloadPolicyWaitsForInitialLoad() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: false,
+            isLoadingMoreMessages: false
+        ))
+    }
+
+    @Test("Top autoload policy does not trigger at bottom")
+    func testTopAutoloadPolicyDoesNotTriggerAtBottom() {
+        let coordinator = ScrollStateCoordinator()
+
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: false
+        ))
+    }
+
+    @Test("Top autoload policy does not trigger while loading")
+    func testTopAutoloadPolicyDoesNotTriggerWhileLoading() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: true
+        ))
+    }
+
+    @Test("Top autoload policy triggers after user scrolls away with more history")
+    func testTopAutoloadPolicyTriggersAfterUserScrollsAway() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+
+        #expect(coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: false
+        ))
+    }
+
     @Test("Failed target navigation restores prior bottom state")
     func testFailedTargetNavigationRestoresPriorState() {
         let coordinator = ScrollStateCoordinator()

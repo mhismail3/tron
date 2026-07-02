@@ -19,6 +19,21 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedStatusPath).path))
     }
 
+    @Test("Chat timeline autoloads earlier messages without manual pill")
+    func testChatTimelineDoesNotMountManualEarlierMessagesPill() throws {
+        let iosRoot = iosAppRoot()
+        let uiSources = [
+            "Sources/UI/Chat/Shell/ChatView+MessageList.swift",
+            "Sources/UI/Chat/Shell/ChatView.swift",
+        ]
+        let removedLabel = "Load " + "Earlier " + "Messages"
+
+        for path in uiSources {
+            let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
+            #expect(!source.contains(removedLabel))
+        }
+    }
+
     @Test("Chat conversation does not mount passive engine cockpit")
     func testChatConversationDoesNotMountPassiveEngineCockpit() throws {
         let iosRoot = iosAppRoot()

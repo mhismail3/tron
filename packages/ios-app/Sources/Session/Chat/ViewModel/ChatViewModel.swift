@@ -121,8 +121,15 @@ final class ChatViewModel {
     var eventBuffer: [ParsedEventV2] = []
     /// Highest processed event sequence number. Events with seq <= this are dropped (dedup).
     var sequenceHighWaterMark: Int64 = -1
-    /// Oldest event ID from the last reconstruction (for pagination cursor).
+    /// Oldest event ID from the loaded reconstruction window (for pagination cursor).
     var reconstructionOldestEventId: String?
+    /// Raw reconstruction events already loaded into the timeline window.
+    ///
+    /// Older pages are transformed with this newer context so an assistant
+    /// content block split from its capability completion still renders the
+    /// completed chip instead of degrading to a running placeholder.
+    @ObservationIgnored
+    var loadedReconstructionEvents: [RawEvent] = []
     /// Snapshot of the live streaming message captured in
     /// `cleanUpStreamingState` so reconstruction can reuse its UUID
     /// when the in-flight streaming text continues from the same point.
@@ -219,7 +226,7 @@ final class ChatViewModel {
     var hasInitiallyLoaded = false
 
     /// Messages pruned from display during live sessions. NOT tracked by SwiftUI.
-    /// Used for instant "Load Earlier Messages" recovery without DB reconstruction.
+    /// Used for instant earlier-history recovery without DB reconstruction.
     @ObservationIgnored
     var prunedLiveMessages: [ChatMessage] = []
 

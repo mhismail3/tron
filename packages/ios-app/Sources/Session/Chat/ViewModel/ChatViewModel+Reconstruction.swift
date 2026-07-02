@@ -31,6 +31,7 @@ extension ChatViewModel {
 
         // 3. Track oldest sequence for load-more pagination
         reconstructionOldestEventId = result.oldestEventId
+        loadedReconstructionEvents = result.events
 
         // 4. Update session metadata from reconstruction
         if let turnCount = result.metadata.turnCount {
@@ -350,31 +351,6 @@ extension ChatViewModel {
 
     /// Load more older messages using `session::reconstruct` with pagination.
     func loadMoreMessagesFromServer() async {
-        guard hasMoreMessages, !isLoadingMoreMessages else { return }
-        isLoadingMoreMessages = true
-        defer { isLoadingMoreMessages = false }
-
-        guard let oldestEventId = reconstructionOldestEventId else {
-            logger.warning("[RECONSTRUCT] loadMore: no oldestEventId tracked, cannot paginate", category: .session)
-            hasMoreMessages = false
-            return
-        }
-
-        do {
-            let result = try await services.sessions.reconstruct(
-                sessionId: sessionId,
-                limit: Self.additionalMessageBatchSize,
-                beforeEventId: oldestEventId
-            )
-
-            let olderMessages = UnifiedEventTransformer.transformPersistedEvents(result.events, presorted: true)
-            allReconstructedMessages.insert(contentsOf: olderMessages, at: 0)
-            insertAtFrontOfMessages(olderMessages)
-            displayedMessageCount += olderMessages.count
-            hasMoreMessages = result.hasMoreEvents
-            reconstructionOldestEventId = result.oldestEventId
-        } catch {
-            logger.warning("Failed to load more messages: \(error)", category: .session)
-        }
+        _ = await loadEarlierMessagesForTopDetent()
     }
 }

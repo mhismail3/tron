@@ -4,6 +4,8 @@ import Foundation
 
 extension ChatViewModel {
 
+    private static let maxEmptyAutoloadServerPages = 3
+
     /// Set the event store manager reference (used when injected via environment)
     /// Call this BEFORE connectAndReconstruct() so event store is available.
     func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
@@ -35,8 +37,7 @@ extension ChatViewModel {
         }
     }
 
-    /// Load more older messages when user scrolls to top.
-    /// Called by the Load Earlier Messages button via `loadEarlierMessages()`.
+    /// Load more older messages when the top paging detent becomes visible.
     func loadMoreMessages() {
         guard hasMoreMessages, !isLoadingMoreMessages else { return }
 
@@ -59,28 +60,32 @@ extension ChatViewModel {
     /// Returns true if messages were loaded, false if buffer is exhausted.
     @discardableResult
     func loadMoreMessagesSync() -> Bool {
-        guard hasMoreMessages else { return false }
-
-        let historicalCount = allReconstructedMessages.count
-        let shownFromHistory = displayedMessageCount
-
-        let remainingInHistory = historicalCount - shownFromHistory
-        let batchToLoad = min(Self.additionalMessageBatchSize, remainingInHistory)
-
-        guard batchToLoad > 0 else { return false }
+        guard hasMoreMessages, !isLoadingMoreMessages else { return false }
 
         isLoadingMoreMessages = true
-        let endIndex = historicalCount - shownFromHistory
-        let startIndex = max(0, endIndex - batchToLoad)
-        let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
-
-        insertAtFrontOfMessages(olderMessages)
-        displayedMessageCount += batchToLoad
-
-        logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
-        hasMoreMessages = displayedMessageCount < historicalCount
+        let loadedCount = loadMoreMessagesSyncBatch()
         isLoadingMoreMessages = false
-        return true
+        return loadedCount > 0
+    }
+
+    /// Awaited top-detent paging path. Returns the number of renderable messages inserted.
+    @discardableResult
+    func loadEarlierMessagesForTopDetent() async -> Int {
+        guard hasMoreMessages, !isLoadingMoreMessages else { return 0 }
+
+        isLoadingMoreMessages = true
+        defer { isLoadingMoreMessages = false }
+
+        if !prunedLiveMessages.isEmpty {
+            return loadPrunedMessagesBatch()
+        }
+
+        let inMemoryCount = loadMoreMessagesSyncBatch()
+        if inMemoryCount > 0 {
+            return inMemoryCount
+        }
+
+        return await loadRenderableServerMessagesForTopDetent()
     }
 
     // MARK: - Live Session Pruning
@@ -124,13 +129,17 @@ extension ChatViewModel {
     /// Takes the most recent batch from the buffer (closest to current display)
     /// and prepends to messages.
     private func loadPrunedMessages() {
+        guard !isLoadingMoreMessages else { return }
         isLoadingMoreMessages = true
-        defer { isLoadingMoreMessages = false }
+        _ = loadPrunedMessagesBatch()
+        isLoadingMoreMessages = false
+    }
 
+    private func loadPrunedMessagesBatch() -> Int {
         let batchSize = min(Self.additionalMessageBatchSize, prunedLiveMessages.count)
         guard batchSize > 0 else {
             hasMoreMessages = false
-            return
+            return 0
         }
 
         // Take from the end (most recent pruned = closest to current display)
@@ -143,6 +152,87 @@ extension ChatViewModel {
         // More available if buffer has entries OR if historical messages exist
         hasMoreMessages = !prunedLiveMessages.isEmpty
             || allReconstructedMessages.count > displayedMessageCount
+        return batchSize
+    }
+
+    private func loadMoreMessagesSyncBatch() -> Int {
+        guard hasMoreMessages else { return 0 }
+
+        let historicalCount = allReconstructedMessages.count
+        let shownFromHistory = displayedMessageCount
+        let remainingInHistory = historicalCount - shownFromHistory
+        let batchToLoad = min(Self.additionalMessageBatchSize, remainingInHistory)
+
+        guard batchToLoad > 0 else { return 0 }
+
+        let endIndex = historicalCount - shownFromHistory
+        let startIndex = max(0, endIndex - batchToLoad)
+        let olderMessages = Array(allReconstructedMessages[startIndex..<endIndex])
+
+        insertAtFrontOfMessages(olderMessages)
+        displayedMessageCount += batchToLoad
+
+        logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
+        hasMoreMessages = displayedMessageCount < historicalCount
+        return batchToLoad
+    }
+
+    private func loadRenderableServerMessagesForTopDetent() async -> Int {
+        var emptyPageCount = 0
+
+        while hasMoreMessages, emptyPageCount < Self.maxEmptyAutoloadServerPages {
+            guard let oldestEventId = reconstructionOldestEventId else {
+                logger.warning("[RECONSTRUCT] loadMore: no oldestEventId tracked, cannot paginate", category: .session)
+                hasMoreMessages = false
+                return 0
+            }
+
+            do {
+                let result = try await services.sessions.reconstruct(
+                    sessionId: sessionId,
+                    limit: Self.additionalMessageBatchSize,
+                    beforeEventId: oldestEventId
+                )
+
+                guard result.oldestEventId != oldestEventId else {
+                    logger.warning("[RECONSTRUCT] loadMore: oldestEventId did not advance; stopping pagination", category: .session)
+                    hasMoreMessages = false
+                    return 0
+                }
+
+                let olderMessages = UnifiedEventTransformer.transformPersistedEvents(
+                    result.events,
+                    presorted: true,
+                    capabilityContextEvents: loadedReconstructionEvents
+                )
+                loadedReconstructionEvents.insert(contentsOf: result.events, at: 0)
+                reconstructionOldestEventId = result.oldestEventId
+                hasMoreMessages = result.hasMoreEvents
+
+                guard !olderMessages.isEmpty else {
+                    emptyPageCount += 1
+                    continue
+                }
+
+                allReconstructedMessages.insert(contentsOf: olderMessages, at: 0)
+                insertAtFrontOfMessages(olderMessages)
+                displayedMessageCount += olderMessages.count
+                return olderMessages.count
+            } catch {
+                logger.warning("Failed to load earlier messages: \(error)", category: .session)
+                appendLocalError(
+                    dedupKey: "session.loadEarlier.failed",
+                    title: "Could not load earlier messages",
+                    message: error.localizedDescription
+                )
+                return 0
+            }
+        }
+
+        if emptyPageCount >= Self.maxEmptyAutoloadServerPages {
+            logger.warning("[RECONSTRUCT] loadMore: reached empty page limit", category: .session)
+        }
+        return 0
     }
 
     /// Append a new message to the display (streaming messages during active session).
