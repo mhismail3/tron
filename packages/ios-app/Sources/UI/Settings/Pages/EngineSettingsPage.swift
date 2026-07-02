@@ -101,18 +101,6 @@ struct EngineSettingsPage: View {
 
                 SettingsRowDivider()
 
-                SettingsRow(icon: "circle.hexagongrid", label: "Provider") {
-                    SettingsCycleToggle(
-                        options: ProviderInfo.settingsOptions(including: settingsState.defaultProvider),
-                        current: settingsState.defaultProvider
-                    ) { newValue in
-                        settingsState.defaultProvider = newValue
-                        updateServerSetting(.defaultProvider(newValue))
-                    }
-                }
-
-                SettingsRowDivider()
-
                 navigationRow(
                     icon: "cpu",
                     label: "Model",

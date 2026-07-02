@@ -69,7 +69,6 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
     func testEngineSettingsPrimitiveCardsRenderForVisualQA() throws {
         let settingsState = SettingsState()
         settingsState.isLoaded = true
-        settingsState.defaultProvider = "openai-codex"
         settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("tron-visual-qa")
             .path
@@ -181,18 +180,25 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testEngineSettingsSurfacesServerOwnedControlsInsideEnginePageOnly() throws {
+    func testEngineSettingsSurfacesActionableServerOwnedControlsInsideEnginePageOnly() throws {
         let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
 
-        XCTAssertTrue(engine.contains("label: \"Provider\""))
-        XCTAssertTrue(engine.contains("ProviderInfo.settingsOptions(including: settingsState.defaultProvider)"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.defaultProvider(newValue))"))
+        XCTAssertTrue(engine.contains("label: \"Model\""))
+        XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.observabilityLogLevel(newValue))"))
         XCTAssertFalse(
+            engine.contains("label: \"Provider\""),
+            "Default provider should not be user-editable because runtime provider routing is inferred from the selected model"
+        )
+        XCTAssertFalse(
+            engine.contains("updateServerSetting(.defaultProvider"),
+            "Engine settings should not expose a no-op default-provider mutation"
+        )
+        XCTAssertFalse(
             settingsMain.contains("defaultProvider"),
-            "Default provider should stay inside Engine/Providers pages, not the Settings main section"
+            "Default provider should not appear as a Settings main-section affordance"
         )
     }
 

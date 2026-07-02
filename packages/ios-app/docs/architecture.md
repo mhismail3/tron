@@ -476,8 +476,10 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 `SettingsSupport.swift`.
 
 Settings main groups controls by ownership rather than by old product modules.
-Engine owns server-mirrored defaults, context compaction, transcription, log
-level, and storage retention policy. Accounts owns provider credential setup.
+Engine owns actionable server-mirrored defaults, context compaction,
+transcription, log level, and storage retention policy; provider routing follows
+the selected model rather than a separate default-provider control. Accounts
+owns provider credential setup.
 Servers owns local pairing/connection and redacted local logs. App owns local
 appearance and device behavior. Settings main does not grow a server-health
 dashboard; core engine visibility lives on the dashboard Engine Cockpit.

@@ -163,6 +163,7 @@ struct ConnectionSettingsPage: View {
             manageServerMenu(server, presentation: presentation)
                 .padding(.trailing, 12)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var onboardRow: some View {
@@ -187,6 +188,7 @@ struct ConnectionSettingsPage: View {
             }
             .buttonStyle(.plain)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func manageServerMenu(_ server: PairedServer, presentation: PairedServerRowPresentation) -> some View {
