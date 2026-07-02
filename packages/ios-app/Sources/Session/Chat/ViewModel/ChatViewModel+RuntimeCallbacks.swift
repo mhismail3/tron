@@ -6,8 +6,10 @@ extension ChatViewModel {
         streamingManager.onTextUpdate = { [weak self] messageId, text in
             guard let self = self else { return }
             if let index = self.messageIndex.index(for: messageId) {
-                self.messages[index].content = .streaming(text)
-                self.messages[index].streamingVersion += 1
+                self.updateMessage(at: index) { message in
+                    message.content = .streaming(text)
+                    message.streamingVersion += 1
+                }
             }
         }
 
@@ -24,8 +26,10 @@ extension ChatViewModel {
                 if finalText.isEmpty {
                     self.removeFromMessages(at: index)
                 } else {
-                    self.messages[index].content = .text(finalText)
-                    self.messages[index].isStreaming = false
+                    self.updateMessage(at: index) { message in
+                        message.content = .text(finalText)
+                        message.isStreaming = false
+                    }
                 }
             }
         }
@@ -79,8 +83,9 @@ extension ChatViewModel {
                 invocation.progressMessage = nil
                 invocation.progressPercent = nil
                 invocation.identity = data.identity
-                messages[index].content = .capabilityInvocation(invocation)
-                messageIndex.didUpdate(messages[index], at: index)
+                updateMessage(at: index) { message in
+                    message.content = .capabilityInvocation(invocation)
+                }
 
                 // Decrement running capability counter (clamp to 0 for catch-up scenarios)
                 runningCapabilityInvocationCount = max(0, runningCapabilityInvocationCount - 1)

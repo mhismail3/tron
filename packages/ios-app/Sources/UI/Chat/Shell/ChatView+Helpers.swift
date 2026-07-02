@@ -11,8 +11,9 @@ extension ChatView {
     // MARK: - Model Operations
 
     /// Pre-fetch models for model picker menu
-    func prefetchModels() async {
+    func prefetchModels(guardedBy ticket: ChatViewTaskTicket? = nil) async {
         await viewModel.modelPickerState.prefetchModels { [weak viewModel] models in
+            if let ticket, !taskCoordinator.isCurrent(ticket) { return }
             viewModel?.updateContextWindow(from: models)
         }
     }
@@ -50,15 +51,17 @@ extension ChatView {
     // MARK: - Deep Link Scroll
 
     /// Perform scroll to deep link target
-    func performDeepLinkScroll(to target: ScrollTarget) async {
+    func performDeepLinkScroll(to target: ScrollTarget, guardedBy ticket: ChatViewTaskTicket? = nil) async {
         scrollCoordinator.beginTargetNavigation()
         var foundTarget = false
         defer { scrollCoordinator.endTargetNavigation(foundTarget: foundTarget) }
 
         if let messageId = await viewModel.resolveMessageIdForDeepLink(target) {
+            guard isCurrent(ticket), !Task.isCancelled else { return }
             foundTarget = true
             for delay in [75, 150, 300] {
                 guard await layoutDelay(milliseconds: delay) else { return }
+                guard isCurrent(ticket), !Task.isCancelled else { return }
                 scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
             }
             logger.info("Deep link scroll to message: \(messageId)", category: .notification)
@@ -82,12 +85,13 @@ extension ChatView {
     /// Uses Swift concurrency sleeps so view cancellation during rapid
     /// navigation cancels the remaining settling work instead of scheduling
     /// stale scrolls back onto the main queue.
-    func handleInitialMessageVisibility() async {
+    func handleInitialMessageVisibility(guardedBy ticket: ChatViewTaskTicket? = nil) async {
         let msgCount = viewModel.messages.count
         logger.debug("[INIT] handleInitialMessageVisibility: messages=\(msgCount) scrollProxy=\(scrollProxy != nil) hasMore=\(viewModel.hasMoreMessages) bottom=\(initDistanceFromBottom)", category: .ui)
 
         guard msgCount > 0 else {
             logger.debug("[INIT] No messages, marking load complete", category: .ui)
+            guard isCurrent(ticket), !Task.isCancelled else { return }
             initialLoadComplete = true
             return
         }
@@ -95,16 +99,19 @@ extension ChatView {
         if !(await waitForInitialScrollProxy()) {
             logger.warning("[INIT] scrollProxy did not become ready before reveal; continuing with fallback", category: .ui)
         }
+        guard isCurrent(ticket), !Task.isCancelled else { return }
 
         // Deep link: skip animation, scroll to target
         if let target = scrollTarget {
             logger.debug("[INIT] Deep link target, skipping cascade", category: .ui)
             viewModel.animationCoordinator.makeAllMessagesVisible(count: msgCount)
+            guard isCurrent(ticket), !Task.isCancelled else { return }
             initialLoadComplete = true
 
             scrollToBottom()
             guard await layoutDelay(milliseconds: 100) else { return }
-            await performDeepLinkScroll(to: target)
+            guard isCurrent(ticket), !Task.isCancelled else { return }
+            await performDeepLinkScroll(to: target, guardedBy: ticket)
             return
         }
 
@@ -120,6 +127,7 @@ extension ChatView {
             let heightBefore = initContentHeight
             scrollToBottom()
             guard await layoutDelay(milliseconds: ChatTranscriptRevealPolicy.initialSettleDelayMilliseconds) else { return }
+            guard isCurrent(ticket), !Task.isCancelled else { return }
             let heightAfter = initContentHeight
             contentHeightStable = heightAfter > 0 && heightAfter == heightBefore
 
@@ -142,6 +150,7 @@ extension ChatView {
         // One final scroll after convergence to ensure we're at the true bottom
         scrollToBottom()
         guard await layoutDelay(milliseconds: 80) else { return }
+        guard isCurrent(ticket), !Task.isCancelled else { return }
         bottomSettled = ChatTranscriptRevealPolicy.isReadyToReveal(
             hasScrollProxy: scrollProxy != nil,
             contentHeightStable: contentHeightStable || initContentHeight > 0,
@@ -153,6 +162,7 @@ extension ChatView {
 
         // Fade in all messages from the correct scroll position
         logger.debug("[INIT] fading in \(viewModel.messages.count) messages, setting initialLoadComplete=true bottom=\(initDistanceFromBottom)", category: .ui)
+        guard isCurrent(ticket), !Task.isCancelled else { return }
         withAnimation(.easeOut(duration: 0.3)) {
             viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
             initialLoadComplete = true
@@ -171,6 +181,11 @@ extension ChatView {
             guard await layoutDelay(milliseconds: 25) else { return false }
         }
         return scrollProxy != nil
+    }
+
+    private func isCurrent(_ ticket: ChatViewTaskTicket?) -> Bool {
+        guard let ticket else { return true }
+        return taskCoordinator.isCurrent(ticket)
     }
 
     func scrollToBottom(

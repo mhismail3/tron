@@ -45,6 +45,13 @@ extension MessageMutating {
         messageIndex.rebuild(from: messages)
     }
 
+    /// Mutate one message in place and keep lookup indexes synchronized.
+    func updateMessage(at position: Int, _ update: (inout ChatMessage) -> Void) {
+        let oldMessage = messages[position]
+        update(&messages[position])
+        messageIndex.didUpdate(from: oldMessage, to: messages[position], at: position)
+    }
+
     /// Replace the entire messages array. Rebuilds the index.
     func replaceAllMessages(with newMessages: [ChatMessage]) {
         messages = newMessages
@@ -159,9 +166,21 @@ final class MessageIndex {
     /// The index position doesn't change, but invocationId mapping may need updating.
     func didUpdate(_ message: ChatMessage, at position: Int) {
         // Re-register invocation id in case content changed.
+        idToIndex[message.id] = position
         if let invocationId = extractCapabilityInvocationId(from: message) {
             capabilityInvocationIdToIndex[invocationId] = position
         }
+    }
+
+    /// Notify the index that a message's content was updated in place.
+    /// Removes stale capability mappings if the message changed from one
+    /// invocation identity to another or stopped being a capability row.
+    func didUpdate(from oldMessage: ChatMessage, to newMessage: ChatMessage, at position: Int) {
+        if let oldInvocationId = extractCapabilityInvocationId(from: oldMessage),
+           oldInvocationId != extractCapabilityInvocationId(from: newMessage) {
+            capabilityInvocationIdToIndex.removeValue(forKey: oldInvocationId)
+        }
+        didUpdate(newMessage, at: position)
     }
 
     /// Clear the entire index.

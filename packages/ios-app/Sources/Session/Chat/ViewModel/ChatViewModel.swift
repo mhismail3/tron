@@ -458,12 +458,14 @@ final class ChatViewModel {
             return
         }
 
-        messages[index].content = .thinking(
-            visible: visible,
-            isExpanded: isExpanded,
-            isStreaming: false,
-            kind: kind
-        )
+        updateMessage(at: index) { message in
+            message.content = .thinking(
+                visible: visible,
+                isExpanded: isExpanded,
+                isStreaming: false,
+                kind: kind
+            )
+        }
         thinkingState.markStreamingComplete()
     }
 

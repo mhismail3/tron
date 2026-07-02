@@ -181,4 +181,29 @@ struct ScrollHistoryAutoloadTests {
             isLoadingMoreMessages: false
         ))
     }
+
+    @Test("Canceled history prepend restores scroll coordinator")
+    func testCanceledHistoryPrependRestoresCoordinator() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.willPrependHistory(anchor: nil)
+        #expect(!coordinator.shouldAutoScroll)
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: false,
+            isNearTop: true
+        ))
+
+        coordinator.cancelPrependHistory()
+
+        #expect(coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: false,
+            isNearTop: true
+        ))
+    }
 }

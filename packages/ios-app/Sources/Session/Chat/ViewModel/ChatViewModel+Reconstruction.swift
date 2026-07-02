@@ -313,12 +313,12 @@ extension ChatViewModel {
                     } else {
                         streamingMessage = ChatMessage.streaming()
                     }
-                    messages.append(streamingMessage)
+                    appendToMessages(streamingMessage)
                     streamingManager.catchUpToInProgress(existingText: text, messageId: streamingMessage.id)
                     if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = streamingMessage.id }
                 } else {
                     let textMessage = ChatMessage(role: .assistant, content: .text(text))
-                    messages.append(textMessage)
+                    appendToMessages(textMessage)
                     if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = textMessage.id }
                 }
 
@@ -345,12 +345,14 @@ extension ChatViewModel {
                 })
 
                 if let idx = existingThinkingIdx {
-                    messages[idx].content = .thinking(
-                        visible: accumulatedThinking,
-                        isExpanded: false,
-                        isStreaming: isThinkingStreaming,
-                        kind: kind
-                    )
+                    updateMessage(at: idx) { message in
+                        message.content = .thinking(
+                            visible: accumulatedThinking,
+                            isExpanded: false,
+                            isStreaming: isThinkingStreaming,
+                            kind: kind
+                        )
+                    }
                     thinkingMessageId = messages[idx].id
                 } else {
                     let msg = ChatMessage.thinking(
@@ -358,7 +360,7 @@ extension ChatViewModel {
                         isStreaming: isThinkingStreaming,
                         kind: kind
                     )
-                    messages.append(msg)
+                    appendToMessages(msg)
                     thinkingMessageId = msg.id
                 }
 
@@ -462,7 +464,9 @@ extension ChatViewModel {
             }
         }) {
             // Only update capability invocation with richer in-flight data (streaming output, startedAt).
-            messages[existingIdx].content = .capabilityInvocation(invocationData)
+            updateMessage(at: existingIdx) { message in
+                message.content = .capabilityInvocation(invocationData)
+            }
             currentCapabilityInvocationMessages[messages[existingIdx].id] = messages[existingIdx]
             animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
             logger.info("[RECONSTRUCT] Deduplicated capability message for \(modelPrimitiveName) id=\(capabilityInvocation.invocationId)", category: .session)
@@ -478,7 +482,7 @@ extension ChatViewModel {
 
         // Track in currentCapabilityInvocationMessages AFTER content is finalized
         currentCapabilityInvocationMessages[messageId] = capabilityMessage
-        messages.append(capabilityMessage)
+        appendToMessages(capabilityMessage)
         animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
     }
 

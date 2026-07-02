@@ -103,12 +103,14 @@ final class TurnLifecycleCoordinator {
         if let id = context.thinkingMessageId,
            let index = MessageFinder.indexById(id, in: context.messages),
            case .thinking(let visible, let isExpanded, _, let kind) = context.messages[index].content {
-            context.messages[index].content = .thinking(
-                visible: visible,
-                isExpanded: isExpanded,
-                isStreaming: false,
-                kind: kind
-            )
+            context.updateMessage(at: index) { message in
+                message.content = .thinking(
+                    visible: visible,
+                    isExpanded: isExpanded,
+                    isStreaming: false,
+                    kind: kind
+                )
+            }
             context.logDebug("Marked thinking message as no longer streaming")
         }
 
@@ -152,11 +154,13 @@ final class TurnLifecycleCoordinator {
 
         // Update the target message with metadata
         if let index = targetIndex {
-            context.messages[index].tokenRecord = pluginResult.tokenRecord
-            context.messages[index].model = context.currentModel
-            context.messages[index].latencyMs = pluginResult.duration
-            context.messages[index].stopReason = pluginResult.stopReason
-            context.messages[index].turnNumber = pluginResult.turnNumber
+            context.updateMessage(at: index) { message in
+                message.tokenRecord = pluginResult.tokenRecord
+                message.model = context.currentModel
+                message.latencyMs = pluginResult.duration
+                message.stopReason = pluginResult.stopReason
+                message.turnNumber = pluginResult.turnNumber
+            }
 
             // Log token record assignment
             if let record = pluginResult.tokenRecord {
@@ -173,7 +177,9 @@ final class TurnLifecycleCoordinator {
         if let startIndex = context.turnStartMessageIndex,
            startIndex < context.messages.count {
             for i in startIndex..<context.messages.count where context.messages[i].role == .assistant {
-                context.messages[i].turnNumber = pluginResult.turnNumber
+                context.updateMessage(at: i) { message in
+                    message.turnNumber = pluginResult.turnNumber
+                }
             }
         }
 

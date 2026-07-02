@@ -235,7 +235,13 @@ the root state object. Chat-scoped error routing lives in
 when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
 shell composition; message-list scrolling, pagination, composer, and sheet
 rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
-extensions.
+extensions. View-local async work is owned by `ChatViewTaskCoordinator`: every
+delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets
+a session-generation ticket and is cancelled on disappearance so stale work
+cannot mutate a replaced chat view. Transcript mutations go through the
+`MessageMutating` helpers in `Session/Chat/Navigation/MessageIndex.swift`; in
+place updates must use `updateMessage(at:)` so message-id and capability-id
+lookups cannot drift while streaming text, thinking, and tool chips update.
 
 ## Chat Visual Affordances
 
@@ -281,6 +287,9 @@ The chat timeline owns only truthful local/session presentation state:
   renders inline above the response when the current stream provides it.
   Provider-authored reasoning summaries are rendered as reasoning summaries, not
   raw append-only thinking, because providers may compress or rewrite them.
+  Live `agent.thinking_delta` appends visible text, while `agent.thinking_end`
+  is a server-authoritative full snapshot that replaces the accumulated draft;
+  iOS must not treat it as another delta.
   Legacy OpenAI replay blocks without an explicit `kind` field use the same
   reasoning-summary presentation based on persisted provider type.
 - Capability evidence uses `CapabilityEvidencePresentation` as the pure mapper

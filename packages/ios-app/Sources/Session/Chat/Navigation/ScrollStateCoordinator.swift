@@ -183,6 +183,11 @@ final class ScrollStateCoordinator {
         isPrependingHistory = true
     }
 
+    func cancelPrependHistory() {
+        prependAnchor = nil
+        isPrependingHistory = false
+    }
+
     func didPrependHistory(using proxy: ScrollViewProxy?) {
         if let anchor = prependAnchor {
             var transaction = Transaction(animation: nil)

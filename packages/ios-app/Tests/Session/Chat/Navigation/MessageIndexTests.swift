@@ -20,6 +20,16 @@ struct MessageIndexTests {
         )
     }
 
+    private final class MessageStore: MessageMutating {
+        var messages: [ChatMessage]
+        let messageIndex = MessageIndex()
+
+        init(messages: [ChatMessage] = []) {
+            self.messages = messages
+            messageIndex.rebuild(from: messages)
+        }
+    }
+
     // MARK: - indexById
 
     @Test("indexById returns correct index after append")
@@ -102,6 +112,34 @@ struct MessageIndexTests {
         index.didRemove(capability, at: 0, newTotalCount: 0)
 
         #expect(index.index(forCapabilityInvocationId: "toolu_abc") == nil)
+    }
+
+    @Test("updateMessage removes stale invocation mapping when row stops being capability")
+    func updateMessage_removesStaleInvocationMapping() {
+        let capability = makeCapabilityMessage(invocationId: "toolu_abc")
+        let store = MessageStore(messages: [capability])
+
+        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_abc") == 0)
+
+        store.updateMessage(at: 0) { message in
+            message.content = .text("done")
+        }
+
+        #expect(store.messageIndex.index(for: capability.id) == 0)
+        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_abc") == nil)
+    }
+
+    @Test("updateMessage replaces invocation mapping when capability id changes")
+    func updateMessage_replacesInvocationMapping() {
+        let capability = makeCapabilityMessage(invocationId: "toolu_old")
+        let store = MessageStore(messages: [capability])
+
+        store.updateMessage(at: 0) { message in
+            message.content = .capabilityInvocation(testCapabilityInvocation(id: "toolu_new", status: .success))
+        }
+
+        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_old") == nil)
+        #expect(store.messageIndex.index(forCapabilityInvocationId: "toolu_new") == 0)
     }
 
     // MARK: - Edge cases

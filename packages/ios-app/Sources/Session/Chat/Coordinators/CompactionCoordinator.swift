@@ -97,7 +97,9 @@ final class CompactionCoordinator {
         if let inProgressId = context.compactionInProgressMessageId,
            let index = context.messageIndex.index(for: inProgressId) {
             withAnimation(.smooth(duration: 0.35)) {
-                context.messages[index].content = replacement.content
+                context.updateMessage(at: index) { message in
+                    message.content = replacement.content
+                }
             }
             context.compactionInProgressMessageId = nil
         } else {

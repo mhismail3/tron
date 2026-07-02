@@ -81,7 +81,9 @@ final class CapabilityInvocationCoordinator {
                 existing.status = .running
                 existing.startedAt = existing.startedAt ?? eventTimestamp
                 existing.identity = pluginResult.identity
-                context.messages[existingIndex].content = .capabilityInvocation(existing)
+                context.updateMessage(at: existingIndex) { message in
+                    message.content = .capabilityInvocation(existing)
+                }
                 context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
             }
 

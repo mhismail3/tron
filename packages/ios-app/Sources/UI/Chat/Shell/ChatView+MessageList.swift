@@ -273,8 +273,9 @@ extension ChatView {
                     guard !wasVisible && isVisible else { return }
                     guard scrollCoordinator.shouldAutoScroll else { return }
 
-                    Task { @MainActor in
+                    taskCoordinator.replaceTask(.keyboardScroll) { ticket in
                         try? await Task.sleep(for: .milliseconds(50))
+                        guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                         scrollToBottomIfAllowed(
                             animated: true,
                             animation: .easeOut(duration: 0.25),
@@ -371,6 +372,7 @@ extension ChatView {
 
     @discardableResult
     func autoloadEarlierMessages(requireNearTop: Bool = true) async -> Int {
+        let ticket = taskCoordinator.currentTicket()
         let shouldLoad: Bool
         if requireNearTop {
             shouldLoad = scrollCoordinator.shouldAutoloadEarlierMessages(
@@ -406,12 +408,21 @@ extension ChatView {
             category: .ui
         )
         scrollCoordinator.willPrependHistory(anchor: anchor)
+        var prependCompleted = false
+        defer {
+            if !prependCompleted {
+                scrollCoordinator.cancelPrependHistory()
+            }
+        }
         let insertedCount = await viewModel.loadEarlierMessagesForTopDetent()
+        guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return 0 }
 
         if insertedCount > 0 {
             try? await Task.sleep(for: .milliseconds(50))
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return 0 }
         }
         scrollCoordinator.didPrependHistory(using: scrollProxy)
+        prependCompleted = true
         if insertedCount > 0, anchor != nil {
             // Re-anchoring to the old first visible row puts newly loaded rows
             // above the viewport. Require fresh geometry or another upward drag
@@ -423,8 +434,10 @@ extension ChatView {
 
     func scheduleAutoloadEarlierMessages(requireNearTop: Bool = true) {
         guard autoloadEarlierTask == nil else { return }
+        let ticket = taskCoordinator.currentTicket()
         autoloadEarlierTask = Task { @MainActor in
             defer { autoloadEarlierTask = nil }
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
 
             guard requireNearTop else {
                 _ = await autoloadEarlierMessages(requireNearTop: false)
@@ -433,8 +446,10 @@ extension ChatView {
 
             repeat {
                 let insertedCount = await autoloadEarlierMessages()
+                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                 if insertedCount == 0 { break }
                 try? await Task.sleep(for: .milliseconds(80))
+                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             } while isNearTopHistoryDetent && viewModel.hasMoreMessages
         }
     }

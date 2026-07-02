@@ -67,12 +67,14 @@ extension ChatViewModel {
         } else if let id = thinkingMessageId,
                   let index = messageIndex.index(for: id) {
             // Update existing thinking message with accumulated content
-            messages[index].content = .thinking(
-                visible: accumulatedText,
-                isExpanded: false,
-                isStreaming: true,
-                kind: kind
-            )
+            updateMessage(at: index) { message in
+                message.content = .thinking(
+                    visible: accumulatedText,
+                    isExpanded: false,
+                    isStreaming: true,
+                    kind: kind
+                )
+            }
         }
 
         logger.verbose("Thinking delta: +\(delta.count) chars, total: \(accumulatedText.count)", category: .events)
@@ -87,12 +89,14 @@ extension ChatViewModel {
 
         if let id = thinkingMessageId,
            let index = messageIndex.index(for: id) {
-            messages[index].content = .thinking(
-                visible: thinking,
-                isExpanded: false,
-                isStreaming: false,
-                kind: kind
-            )
+            updateMessage(at: index) { message in
+                message.content = .thinking(
+                    visible: thinking,
+                    isExpanded: false,
+                    isStreaming: false,
+                    kind: kind
+                )
+            }
         } else {
             let thinkingMessage = ChatMessage.thinking(thinking, isStreaming: false, kind: kind)
             if let streamingId = streamingManager.streamingMessageId,
@@ -123,7 +127,9 @@ extension ChatViewModel {
         if case .capabilityInvocation(var invocation) = messages[index].content {
             let accumulated = (invocation.logs.last ?? "") + result.output
             invocation.logs = [String(accumulated.prefix(24_000))]
-            messages[index].content = .capabilityInvocation(invocation)
+            updateMessage(at: index) { message in
+                message.content = .capabilityInvocation(invocation)
+            }
         }
     }
 
@@ -137,7 +143,9 @@ extension ChatViewModel {
             if result.identity.stableCapabilityId != "capability" {
                 invocation.identity = result.identity
             }
-            messages[index].content = .capabilityInvocation(invocation)
+            updateMessage(at: index) { message in
+                message.content = .capabilityInvocation(invocation)
+            }
         }
     }
 
@@ -159,7 +167,9 @@ extension ChatViewModel {
                 ]
             )
             if !result.identity.isEmpty { invocation.identity = result.identity }
-            messages[index].content = .capabilityInvocation(invocation)
+            updateMessage(at: index) { message in
+                message.content = .capabilityInvocation(invocation)
+            }
         }
     }
 

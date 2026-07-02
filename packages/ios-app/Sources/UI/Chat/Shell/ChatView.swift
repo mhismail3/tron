@@ -18,6 +18,7 @@ struct ChatView: View {
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State var inputHistory = InputHistoryStore()
     @State var scrollCoordinator = ScrollStateCoordinator()
+    @State var taskCoordinator: ChatViewTaskCoordinator
 
     // MARK: - Sheet Coordinator (single sheet pattern)
     // Uses enum-based single .sheet(item:) modifier to avoid Swift compiler type-checking timeout
@@ -72,6 +73,7 @@ struct ChatView: View {
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
         _viewModel = State(wrappedValue: ChatViewModel(services: services, sessionId: sessionId))
+        _taskCoordinator = State(wrappedValue: ChatViewTaskCoordinator(sessionId: sessionId))
     }
 
     // MARK: - Body
@@ -135,6 +137,9 @@ struct ChatView: View {
             // Note: Message entry animations are handled in .task after messages load
         }
         .onDisappear {
+            taskCoordinator.invalidate()
+            autoloadEarlierTask?.cancel()
+            autoloadEarlierTask = nil
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
             viewModel.clearLocalNotifications()
@@ -152,6 +157,7 @@ struct ChatView: View {
             dependencies.draftStore.scheduleSave(sessionId: sessionId, inputBarState: viewModel.inputBarState)
         }
         .task {
+            let ticket = taskCoordinator.beginLifecycle()
             // PERFORMANCE OPTIMIZATION: Parallelize independent operations
             // and ensure UI is responsive immediately
             //
@@ -170,29 +176,33 @@ struct ChatView: View {
 
             // Restore draft state and wire draft store
             await dependencies.draftStore.loadDraft(sessionId: sessionId, into: viewModel.inputBarState)
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             viewModel.draftStore = dependencies.draftStore
 
             // Run model prefetch in parallel with connect/resume
             // This is a fire-and-forget operation that doesn't block session entry
-            Task {
-                await prefetchModels()
+            taskCoordinator.replaceTask(.modelPrefetch) { prefetchTicket in
+                await prefetchModels(guardedBy: prefetchTicket)
             }
 
             // Connect, resume, and reconstruct session state in one flow
             logger.debug("[INIT] starting connectAndReconstruct", category: .ui)
             await viewModel.connectAndReconstruct()
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
             // Handle message visibility and set initialLoadComplete
             // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
             // AFTER the cascade starts, to prevent a flash where all messages are visible
-            await handleInitialMessageVisibility()
+            await handleInitialMessageVisibility(guardedBy: ticket)
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
         }
         .onChange(of: services.connection.connectionState) { oldState, newState in
             // React when connection transitions to connected
             if newState.isConnected && !oldState.isConnected {
-                Task {
+                taskCoordinator.replaceTask(.connectionRefresh) { ticket in
+                    guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                     if initialLoadComplete {
                         // Reconnection after initial setup — reconstruct state
                         await viewModel.reconnectAndReconstruct()
@@ -200,6 +210,7 @@ struct ChatView: View {
                         // First connection — use initial connect flow
                         await viewModel.connectAndReconstruct()
                     }
+                    guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
                 }
             }
             // Input-bar read-only mode is derived from `interactionPolicy` (500ms
@@ -222,8 +233,10 @@ struct ChatView: View {
                 return
             }
 
-            Task {
-                await performDeepLinkScroll(to: target)
+            taskCoordinator.replaceTask(.deepLinkScroll) { ticket in
+                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+                await performDeepLinkScroll(to: target, guardedBy: ticket)
+                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
             }
         }
     }
