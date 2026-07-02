@@ -52,8 +52,8 @@ extension ChatViewModel {
         }
     }
 
-    /// Resolve a deep-link target, fetching older reconstructed pages until the
-    /// target is available in the displayed message tree.
+    /// Resolve a deep-link target, loading older history until the target is
+    /// available in the displayed message tree.
     func resolveMessageIdForDeepLink(
         _ target: ScrollTarget,
         loadMore: (() async -> Void)? = nil
@@ -64,20 +64,20 @@ extension ChatViewModel {
 
         var pagesLoaded = 0
         while hasMoreMessages && pagesLoaded < Self.maxDeepLinkPaginationBatches {
-            let previousCount = allReconstructedMessages.count
+            let previousProgress = loadedHistoryProgressSnapshot
             pagesLoaded += 1
 
             if let loadMore {
                 await loadMore()
             } else {
-                await loadMoreMessagesFromServer()
+                await loadEarlierMessagesForTopDetent()
             }
 
             if let id = findMessageId(for: target) {
                 return id
             }
 
-            guard allReconstructedMessages.count > previousCount else {
+            guard loadedHistoryProgressSnapshot != previousProgress else {
                 break
             }
         }
@@ -90,6 +90,24 @@ extension ChatViewModel {
     }
 
     // MARK: - Private Helpers
+
+    private struct LoadedHistoryProgressSnapshot: Equatable {
+        let prunedLiveMessageCount: Int
+        let displayedMessageCount: Int
+        let reconstructedMessageCount: Int
+        let reconstructionOldestEventId: String?
+        let hasOlderServerReconstructionPages: Bool
+    }
+
+    private var loadedHistoryProgressSnapshot: LoadedHistoryProgressSnapshot {
+        LoadedHistoryProgressSnapshot(
+            prunedLiveMessageCount: prunedLiveMessages.count,
+            displayedMessageCount: displayedMessageCount,
+            reconstructedMessageCount: allReconstructedMessages.count,
+            reconstructionOldestEventId: reconstructionOldestEventId,
+            hasOlderServerReconstructionPages: hasOlderServerReconstructionPages
+        )
+    }
 
     /// Search for a capability invocation ID in a messages array
     private func findCapabilityInvocationInMessages(_ invocationId: String, messages: [ChatMessage]) -> UUID? {

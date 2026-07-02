@@ -282,6 +282,48 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(loadCount, 1)
     }
 
+    func testResolveMessageIdForDeepLinkContinuesFromPrunedBatchToServerCursor() async {
+        let (viewModel, sessions) = makeDeepLinkViewModel()
+        self.viewModel = viewModel
+
+        let targetEventId = "event-target"
+        let visibleMessage = makeMessage("visible recent")
+        viewModel.allReconstructedMessages = [visibleMessage]
+        viewModel.replaceAllMessages(with: [visibleMessage])
+        viewModel.displayedMessageCount = 1
+        viewModel.prunedLiveMessages = (0..<ChatViewModel.additionalMessageBatchSize).map { index in
+            makeMessage("pruned \(index)")
+        }
+        viewModel.reconstructionOldestEventId = "cursor-live"
+        viewModel.hasOlderServerReconstructionPages = true
+        viewModel.recomputeHasMoreMessages()
+
+        sessions.reconstructHandler = { _, _, beforeEventId in
+            XCTAssertEqual(beforeEventId, "cursor-live")
+            return self.reconstructResult(
+                events: [
+                    self.rawEvent(
+                        id: targetEventId,
+                        type: "message.user",
+                        content: "older target",
+                        sequence: 1
+                    )
+                ],
+                hasMoreEvents: false,
+                oldestEventId: "cursor-root"
+            )
+        }
+
+        let found = await viewModel.resolveMessageIdForDeepLink(.event(id: targetEventId))
+
+        XCTAssertNotNil(found)
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["cursor-live"])
+        XCTAssertTrue(viewModel.prunedLiveMessages.isEmpty)
+        XCTAssertTrue(viewModel.messages.contains(where: { $0.eventId == targetEventId }))
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, "cursor-root")
+        XCTAssertFalse(viewModel.hasMoreMessages)
+    }
+
     func testFindMessageIdExpandsWindowForOldMessage() {
         // Given: A deep link target that's beyond the displayed window
         let targetId = UUID()
@@ -340,5 +382,144 @@ final class ChatViewModelFindMessageTests: XCTestCase {
 
         // Then: Should return the message ID
         XCTAssertEqual(found, targetId)
+    }
+
+    // MARK: - Helpers
+
+    private func makeDeepLinkViewModel() -> (ChatViewModel, DeepLinkTestSessionRepository) {
+        let transport = MockEngineTransport()
+        let sessions = DeepLinkTestSessionRepository()
+        let services = ChatSessionServices(
+            connection: DeepLinkTestConnectionRepository(),
+            events: DeepLinkTestSessionEventRepository(),
+            sessions: sessions,
+            agent: DefaultAgentRepository(agentClient: AgentClient(transport: transport)),
+            models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
+            messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
+            transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),
+            workerLifecycle: DefaultWorkerLifecycleRepository(client: WorkerLifecycleClient(transport: transport))
+        )
+        return (ChatViewModel(services: services, sessionId: "test-session"), sessions)
+    }
+
+    private func makeMessage(_ text: String) -> ChatMessage {
+        ChatMessage(role: .assistant, content: .text(text), timestamp: Date())
+    }
+
+    private func reconstructResult(
+        events: [RawEvent],
+        hasMoreEvents: Bool,
+        oldestEventId: String?
+    ) -> SessionReconstructResult {
+        SessionReconstructResult(
+            events: events,
+            hasMoreEvents: hasMoreEvents,
+            oldestEventId: oldestEventId,
+            inFlight: nil,
+            lastSequence: Int64(events.map(\.sequence).max() ?? 0),
+            isRunning: false,
+            agentPhase: "idle",
+            metadata: ReconstructMetadata(
+                model: nil,
+                turnCount: nil,
+                workingDirectory: nil,
+                title: nil,
+                tokenUsage: nil,
+                totalCost: nil
+            )
+        )
+    }
+
+    private func rawEvent(
+        id: String,
+        type: String,
+        content: String,
+        sequence: Int
+    ) -> RawEvent {
+        RawEvent(
+            id: id,
+            parentId: nil,
+            sessionId: "test-session",
+            workspaceId: "/test/workspace",
+            type: type,
+            timestamp: "2026-01-01T00:00:00Z",
+            sequence: sequence,
+            payload: ["content": AnyCodable(content)]
+        )
+    }
+}
+
+@MainActor
+private final class DeepLinkTestConnectionRepository: AppConnectionRepository {
+    var connectionState: ConnectionState = .connected
+    var isConnected: Bool { true }
+
+    func connect() async {}
+    func disconnect() async {}
+    func verifyConnection() async -> Bool { true }
+    func manualRetry() async {}
+    func setBackgroundState(_ inBackground: Bool) {}
+}
+
+@MainActor
+private final class DeepLinkTestSessionEventRepository: SessionEventRepository {
+    var currentSessionId: String?
+    var currentModel: String = "claude-sonnet-4"
+    var hasActiveSession: Bool = true
+
+    func events(for sessionId: String?) -> AsyncStream<ParsedEventV2> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
+
+    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws {}
+}
+
+@MainActor
+private final class DeepLinkTestSessionRepository: NetworkSessionRepository {
+    var reconstructCalls: [(sessionId: String, limit: Int?, beforeEventId: String?)] = []
+    var reconstructHandler: ((String, Int?, String?) async throws -> SessionReconstructResult)?
+
+    func create(
+        workingDirectory: String,
+        model: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionCreateResult {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func list(
+        workingDirectory: String?,
+        limit: Int,
+        offset: Int,
+        includeArchived: Bool
+    ) async throws -> SessionListResult {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {}
+
+    func reconstruct(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
+        reconstructCalls.append((sessionId: sessionId, limit: limit, beforeEventId: beforeEventId))
+        guard let reconstructHandler else {
+            throw EngineConnectionError.invalidResponse
+        }
+        return try await reconstructHandler(sessionId, limit, beforeEventId)
+    }
+
+    func archive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {}
+    func unarchive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {}
+
+    func fork(
+        sessionId: String,
+        fromEventId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> SessionForkResult {
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func getHistory(limit: Int) async throws -> [HistoryMessage] {
+        []
     }
 }
