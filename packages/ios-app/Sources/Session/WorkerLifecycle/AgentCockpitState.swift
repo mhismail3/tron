@@ -40,6 +40,8 @@ struct AgentCockpitFunctionRow: Equatable, Identifiable, Sendable {
     var requestSchemaPresent: Bool
     var responseSchemaPresent: Bool
     var opaqueResponse: Bool
+    var requestSchemaJSON: String?
+    var responseSchemaJSON: String?
 
     var schemaComplete: Bool {
         requestSchemaPresent && (responseSchemaPresent || opaqueResponse)
@@ -497,8 +499,18 @@ enum AgentCockpitProjection {
             tags: function.tags ?? [],
             requestSchemaPresent: function.requestSchema != nil,
             responseSchemaPresent: function.responseSchema != nil,
-            opaqueResponse: function.opaqueResponse ?? false
+            opaqueResponse: function.opaqueResponse ?? false,
+            requestSchemaJSON: formattedJSON(function.requestSchema),
+            responseSchemaJSON: formattedJSON(function.responseSchema)
         )
+    }
+
+    private static func formattedJSON(_ value: AnyCodable?) -> String? {
+        guard let value else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private static func triggerRow(_ trigger: TriggerCatalogDefinitionDTO) -> AgentCockpitTriggerRow {
@@ -555,6 +567,7 @@ enum AgentCockpitProjection {
     private static func image(forModuleStatus status: String, resourceKind: String) -> String {
         switch normalized(status) {
         case "blocked": return "exclamationmark.octagon"
+        case "degraded": return "exclamationmark.triangle"
         case "waiting": return "hourglass"
         case "active": return "bolt.circle"
         case "ready": return "checkmark.seal"

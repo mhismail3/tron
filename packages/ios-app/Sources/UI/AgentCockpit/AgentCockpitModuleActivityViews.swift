@@ -6,10 +6,10 @@ struct ModuleActivitySummaryCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(activity.summary.title)
+                Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
-                Text(activity.summary.detail)
+                Text(detail)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
             }
@@ -17,7 +17,7 @@ struct ModuleActivitySummaryCard: View {
                 summaryMetric("Active", activity.summary.active, .tronCyan)
                 summaryMetric("Waiting", activity.summary.waiting, .tronWarning)
                 summaryMetric("Blocked", activity.summary.blocked, .tronError)
-                summaryMetric("Total", activity.summary.total, .tronTextSecondary)
+                summaryMetric("Degraded", degradedCount, .tronWarning)
             }
             if !activity.resources.isEmpty {
                 WrapRow(
@@ -28,6 +28,22 @@ struct ModuleActivitySummaryCard: View {
         }
         .padding(13)
         .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var title: String {
+        activity.summary.total == 0 ? "No engine work" : activity.summary.title
+    }
+
+    private var detail: String {
+        activity.summary.total == 0
+            ? "No engine or module work is running, waiting, or blocked."
+            : activity.summary.detail
+    }
+
+    private var degradedCount: Int {
+        activity.summary.degraded ?? activity.timeline.filter {
+            AgentCockpitProjection.normalized($0.status) == "degraded"
+        }.count
     }
 
     private func summaryMetric(_ title: String, _ value: Int, _ color: Color) -> some View {

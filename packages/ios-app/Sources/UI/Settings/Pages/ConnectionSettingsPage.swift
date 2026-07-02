@@ -2,22 +2,18 @@ import SwiftUI
 
 struct ConnectionSettingsPage: View {
     let settingsState: SettingsState
-    let updateServerSetting: (SettingsMutation) -> Void
     let startServerOnboarding: (PairedServer?) -> Void
 
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
     @State private var serverRemovalError: String?
-    @State private var activeDiagnosticsSheet: ConnectionSettingsDiagnosticsSheet?
-    @State private var agentCockpit = AgentCockpitViewModel()
+    @State private var showLogs = false
 
     init(
         settingsState: SettingsState,
-        updateServerSetting: @escaping (SettingsMutation) -> Void,
         startServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }
     ) {
         self.settingsState = settingsState
-        self.updateServerSetting = updateServerSetting
         self.startServerOnboarding = startServerOnboarding
     }
 
@@ -40,19 +36,8 @@ struct ConnectionSettingsPage: View {
         } message: {
             Text(serverRemovalError ?? "The pairing token could not be removed from Keychain.")
         }
-        .sheet(item: $activeDiagnosticsSheet) { sheet in
-            switch sheet {
-            case .logs:
-                LogViewer()
-            case .runtimeCockpit:
-                AgentCockpitSheet(
-                    viewModel: agentCockpit,
-                    repository: dependencies.workerLifecycleRepository,
-                    sessionId: dependencies.sessionEventRepository.currentSessionId,
-                    workspaceId: nil,
-                    connectionState: dependencies.connectionRepository.connectionState
-                )
-            }
+        .sheet(isPresented: $showLogs) {
+            LogViewer()
         }
     }
 
@@ -60,8 +45,7 @@ struct ConnectionSettingsPage: View {
     private var stackedContent: some View {
         serverInfoCard
         pairedServersSection
-        serverBackedContent
-        logsAndRuntimeSection
+        logsSection
     }
 
     private var landscapeContent: some View {
@@ -76,20 +60,10 @@ struct ConnectionSettingsPage: View {
                 .frame(maxWidth: .infinity, alignment: .top)
 
                 VStack(spacing: 16) {
-                    serverBackedContent
-                    logsAndRuntimeSection
+                    logsSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var serverBackedContent: some View {
-        if settingsState.isLoaded && !activeServerUnavailable {
-            runtimeEvidenceSection
-        } else if let status = serverControlsStatus {
-            serverBackedSettingsStatusSection(status)
         }
     }
 
@@ -118,14 +92,6 @@ struct ConnectionSettingsPage: View {
 
     private var hasActiveServer: Bool {
         dependencies.pairedServerStore.activeServer != nil
-    }
-
-    private var serverControlsStatus: ConnectionSettingsServerControlsStatus? {
-        ConnectionSettingsServerControlsStatus.resolve(
-            hasActiveServer: hasActiveServer,
-            activeServerUnavailable: activeServerUnavailable,
-            loadError: settingsState.loadError
-        )
     }
 
     private var pairedServersSection: some View {
@@ -213,9 +179,6 @@ struct ConnectionSettingsPage: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronTextPrimary)
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
@@ -294,153 +257,19 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private func serverBackedSettingsStatusSection(_ status: ConnectionSettingsServerControlsStatus) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Server Controls")
-
-            SettingsCard(accent: .tronWarning) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: status.icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronWarning)
-                        .frame(width: 18)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(status.title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
-                        Text(status.description)
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 14)
-            }
-        }
-    }
-
-    private var runtimeEvidenceSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Runtime Evidence")
-
-            SettingsCard {
-                SettingsRow(icon: "waveform.path.ecg", label: "Log level") {
-                    SettingsCycleToggle(
-                        options: [
-                            ("info", "Info"),
-                            ("debug", "Debug"),
-                            ("trace", "Trace"),
-                            ("warn", "Warn"),
-                            ("error", "Error"),
-                        ],
-                        current: settingsState.observabilityLogLevel
-                    ) { newValue in
-                        settingsState.observabilityLogLevel = newValue
-                        updateServerSetting(.observabilityLogLevel(newValue))
-                    }
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "calendar", label: "Verbose days") {
-                    Stepper(value: Binding(
-                        get: { Int(settingsState.observabilityVerboseRetentionDays) },
-                        set: { newValue in
-                            let clamped = UInt64(min(max(newValue, 1), 90))
-                            settingsState.observabilityVerboseRetentionDays = clamped
-                            updateServerSetting(.observabilityVerboseRetentionDays(clamped))
-                        }
-                    ), in: 1...90) {
-                        Text("\(settingsState.observabilityVerboseRetentionDays)d")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "mic", label: "Local transcription") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.transcriptionEnabled },
-                            set: { newValue in
-                                settingsState.transcriptionEnabled = newValue
-                                updateServerSetting(.transcriptionEnabled(newValue))
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "externaldrive", label: "Retention") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.storageRetentionEnabled },
-                            set: { newValue in
-                                settingsState.storageRetentionEnabled = newValue
-                                updateServerSetting(.storageRetentionEnabled(newValue))
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "internaldrive", label: "Storage cap") {
-                    Stepper(value: Binding(
-                        get: { Int(settingsState.storageMaxDatabaseMb) },
-                        set: { newValue in
-                            let clamped = UInt64(min(max(newValue, 64), 8192))
-                            settingsState.storageMaxDatabaseMb = clamped
-                            updateServerSetting(.storageMaxDatabaseMb(clamped))
-                        }
-                    ), in: 64...8192, step: 64) {
-                        Text("\(settingsState.storageMaxDatabaseMb) MB")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                }
-            }
-
-            SettingsCaption(text: "The server owns trace records, retained logs, compression, and storage cleanup. iOS only requests the policy.")
-        }
-    }
-
-    private var logsAndRuntimeSection: some View {
+    private var logsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: ConnectionSettingsDiagnosticsCopy.sectionTitle)
 
             SettingsCard(interactive: true) {
                 Button {
-                    activeDiagnosticsSheet = .logs
+                    showLogs = true
                 } label: {
                     SettingsRow(icon: "doc.text.magnifyingglass", label: ConnectionSettingsDiagnosticsCopy.logsLabel) {
                         HStack(spacing: 5) {
                             Text(ConnectionSettingsDiagnosticsCopy.logsAction)
                                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                                 .foregroundStyle(.tronEmerald)
-                            Image(systemName: "chevron.right")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                                .foregroundStyle(.tronTextMuted)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-
-                SettingsRowDivider()
-
-                Button {
-                    activeDiagnosticsSheet = .runtimeCockpit
-                } label: {
-                    SettingsRow(icon: "slider.horizontal.3", label: ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel) {
-                        HStack(spacing: 5) {
-                            Text(ConnectionSettingsDiagnosticsCopy.runtimeCockpitAction)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                            Image(systemName: "chevron.right")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                                .foregroundStyle(.tronTextMuted)
                         }
                     }
                 }
@@ -487,11 +316,4 @@ struct ConnectionSettingsPage: View {
             set: { if !$0 { serverPendingRemoval = nil } }
         )
     }
-}
-
-private enum ConnectionSettingsDiagnosticsSheet: String, Identifiable {
-    case logs
-    case runtimeCockpit
-
-    var id: String { rawValue }
 }

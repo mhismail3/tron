@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with an Agent cockpit; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
+Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with Agent Briefing and Engine Cockpit surfaces; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -951,7 +951,7 @@ dependency requests/decisions/policies, lifecycle states, and runtime states.
 The read derives scope only from trusted invocation causal context, fails closed
 without session/workspace context, and revalidates inspected resources against
 that scope. The
-projection derives active, waiting, blocked, ready, and recorded statuses only
+projection derives active, waiting, blocked, degraded, ready, and recorded statuses only
 from stored facts, and returns bounded summaries for authority labels, touched
 resources, rollback/quarantine/runtime-authorization gates, and generic
 timeline entries. It is not a provider-visible execute operation and does not
@@ -972,7 +972,7 @@ share identical scope, redaction, empty-state, drill-down, and evidence
 semantics; it does not create resources, compact/clear context, schedule work,
 learn, activate modules, install packages, execute runtime code, add autonomy
 behavior, expose raw ids, paths, commands, logs, prompt bodies, secrets, or
-replace Runtime Cockpit diagnostics.
+replace Engine Cockpit diagnostics.
 Accepted Phase 3 Slice 24I records fixed old iOS product panels as an
 accepted rejected-shape baseline: the iOS source guard explicitly rejects old
 approval/work panels and work dashboards alongside the existing source-control,
@@ -1316,7 +1316,7 @@ Current primitive operations:
 | `module_runtime_list` | Slice 23F accepted operation that lists scoped `module_runtime_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with truncation metadata, output artifact refs only, `networkPolicy: none`, and no execution side effects or raw runtime material. |
 | `module_runtime_inspect` | Slice 23F accepted operation that inspects one scoped `module_runtime_state` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning redacted supervision, lifecycle authorization, timeout/cancel/shutdown, refs, trace/replay, idempotency, and side-effect proof without raw paths, env values, secrets, logs, commands, stdout/stderr, code, file contents, raw grant ids, raw authority ids, debug payloads, or chain-of-thought. |
 | `module_runtime_cancel` | Slice 23F accepted operation that records cancellation metadata for one scoped runtime envelope with expected current version freshness and exact runtime selector authority, without sending provider-visible process/job commands or overwriting terminal completed/failed/timed-out states. |
-| `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
+| `module_activity::overview` | Slice 23H accepted system-visible pure-read function that returns a bounded Runtime Cockpit projection from current-session/workspace module-plane resources after trusted invocation-scope derivation and stored-resource scope revalidation, with server-owned redaction, derived active/waiting/blocked/degraded status, authority labels, touched-resource summaries, and rollback/quarantine/runtime-authorization gate status; it is not a provider-visible execute operation and has no write, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
 | `agent_briefing::overview` | Implementation-candidate system-visible pure-read function that returns a bounded Agent Briefing projection for dashboard and sheet clients by reshaping the accepted `module_activity::overview` facts into scoped narrative sections, empty states, and evidence labels; it is not provider-visible and has no write, autonomy, compact/clear, learn, schedule, install, activation, execution, dependency, package-manager, network, or fixed-panel side effects. |
 | `procedural_definition_record` | Accepted Slice 24E operation that records one scoped `procedural_record` for metadata-only skill/rule/hook/procedure definitions, including validation evidence, review state, trigger declarations, conflict/ordering metadata, scoped-authority proof, trace/replay refs, bounded refs, content hash, and idempotency fingerprint without storing raw bodies, commands, file contents, unsafe paths, secrets, grant ids, authority ids, trigger registration, prompt injection, dependency restoration, or code execution. |
 | `procedural_state_list` | List current-session/workspace `procedural_record` resources one procedural kind at a time after stored kind/schema/status and eval scalar revalidation, with bounded status/provenance/eval summaries, explicit truncation metadata, `networkPolicy: none`, and no activation, trigger firing, prompt injection, learned behavior, or execution. |
@@ -2631,20 +2631,28 @@ packages/ios-app/Sources/
   skills, prompt-library panels, prompt queues, and parallel tree-only
   projections are removed from the primary source tree.
 - **Agent briefing and cockpit**: the session dashboard keeps the existing
-  workspace-grouped chat list and adds a small Agent Briefing band above the
-  groups. The band opens an Agent Briefing sheet backed by
+  workspace-grouped chat list and adds small Agent Briefing and Engine Cockpit
+  bands above the groups. The briefing band opens an Agent Briefing sheet backed by
   `agent_briefing::overview`, with narrative sections for activity,
   adaptation, active work, user-needed work, weak points/failures, memory and
   learned state, and audit evidence. The sheet uses the standard Tron
   typography, theme, and sheet chrome, includes empty/degraded states and
   drill-down evidence rows, and avoids raw paths, commands, logs, grants,
-  authority ids, and secrets at top level. Servers -> Diagnostics exposes a compact Runtime Cockpit
-  row that opens the cockpit sheet. The sheet renders live worker lifecycle
-  catalog rows, capability discovery families, schema/health gaps, durable
-  `catalog_discovery_report` history, package/resource status,
+  authority ids, and secrets at top level. The dashboard Engine Cockpit band is
+  the core engine summary: connection state, visible capability count, issue
+  count, and plain catalog trust state such as catalog verified, needs review,
+  or unchecked. The cockpit sheet opens on
+  Capabilities, grouping operations into user-facing areas with drill-down
+  operation/owner/effect/risk/tag detail and request/response schema bodies from
+  the live catalog; catalog snapshot revision and
+  durable `catalog_discovery_report` resources are presented there as
+  contextual verification proof rather than top-level telemetry.
+  Deeper worker/package/surface tabs appear only when server evidence exists.
+  The sheet renders live worker lifecycle catalog rows, capability schema/health gaps,
+  package/resource status,
   redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, server-owned `module_activity::overview`
-  activity/work facts scoped by trusted invocation context, and active
+  active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context, and active
   `ui_surface` resources through generic engine data using the standard
   liquid-glass sheet chrome and shared segmented tab control. The Activity tab
   does not fabricate catalog/package activity locally
@@ -2716,7 +2724,7 @@ Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> invocation-scoped module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity server facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
 The camera child sheet mounts before AVFoundation warm-up and uses the viewport

@@ -20,7 +20,7 @@ struct SettingsView: View {
     @State var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case server, agent, context, providers, app
+        case engine, providers, server, app
         var id: String { rawValue }
     }
 
@@ -89,18 +89,22 @@ struct SettingsView: View {
     }
 
     private var settingsBaseView: some View {
-        SettingsPageContainer(title: "Settings") {
-            Button { showLogViewer = true } label: {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(TronTypography.buttonSM)
-                    .foregroundStyle(.tronEmerald)
+        SettingsPageContainer(
+            title: "Settings",
+            leadingToolbar: {
+                Button { showLogViewer = true } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(.tronEmerald)
+                }
             }
-        } content: {
-            mainSettingsSection
-                .cardEntrance(visible: cardsVisible, index: 0)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            pinnedFooterView
+        ) {
+            VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
+                mainSettingsSection
+                    .cardEntrance(visible: cardsVisible, index: 0)
+
+                settingsFooterDockView
+            }
         }
     }
 
@@ -176,22 +180,16 @@ struct SettingsView: View {
     @ViewBuilder
     private func settingsPageSheet(for page: SettingsPage) -> some View {
         switch page {
-        case .server:
-            ConnectionSettingsPage(
-                settingsState: settingsState,
-                updateServerSetting: updateServerSetting,
-                startServerOnboarding: { startOnboarding(prefill: $0) }
-            )
-        case .agent:
-            AgentSettingsPage(
+        case .engine:
+            EngineSettingsPage(
                 settingsState: settingsState,
                 selectedModelDisplayName: selectedModelDisplayName,
                 updateServerSetting: updateServerSetting
             )
-        case .context:
-            ContextSettingsPage(
+        case .server:
+            ConnectionSettingsPage(
                 settingsState: settingsState,
-                updateServerSetting: updateServerSetting
+                startServerOnboarding: { startOnboarding(prefill: $0) }
             )
         case .providers:
             ProvidersSettingsPage()

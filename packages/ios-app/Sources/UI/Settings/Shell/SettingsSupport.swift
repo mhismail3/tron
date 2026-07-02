@@ -25,54 +25,46 @@ enum SettingsAdaptiveLayout {
 }
 
 enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
-    case server
+    case engine
     case providers
-    case agent
-    case context
+    case server
 
     static let serverBackedOrder: [Self] = [
-        .server,
+        .engine,
         .providers,
-        .agent,
-        .context,
+        .server,
     ]
 
     var icon: String {
         switch self {
+        case .engine:
+            return "cpu"
         case .server:
             return "network"
         case .providers:
             return "circle.hexagongrid"
-        case .agent:
-            return "wand.and.stars"
-        case .context:
-            return "gauge.with.dots.needle.67percent"
         }
     }
 
     var title: String {
         switch self {
+        case .engine:
+            return "Engine"
         case .server:
             return "Servers"
         case .providers:
-            return SettingsLabels.providers
-        case .agent:
-            return "Agent"
-        case .context:
-            return "Context"
+            return "Accounts"
         }
     }
 
     var subtitle: String {
         switch self {
+        case .engine:
+            return "Server-owned defaults, context, and evidence policy"
         case .server:
-            return "Paired servers and evidence"
+            return "Pairing and connection"
         case .providers:
             return "Login with OAuth and configure API keys"
-        case .agent:
-            return "Prompt defaults"
-        case .context:
-            return "Compaction for the prompt loop"
         }
     }
 }
@@ -82,109 +74,85 @@ enum MainSettingsLocalCategoryStyle {
     static let appIcon = "paintbrush"
 }
 
-enum MainSettingsGridLayout {
-    static let columnCount = 3
-    static let unavailableColumnCount = 2
+enum MainSettingsListLayout {
     static let columnSpacing: CGFloat = 8
     static let rowSpacing: CGFloat = 8
-    static let destinationTileMinHeight: CGFloat = 98
-    static let dangerTileMinHeight: CGFloat = 0
     static let dividerHeight: CGFloat = 1
     static let dividerHorizontalPadding: CGFloat = 2
     static let dividerVerticalPadding: CGFloat = 6
     static let dividerOpacity = 0.22
-    static let iconSize: CGFloat = TronTypography.sizeLargeTitle
-    static let iconFrameSize: CGFloat = 22
-    static let destinationTitleSize: CGFloat = TronTypography.sizeTitle
-    static let destinationDescriptionSize: CGFloat = TronTypography.sizeSM
-    static let destinationDescriptionTopPadding: CGFloat = 6
-    static let destinationDescriptionOpacity = 0.68
-    static let dangerTitleSize: CGFloat = TronTypography.sizeBodySM
     static let unavailableActionLeadingPadding: CGFloat = 28
-
-    static func destinationColumnCount(serverSettingsUnavailable: Bool) -> Int {
-        serverSettingsUnavailable ? unavailableColumnCount : columnCount
-    }
 }
 
 enum MainSettingsGridDestination: Hashable, Sendable {
-    case server
-    case app
+    case engine
     case providers
-    case agent
-    case context
+    case app
+    case server
 
-    static let surfaceRow: [Self] = [
-        .app,
-        .server,
+    static let serverOwned: [Self] = [
+        .engine,
         .providers,
     ]
 
-    static let behaviorRow: [Self] = [
-        .agent,
-        .context,
+    static let deviceOwned: [Self] = [
+        .server,
+        .app,
     ]
 
-    static let unavailableRow: [Self] = [
-        .app,
-        .server,
-    ]
+    static let unavailableRow: [Self] = deviceOwned
 
     static func visibleDestinations(serverSettingsUnavailable: Bool) -> [Self] {
-        serverSettingsUnavailable ? unavailableRow : surfaceRow + behaviorRow
+        serverSettingsUnavailable ? unavailableRow : serverOwned + deviceOwned
     }
 
     var icon: String {
         switch self {
+        case .engine:
+            return ServerSettingsCategory.engine.icon
         case .server:
             return ServerSettingsCategory.server.icon
         case .app:
             return MainSettingsLocalCategoryStyle.appIcon
         case .providers:
             return ServerSettingsCategory.providers.icon
-        case .agent:
-            return ServerSettingsCategory.agent.icon
-        case .context:
-            return ServerSettingsCategory.context.icon
         }
     }
 
     var title: String {
         switch self {
+        case .engine:
+            return ServerSettingsCategory.engine.title
         case .server:
-            return "Server"
+            return ServerSettingsCategory.server.title
         case .app:
             return "App"
         case .providers:
             return ServerSettingsCategory.providers.title
-        case .agent:
-            return ServerSettingsCategory.agent.title
-        case .context:
-            return ServerSettingsCategory.context.title
         }
     }
 
     var description: String {
         switch self {
+        case .engine:
+            return ServerSettingsCategory.engine.subtitle
         case .server:
-            return "Paired servers and evidence"
+            return ServerSettingsCategory.server.subtitle
         case .app:
             return "Appearance, notifications, local behavior"
         case .providers:
             return "OAuth login and API keys"
-        case .agent:
-            return "Prompt defaults"
-        case .context:
-            return "Prompt compaction"
         }
     }
 
     var accessibilityHint: String {
         switch self {
-        case .server, .app, .providers:
-            return "Configure settings for app surfaces."
-        case .agent, .context:
-            return "Configure settings for agent behavior."
+        case .engine:
+            return "Configure server-owned engine settings."
+        case .server, .app:
+            return "Configure local app and pairing settings."
+        case .providers:
+            return "Configure server-held provider accounts."
         }
     }
 }
@@ -194,12 +162,15 @@ enum MainSettingsFooterLayout {
     static let textLeadingPadding: CGFloat = 8
     static let topPadding: CGFloat = 10
     static let bottomPadding: CGFloat = 10
+    static let dockHeight: CGFloat = 58
     static let feedbackButtonCornerRadius: CGFloat = 13
     static let feedbackButtonGlassTintOpacity = 0.14
 }
 
-enum AgentSettingsSection: String, CaseIterable, Sendable {
-    case quickSession = "Quick Session"
+enum EngineSettingsSection: String, CaseIterable, Sendable {
+    case defaults = "Session Defaults"
+    case context = "Context"
+    case evidence = "Evidence Policy"
 }
 
 enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
@@ -267,29 +238,7 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
     }
 }
 
-enum AgentSettingsSummary {
-    struct Context: Equatable, Sendable {
-        let isLoaded: Bool
-    }
-
-    static func title(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Load agent settings"
-        }
-
-        return "Agent behavior"
-    }
-
-    static func description(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Loading prompt defaults from the active server."
-        }
-
-        return "Prompt defaults are loaded from the active server."
-    }
-}
-
-enum ContextSettingsSummary {
+enum EngineSettingsSummary {
     struct Context: Equatable, Sendable {
         let isLoaded: Bool
         let triggerTokenThreshold: Double
@@ -298,18 +247,19 @@ enum ContextSettingsSummary {
 
     static func title(for context: Context) -> String {
         guard context.isLoaded else {
-            return "Load context settings"
+            return "Load engine settings"
         }
-        return "Context management"
+
+        return "Server-owned engine policy"
     }
 
     static func description(for context: Context) -> String {
         guard context.isLoaded else {
-            return "Loading compaction settings from the active server."
+            return "Loading model defaults, context, and evidence policy from the active server."
         }
 
         let threshold = Int((context.triggerTokenThreshold * 100).rounded())
-        return "Compaction starts at \(threshold)% and keeps \(context.preserveRecentCount) recent \(context.preserveRecentCount == 1 ? "turn" : "turns")."
+        return "Defaults, compaction at \(threshold)%, and evidence retention are mirrored from the server."
     }
 }
 
@@ -396,53 +346,11 @@ enum ServerOnboardingLauncher {
     }
 }
 
-struct ConnectionSettingsServerControlsStatus: Equatable, Sendable {
-    let title: String
-    let description: String
-    let icon: String
-
-    static func resolve(
-        hasActiveServer: Bool,
-        activeServerUnavailable: Bool,
-        loadError: String?
-    ) -> Self? {
-        guard hasActiveServer else { return nil }
-
-        if activeServerUnavailable {
-            return Self(
-                title: "Server settings unavailable",
-                description: SettingsLabels.connectedServerUnavailableDescription,
-                icon: "wifi.exclamationmark"
-            )
-        }
-
-        if let error = cleaned(loadError), !error.isEmpty {
-            return Self(
-                title: "Server settings unavailable",
-                description: error,
-                icon: "wifi.exclamationmark"
-            )
-        }
-
-        return Self(
-            title: "Loading server settings",
-            description: SettingsLabels.loadingServerSettingsDescription,
-            icon: "hourglass"
-        )
-    }
-
-    private static func cleaned(_ value: String?) -> String? {
-        value?.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
 enum ConnectionSettingsDiagnosticsCopy {
     static let sectionTitle = "Diagnostics"
     static let logsLabel = "Logs"
     static let logsAction = "View"
-    static let runtimeCockpitLabel = "Runtime Cockpit"
-    static let runtimeCockpitAction = "Open"
-    static let caption = "Shows redacted local iOS logs and current server-sourced runtime diagnostics."
+    static let caption = "Shows redacted local iOS logs. Engine visibility now lives in the dashboard cockpit."
 }
 
 enum ServerSettingsSummary {
@@ -466,7 +374,7 @@ enum ServerSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to manage runtime evidence from this iPhone."
+            return "Pair a Mac to connect this iPhone to the engine."
         }
 
         guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
@@ -483,10 +391,10 @@ enum ServerSettingsSummary {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is connected. Loading runtime evidence settings."
+            return "\(label) is connected. Loading server settings."
         }
 
-        return "\(label) is connected. Runtime evidence settings are available."
+        return "\(label) is connected. Pairing and diagnostics are available."
     }
 
     private static func cleaned(_ value: String?) -> String? {

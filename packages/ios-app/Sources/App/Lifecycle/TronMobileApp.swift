@@ -157,7 +157,7 @@ struct TronMobileApp: App {
                 )
                 .environment(\.dependencies, container)
                 .environment(\.interactionPolicy, container.interactionPolicy)
-                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear, dragIndicator: .visible)
+                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)
                 .presentationContentInteraction(.resizes)
                 .interactiveDismissDisabled(!onboardingComplete && !onboardingAllowsDismiss)
             }

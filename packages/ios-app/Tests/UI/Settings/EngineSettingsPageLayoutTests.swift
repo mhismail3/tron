@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// iPad landscape forms keep critical settings visible without relying on deep
 /// scrolling in compact floating sheets.
-final class AgentSettingsPageLayoutTests: XCTestCase {
+final class EngineSettingsPageLayoutTests: XCTestCase {
 
     func testSettingsAdaptiveLayoutDetectsIPadLandscape() throws {
         let content = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
@@ -25,23 +25,25 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testAgentSettingsUsesIPadLandscapeTwoColumnLayout() throws {
-        let content = try settingsPageSource(named: "AgentSettingsPage.swift")
+    func testEngineSettingsUsesIPadLandscapeTwoColumnLayout() throws {
+        let content = try settingsPageSource(named: "EngineSettingsPage.swift")
 
         XCTAssertTrue(
             content.contains("SettingsAdaptiveLayout.usesIPadLandscapeLayout"),
-            "Agent settings should use the shared iPad-landscape branch"
+            "Engine settings should use the shared iPad-landscape branch"
         )
         XCTAssertTrue(
             content.contains("private var landscapeContent: some View"),
-            "Agent settings needs a dedicated landscape projection"
+            "Engine settings needs a dedicated landscape projection"
         )
 
         let landscapeStart = try XCTUnwrap(
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
-        XCTAssertNotNil(landscapeContent.range(of: "quickSessionCard"))
+        XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
+        XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
+        XCTAssertNotNil(landscapeContent.range(of: "evidencePolicySection"))
         XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(
             landscapeContent.contains("protected" + "Branches" + "Section"),
@@ -49,10 +51,12 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testAgentSettingsDeletesProductPolicySections() throws {
-        let content = try settingsPageSource(named: "AgentSettingsPage.swift")
+    func testEngineSettingsDeletesProductPolicySections() throws {
+        let content = try settingsPageSource(named: "EngineSettingsPage.swift")
 
-        XCTAssertTrue(content.contains("quickSessionCard"))
+        XCTAssertTrue(content.contains("defaultsSection"))
+        XCTAssertTrue(content.contains("contextSection"))
+        XCTAssertTrue(content.contains("evidencePolicySection"))
         XCTAssertFalse(content.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(content.contains("autonomy" + "Section"))
         XCTAssertFalse(content.contains("guard" + "rails" + "Section"))
@@ -62,7 +66,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testAgentSettingsPrimitiveCardsRenderForVisualQA() throws {
+    func testEngineSettingsPrimitiveCardsRenderForVisualQA() throws {
         let settingsState = SettingsState()
         settingsState.isLoaded = true
         settingsState.defaultProvider = "openai-codex"
@@ -70,7 +74,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             .appendingPathComponent("tron-visual-qa")
             .path
         settingsState.defaultModel = "gpt-5.5"
-        let content = AgentSettingsPage(
+        let content = EngineSettingsPage(
             settingsState: settingsState,
             selectedModelDisplayName: "GPT-5.5",
             updateServerSetting: { _ in }
@@ -106,7 +110,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
             .map(URL.init(fileURLWithPath:))
             ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        let outputURL = artifactRoot.appendingPathComponent("agent-settings-primitive-render.png")
+        let outputURL = artifactRoot.appendingPathComponent("engine-settings-primitive-render.png")
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -132,23 +136,15 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
-        let pairedIndex = try XCTUnwrap(landscapeContent.range(of: "pairedServersSection")?.lowerBound)
-        let evidenceIndex = try XCTUnwrap(
-            landscapeContent.range(of: "runtimeEvidenceSection", range: pairedIndex..<landscapeContent.endIndex)?.lowerBound
-        )
-
-        XCTAssertLessThan(pairedIndex, evidenceIndex)
+        XCTAssertNotNil(landscapeContent.range(of: "pairedServersSection"))
+        XCTAssertNotNil(landscapeContent.range(of: "logsSection"))
         XCTAssertTrue(
-            landscapeContent.contains("serverBackedContent"),
-            "Server landscape should render the retained server-backed runtime evidence content in the right column"
+            landscapeContent.contains("logsSection"),
+            "Server landscape should keep redacted local logs available from the right column"
         )
         XCTAssertFalse(
             landscapeContent.contains("updates" + "Section"),
             "Server landscape should not retain a fixed update-check section"
-        )
-        XCTAssertTrue(
-            landscapeContent.contains("serverBackedSettingsStatusSection(status)"),
-            "Server landscape layout should still expose the explicit unavailable/loading status card"
         )
         XCTAssertTrue(
             landscapeContent.contains(".fixedSize(horizontal: false, vertical: true)"),
@@ -185,16 +181,88 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testAgentSettingsSurfacesDefaultProviderInsideAgentPageOnly() throws {
-        let agent = try settingsPageSource(named: "AgentSettingsPage.swift")
+    func testEngineSettingsSurfacesServerOwnedControlsInsideEnginePageOnly() throws {
+        let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
 
-        XCTAssertTrue(agent.contains("label: \"Provider\""))
-        XCTAssertTrue(agent.contains("ProviderInfo.settingsOptions(including: settingsState.defaultProvider)"))
-        XCTAssertTrue(agent.contains("updateServerSetting(.defaultProvider(newValue))"))
+        XCTAssertTrue(engine.contains("label: \"Provider\""))
+        XCTAssertTrue(engine.contains("ProviderInfo.settingsOptions(including: settingsState.defaultProvider)"))
+        XCTAssertTrue(engine.contains("updateServerSetting(.defaultProvider(newValue))"))
+        XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
+        XCTAssertTrue(engine.contains("updateServerSetting(.observabilityLogLevel(newValue))"))
         XCTAssertFalse(
             settingsMain.contains("defaultProvider"),
-            "Default provider should stay inside Agent/Providers pages, not the Settings main grid"
+            "Default provider should stay inside Engine/Providers pages, not the Settings main section"
+        )
+    }
+
+    func testSettingsMainRowsUseSeparateCardsWithoutChevrons() throws {
+        let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
+
+        XCTAssertTrue(
+            settingsMain.contains("ForEach(destinations, id: \\.self)")
+                && settingsMain.contains("SettingsCard {")
+                && settingsMain.contains("mainSettingsDestinationRow(destination)"),
+            "Server-Owned and This iPhone rows should render as separate SettingsCard containers"
+        )
+        XCTAssertTrue(
+            settingsMain.contains("ForEach(SettingsDangerZoneAction.order, id: \\.self)")
+                && settingsMain.contains("SettingsCard(accent: .tronError)"),
+            "Maintenance actions should render as separate danger cards rather than one divided table"
+        )
+        XCTAssertFalse(
+            settingsMain.contains("SettingsRowDivider()"),
+            "Settings main rows should not use internal dividers between entries"
+        )
+        XCTAssertFalse(
+            settingsMain.contains("chevron.right"),
+            "Settings main rows should not show chevrons; the whole card remains the tappable affordance"
+        )
+    }
+
+    func testSettingsFooterStaysInSheetContentFlow() throws {
+        let settingsView = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
+        let pageContainer = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsPageContainer.swift"])
+        let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
+        let footerSupport = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+FooterSupport.swift"])
+        let support = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
+
+        XCTAssertTrue(
+            settingsView.contains("mainSettingsSection")
+                && settingsView.contains("settingsFooterDockView")
+                && settingsView.range(of: "mainSettingsSection")!.lowerBound < settingsView.range(of: "settingsFooterDockView")!.lowerBound,
+            "The Settings footer should live in the sheet content after actionable rows"
+        )
+        XCTAssertFalse(
+            settingsView.contains(".safeAreaInset(edge: .bottom"),
+            "The Settings footer should not be a pinned overlay that can cover Maintenance rows"
+        )
+        XCTAssertFalse(
+            pageContainer.contains("safeAreaInset") || pageContainer.contains("footer:"),
+            "SettingsPageContainer should stay a plain scroll container; Settings footer belongs to Settings content"
+        )
+        XCTAssertTrue(
+            settingsMain.contains("var settingsFooterDockView: some View")
+                && settingsMain.contains("SettingsFooterBackdrop()"),
+            "The inline footer dock should render through the footer support backdrop"
+        )
+        XCTAssertTrue(
+            settingsMain.contains(".frame(height: MainSettingsFooterLayout.dockHeight)"),
+            "The inline footer dock should keep a stable touch and visual region"
+        )
+        XCTAssertTrue(
+            footerSupport.contains("struct SettingsFooterBackdrop"),
+            "The footer blur/fade should live in reusable footer support, not inline in the main settings list"
+        )
+        XCTAssertTrue(
+            footerSupport.contains(".fill(.thinMaterial)")
+                && footerSupport.contains("Color.tronBackground")
+                && footerSupport.contains(".mask("),
+            "The footer backdrop should use a subtle material fade instead of a heavy masking gradient"
+        )
+        XCTAssertTrue(
+            support.contains("static let dockHeight") && !support.contains("contentBottomClearance"),
+            "Footer spacing constants should be centralized with the other Settings layout values"
         )
     }
 

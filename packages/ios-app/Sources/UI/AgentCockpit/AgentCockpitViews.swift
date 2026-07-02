@@ -7,7 +7,8 @@ struct AgentCockpitSheet: View {
     let workspaceId: String?
     let connectionState: ConnectionState
 
-    @State private var selectedTab: AgentCockpitTab = .discovery
+    @State private var selectedTab: AgentCockpitTab = .capabilities
+    @State private var selectedCapabilityGroup: AgentCockpitCapabilityGroupRow?
 
     var body: some View {
         NavigationStack {
@@ -24,14 +25,14 @@ struct AgentCockpitSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Runtime Cockpit", color: .tronEmerald)
+                    SheetTitle(title: "Engine Cockpit", color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     SheetPrimaryActionButton(
                         icon: "arrow.clockwise",
                         accent: .tronEmerald,
                         isBusy: viewModel.isRefreshing,
-                        accessibilityLabel: "Refresh runtime cockpit"
+                        accessibilityLabel: "Refresh engine cockpit"
                     ) {
                         Task { await refresh() }
                     }
@@ -67,6 +68,12 @@ struct AgentCockpitSheet: View {
                 Text(viewModel.pendingConfirmation?.message ?? "")
             }
         }
+        .sheet(item: $selectedCapabilityGroup) { group in
+            CapabilityGroupDetailSheet(
+                group: group,
+                latestReport: viewModel.overview.discovery.latestReport
+            )
+        }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
     }
@@ -89,18 +96,18 @@ struct AgentCockpitSheet: View {
                     Text(viewModel.overview.status.title)
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
-                    Text(viewModel.overview.status.detail)
+                    Text(headerDetail)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextSecondary)
                 }
                 Spacer()
             }
-            if let error = viewModel.lastError {
-                Label(error, systemImage: "exclamationmark.triangle")
+            if viewModel.lastError != nil {
+                Label("Latest refresh could not complete. Low-level diagnostics stay in audit detail.", systemImage: "exclamationmark.triangle")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronError)
             }
-            MetricStrip(overview: viewModel.overview)
+            AgentCockpitMetricStrip(overview: viewModel.overview)
         }
         .padding(14)
         .sectionFill(.tronEmerald, cornerRadius: 12, interactive: false)
@@ -108,17 +115,43 @@ struct AgentCockpitSheet: View {
 
     private var tabPicker: some View {
         TronSegmentedControl(
-            options: AgentCockpitTab.allCases.map { (label: $0.title, value: $0) },
-            selection: $selectedTab,
+            options: visibleTabs.map { (label: $0.title, value: $0) },
+            selection: Binding(
+                get: { visibleTabs.contains(selectedTab) ? selectedTab : .capabilities },
+                set: { selectedTab = $0 }
+            ),
             accent: .tronEmerald
         )
     }
 
+    private var headerDetail: String {
+        switch viewModel.overview.status.kind {
+        case .connecting:
+            return "Rebuilding the engine link."
+        case .degraded:
+            return "Open the cockpit sections for safe diagnostics and audit detail."
+        case .awaitingApproval:
+            return "A server-owned item is waiting for your review."
+        case .running:
+            return "Engine or module work is currently active."
+        case .ready:
+            return "Core link is healthy and capabilities are available."
+        case .idle:
+            return "No engine or module work is currently active."
+        case .offline:
+            return "Connect a server to inspect core health."
+        }
+    }
+
+    private var visibleTabs: [AgentCockpitTab] {
+        AgentCockpitTab.visibleTabs(for: viewModel.overview)
+    }
+
     @ViewBuilder
     private var tabContent: some View {
-        switch selectedTab {
-        case .discovery:
-            discoveryTab
+        switch visibleTabs.contains(selectedTab) ? selectedTab : .capabilities {
+        case .capabilities:
+            capabilitiesTab
         case .workers:
             workersTab
         case .packages:
@@ -130,9 +163,12 @@ struct AgentCockpitSheet: View {
         }
     }
 
-    private var discoveryTab: some View {
+    private var capabilitiesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
-            DiscoverySummaryCard(overview: viewModel.overview.discovery) {
+            CapabilitiesSummaryCard(
+                overview: viewModel.overview.discovery,
+                currentRevision: viewModel.overview.currentRevision
+            ) {
                 Task {
                     await viewModel.verifyCatalogDiscovery(
                         repository: repository,
@@ -142,20 +178,32 @@ struct AgentCockpitSheet: View {
                     )
                 }
             }
-            if viewModel.overview.discovery.families.isEmpty {
-                CockpitEmptyState(symbol: "questionmark.folder", title: "No catalog", detail: "The connected engine has not published visible capability families.")
+            WorkerTriggerExplanationCard(
+                workers: viewModel.overview.workers.count,
+                triggers: viewModel.overview.triggers.count,
+                operations: viewModel.overview.functions.count
+            )
+            if viewModel.overview.discovery.groups.isEmpty {
+                CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published a visible capability catalog.")
             } else {
-                ForEach(viewModel.overview.discovery.families) { family in
-                    CapabilityFamilyCard(family: family)
+                ForEach(viewModel.overview.discovery.groups) { group in
+                    Button {
+                        selectedCapabilityGroup = group
+                    } label: {
+                        CapabilityGroupCard(group: group)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityIdentifier("capability-group-\(group.id)")
                 }
             }
             if !viewModel.overview.discovery.reports.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Reports")
+                    Text("Verification Proof")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextSecondary)
                     ForEach(viewModel.overview.discovery.reports.prefix(4)) { report in
-                        DiscoveryReportRow(report: report)
+                        CatalogVerificationRow(report: report)
                     }
                 }
             }
@@ -194,7 +242,7 @@ struct AgentCockpitSheet: View {
                 ModuleActivitySummaryCard(activity: moduleActivity)
             }
             if viewModel.overview.activity.isEmpty {
-                CockpitEmptyState(symbol: "clock", title: "No module activity", detail: "Module-plane activity records will appear here.")
+                CockpitEmptyState(symbol: "clock", title: "No engine work", detail: "No engine or module work is running, waiting, or blocked.")
             } else {
                 ForEach(viewModel.overview.activity) { item in
                     ActivityRow(item: item)
@@ -245,7 +293,7 @@ struct AgentCockpitSheet: View {
 }
 
 private enum AgentCockpitTab: String, CaseIterable, Identifiable {
-    case discovery
+    case capabilities
     case workers
     case packages
     case activity
@@ -255,7 +303,7 @@ private enum AgentCockpitTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .discovery: return "Discovery"
+        case .capabilities: return "Capabilities"
         case .workers: return "Workers"
         case .packages: return "Packages"
         case .activity: return "Activity"
@@ -265,48 +313,20 @@ private enum AgentCockpitTab: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .discovery: return "checkmark.shield"
+        case .capabilities: return "checkmark.shield"
         case .workers: return "cpu"
         case .packages: return "shippingbox"
         case .activity: return "clock"
         case .surfaces: return "rectangle.3.group"
         }
     }
-}
 
-private struct MetricStrip: View {
-    let overview: AgentCockpitOverview
-
-    var body: some View {
-        HStack(spacing: 8) {
-            metric("Workers", value: overview.workers.count, icon: "cpu")
-            metric("Functions", value: overview.functions.count, icon: "curlybraces")
-            metric(
-                "Issues",
-                value: overview.discovery.missingSchemaCount
-                    + overview.discovery.degradedFunctionCount
-                    + overview.discovery.catalogDecodeIssueCount,
-                icon: "exclamationmark.triangle"
-            )
-            metric("Reports", value: overview.discovery.reports.count, icon: "checkmark.shield")
-        }
-    }
-
-    private func metric(_ title: String, value: Int, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(.tronTextSecondary)
-            Text("\(value)")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(9)
-        .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, interactive: false)
+    static func visibleTabs(for overview: AgentCockpitOverview) -> [Self] {
+        var tabs: [Self] = [.capabilities, .activity]
+        if !overview.workers.isEmpty { tabs.append(.workers) }
+        if !overview.packages.isEmpty { tabs.append(.packages) }
+        if !overview.runtimeSurfaces.isEmpty { tabs.append(.surfaces) }
+        return tabs
     }
 }
 
@@ -481,6 +501,7 @@ private struct ActivityRow: View {
     private var statusColor: Color {
         switch AgentCockpitProjection.normalized(item.status) {
         case "blocked": return .tronError
+        case "degraded": return .tronWarning
         case "waiting": return .tronWarning
         case "active": return .tronCyan
         case "ready": return .tronInfo
@@ -494,16 +515,20 @@ struct WrapRow: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 6) {
+        FlowLayout(spacing: 6) {
             ForEach(items.prefix(4), id: \.self) { item in
                 Text(item)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 170, alignment: .leading)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .glassEffect(.regular.tint(tint.opacity(0.16)), in: .capsule)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

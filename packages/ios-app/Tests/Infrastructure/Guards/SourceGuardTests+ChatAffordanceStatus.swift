@@ -19,13 +19,12 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedStatusPath).path))
     }
 
-    @Test("Chat shell does not mount passive agent cockpit")
-    func testChatShellDoesNotMountPassiveAgentCockpit() throws {
+    @Test("Chat conversation does not mount passive engine cockpit")
+    func testChatConversationDoesNotMountPassiveEngineCockpit() throws {
         let iosRoot = iosAppRoot()
         let chatSources = [
             "Sources/UI/Chat/Shell/ChatView.swift",
             "Sources/UI/Chat/Shell/ChatSheetContent.swift",
-            "Sources/UI/Chat/Shell/SessionSidebar.swift",
             "Sources/UI/Chat/Shell/ChatSheetModifier.swift",
             "Sources/Session/Chat/Coordinators/SheetCoordinator.swift",
             "Sources/Session/Chat/State/ChatSheet.swift",
@@ -35,7 +34,7 @@ extension SourceGuardTests {
             let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
             #expect(!source.contains("AgentStatusCapsuleView"))
             #expect(!source.contains("AgentCockpitViewModel()"))
-            #expect(!source.contains("showAgentCockpit"))
+            #expect(!source.contains("showEngineCockpit"))
             #expect(!source.contains("agentCockpit.refresh"))
             #expect(!source.contains("case agentCockpit"))
         }
@@ -44,9 +43,25 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitViews.swift"),
             encoding: .utf8
         )
+        let cockpitSummaryViews = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift"),
+            encoding: .utf8
+        )
+        let cockpitDiscoveryViews = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift"),
+            encoding: .utf8
+        )
         #expect(cockpitViews.contains("struct AgentCockpitSheet"))
+        #expect(cockpitSummaryViews.contains("struct EngineCockpitDashboardBand"))
+        #expect(cockpitSummaryViews.contains(#"briefingMetric("Capabilities""#))
+        #expect(cockpitSummaryViews.contains("Catalog verified"))
+        #expect(!cockpitSummaryViews.contains(##""rev \(revision)""##))
+        #expect(!cockpitSummaryViews.contains(#"metric("Verified""#))
+        #expect(!cockpitSummaryViews.contains("Checked"))
+        #expect(!cockpitSummaryViews.contains(#"Image(systemName: "chevron.right")"#))
+        #expect(!cockpitDiscoveryViews.contains(#"Image(systemName: "chevron.right")"#))
         #expect(!cockpitViews.contains("struct AgentStatusCapsuleView"))
-        #expect(cockpitViews.contains(#"SheetTitle(title: "Runtime Cockpit", color: .tronEmerald)"#))
+        #expect(cockpitViews.contains(#"SheetTitle(title: "Engine Cockpit", color: .tronEmerald)"#))
         #expect(cockpitViews.contains("SheetDismissButton(color: .tronEmerald)"))
         #expect(cockpitViews.contains("TronSegmentedControl("))
         #expect(!cockpitViews.contains(#"Picker("Cockpit""#))
@@ -56,11 +71,17 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
             encoding: .utf8
         )
-        #expect(serverSettings.contains("ConnectionSettingsDiagnosticsSheet"))
-        #expect(serverSettings.contains("AgentCockpitSheet("))
+        let engineSettings = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineSettingsPage.swift"),
+            encoding: .utf8
+        )
+        #expect(!serverSettings.contains("ConnectionSettingsDiagnosticsSheet"))
+        #expect(!serverSettings.contains("AgentCockpitSheet("))
+        #expect(!serverSettings.contains(#"Image(systemName: "chevron.right")"#))
+        #expect(!engineSettings.contains(#"Image(systemName: "chevron.right")"#))
     }
 
-    @Test("Dashboard allows high-signal agent briefing without fixed cockpit")
+    @Test("Dashboard allows high-signal briefing and engine cockpit")
     func testDashboardAllowsAgentBriefingBand() throws {
         let iosRoot = iosAppRoot()
         let sidebar = try String(
@@ -74,17 +95,19 @@ extension SourceGuardTests {
 
         #expect(sidebar.contains("AgentBriefingDashboardBand("))
         #expect(sidebar.contains("AgentBriefingSheet("))
+        #expect(sidebar.contains("EngineCockpitDashboardBand("))
+        #expect(sidebar.contains("AgentCockpitSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
         #expect(sidebar.contains("briefingRefreshKey"))
+        #expect(sidebar.contains("cockpitRefreshKey"))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
         #expect(sidebar.contains(".task(id: briefingRefreshKey)"))
+        #expect(sidebar.contains(".task(id: cockpitRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
-        #expect(!sidebar.contains("AgentCockpitSheet("))
         #expect(!sidebar.contains("DashboardV2"))
         #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
-        #expect(briefingViews.contains("Deep diagnostics remain in Servers"))
-        #expect(briefingViews.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"))
+        #expect(!briefingViews.contains(#"Image(systemName: "chevron.right")"#))
         #expect(!briefingViews.contains(#"SheetTitle(title: "Runtime Cockpit""#))
 
         let retiredDashboardV2Paths = [

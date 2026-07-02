@@ -20,6 +20,7 @@ struct ModuleActivitySummaryDTO: Codable, Equatable, Sendable {
     var active: Int
     var waiting: Int
     var blocked: Int
+    var degraded: Int? = nil
     var ready: Int
     var recorded: Int
     var title: String

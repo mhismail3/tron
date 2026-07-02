@@ -20,6 +20,7 @@ pub(crate) enum ActivityStatus {
     Active,
     Waiting,
     Blocked,
+    Degraded,
     Ready,
     Recorded,
 }
@@ -28,10 +29,11 @@ impl ActivityStatus {
     fn rank(&self) -> u8 {
         match self {
             Self::Blocked => 0,
-            Self::Waiting => 1,
-            Self::Active => 2,
-            Self::Ready => 3,
-            Self::Recorded => 4,
+            Self::Degraded => 1,
+            Self::Waiting => 2,
+            Self::Active => 3,
+            Self::Ready => 4,
+            Self::Recorded => 5,
         }
     }
 }
@@ -79,6 +81,7 @@ pub(crate) struct ModuleActivityProjection {
     summary: ActivitySummary,
     timeline: Vec<ModuleActivityItem>,
     blocked: Vec<ModuleActivityItem>,
+    degraded: Vec<ModuleActivityItem>,
     waiting: Vec<ModuleActivityItem>,
     resources: Vec<ResourceKindSummary>,
     projection: ProjectionPolicy,
@@ -91,6 +94,7 @@ struct ActivitySummary {
     active: usize,
     waiting: usize,
     blocked: usize,
+    degraded: usize,
     ready: usize,
     recorded: usize,
     title: String,
@@ -105,6 +109,7 @@ struct ResourceKindSummary {
     active: usize,
     waiting: usize,
     blocked: usize,
+    degraded: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -146,6 +151,12 @@ impl ModuleActivityProjection {
             .take(MAX_RESOURCE_SUMMARIES)
             .cloned()
             .collect();
+        let degraded = timeline
+            .iter()
+            .filter(|item| item.status == ActivityStatus::Degraded)
+            .take(MAX_RESOURCE_SUMMARIES)
+            .cloned()
+            .collect();
         let waiting = timeline
             .iter()
             .filter(|item| item.status == ActivityStatus::Waiting)
@@ -159,6 +170,7 @@ impl ModuleActivityProjection {
             summary,
             timeline,
             blocked,
+            degraded,
             waiting,
             resources,
             projection: ProjectionPolicy {
@@ -189,8 +201,8 @@ impl ActivitySummary {
     fn from_items(items: &[ModuleActivityItem]) -> Self {
         let mut summary = Self {
             total: items.len(),
-            title: "No module work".to_owned(),
-            detail: "No module-plane activity has been recorded.".to_owned(),
+            title: "No engine work".to_owned(),
+            detail: "No engine or module work is running, waiting, or blocked.".to_owned(),
             ..Self::default()
         };
         for item in items {
@@ -198,6 +210,7 @@ impl ActivitySummary {
                 ActivityStatus::Active => summary.active += 1,
                 ActivityStatus::Waiting => summary.waiting += 1,
                 ActivityStatus::Blocked => summary.blocked += 1,
+                ActivityStatus::Degraded => summary.degraded += 1,
                 ActivityStatus::Ready => summary.ready += 1,
                 ActivityStatus::Recorded => summary.recorded += 1,
             }
@@ -205,6 +218,12 @@ impl ActivitySummary {
         if summary.blocked > 0 {
             summary.title = "Module work blocked".to_owned();
             summary.detail = format!("{} blocked module activities need review.", summary.blocked);
+        } else if summary.degraded > 0 {
+            summary.title = "Module work degraded".to_owned();
+            summary.detail = format!(
+                "{} module activities failed or entered quarantine.",
+                summary.degraded
+            );
         } else if summary.waiting > 0 {
             summary.title = "Module work waiting".to_owned();
             summary.detail = format!("{} module activities are pending review.", summary.waiting);
@@ -268,14 +287,20 @@ fn derive_status(
     payload: &Value,
 ) -> ActivityStatus {
     let normalized_state = normalize(state);
-    if quarantine.blocked || rollback.blocked || runtime_authorization.blocked {
+    if rollback.blocked || runtime_authorization.blocked {
+        return ActivityStatus::Blocked;
+    }
+    if quarantine.blocked {
+        return ActivityStatus::Degraded;
+    }
+    if matches!(normalized_state.as_str(), "rejected" | "denied" | "blocked") {
         return ActivityStatus::Blocked;
     }
     if matches!(
         normalized_state.as_str(),
-        "quarantined" | "rolledback" | "failed" | "rejected" | "denied" | "blocked"
+        "quarantined" | "rolledback" | "failed" | "degraded" | "unhealthy"
     ) {
-        return ActivityStatus::Blocked;
+        return ActivityStatus::Degraded;
     }
     if rollback.waiting || runtime_authorization.waiting {
         return ActivityStatus::Waiting;
@@ -386,7 +411,7 @@ fn quarantine_status(resource: &EngineResource, payload: &Value) -> GateStatus {
     GateStatus {
         label: "Quarantine".to_owned(),
         state: safe_text(&state, LABEL_BYTES),
-        blocked: normalized == "quarantined",
+        blocked: matches!(normalized.as_str(), "quarantined" | "blocked"),
         waiting: false,
     }
 }
@@ -553,12 +578,14 @@ fn resource_summaries(items: &[ModuleActivityItem]) -> Vec<ResourceKindSummary> 
                 active: 0,
                 waiting: 0,
                 blocked: 0,
+                degraded: 0,
             });
         summary.total += 1;
         match item.status {
             ActivityStatus::Active => summary.active += 1,
             ActivityStatus::Waiting => summary.waiting += 1,
             ActivityStatus::Blocked => summary.blocked += 1,
+            ActivityStatus::Degraded => summary.degraded += 1,
             ActivityStatus::Ready | ActivityStatus::Recorded => {}
         }
     }

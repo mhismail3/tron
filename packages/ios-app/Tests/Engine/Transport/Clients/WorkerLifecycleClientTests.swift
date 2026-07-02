@@ -189,7 +189,7 @@ struct WorkerLifecycleClientTests {
             #expect(options.context?.sessionId == "session-1")
             #expect(options.context?.workspaceId == "workspace-1")
             let request = try #require(payload as? CatalogDiscoveryReportRequestDTO)
-            #expect(request.reason == "runtime cockpit verification")
+            #expect(request.reason == "engine cockpit catalog verification")
             #expect(request.includeProtectedCounts == true)
             #expect(request.sessionId == "session-1")
             #expect(request.workspaceId == "workspace-1")
@@ -210,7 +210,7 @@ struct WorkerLifecycleClientTests {
         }
 
         let result = try await client.createCatalogDiscoveryReport(
-            reason: "runtime cockpit verification",
+            reason: "engine cockpit catalog verification",
             sessionId: "session-1",
             workspaceId: "workspace-1",
             idempotencyKey: .userAction("catalogDiscovery.report")

@@ -12,13 +12,13 @@ keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
 runtime surfaces emitted by the engine. The session dashboard keeps its
-workspace-grouped chat list and adds a small Agent Briefing band backed by the
-server-owned `agent_briefing::overview` projection. The full Agent Briefing
+workspace-grouped chat list and adds small Agent Briefing and Engine Cockpit
+bands backed by server-owned projections. The full Agent Briefing
 sheet presents activity, adaptation, active work, user-needed work, weak
 points/failures, memory/learned-state, and audit sections with drill-down
-evidence and empty/degraded states. The Runtime Cockpit remains a diagnostics
-surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
-surfaces live worker lifecycle catalog entries, capability discovery families,
+evidence and empty/degraded states. The Engine Cockpit opens from the dashboard
+and starts with core engine visibility before progressively exposing module-plane
+diagnostics. It surfaces live worker lifecycle catalog entries, capability discovery families,
 schema/health gaps, durable `catalog_discovery_report` history,
 package/resource status, confirmation-backed lifecycle actions, activity, and
 active `ui_surface` resources without adding fixed product panels. The Activity
@@ -69,9 +69,9 @@ and matching database/event/settings/dependency work.
 
 - Connection, strict pairing host validation, onboarding, and local paired-server
   selection.
-- Settings needed to reach the server, configure providers, choose models, and
-  inspect local diagnostics.
-- Grouped session dashboard with a scoped Agent Briefing band, collapsible
+- Settings needed to reach the server, configure providers, choose models, tune
+  server-owned context/evidence policy, and inspect local diagnostics.
+- Grouped session dashboard with scoped Agent Briefing and Engine Cockpit bands, collapsible
   workspace headers and compact
   inset liquid-glass one-line session rows, session creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
@@ -86,10 +86,10 @@ and matching database/event/settings/dependency work.
 - Chat timeline/model pill Session Briefing sheet for model switching,
   server-owned context snapshots, manual compact/clear actions, read-only memory
   refs, and durable context action audit refs.
-- Servers diagnostics Runtime Cockpit row and sheet for catalog discovery,
-  worker lifecycle catalog/resource state, package actions, server-owned module
-  activity, and dynamic runtime surfaces. The primary chat shell does not mount
-  passive worker-runtime diagnostics.
+- Dashboard Engine Cockpit band and sheet for core engine link/catalog health,
+  catalog discovery, worker lifecycle catalog/resource state, package actions,
+  server-owned module activity, and dynamic runtime surfaces. The primary chat
+  conversation shell does not mount passive worker-runtime diagnostics.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
@@ -119,7 +119,7 @@ Sources/
 +-- Support/              Composition, diagnostics, feedback, foundation,
 |                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
-|                         surfaces, Agent cockpit, capabilities, components,
+|                         surfaces, Agent Briefing, Engine Cockpit, capabilities, components,
 |                         system sheets
 +-- Assets.xcassets/      App icons and image assets
 +-- Resources/            Fonts and generated app-icon source layers
@@ -149,7 +149,7 @@ Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> Chat
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Context: ContextStatusPill/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
 Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> invocation-scoped module_activity::overview/other server facts -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity server facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
 `AgentCockpitProjection` is also the boundary that turns partial or failed
@@ -406,16 +406,28 @@ payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
-The Agent cockpit opens from Servers -> Diagnostics -> Runtime Cockpit. Its
-Discovery tab groups visible functions by namespace, summarizes schema and
-health gaps, lists recent `catalog_discovery_report` resources, and can request
-a new `catalog_discovery::conformance_report`. That action writes durable
-report/stream evidence only; it does not execute discovered functions. Its
+The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
+and sheet header are the core engine summary: connection state, visible
+capability count, issue count, and plain catalog trust state from server-owned
+facts. The sheet opens on Capabilities, grouping visible operations into
+user-facing areas before drilling into operation owner, effect/risk,
+schema-health, worker, trigger, tags, request/response schema bodies, and safe
+verification details. Catalog
+snapshot revision and recent `catalog_discovery_report` resources are rendered
+inside the cockpit as catalog verification proof, not as top-level telemetry.
+Dashboard and operation cards use the whole glass container as the disclosure
+target instead of decorative chevron glyphs; drill-down is communicated by the
+surface hierarchy and tap target, while functional navigation and expansion
+controls keep their own directional icons.
+The verify action can request a new
+`catalog_discovery::conformance_report`; that action writes durable
+report/stream evidence only and does not execute discovered functions. Deeper
+worker/package/surface tabs appear only when there is server evidence to inspect. The
 Surfaces tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
 Its Activity tab renders invocation-scoped `module_activity::overview`
-summaries from the server: active/waiting/blocked status, generic timeline
+summaries from the server: active/waiting/blocked/degraded status, generic timeline
 entries, authority labels, touched-resource summaries, and
 rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
 module resource payloads, invent activity states, own redaction policy, or
@@ -440,12 +452,18 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 `SettingsServerSupport.swift`; and shared row/card primitives stay in
 `SettingsSupport.swift`.
 
-Server identity, reachability, diagnostics, and pairing controls stay inside
-the Servers page or the disconnected warning card; Settings main does not grow
-a server-health dashboard. Servers diagnostics owns the compact Logs and
-Runtime Cockpit entries. Agent settings owns server-backed quick-session
-defaults, including `server.defaultProvider`, `server.defaultModel`, and
-`server.defaultWorkspace`. Provider credential state remains in Providers.
+Settings main groups controls by ownership rather than by old product modules.
+Engine owns server-mirrored defaults, context compaction, transcription, log
+level, and storage retention policy. Accounts owns provider credential setup.
+Servers owns local pairing/connection and redacted local logs. App owns local
+appearance and device behavior. Settings main does not grow a server-health
+dashboard; core engine visibility lives on the dashboard Engine Cockpit.
+Each main Settings destination or maintenance action renders as its own card;
+the sheet avoids grouped table dividers and chevrons because the card itself is
+the tap target and disclosure affordance.
+The Settings footer stays in the sheet content flow after the maintenance
+actions. It uses a subtle material fade, but it is not a pinned overlay; the
+footer appears naturally when the sheet is expanded or scrolled to the bottom.
 
 `ModelPickerSheet.swift` owns the model-picker sheet frame and loading/error
 state. Provider, family, model-card, reasoning-visibility, and reasoning

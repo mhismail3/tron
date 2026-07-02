@@ -31,10 +31,6 @@ struct AgentBriefingDashboardBand: View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(accent)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
                 }
             }
             .padding(14)
@@ -208,7 +204,7 @@ struct AgentBriefingSheet: View {
     }
 
     private var diagnosticsNote: some View {
-        Label("Deep diagnostics remain in Servers when operator-level details are needed.", systemImage: "stethoscope")
+        Label("Core engine diagnostics live in the dashboard Engine Cockpit when operator-level details are needed.", systemImage: "stethoscope")
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)

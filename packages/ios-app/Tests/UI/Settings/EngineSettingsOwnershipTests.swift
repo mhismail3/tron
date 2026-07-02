@@ -2,54 +2,49 @@ import Testing
 import SwiftUI
 @testable import TronMobile
 
-@Suite("Agent and Context Settings Page Tests")
-struct AgentContextSettingsPageTests {
+@Suite("Engine Settings Page Tests")
+struct EngineSettingsOwnershipTests {
 
     @Test("server settings categories expose only primitive settings groups")
     func serverSettingsCategoriesExposeOnlyPrimitiveGroups() {
         #expect(ServerSettingsCategory.serverBackedOrder == [
-            .server,
+            .engine,
             .providers,
-            .agent,
-            .context,
+            .server,
         ])
 
+        #expect(ServerSettingsCategory.engine.title == "Engine")
+        #expect(ServerSettingsCategory.engine.subtitle == "Server-owned defaults, context, and evidence policy")
         #expect(ServerSettingsCategory.server.title == "Servers")
-        #expect(ServerSettingsCategory.server.subtitle == "Paired servers and evidence")
+        #expect(ServerSettingsCategory.server.subtitle == "Pairing and connection")
         #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
-        #expect(ServerSettingsCategory.agent.title == "Agent")
-        #expect(ServerSettingsCategory.agent.subtitle == "Prompt defaults")
-        #expect(ServerSettingsCategory.context.title == "Context")
-        #expect(ServerSettingsCategory.context.subtitle == "Compaction for the prompt loop")
+        #expect(ServerSettingsCategory.providers.title == "Accounts")
 
-        #expect(MainSettingsGridDestination.surfaceRow == [
-            .app,
-            .server,
+        #expect(MainSettingsGridDestination.serverOwned == [
+            .engine,
             .providers,
         ])
-        #expect(MainSettingsGridDestination.surfaceRow.map(\.description) == [
-            "Appearance, notifications, local behavior",
-            "Paired servers and evidence",
+        #expect(MainSettingsGridDestination.serverOwned.map(\.description) == [
+            "Server-owned defaults, context, and evidence policy",
             "OAuth login and API keys",
         ])
-        #expect(MainSettingsGridDestination.behaviorRow == [
-            .agent,
-            .context,
+        #expect(MainSettingsGridDestination.deviceOwned == [
+            .server,
+            .app,
         ])
-        #expect(MainSettingsGridDestination.behaviorRow.map(\.description) == [
-            "Prompt defaults",
-            "Prompt compaction",
+        #expect(MainSettingsGridDestination.deviceOwned.map(\.description) == [
+            "Pairing and connection",
+            "Appearance, notifications, local behavior",
         ])
         #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: false) == [
-            .app,
-            .server,
+            .engine,
             .providers,
-            .agent,
-            .context,
+            .server,
+            .app,
         ])
         #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: true) == [
-            .app,
             .server,
+            .app,
         ])
         let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
         #expect(ServerSettingsCategory.allCases.map(\.title).allSatisfy { title in
@@ -57,10 +52,12 @@ struct AgentContextSettingsPageTests {
         })
     }
 
-    @Test("agent sheet keeps only quick session settings")
-    func agentSheetKeepsOnlyPrimitiveSections() {
-        #expect(AgentSettingsSection.allCases == [
-            .quickSession,
+    @Test("engine sheet keeps server-owned settings in one progressive page")
+    func engineSheetKeepsServerOwnedSettingsTogether() {
+        #expect(EngineSettingsSection.allCases == [
+            .defaults,
+            .context,
+            .evidence,
         ])
     }
 
@@ -99,37 +96,22 @@ struct AgentContextSettingsPageTests {
         ))
     }
 
-    @Test("agent summary describes prompt defaults")
-    func agentSummaryDescribesPromptDefaults() {
-        let unloaded = AgentSettingsSummary.Context(
-            isLoaded: false
-        )
-        #expect(AgentSettingsSummary.title(for: unloaded) == "Load agent settings")
-        #expect(AgentSettingsSummary.description(for: unloaded) == "Loading prompt defaults from the active server.")
-
-        let loaded = AgentSettingsSummary.Context(
-            isLoaded: true
-        )
-        #expect(AgentSettingsSummary.title(for: loaded) == "Agent behavior")
-        #expect(AgentSettingsSummary.description(for: loaded) == "Prompt defaults are loaded from the active server.")
-    }
-
-    @Test("context summary describes compaction only")
-    func contextSummaryDescribesCompactionOnly() {
-        let unloaded = ContextSettingsSummary.Context(
+    @Test("engine summary describes server owned settings")
+    func engineSummaryDescribesServerOwnedSettings() {
+        let unloaded = EngineSettingsSummary.Context(
             isLoaded: false,
             triggerTokenThreshold: 0.70,
             preserveRecentCount: 5
         )
-        #expect(ContextSettingsSummary.title(for: unloaded) == "Load context settings")
-        #expect(ContextSettingsSummary.description(for: unloaded) == "Loading compaction settings from the active server.")
+        #expect(EngineSettingsSummary.title(for: unloaded) == "Load engine settings")
+        #expect(EngineSettingsSummary.description(for: unloaded) == "Loading model defaults, context, and evidence policy from the active server.")
 
-        let loaded = ContextSettingsSummary.Context(
+        let loaded = EngineSettingsSummary.Context(
             isLoaded: true,
             triggerTokenThreshold: 0.65,
             preserveRecentCount: 4
         )
-        #expect(ContextSettingsSummary.title(for: loaded) == "Context management")
-        #expect(ContextSettingsSummary.description(for: loaded) == "Compaction starts at 65% and keeps 4 recent turns.")
+        #expect(EngineSettingsSummary.title(for: loaded) == "Server-owned engine policy")
+        #expect(EngineSettingsSummary.description(for: loaded) == "Defaults, compaction at 65%, and evidence retention are mirrored from the server.")
     }
 }

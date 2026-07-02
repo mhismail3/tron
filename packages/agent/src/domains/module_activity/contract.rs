@@ -42,6 +42,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "summary": {"type": "object"},
                 "timeline": {"type": "array"},
                 "blocked": {"type": "array"},
+                "degraded": {"type": "array"},
                 "waiting": {"type": "array"},
                 "resources": {"type": "array"},
                 "projection": {"type": "object"}

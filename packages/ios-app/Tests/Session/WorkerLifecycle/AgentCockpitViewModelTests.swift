@@ -124,7 +124,7 @@ struct AgentCockpitViewModelTests {
             connectionState: .connected
         )
 
-        #expect(repository.createdCatalogReportReason == "runtime cockpit verification")
+        #expect(repository.createdCatalogReportReason == "engine cockpit catalog verification")
         #expect(repository.createdCatalogReportSessionId == "session-1")
         #expect(repository.createdCatalogReportWorkspaceId == "workspace-1")
         #expect(repository.overviewCallCount == 1)

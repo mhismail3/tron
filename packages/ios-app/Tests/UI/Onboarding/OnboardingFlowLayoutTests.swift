@@ -84,7 +84,7 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             "The sheet modifier should consume the central onboarding detent policy"
         )
         XCTAssertTrue(
-            app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear, dragIndicator: .visible)"),
+            app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"),
             "Onboarding should use the compact iPad form now that the flow is medium-first"
         )
         XCTAssertTrue(
@@ -140,6 +140,14 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             "Phone onboarding pages should only allow scroll once the sheet is expanded"
         )
         XCTAssertTrue(
+            flow.contains("applyPreferredDetent(for: state.currentStep)"),
+            "The flow should move form-heavy setup pages to their preferred detent instead of clipping them at the bottom edge"
+        )
+        XCTAssertTrue(
+            flow.contains("case .workspace, .anthropic, .openAI, .providers, .services, .model:"),
+            "Post-pairing setup pages should be treated as large-detent form pages"
+        )
+        XCTAssertTrue(
             shell.contains(#"@Environment(\.onboardingScrollsEnabled)"#),
             "Shared onboarding pages should read the central scroll policy"
         )
@@ -147,9 +155,9 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             shell.contains(".scrollDisabled(!onboardingScrollsEnabled)"),
             "Medium onboarding pages should not consume drag gestures as scroll"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             app.contains("dragIndicator: .visible"),
-            "The native drag indicator should remain visible so users can pull the medium sheet to large"
+            "Onboarding should not opt back into native sheet drag handles"
         )
         XCTAssertFalse(
             flow.contains("DragGesture(") || shell.contains("DragGesture("),

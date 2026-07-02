@@ -4,88 +4,112 @@ extension SettingsView {
     // MARK: - Main Sections
 
     var mainSettingsSection: some View {
-        VStack(alignment: .leading, spacing: MainSettingsGridLayout.rowSpacing) {
-            LazyVGrid(columns: mainSettingsDestinationGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
-                ForEach(
-                    MainSettingsGridDestination.visibleDestinations(
-                        serverSettingsUnavailable: showsServerUnavailableState
-                    ),
-                    id: \.self
-                ) { destination in
-                    mainSettingsDestinationTile(destination)
-                }
-            }
+        VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
+            settingsOwnershipSection(
+                title: "Server-Owned",
+                destinations: MainSettingsGridDestination.serverOwned
+            )
 
             if showsServerUnavailableState {
                 serverUnavailableCard
             }
 
+            settingsOwnershipSection(
+                title: "This iPhone",
+                destinations: MainSettingsGridDestination.deviceOwned
+            )
+
             mainSettingsDivider
 
-            LazyVGrid(columns: mainSettingsDangerGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
-                ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
-                    dangerActionTile(action)
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSectionHeader(title: "Maintenance")
+
+                VStack(spacing: MainSettingsListLayout.rowSpacing) {
+                    ForEach(SettingsDangerZoneAction.order, id: \.self) { action in
+                        SettingsCard(accent: .tronError) {
+                            dangerActionRow(action)
+                        }
+                    }
                 }
             }
         }
     }
 
+    @ViewBuilder
+    func settingsOwnershipSection(title: String, destinations: [MainSettingsGridDestination]) -> some View {
+        VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
+            SettingsSectionHeader(title: title)
+
+            ForEach(destinations, id: \.self) { destination in
+                SettingsCard {
+                    mainSettingsDestinationRow(destination)
+                }
+            }
+        }
+    }
+
+    func mainSettingsDestinationRow(_ destination: MainSettingsGridDestination) -> some View {
+        let enabled = isMainSettingsDestinationEnabled(destination)
+        return Button {
+            openMainSettingsDestination(destination)
+        } label: {
+            SettingsRow(
+                icon: destination.icon,
+                label: destination.title,
+                accentColor: mainSettingsDestinationAccent(destination),
+                labelColor: enabled ? .tronTextPrimary : .tronTextMuted
+            ) {
+                Text(destination.description)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.44)
+        .accessibilityHint(destination.accessibilityHint)
+    }
+
+    func dangerActionRow(_ action: SettingsDangerZoneAction) -> some View {
+        let enabled = isDangerActionEnabled(action)
+        return Button {
+            performDangerAction(action)
+        } label: {
+            SettingsRow(
+                icon: action.icon,
+                label: action.title,
+                accentColor: .tronError,
+                labelColor: .tronError
+            ) {
+                if isDangerActionInProgress(action) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.tronError)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+    }
+
     var mainSettingsDivider: some View {
         Rectangle()
-            .fill(Color.tronTextMuted.opacity(MainSettingsGridLayout.dividerOpacity))
-            .frame(height: MainSettingsGridLayout.dividerHeight)
-            .padding(.horizontal, MainSettingsGridLayout.dividerHorizontalPadding)
-            .padding(.vertical, MainSettingsGridLayout.dividerVerticalPadding)
-    }
-
-    var mainSettingsDestinationGridColumns: [GridItem] {
-        mainSettingsGridColumns(
-            count: MainSettingsGridLayout.destinationColumnCount(
-                serverSettingsUnavailable: showsServerUnavailableState
-            )
-        )
-    }
-
-    var mainSettingsDangerGridColumns: [GridItem] {
-        mainSettingsGridColumns(count: MainSettingsGridLayout.columnCount)
-    }
-
-    func mainSettingsGridColumns(count: Int) -> [GridItem] {
-        Array(
-            repeating: GridItem(.flexible(), spacing: MainSettingsGridLayout.columnSpacing),
-            count: count
-        )
-    }
-
-    func mainSettingsDestinationTile(_ destination: MainSettingsGridDestination) -> some View {
-        let enabled = isMainSettingsDestinationEnabled(destination)
-        return SettingsCard(
-            accent: mainSettingsDestinationAccent(destination),
-            interactive: enabled
-        ) {
-            Button {
-                openMainSettingsDestination(destination)
-            } label: {
-                mainSettingsDestinationTileContent(
-                    icon: destination.icon,
-                    title: destination.title,
-                    description: destination.description,
-                    accent: mainSettingsDestinationAccent(destination),
-                    minHeight: MainSettingsGridLayout.destinationTileMinHeight
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(!enabled)
-            .opacity(enabled ? 1 : 0.4)
-            .accessibilityHint(destination.accessibilityHint)
-        }
+            .fill(Color.tronTextMuted.opacity(MainSettingsListLayout.dividerOpacity))
+            .frame(height: MainSettingsListLayout.dividerHeight)
+            .padding(.horizontal, MainSettingsListLayout.dividerHorizontalPadding)
+            .padding(.vertical, MainSettingsListLayout.dividerVerticalPadding)
     }
 
     func isMainSettingsDestinationEnabled(_ destination: MainSettingsGridDestination) -> Bool {
         switch destination {
         case .server, .app:
             return true
-        case .providers, .agent, .context:
+        case .providers, .engine:
             return serverSettingsReady
         }
     }
@@ -101,6 +125,8 @@ extension SettingsView {
 
     func openMainSettingsDestination(_ destination: MainSettingsGridDestination) {
         switch destination {
+        case .engine:
+            activePage = .engine
         case .server:
             if hasPairedServers {
                 activePage = .server
@@ -111,10 +137,6 @@ extension SettingsView {
             activePage = .app
         case .providers:
             activePage = .providers
-        case .agent:
-            activePage = .agent
-        case .context:
-            activePage = .context
         }
     }
 
@@ -153,79 +175,10 @@ extension SettingsView {
                     .buttonStyle(.bordered)
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .padding(.leading, MainSettingsGridLayout.unavailableActionLeadingPadding)
+                .padding(.leading, MainSettingsListLayout.unavailableActionLeadingPadding)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
-        }
-    }
-
-    func mainSettingsDestinationTileContent(
-        icon: String,
-        title: String,
-        description: String,
-        accent: Color,
-        minHeight: CGFloat
-    ) -> some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(title)
-                    .font(TronTypography.sans(size: MainSettingsGridLayout.destinationTitleSize, weight: .bold))
-                    .foregroundStyle(accent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, MainSettingsGridLayout.iconFrameSize + 8)
-
-                Text(description)
-                    .font(TronTypography.sans(size: MainSettingsGridLayout.destinationDescriptionSize, weight: .medium))
-                    .foregroundStyle(.tronTextMuted.opacity(MainSettingsGridLayout.destinationDescriptionOpacity))
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.72)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, MainSettingsGridLayout.destinationDescriptionTopPadding)
-
-                Spacer(minLength: 0)
-            }
-
-            VStack {
-                Image(systemName: icon)
-                    .font(TronTypography.sans(size: MainSettingsGridLayout.iconSize))
-                    .foregroundStyle(accent)
-                    .frame(
-                        width: MainSettingsGridLayout.iconFrameSize,
-                        height: MainSettingsGridLayout.iconFrameSize,
-                        alignment: .leading
-                    )
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    func dangerActionTile(_ action: SettingsDangerZoneAction) -> some View {
-        let enabled = isDangerActionEnabled(action)
-        return SettingsCard(accent: .tronError, interactive: enabled) {
-            Button {
-                performDangerAction(action)
-            } label: {
-                mainSettingsTileContent(
-                    icon: action.icon,
-                    title: action.title,
-                    accent: .tronError,
-                    labelColor: .tronError,
-                    minHeight: MainSettingsGridLayout.dangerTileMinHeight,
-                    titleSize: MainSettingsGridLayout.dangerTitleSize,
-                    titleWeight: .medium,
-                    showsProgress: isDangerActionInProgress(action)
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(!enabled)
-            .opacity(enabled ? 1 : 0.4)
         }
     }
 
@@ -256,52 +209,16 @@ extension SettingsView {
         }
     }
 
-    func mainSettingsTileContent(
-        icon: String,
-        title: String,
-        accent: Color,
-        labelColor: Color = .tronTextPrimary,
-        minHeight: CGFloat,
-        titleSize: CGFloat = MainSettingsGridLayout.dangerTitleSize,
-        titleWeight: Font.Weight = .medium,
-        showsProgress: Bool = false
-    ) -> some View {
-        ZStack(alignment: .topTrailing) {
-            Text(title)
-                .font(TronTypography.sans(size: titleSize, weight: titleWeight))
-                .foregroundStyle(labelColor)
-                .lineLimit(2)
-                .minimumScaleFactor(0.76)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, MainSettingsGridLayout.iconFrameSize + 8)
-
-            if showsProgress {
-                ProgressView()
-                    .tint(accent)
-                    .scaleEffect(0.7)
-            } else {
-                Image(systemName: icon)
-                    .font(TronTypography.sans(size: MainSettingsGridLayout.iconSize))
-                    .foregroundStyle(accent)
-                    .frame(
-                        width: MainSettingsGridLayout.iconFrameSize,
-                        height: MainSettingsGridLayout.iconFrameSize,
-                        alignment: .leading
-                    )
-            }
+    var settingsFooterDockView: some View {
+        ZStack(alignment: .bottom) {
+            SettingsFooterBackdrop()
+            footerView
+                .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
+                .padding(.top, MainSettingsFooterLayout.topPadding)
+                .padding(.bottom, MainSettingsFooterLayout.bottomPadding)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    var pinnedFooterView: some View {
-        footerView
-            .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
-            .padding(.top, MainSettingsFooterLayout.topPadding)
-            .padding(.bottom, MainSettingsFooterLayout.bottomPadding)
+            .frame(maxWidth: .infinity)
+            .frame(height: MainSettingsFooterLayout.dockHeight)
             .cardEntrance(visible: cardsVisible, index: 1)
     }
 

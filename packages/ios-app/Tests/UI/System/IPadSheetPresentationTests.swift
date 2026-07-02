@@ -96,7 +96,7 @@ final class IPadSheetPresentationTests: XCTestCase {
         let expected: [(path: [String], fragment: String)] = [
             (
                 ["Sources", "App", "Lifecycle", "TronMobileApp.swift"],
-                ".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear, dragIndicator: .visible)"
+                ".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"
             ),
             (
                 ["Sources", "UI", "Chat", "Composer", "CameraCaptureSheet.swift"],
@@ -241,6 +241,23 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             offenders.isEmpty,
             "Raw presentationDragIndicator styling bypasses the adaptive sheet helper: \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    func testNoSheetOptsIntoVisibleDragIndicator() throws {
+        let sourceRoot = try projectRoot()
+            .appendingPathComponent("Sources")
+        let files = try swiftFiles(under: sourceRoot)
+        let offenders = try files.compactMap { file -> String? in
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return content.contains("dragIndicator: .visible")
+                ? relativePath(file, under: sourceRoot)
+                : nil
+        }
+
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Sheets should not opt into visible drag handles: \(offenders.joined(separator: ", "))"
         )
     }
 

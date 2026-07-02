@@ -4,15 +4,17 @@
 
 The iOS app always opens to the normal session shell after initialization.
 `TronMobileApp` presents one medium-first onboarding sheet for first-run setup,
-Server-page pairing, and pairing URLs. The user can pull it to the large detent
-when a form needs more room. Page scrolling is disabled at the medium detent,
-the native sheet drag indicator remains visible for expansion, and content only
-scrolls once the sheet is large. The sheet is a paged flow: welcome, install
+Server-page pairing, and pairing URLs. Preparation and pairing pages stay compact;
+after the Mac is paired, form-heavy setup pages expand to the large detent so
+provider/settings cards do not clip against the bottom of the sheet. Page
+scrolling is disabled at the medium detent, the app hides native sheet drag
+handles, and content only scrolls once the sheet is large. The sheet is a paged
+flow: welcome, install
 Tailscale on iPhone, install Tron Server on Mac, connect, then a short settings
 setup flow for workspace, credentials, services, and default model.
 Setup pages are locked until the Mac connection succeeds. The sheet follows the
-app's standard Liquid Glass chrome: visible native drag handle, principal toolbar title,
-Back/Next controls in the top sheet toolbar for paged navigation, and a compact
+app's standard Liquid Glass chrome: principal toolbar title, Back/Next controls
+in the top sheet toolbar for paged navigation, and a compact
 floating progress-dot indicator that sits low at the bottom of the sheet.
 
 The three preparation pages stay terse and action-oriented. Welcome frames the
@@ -165,7 +167,7 @@ host and port.
   optional model providers.
 - **Default model** reuses `ModelPickerSheet`, then writes
   `server.defaultModel`. The separate `server.defaultProvider` control lives in
-  Agent settings because it is a retained server setting, not a credential.
+  Engine settings because it is a retained server setting, not a credential.
 
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
@@ -238,9 +240,9 @@ the local Logs sheet; feedback remains the persistent Settings footer action.
 Product update checks are not part of the primitive iOS shell.
 When the active paired server is unreachable, the Servers sheet keeps paired
 server rows visible for local switching and removal, turns the summary card
-warning-yellow with `<server name> not available`, and hides server-backed
-controls including the `Server Controls` header until the Mac reconnects and
-`settings.get` succeeds. The selected unreachable row overrides stale
+warning-yellow with `<server name> not available`, and disables the Engine and
+Accounts settings rows until the Mac reconnects and `settings.get` succeeds.
+The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
 and Forget. The main Settings sheet also disables destructive server-coupled
 actions while in this unavailable state: Archive All Sessions is unavailable,

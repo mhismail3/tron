@@ -26,7 +26,7 @@ struct ServerSettingsPageTests {
         let serverUnavailableCard = try section(
             in: mainSection,
             from: "var serverUnavailableCard: some View {",
-            to: "func mainSettingsDestinationTileContent("
+            to: "var settingsFooterDockView: some View {"
         )
 
         #expect(serverUnavailableCard.contains("Button(SettingsLabels.repairActiveServerPairing)"))
@@ -56,10 +56,8 @@ struct ServerSettingsPageTests {
         #expect(ConnectionSettingsDiagnosticsCopy.sectionTitle == "Diagnostics")
         #expect(ConnectionSettingsDiagnosticsCopy.logsLabel == "Logs")
         #expect(ConnectionSettingsDiagnosticsCopy.logsAction == "View")
-        #expect(ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel == "Runtime Cockpit")
-        #expect(ConnectionSettingsDiagnosticsCopy.runtimeCockpitAction == "Open")
         #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("redacted local iOS logs"))
-        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("server-sourced runtime diagnostics"))
+        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("dashboard cockpit"))
     }
 
     @Test("paired server menu uses server-specific actions")
@@ -171,7 +169,7 @@ struct ServerSettingsPageTests {
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Connect a Mac")
-        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage runtime evidence from this iPhone.")
+        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to connect this iPhone to the engine.")
     }
 
     @Test("server summary explains unavailable active server settings")
@@ -199,7 +197,7 @@ struct ServerSettingsPageTests {
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading runtime evidence settings.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading server settings.")
     }
 
     @Test("server summary warns when active server cannot be reached")
@@ -216,57 +214,7 @@ struct ServerSettingsPageTests {
         #expect(ServerSettingsSummary.description(for: context) == SettingsLabels.connectedServerUnavailableDescription)
     }
 
-    @Test("server controls status hides when no active server exists")
-    func serverControlsStatusHidesWhenNoActiveServerExists() {
-        let status = ConnectionSettingsServerControlsStatus.resolve(
-            hasActiveServer: false,
-            activeServerUnavailable: false,
-            loadError: nil
-        )
-
-        #expect(status == nil)
-    }
-
-    @Test("server controls status shows unavailable copy for disconnected active server")
-    func serverControlsStatusShowsUnavailableCopyForDisconnectedActiveServer() throws {
-        let status = try #require(ConnectionSettingsServerControlsStatus.resolve(
-            hasActiveServer: true,
-            activeServerUnavailable: true,
-            loadError: nil
-        ))
-
-        #expect(status.title == "Server settings unavailable")
-        #expect(status.description == SettingsLabels.connectedServerUnavailableDescription)
-        #expect(status.icon == "wifi.exclamationmark")
-    }
-
-    @Test("server controls status keeps explicit load error")
-    func serverControlsStatusKeepsExplicitLoadError() throws {
-        let status = try #require(ConnectionSettingsServerControlsStatus.resolve(
-            hasActiveServer: true,
-            activeServerUnavailable: false,
-            loadError: "Connection timed out"
-        ))
-
-        #expect(status.title == "Server settings unavailable")
-        #expect(status.description == "Connection timed out")
-        #expect(status.icon == "wifi.exclamationmark")
-    }
-
-    @Test("server controls status shows loading for connected active server before settings load")
-    func serverControlsStatusShowsLoadingForConnectedActiveServerBeforeSettingsLoad() throws {
-        let status = try #require(ConnectionSettingsServerControlsStatus.resolve(
-            hasActiveServer: true,
-            activeServerUnavailable: false,
-            loadError: nil
-        ))
-
-        #expect(status.title == "Loading server settings")
-        #expect(status.description == SettingsLabels.loadingServerSettingsDescription)
-        #expect(status.icon == "hourglass")
-    }
-
-    @Test("server summary reflects loaded runtime evidence settings")
+    @Test("server summary reflects loaded pairing and diagnostics state")
     func serverSummaryReflectsLoadedSettings() {
         let context = ServerSettingsSummary.Context(
             activeServerLabel: "Test Server",
@@ -277,7 +225,7 @@ struct ServerSettingsPageTests {
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Runtime evidence settings are available.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Pairing and diagnostics are available.")
     }
 
     @Test("active unreachable row overrides stale connected status")

@@ -84,7 +84,7 @@ final class AgentCockpitViewModel {
         defer { isRefreshing = false }
         do {
             _ = try await repository.createCatalogDiscoveryReport(
-                reason: "runtime cockpit verification",
+                reason: "engine cockpit catalog verification",
                 sessionId: sessionId,
                 workspaceId: workspaceId,
                 idempotencyKey: .userAction("catalogDiscovery.conformanceReport")

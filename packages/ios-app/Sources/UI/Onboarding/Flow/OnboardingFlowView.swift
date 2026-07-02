@@ -156,9 +156,13 @@ struct OnboardingFlowView: View {
         .tint(.tronEmerald)
         .onAppear {
             state.selectStep(state.currentStep)
+            applyPreferredDetent(for: state.currentStep)
         }
         .onChange(of: state.hasPairedMac) { _, _ in
             state.selectStep(state.currentStep)
+        }
+        .onChange(of: state.currentStep) { _, step in
+            applyPreferredDetent(for: step)
         }
     }
 
@@ -191,6 +195,15 @@ struct OnboardingFlowView: View {
         selectedDetent == .large || UIDevice.current.userInterfaceIdiom == .pad
     }
 
+    private func applyPreferredDetent(for step: OnboardingState.Step) {
+        guard UIDevice.current.userInterfaceIdiom != .pad else { return }
+        let preferredDetent = step.onboardingPreferredDetent
+        guard selectedDetent != preferredDetent else { return }
+        withAnimation(.snappy(duration: 0.28)) {
+            selectedDetent = preferredDetent
+        }
+    }
+
     private func toolbarNavigationButton(
         title: String,
         systemImage: String,
@@ -208,6 +221,17 @@ struct OnboardingFlowView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private extension OnboardingState.Step {
+    var onboardingPreferredDetent: PresentationDetent {
+        switch self {
+        case .welcome, .installTailscale, .installMac, .connect:
+            return .medium
+        case .workspace, .anthropic, .openAI, .providers, .services, .model:
+            return .large
+        }
     }
 }
 

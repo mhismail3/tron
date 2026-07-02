@@ -219,6 +219,62 @@ fn blocked_and_waiting_states_are_derived_from_existing_facts() {
 }
 
 #[test]
+fn failed_and_quarantined_states_are_degraded_not_blocked() {
+    let failed = resource(crate::engine::MODULE_RUNTIME_STATE_KIND, "failed");
+    let failed_payload = json!({
+        "runtime": {"label": "Failed runtime"},
+        "supervision": {"state": "failed"},
+        "updatedAt": "2026-06-20T12:00:00Z"
+    });
+    let quarantined = resource(crate::engine::MODULE_LIFECYCLE_STATE_KIND, "enabled");
+    let quarantined_payload = json!({
+        "transition": {"action": "quarantine", "reason": "health check failed"},
+        "quarantine": {"status": "blocked"},
+        "updatedAt": "2026-06-20T12:01:00Z"
+    });
+
+    let failed = ModuleActivityItem::from_resource(
+        &failed,
+        &version(&failed, failed_payload.clone()),
+        &failed_payload,
+    );
+    let quarantined = ModuleActivityItem::from_resource(
+        &quarantined,
+        &version(&quarantined, quarantined_payload.clone()),
+        &quarantined_payload,
+    );
+    let projection = test_projection(vec![failed, quarantined], 40);
+
+    assert_eq!(projection["summary"]["degraded"], 2);
+    assert_eq!(projection["summary"]["blocked"], 0);
+    assert_eq!(projection["summary"]["title"], "Module work degraded");
+    assert_eq!(
+        projection["degraded"]
+            .as_array()
+            .expect("degraded list")
+            .len(),
+        2
+    );
+    assert!(
+        projection["blocked"]
+            .as_array()
+            .expect("blocked list")
+            .is_empty()
+    );
+}
+
+#[test]
+fn empty_projection_uses_plain_engine_activity_copy() {
+    let projection = test_projection(Vec::new(), 40);
+
+    assert_eq!(projection["summary"]["title"], "No engine work");
+    assert_eq!(
+        projection["summary"]["detail"],
+        "No engine or module work is running, waiting, or blocked."
+    );
+}
+
+#[test]
 fn projection_redacts_sensitive_shapes_and_declares_policy() {
     let resource = resource(crate::engine::MODULE_PROPOSAL_KIND, "draft");
     let payload = json!({

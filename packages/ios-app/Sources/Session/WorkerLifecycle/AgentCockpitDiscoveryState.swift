@@ -11,6 +11,32 @@ struct AgentCockpitCapabilityFamilyRow: Equatable, Identifiable, Sendable {
     var riskLevels: [String]
 }
 
+struct AgentCockpitCapabilityGroupRow: Equatable, Identifiable, Sendable {
+    var id: String
+    var title: String
+    var question: String
+    var narrative: String
+    var ownerSummary: String
+    var functionCount: Int
+    var workerCount: Int
+    var triggerCount: Int
+    var degradedCount: Int
+    var missingSchemaCount: Int
+    var namespaces: [String]
+    var functions: [AgentCockpitFunctionRow]
+    var workerIds: [String]
+    var triggerIds: [String]
+
+    var hasIssues: Bool {
+        degradedCount > 0 || missingSchemaCount > 0
+    }
+
+    var workerTriggerExplanation: String? {
+        guard functionCount > 0, workerCount == 0, triggerCount == 0 else { return nil }
+        return "These are built-in engine operations. Worker and trigger counts appear when a module publishes autonomous runtime owners."
+    }
+}
+
 struct AgentCockpitDiscoveryReportRow: Equatable, Identifiable, Sendable {
     var id: String
     var resourceId: String
@@ -34,6 +60,7 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var latestReport: AgentCockpitDiscoveryReportRow?
     var reports: [AgentCockpitDiscoveryReportRow]
     var families: [AgentCockpitCapabilityFamilyRow]
+    var groups: [AgentCockpitCapabilityGroupRow]
 
     static let empty = AgentCockpitDiscoveryOverview(
         title: "No Catalog",
@@ -49,7 +76,8 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
         catalogDecodeIssueCount: 0,
         latestReport: nil,
         reports: [],
-        families: []
+        families: [],
+        groups: []
     )
 }
 
@@ -77,6 +105,11 @@ extension AgentCockpitProjection {
             }
             return lhs.missingSchemaCount > rhs.missingSchemaCount
         }
+        let groups = capabilityGroups(
+            workers: workers,
+            functions: functions,
+            triggers: triggers
+        )
 
         let latestReport = reportRows.first
         let normalizedLatest = latestReport.map { normalized($0.lifecycle) }
@@ -127,8 +160,145 @@ extension AgentCockpitProjection {
             catalogDecodeIssueCount: catalogDecodeIssues.count,
             latestReport: latestReport,
             reports: reportRows,
-            families: families
+            families: families,
+            groups: groups
         )
+    }
+
+    private static func capabilityGroups(
+        workers: [AgentCockpitWorkerRow],
+        functions: [AgentCockpitFunctionRow],
+        triggers: [AgentCockpitTriggerRow]
+    ) -> [AgentCockpitCapabilityGroupRow] {
+        var claimedNamespaces = Set<String>()
+        var groups: [AgentCockpitCapabilityGroupRow] = capabilityGroupDefinitions().compactMap { definition in
+            let groupFunctions = functions.filter { definition.namespaces.contains(namespace(for: $0.id)) }
+            let namespaceSet = Set(groupFunctions.map { namespace(for: $0.id) })
+            claimedNamespaces.formUnion(namespaceSet)
+            let groupWorkers = workers.filter { worker in
+                namespaceSet.contains(worker.id)
+                    || worker.namespaceClaims.contains { namespaceSet.contains($0) }
+                    || groupFunctions.contains { $0.ownerWorker == worker.id }
+            }
+            let groupTriggers = triggers.filter { trigger in
+                definition.namespaces.contains(namespace(for: trigger.targetFunction))
+            }
+            guard !groupFunctions.isEmpty || !groupWorkers.isEmpty || !groupTriggers.isEmpty else {
+                return nil
+            }
+            return AgentCockpitCapabilityGroupRow(
+                id: definition.id,
+                title: definition.title,
+                question: definition.question,
+                narrative: definition.narrative,
+                ownerSummary: ownerSummary(workers: groupWorkers, functions: groupFunctions),
+                functionCount: groupFunctions.count,
+                workerCount: groupWorkers.count,
+                triggerCount: groupTriggers.count,
+                degradedCount: groupFunctions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count,
+                missingSchemaCount: groupFunctions.filter { !$0.schemaComplete }.count,
+                namespaces: Array(namespaceSet).sorted(),
+                functions: groupFunctions.sorted { $0.id < $1.id },
+                workerIds: groupWorkers.map(\.id).sorted(),
+                triggerIds: groupTriggers.map(\.id).sorted()
+            )
+        }
+        let otherFunctions = functions.filter { !claimedNamespaces.contains(namespace(for: $0.id)) }
+        if !otherFunctions.isEmpty {
+            let otherNamespaces = Set(otherFunctions.map { namespace(for: $0.id) })
+            let otherWorkers = workers.filter { worker in
+                otherNamespaces.contains(worker.id)
+                    || worker.namespaceClaims.contains { otherNamespaces.contains($0) }
+                    || otherFunctions.contains { $0.ownerWorker == worker.id }
+            }
+            let otherTriggers = triggers.filter { otherNamespaces.contains(namespace(for: $0.targetFunction)) }
+            groups.append(
+                AgentCockpitCapabilityGroupRow(
+                    id: "other_capabilities",
+                    title: "Other Capabilities",
+                    question: "What else has Tron learned or exposed?",
+                    narrative: "Additional namespaces, including future agent-authored capabilities that do not fit the built-in groups yet.",
+                    ownerSummary: ownerSummary(workers: otherWorkers, functions: otherFunctions),
+                    functionCount: otherFunctions.count,
+                    workerCount: otherWorkers.count,
+                    triggerCount: otherTriggers.count,
+                    degradedCount: otherFunctions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count,
+                    missingSchemaCount: otherFunctions.filter { !$0.schemaComplete }.count,
+                    namespaces: Array(otherNamespaces).sorted(),
+                    functions: otherFunctions.sorted { $0.id < $1.id },
+                    workerIds: otherWorkers.map(\.id).sorted(),
+                    triggerIds: otherTriggers.map(\.id).sorted()
+                )
+            )
+        }
+        return groups
+    }
+
+    private static func capabilityGroupDefinitions() -> [CapabilityGroupDefinition] {
+        [
+            CapabilityGroupDefinition(
+                id: "core_engine",
+                title: "Core Engine",
+                question: "Can Tron inspect and invoke its own primitive engine?",
+                narrative: "Provider execution, capability routing, settings, authentication, and model selection.",
+                namespaces: ["capability", "system", "settings", "auth", "model", "registration"]
+            ),
+            CapabilityGroupDefinition(
+                id: "session_context",
+                title: "Session & Context",
+                question: "Can Tron understand and manage the current conversation?",
+                narrative: "Session state, context snapshots, compact/clear actions, goals, and message flow.",
+                namespaces: ["agent", "session", "context_control", "message", "goals"]
+            ),
+            CapabilityGroupDefinition(
+                id: "resources_memory",
+                title: "Resources & Memory",
+                question: "Can Tron preserve inspectable state instead of guessing?",
+                narrative: "Durable resources, blobs, memory refs, filesystem-safe evidence, and replayable artifacts.",
+                namespaces: ["resource", "blob", "memory", "filesystem"]
+            ),
+            CapabilityGroupDefinition(
+                id: "modules",
+                title: "Modules",
+                question: "Can Tron author, validate, install, and govern modular abilities?",
+                narrative: "Module registry, authoring, validation, install, dependency policy, and lifecycle state.",
+                namespaces: [
+                    "module_registry",
+                    "module_authoring",
+                    "module_validation",
+                    "module_install",
+                    "module_dependencies",
+                    "module_lifecycle"
+                ]
+            ),
+            CapabilityGroupDefinition(
+                id: "runtime_workers",
+                title: "Runtime & Workers",
+                question: "Can Tron supervise real work without hiding runtime risk?",
+                narrative: "Jobs, module runtime envelopes, worker lifecycle, generated surfaces, and bounded output refs.",
+                namespaces: ["jobs", "module_runtime", "worker_lifecycle", "ui_surface"]
+            ),
+            CapabilityGroupDefinition(
+                id: "diagnostics_audit",
+                title: "Diagnostics & Audit",
+                question: "Can Tron prove what changed and why it is safe?",
+                narrative: "Catalog discovery, module activity, approvals, agent briefing, and provider-safe audit evidence.",
+                namespaces: ["catalog_discovery", "module_activity", "approval", "agent_briefing"]
+            )
+        ]
+    }
+
+    private static func ownerSummary(
+        workers: [AgentCockpitWorkerRow],
+        functions: [AgentCockpitFunctionRow]
+    ) -> String {
+        if !workers.isEmpty {
+            return "\(workers.count) worker owner\(workers.count == 1 ? "" : "s")"
+        }
+        if functions.isEmpty {
+            return "No published operations"
+        }
+        return "Built-in engine operations"
     }
 
     private static func capabilityFamily(
@@ -166,6 +336,22 @@ extension AgentCockpitProjection {
             currentVersionId: resource.currentVersionId,
             updatedAt: resource.updatedAt
         )
+    }
+
+    private struct CapabilityGroupDefinition {
+        var id: String
+        var title: String
+        var question: String
+        var narrative: String
+        var namespaces: Set<String>
+
+        init(id: String, title: String, question: String, narrative: String, namespaces: [String]) {
+            self.id = id
+            self.title = title
+            self.question = question
+            self.narrative = narrative
+            self.namespaces = Set(namespaces)
+        }
     }
 
     private static func namespace(for functionId: String) -> String {

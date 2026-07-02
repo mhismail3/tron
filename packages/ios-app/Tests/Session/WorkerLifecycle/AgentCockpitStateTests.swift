@@ -29,10 +29,14 @@ struct AgentCockpitStateTests {
         #expect(overview.workers.first?.id == "local.echo")
         #expect(overview.workers.first?.functionCount == 1)
         #expect(overview.functions.first?.id == "local.echo::reply")
+        #expect(overview.functions.first?.requestSchemaJSON?.contains(#""type" : "object""#) == true)
+        #expect(overview.functions.first?.responseSchemaJSON?.contains(#""type" : "object""#) == true)
         #expect(overview.triggers.first?.targetFunction == "local.echo::reply")
         #expect(overview.packages.first?.packageId == "local.echo")
         #expect(overview.discovery.title == "Verified")
         #expect(overview.discovery.families.first?.id == "local.echo")
+        #expect(overview.discovery.groups.first?.title == "Other Capabilities")
+        #expect(overview.discovery.groups.first?.functionCount == 1)
         #expect(overview.discovery.reports.first?.lifecycle == "passed")
         #expect(overview.activity.isEmpty)
     }
@@ -59,6 +63,21 @@ struct AgentCockpitStateTests {
         #expect(overview.activity.first?.authorityLabels.contains("grant redacted") == true)
         #expect(overview.activity.first?.touchedResources.first?.label == "output refs")
         #expect(overview.moduleActivity?.projection.rawPayloadsReturned == false)
+    }
+
+    @Test("Projection preserves degraded module activity state")
+    func projectionPreservesDegradedModuleActivityState() {
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            moduleActivity: sampleDegradedModuleActivityOverview(),
+            connectionState: .connected
+        )
+
+        #expect(overview.activity.count == 1)
+        #expect(overview.activity.first?.status == "degraded")
+        #expect(overview.activity.first?.systemImage == "exclamationmark.triangle")
+        #expect(overview.moduleActivity?.summary.degraded == 1)
     }
 
     @Test("Projection marks degraded worker/function health")
@@ -109,6 +128,46 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.title == "Schema Gaps")
         #expect(overview.discovery.missingSchemaCount == 1)
         #expect(overview.discovery.families.first?.missingSchemaCount == 1)
+        #expect(overview.discovery.groups.first?.missingSchemaCount == 1)
+    }
+
+    @Test("Projection explains built-in operations without workers or triggers")
+    func projectionExplainsBuiltInOperationsWithoutWorkersOrTriggers() {
+        let snapshot = CatalogWatchSnapshotDTO(
+            changes: [],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "context_control::snapshot",
+                        "owner_worker": "context_control",
+                        "description": "Read a provider-safe context snapshot",
+                        "visibility": "System",
+                        "effect_class": "PureRead",
+                        "risk_level": "Low",
+                        "health": "Healthy",
+                        "request_schema": ["type": "object"],
+                        "response_schema": ["type": "object"]
+                    ])
+                ],
+                workers: [],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 4,
+            nextRevision: 5,
+            hasMore: false
+        )
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: snapshot,
+            resources: [],
+            connectionState: .connected
+        )
+
+        let group = overview.discovery.groups.first
+        #expect(group?.title == "Session & Context")
+        #expect(group?.ownerSummary == "Built-in engine operations")
+        #expect(group?.workerTriggerExplanation?.contains("built-in engine operations") == true)
     }
 
     @Test("Projection reports malformed catalog entries as degraded")
@@ -347,6 +406,62 @@ struct AgentCockpitStateTests {
             resourceId: "\(kind.rawValue):local.echo:1.0.0",
             currentVersionId: "version-1",
             updatedAt: nil
+        )
+    }
+
+    private func sampleDegradedModuleActivityOverview() -> ModuleActivityOverviewDTO {
+        ModuleActivityOverviewDTO(
+            schemaVersion: "tron.module_activity.overview.v1",
+            operation: "module_activity_overview",
+            summary: ModuleActivitySummaryDTO(
+                total: 1,
+                active: 0,
+                waiting: 0,
+                blocked: 0,
+                degraded: 1,
+                ready: 0,
+                recorded: 0,
+                title: "Module work degraded",
+                detail: "1 module activity failed or entered quarantine."
+            ),
+            timeline: [
+                ModuleActivityItemDTO(
+                    id: "module_runtime_state:version-2",
+                    resourceId: "module_runtime_state:runtime-2",
+                    resourceKind: "module_runtime_state",
+                    status: "degraded",
+                    state: "failed",
+                    title: "Runtime envelope",
+                    detail: "Server-owned projection",
+                    authorityLabels: [],
+                    touchedResources: [],
+                    rollbackStatus: ModuleActivityGateStatusDTO(label: "Rollback", state: "not_declared", blocked: false, waiting: false),
+                    quarantineStatus: ModuleActivityGateStatusDTO(label: "Quarantine", state: "blocked", blocked: true, waiting: false),
+                    runtimeAuthorizationStatus: ModuleActivityGateStatusDTO(label: "Runtime authorization", state: "allowed", blocked: false, waiting: false),
+                    updatedAt: "2026-06-20T12:00:00Z"
+                )
+            ],
+            blocked: [],
+            waiting: [],
+            resources: [
+                ModuleActivityResourceSummaryDTO(kind: "module_runtime_state", total: 1, active: 0, waiting: 0, blocked: 0)
+            ],
+            projection: ModuleActivityProjectionPolicyDTO(
+                allowlist: "module_activity_cockpit_metadata_redacted_v1",
+                serverOwnedTruth: true,
+                metadataOnly: true,
+                rawPayloadsReturned: false,
+                rawCommandsReturned: false,
+                rawLogsReturned: false,
+                fileContentsReturned: false,
+                absolutePathsReturned: false,
+                grantIdsReturned: false,
+                authorityIdsReturned: false,
+                traceIdsReturned: false,
+                invocationIdsReturned: false,
+                tokenLikeMaterialReturned: false,
+                boundedItems: true
+            )
         )
     }
 }
