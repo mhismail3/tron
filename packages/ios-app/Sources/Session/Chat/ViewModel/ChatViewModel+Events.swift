@@ -69,6 +69,30 @@ extension ChatViewModel {
         logger.verbose("Thinking delta: +\(delta.count) chars, total: \(accumulatedText.count)", category: .events)
     }
 
+    func handleThinkingEnd(_ thinking: String) {
+        thinkingState.handleThinkingEnd(thinking)
+        guard !thinking.isEmpty else {
+            markThinkingMessageCompleteIfNeeded()
+            return
+        }
+
+        if let id = thinkingMessageId,
+           let index = messageIndex.index(for: id) {
+            messages[index].content = .thinking(visible: thinking, isExpanded: false, isStreaming: false)
+        } else {
+            let thinkingMessage = ChatMessage.thinking(thinking, isStreaming: false)
+            if let streamingId = streamingManager.streamingMessageId,
+               let streamingIndex = messageIndex.index(for: streamingId) {
+                insertInMessages(thinkingMessage, at: streamingIndex)
+            } else {
+                appendToMessages(thinkingMessage)
+            }
+            thinkingMessageId = thinkingMessage.id
+        }
+
+        logger.verbose("Thinking end: final total \(thinking.count) chars", category: .events)
+    }
+
     func handleCapabilityInvocationGenerating(_ pluginResult: CapabilityInvocationGeneratingPlugin.Result) {
         capabilityInvocationCoordinator.handleCapabilityInvocationGenerating(pluginResult, context: self)
     }

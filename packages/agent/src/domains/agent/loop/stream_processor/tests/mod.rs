@@ -232,6 +232,137 @@ async fn multiple_capability_invocations() {
 }
 
 #[tokio::test]
+async fn stream_order_overrides_bucketed_provider_done_content() {
+    let mut args = serde_json::Map::new();
+    let _ = args.insert("operation".into(), serde_json::json!("inspect"));
+    let s = stream! {
+        yield Ok(StreamEvent::Start);
+        yield Ok(StreamEvent::ThinkingStart);
+        yield Ok(StreamEvent::ThinkingDelta { delta: "summary".into() });
+        yield Ok(StreamEvent::ThinkingEnd { thinking: "full thinking".into(), signature: None });
+        yield Ok(StreamEvent::TextStart);
+        yield Ok(StreamEvent::TextDelta { delta: "before".into() });
+        yield Ok(StreamEvent::TextEnd { text: "before".into(), signature: None });
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "execute".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-1", "execute", args.clone()),
+        });
+        yield Ok(StreamEvent::TextStart);
+        yield Ok(StreamEvent::TextDelta { delta: "after".into() });
+        yield Ok(StreamEvent::TextEnd { text: "after".into(), signature: None });
+        yield Ok(StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![
+                    AssistantContent::Thinking { thinking: "full thinking".into(), signature: None },
+                    AssistantContent::text("beforeafter"),
+                    AssistantContent::CapabilityInvocation {
+                        id: "tc-1".into(),
+                        name: "execute".into(),
+                        arguments: args,
+                        thought_signature: None,
+                    },
+                ],
+                token_usage: Some(TokenUsage { input_tokens: 11, output_tokens: 7, ..Default::default() }),
+            },
+            stop_reason: "capability_invocation".into(),
+        });
+    };
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 11);
+    assert_eq!(result.message.content.len(), 4);
+    assert!(matches!(
+        &result.message.content[0],
+        AssistantContent::Thinking { thinking, .. } if thinking == "full thinking"
+    ));
+    assert!(matches!(
+        &result.message.content[1],
+        AssistantContent::Text { text } if text == "before"
+    ));
+    assert!(matches!(
+        &result.message.content[2],
+        AssistantContent::CapabilityInvocation { id, .. } if id == "tc-1"
+    ));
+    assert!(matches!(
+        &result.message.content[3],
+        AssistantContent::Text { text } if text == "after"
+    ));
+}
+
+#[tokio::test]
+async fn capability_blocks_keep_first_observed_order_when_done_is_reversed() {
+    let s = stream! {
+        yield Ok(StreamEvent::Start);
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-a".into(), name: "execute".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-a", "execute", serde_json::Map::new()),
+        });
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-b".into(), name: "inspect".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("tc-b", "inspect", serde_json::Map::new()),
+        });
+        yield Ok(StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![
+                    AssistantContent::CapabilityInvocation {
+                        id: "tc-b".into(),
+                        name: "inspect".into(),
+                        arguments: serde_json::Map::new(),
+                        thought_signature: None,
+                    },
+                    AssistantContent::CapabilityInvocation {
+                        id: "tc-a".into(),
+                        name: "execute".into(),
+                        arguments: serde_json::Map::new(),
+                        thought_signature: None,
+                    },
+                ],
+                token_usage: None,
+            },
+            stop_reason: "capability_invocation".into(),
+        });
+    };
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let ids: Vec<&str> = result
+        .message
+        .content
+        .iter()
+        .filter_map(|content| match content {
+            AssistantContent::CapabilityInvocation { id, .. } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec!["tc-a", "tc-b"]);
+}
+
+#[tokio::test]
 async fn error_mid_stream() {
     let s = stream! {
         yield Ok(StreamEvent::Start);

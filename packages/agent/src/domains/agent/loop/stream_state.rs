@@ -1,9 +1,13 @@
 //! Stream accumulator state and event handlers.
 //!
 //! `StreamState` accumulates content blocks (text, thinking, capability invocations) as
-//! they arrive from the LLM stream. Two handler methods—`handle_normal_event`
-//! and `handle_drain_event`—classify each `StreamEvent` into a `StreamAction`
-//! that the caller (`process_stream`) uses to drive the select loop.
+//! they arrive from the LLM stream. The ordered content accumulator is the
+//! canonical source for assistant message content whenever any stream block was
+//! observed; provider `Done` messages still supply token usage and stop reason,
+//! but their provider-specific bucket order does not overwrite stream order.
+//! Two handler methods—`handle_normal_event` and `handle_drain_event`—classify
+//! each `StreamEvent` into a `StreamAction` that the caller (`process_stream`)
+//! uses to drive the select loop.
 //!
 //! Pure message/finalization helpers live in the sibling `stream_message`
 //! module and are re-exported here for focused stream tests.
@@ -20,7 +24,7 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
 pub(super) use crate::domains::agent::r#loop::stream_message::{
-    build_message, finalize_capability_invocation,
+    OrderedAssistantContent, build_message, finalize_capability_invocation,
 };
 
 /// What `process_stream` should do after handling one event.
@@ -64,6 +68,7 @@ impl StreamTraceContext<'_> {
 pub(super) struct StreamState {
     pub(super) text_acc: String,
     pub(super) thinking_acc: String,
+    pub(super) ordered_content: OrderedAssistantContent,
     pub(super) capability_invocations: Vec<CapabilityInvocationDraft>,
     pub(super) current_invocation_id: Option<String>,
     pub(super) current_model_primitive_name: Option<String>,
@@ -82,6 +87,7 @@ impl StreamState {
         Self {
             text_acc: String::with_capacity(4096),
             thinking_acc: String::with_capacity(2048),
+            ordered_content: OrderedAssistantContent::new(),
             capability_invocations: Vec::with_capacity(4),
             current_invocation_id: None,
             current_model_primitive_name: None,
@@ -121,6 +127,7 @@ impl StreamState {
             "model stream text delta"
         );
         self.text_acc.push_str(&delta);
+        self.ordered_content.append_text(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::MessageUpdate {
@@ -157,6 +164,7 @@ impl StreamState {
             "model stream thinking delta"
         );
         self.thinking_acc.push_str(&delta);
+        self.ordered_content.append_thinking(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ThinkingDelta {
@@ -184,6 +192,8 @@ impl StreamState {
     ) {
         self.thinking_acc.clone_from(&thinking);
         self.thinking_signature = signature;
+        self.ordered_content
+            .finish_thinking(&thinking, self.thinking_signature.clone());
         tracing::trace!(
             component = "agent.stream",
             agent_event = "stream_thinking_end",
@@ -219,16 +229,20 @@ impl StreamState {
         counter: Option<&AtomicI64>,
         trace_context: StreamTraceContext<'_>,
     ) {
-        finalize_capability_invocation(
+        if let Some(draft) = finalize_capability_invocation(
             &mut self.capability_invocations,
             &mut self.current_invocation_id,
             &mut self.current_model_primitive_name,
             &mut self.current_capability_args,
-        );
+        ) {
+            self.ordered_content.finish_capability_invocation(&draft);
+        }
 
         self.current_invocation_id = Some(invocation_id.clone());
         self.current_model_primitive_name = Some(name.clone());
         self.current_capability_args.clear();
+        self.ordered_content
+            .start_capability_invocation(&invocation_id, &name);
         tracing::trace!(
             component = "agent.stream",
             agent_event = "stream_capability_invocation_started",
@@ -310,6 +324,7 @@ impl StreamState {
         &mut self,
         capability_invocation: CapabilityInvocationDraft,
     ) {
+        let ordered_draft = capability_invocation.clone();
         self.current_invocation_id = None;
         self.current_model_primitive_name = None;
         self.current_capability_args.clear();
@@ -322,6 +337,8 @@ impl StreamState {
         } else {
             self.capability_invocations.push(capability_invocation);
         }
+        self.ordered_content
+            .finish_capability_invocation(&ordered_draft);
     }
 
     pub(super) fn build_interrupted_result(
@@ -333,12 +350,16 @@ impl StreamState {
             Some(self.text_acc.clone())
         };
         crate::domains::agent::r#loop::types::StreamResult {
-            message: build_message(
-                &self.text_acc,
-                &self.thinking_acc,
-                self.thinking_signature.as_deref(),
-                &self.capability_invocations,
-            ),
+            message: if self.ordered_content.is_empty() {
+                build_message(
+                    &self.text_acc,
+                    &self.thinking_acc,
+                    self.thinking_signature.as_deref(),
+                    &self.capability_invocations,
+                )
+            } else {
+                self.ordered_content.into_message(None)
+            },
             capability_invocations: self.capability_invocations,
             stop_reason: "interrupted".into(),
             token_usage: self.token_usage,
@@ -353,21 +374,31 @@ impl StreamState {
         final_message: Option<AssistantMessage>,
         stop_reason: String,
     ) -> crate::domains::agent::r#loop::types::StreamResult {
-        finalize_capability_invocation(
+        if let Some(draft) = finalize_capability_invocation(
             &mut self.capability_invocations,
             &mut self.current_invocation_id,
             &mut self.current_model_primitive_name,
             &mut self.current_capability_args,
-        );
+        ) {
+            self.ordered_content.finish_capability_invocation(&draft);
+        }
 
-        let message = final_message.unwrap_or_else(|| {
-            build_message(
-                &self.text_acc,
-                &self.thinking_acc,
-                self.thinking_signature.as_deref(),
-                &self.capability_invocations,
+        let message = if self.ordered_content.is_empty() {
+            final_message.unwrap_or_else(|| {
+                build_message(
+                    &self.text_acc,
+                    &self.thinking_acc,
+                    self.thinking_signature.as_deref(),
+                    &self.capability_invocations,
+                )
+            })
+        } else {
+            self.ordered_content.into_message(
+                final_message
+                    .as_ref()
+                    .and_then(|message| message.token_usage.clone()),
             )
-        });
+        };
 
         crate::domains::agent::r#loop::types::StreamResult {
             message,
@@ -503,6 +534,7 @@ impl StreamState {
                 );
             }
             StreamEvent::TextStart => {
+                self.ordered_content.start_text();
                 tracing::trace!(
                     component = "agent.stream",
                     agent_event = "stream_text_started",
@@ -513,6 +545,16 @@ impl StreamState {
                 );
             }
             StreamEvent::TextEnd { text, signature } => {
+                if let Some(j) = journal {
+                    if let Err(e) = j.append_delta("text_end", &text) {
+                        tracing::warn!(
+                            session_id,
+                            error = %e,
+                            "journal write failed for text end"
+                        );
+                    }
+                }
+                self.ordered_content.finish_text(&text);
                 tracing::trace!(
                     component = "agent.stream",
                     agent_event = "stream_text_end",
@@ -526,6 +568,7 @@ impl StreamState {
             }
 
             StreamEvent::ThinkingStart => {
+                self.ordered_content.start_thinking();
                 tracing::trace!(
                     component = "agent.stream",
                     agent_event = "stream_thinking_started",
@@ -567,6 +610,15 @@ impl StreamState {
                 thinking,
                 signature,
             } => {
+                if let Some(j) = journal {
+                    if let Err(e) = j.append_delta("thinking_end", &thinking) {
+                        tracing::warn!(
+                            session_id,
+                            error = %e,
+                            "journal write failed for thinking end"
+                        );
+                    }
+                }
                 tracing::trace!(
                     component = "agent.stream",
                     agent_event = "stream_thinking_end_received",
@@ -591,6 +643,21 @@ impl StreamState {
                 invocation_id,
                 name,
             } => {
+                if let Some(j) = journal {
+                    let start = serde_json::json!({
+                        "id": &invocation_id,
+                        "name": &name,
+                    });
+                    if let Err(e) =
+                        j.append_delta("capability_invocation_start", &start.to_string())
+                    {
+                        tracing::warn!(
+                            session_id,
+                            error = %e,
+                            "journal write failed for capability invocation start"
+                        );
+                    }
+                }
                 self.handle_capability_invocation_start(
                     invocation_id,
                     name,

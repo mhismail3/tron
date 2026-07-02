@@ -27,6 +27,7 @@ use serde_json::json;
 use tracing::{debug, info, warn};
 
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
+use crate::domains::agent::r#loop::pipeline::persistence;
 use crate::domains::session::event_store::{AppendOptions, EventStore, EventType};
 
 /// Recover incomplete turns from orphaned streaming journals.
@@ -115,26 +116,10 @@ fn recover_single_turn(
         }
     };
 
-    // Build content blocks for the partial assistant message
-    let mut content = Vec::new();
-    if !recovered.accumulated_text.is_empty() {
-        content.push(json!({
-            "type": "text",
-            "text": recovered.accumulated_text,
-        }));
-    }
-    if !recovered.accumulated_thinking.is_empty() {
-        content.push(json!({
-            "type": "thinking",
-            "thinking": recovered.accumulated_thinking,
-        }));
-    }
-    for tc in &recovered.capability_invocations {
-        content.push(json!({
-            "type": "capability_invocation",
-            "capability_invocation": tc,
-        }));
-    }
+    // Build canonical assistant content blocks for the partial message. The
+    // journal preserves stream order, including capability positions from the
+    // first draft marker rather than recovery-time bucket order.
+    let content = persistence::build_content_json(&recovered.content);
 
     if content.is_empty() {
         debug!(
@@ -259,23 +244,29 @@ mod tests {
     #[test]
     fn test_recovered_turn_content_building() {
         // Verify the content block construction logic
-        let text = "Hello world";
-        let thinking = "Let me think";
-        let capability_invocation = json!({"name": "execute", "id": "tc_1"});
-
-        let mut content = Vec::new();
-        if !text.is_empty() {
-            content.push(json!({ "type": "text", "text": text }));
-        }
-        if !thinking.is_empty() {
-            content.push(json!({ "type": "thinking", "thinking": thinking }));
-        }
-        content.push(json!({ "type": "capability_invocation", "capability_invocation": capability_invocation }));
+        let mut args = serde_json::Map::new();
+        let _ = args.insert("command".to_owned(), json!("ls"));
+        let content = persistence::build_content_json(&[
+            crate::shared::protocol::content::AssistantContent::text("Hello world"),
+            crate::shared::protocol::content::AssistantContent::Thinking {
+                thinking: "Let me think".to_owned(),
+                signature: None,
+            },
+            crate::shared::protocol::content::AssistantContent::CapabilityInvocation {
+                id: "tc_1".to_owned(),
+                name: "execute".to_owned(),
+                arguments: args,
+                thought_signature: None,
+            },
+        ]);
 
         assert_eq!(content.len(), 3);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "Hello world");
         assert_eq!(content[1]["type"], "thinking");
         assert_eq!(content[2]["type"], "capability_invocation");
+        assert!(content[2].get("capability_invocation").is_none());
+        assert_eq!(content[2]["id"], "tc_1");
+        assert_eq!(content[2]["arguments"]["command"], "ls");
     }
 }

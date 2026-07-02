@@ -12,7 +12,7 @@
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
 //! shared `stream_common` module. OpenAI-specific reasoning dedup and capability invocation
-//! handling (HashMap-based, with fail-closed provider argument parsing) stays here.
+//! handling (first-seen call ordering plus fail-closed provider argument parsing) stays here.
 
 use std::collections::{HashMap, HashSet};
 
@@ -32,6 +32,8 @@ pub struct StreamState {
     pub acc: StreamAccumulator,
     /// Capability invocations by `call_id` → (id, name, `accumulated_args`).
     pub capability_invocations: HashMap<String, CapabilityInvocationDraftState>,
+    /// First-seen order for capability call IDs.
+    pub capability_invocation_order: Vec<String>,
     /// Whether a provider argument parse error has already made the stream terminal.
     pub capability_argument_failed: bool,
     /// Deduplication set for reasoning text.
@@ -57,6 +59,7 @@ pub fn create_stream_state() -> StreamState {
     StreamState {
         acc: StreamAccumulator::new(),
         capability_invocations: HashMap::new(),
+        capability_invocation_order: Vec::new(),
         capability_argument_failed: false,
         seen_thinking_texts: HashSet::new(),
         has_reasoning_text: false,
@@ -108,6 +111,9 @@ fn handle_output_item_added(
                 let name = item.name.clone().unwrap_or_default();
                 let initial_args = item.arguments.clone().unwrap_or_default();
                 let is_new = !state.capability_invocations.contains_key(call_id.as_str());
+                if is_new {
+                    state.capability_invocation_order.push(call_id.clone());
+                }
                 if let Some(existing) = state.capability_invocations.get_mut(call_id.as_str()) {
                     if existing.name.is_empty() {
                         existing.name.clone_from(&name);
@@ -196,6 +202,13 @@ fn handle_function_call_args_delta(
                 name: String::new(),
                 args: String::new(),
             });
+        if !state
+            .capability_invocation_order
+            .iter()
+            .any(|id| id == call_id)
+        {
+            state.capability_invocation_order.push(call_id.clone());
+        }
         tc.args.push_str(delta);
         events.push(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: call_id.clone(),
@@ -316,8 +329,11 @@ fn process_completed_response(
     events.extend(state.acc.close_text(None));
 
     // Emit toolcall_end for each capability invocation
-    for tc in state.capability_invocations.values() {
-        if !tc.id.is_empty() && !tc.name.is_empty() {
+    for call_id in &state.capability_invocation_order {
+        if let Some(tc) = state.capability_invocations.get(call_id.as_str())
+            && !tc.id.is_empty()
+            && !tc.name.is_empty()
+        {
             match parse_openai_capability_arguments(tc) {
                 Ok(arguments) => {
                     events.push(StreamEvent::CapabilityInvocationDraftEnd {
@@ -340,7 +356,7 @@ fn process_completed_response(
 
     // Build final done event
     if !state.capability_argument_failed {
-        events.push(build_done_event(state));
+        events.push(build_done_event(state, response));
     }
 
     events
@@ -403,6 +419,13 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
     let Some(call_id) = &item.call_id else {
         return;
     };
+    if !state
+        .capability_invocation_order
+        .iter()
+        .any(|id| id == call_id)
+    {
+        state.capability_invocation_order.push(call_id.clone());
+    }
     if let Some(existing) = state.capability_invocations.get_mut(call_id.as_str()) {
         if let Some(arguments) = &item.arguments
             && existing.args.is_empty()
@@ -427,24 +450,114 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
 }
 
 /// Build the final `Done` event with the complete message.
-fn build_done_event(state: &StreamState) -> StreamEvent {
+fn build_done_event(
+    state: &StreamState,
+    response: &super::types::ResponsesResponse,
+) -> StreamEvent {
     let mut content: Vec<AssistantContent> = Vec::new();
     let mut has_valid_capability_invocation = false;
+    let mut saw_reasoning_item = false;
+    let mut saw_message_item = false;
 
-    if !state.acc.accumulated_thinking.is_empty() {
-        content.push(AssistantContent::Thinking {
-            thinking: state.acc.accumulated_thinking.clone(),
-            signature: None,
-        });
+    for item in &response.output {
+        match item.item_type {
+            OutputItemType::Reasoning => {
+                saw_reasoning_item = true;
+                let thinking = if state.acc.accumulated_thinking.is_empty() {
+                    item.summary
+                        .as_ref()
+                        .map(|summary| {
+                            summary
+                                .iter()
+                                .filter(|part| part.content_type == "summary_text")
+                                .filter_map(|part| part.text.as_deref())
+                                .collect::<Vec<_>>()
+                                .join("")
+                        })
+                        .unwrap_or_default()
+                } else {
+                    state.acc.accumulated_thinking.clone()
+                };
+                if !thinking.is_empty() {
+                    content.push(AssistantContent::Thinking {
+                        thinking,
+                        signature: None,
+                    });
+                }
+            }
+            OutputItemType::Message => {
+                saw_message_item = true;
+                let text = item
+                    .content
+                    .as_ref()
+                    .map(|parts| {
+                        parts
+                            .iter()
+                            .filter(|part| part.content_type == "output_text")
+                            .filter_map(|part| part.text.as_deref())
+                            .collect::<Vec<_>>()
+                            .join("")
+                    })
+                    .unwrap_or_default();
+                let text = if text.is_empty() {
+                    state.acc.accumulated_text.as_str()
+                } else {
+                    text.as_str()
+                };
+                if !text.is_empty() {
+                    content.push(AssistantContent::text(text));
+                }
+            }
+            OutputItemType::FunctionCall => {
+                if let Some(call_id) = item.call_id.as_ref()
+                    && let Some(tc) = state.capability_invocations.get(call_id.as_str())
+                    && !tc.id.is_empty()
+                    && !tc.name.is_empty()
+                    && let Ok(arguments) = parse_openai_capability_arguments(tc)
+                {
+                    has_valid_capability_invocation = true;
+                    content.push(AssistantContent::CapabilityInvocation {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        arguments,
+                        thought_signature: None,
+                    });
+                }
+            }
+            OutputItemType::Unknown => {}
+        }
     }
 
-    if !state.acc.accumulated_text.is_empty() {
+    if !saw_reasoning_item && !state.acc.accumulated_thinking.is_empty() {
+        content.insert(
+            0,
+            AssistantContent::Thinking {
+                thinking: state.acc.accumulated_thinking.clone(),
+                signature: None,
+            },
+        );
+    }
+
+    if !saw_message_item && !state.acc.accumulated_text.is_empty() {
         content.push(AssistantContent::text(&state.acc.accumulated_text));
     }
 
-    for tc in state.capability_invocations.values() {
-        if !tc.id.is_empty() && !tc.name.is_empty() {
-            if let Ok(arguments) = parse_openai_capability_arguments(tc) {
+    if content.is_empty() {
+        if !state.acc.accumulated_thinking.is_empty() {
+            content.push(AssistantContent::Thinking {
+                thinking: state.acc.accumulated_thinking.clone(),
+                signature: None,
+            });
+        }
+        if !state.acc.accumulated_text.is_empty() {
+            content.push(AssistantContent::text(&state.acc.accumulated_text));
+        }
+        for call_id in &state.capability_invocation_order {
+            if let Some(tc) = state.capability_invocations.get(call_id.as_str())
+                && !tc.id.is_empty()
+                && !tc.name.is_empty()
+                && let Ok(arguments) = parse_openai_capability_arguments(tc)
+            {
                 has_valid_capability_invocation = true;
                 content.push(AssistantContent::CapabilityInvocation {
                     id: tc.id.clone(),

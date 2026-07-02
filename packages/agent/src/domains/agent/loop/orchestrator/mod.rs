@@ -12,7 +12,7 @@
 //! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
 //! | `event_persister` | Persists agent events to the event store (supports pre-assigned sequences) |
 //! | `turn_accumulator` | In-memory per-session scratchpad of in-flight turn content for `session.reconstruct` |
-//! | `streaming_journal` | Per-turn append-only WAL for crash recovery of partial LLM output |
+//! | `streaming_journal` | Per-turn append-only WAL for crash recovery of ordered partial LLM output |
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
 //! | `capability_invocation_tracker` | Tracks in-flight capability invocations for cancellation |
 //! | `invocation_abort_registry` | Per-invocation `CancellationToken` registry for `agent.abortCapabilityInvocation` |
@@ -52,6 +52,9 @@
 //! completion the journal is deleted. If the server crashes mid-turn, orphaned
 //! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
 //! which persists partial content as assistant messages before accepting connections.
+//! The journal records block-final snapshots and capability draft start/end
+//! markers so recovered `message.assistant.content` uses the same ordered,
+//! canonical content shape as normal turn completion.
 //!
 //! ## Invariants
 //!

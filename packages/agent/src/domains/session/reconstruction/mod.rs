@@ -13,6 +13,9 @@
 //! thinking, text, and capability_invocation blocks), but the turn accumulator still holds the same
 //! content. [`reconcile_in_flight`] strips text/thinking from in-flight state when capabilities
 //! are past "generating" status, preventing duplicate content on iOS reconstruction.
+//! Before capability execution starts, `streaming.type` is derived from the last
+//! active content-sequence item, so reconnects distinguish active thinking from
+//! active assistant text.
 //!
 //! ## Response shape
 //!
@@ -335,17 +338,31 @@ impl SessionReconstructionService {
             })
         } else {
             // LLM still streaming — keep everything (no persisted message.assistant yet).
-            let streaming = if !text.is_empty() {
-                Some(json!({ "type": "text", "content": text }))
-            } else {
-                None
-            };
+            let streaming = Self::streaming_from_sequence(&content_sequence, &text);
 
             json!({
                 "capabilityInvocations": capability_invocations,
                 "contentSequence": content_sequence,
                 "streaming": streaming,
             })
+        }
+    }
+
+    fn streaming_from_sequence(content_sequence: &Value, text: &str) -> Option<Value> {
+        let last = content_sequence.as_array()?.last()?;
+        match last.get("type").and_then(Value::as_str) {
+            Some("thinking") => last
+                .get("thinking")
+                .and_then(Value::as_str)
+                .filter(|thinking| !thinking.is_empty())
+                .map(|thinking| json!({ "type": "thinking", "content": thinking })),
+            Some("text") => last
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|current_text| !current_text.is_empty())
+                .map(|current_text| json!({ "type": "text", "content": current_text })),
+            _ if !text.is_empty() => Some(json!({ "type": "text", "content": text })),
+            _ => None,
         }
     }
 }
@@ -550,8 +567,23 @@ mod tests {
             ]),
         );
 
-        assert!(result["streaming"].is_null());
+        assert_eq!(result["streaming"]["type"], "thinking");
+        assert_eq!(result["streaming"]["content"], "hmm");
         assert_eq!(result["contentSequence"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn active_thinking_reports_thinking_streaming_type() {
+        let result = SessionReconstructionService::reconcile_in_flight(
+            String::new(),
+            json!([]),
+            json!([
+                { "type": "thinking", "thinking": "Analyzing order..." },
+            ]),
+        );
+
+        assert_eq!(result["streaming"]["type"], "thinking");
+        assert_eq!(result["streaming"]["content"], "Analyzing order...");
     }
 
     #[test]

@@ -5,8 +5,10 @@
 //! transitions, function call extraction, safety blocks, and token usage.
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
-//! shared `stream_common` module. Capability invocation handling remains provider-specific
-//! because Gemini delivers complete function calls (not streamed argument deltas).
+//! shared `stream_common` module. Final `Done` content is built from Gemini part
+//! order rather than aggregate buckets. Capability invocation handling remains
+//! provider-specific because Gemini delivers complete function calls (not
+//! streamed argument deltas).
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
@@ -31,6 +33,8 @@ pub struct StreamState {
     pub tool_use_prompt_tokens: u64,
     /// Provider-reported total token count.
     pub total_tokens: u64,
+    /// Assistant content in Gemini part order for the final Done event.
+    pub ordered_content: Vec<AssistantContent>,
 }
 
 /// State for an in-progress capability invocation.
@@ -56,6 +60,31 @@ pub fn create_stream_state() -> StreamState {
         unique_prefix: prefix,
         tool_use_prompt_tokens: 0,
         total_tokens: 0,
+        ordered_content: Vec::new(),
+    }
+}
+
+impl StreamState {
+    fn append_ordered_text(&mut self, text: &str) {
+        if let Some(AssistantContent::Text { text: current }) = self.ordered_content.last_mut() {
+            current.push_str(text);
+        } else {
+            self.ordered_content.push(AssistantContent::text(text));
+        }
+    }
+
+    fn append_ordered_thinking(&mut self, thinking: &str) {
+        if let Some(AssistantContent::Thinking {
+            thinking: current, ..
+        }) = self.ordered_content.last_mut()
+        {
+            current.push_str(thinking);
+        } else {
+            self.ordered_content.push(AssistantContent::Thinking {
+                thinking: thinking.to_owned(),
+                signature: None,
+            });
+        }
     }
 }
 
@@ -148,6 +177,7 @@ fn process_part(part: &GeminiPart, state: &mut StreamState) -> Vec<StreamEvent> 
 
 /// Process a thinking/reasoning text part.
 fn process_thinking_text(text: &str, state: &mut StreamState) -> Vec<StreamEvent> {
+    state.append_ordered_thinking(text);
     state.acc.process_thinking_delta(text)
 }
 
@@ -158,6 +188,7 @@ fn process_regular_text(text: &str, state: &mut StreamState) -> Vec<StreamEvent>
     // Transition from thinking to text
     events.extend(state.acc.close_thinking(None));
 
+    state.append_ordered_text(text);
     events.extend(state.acc.process_text_delta(text));
 
     events
@@ -215,12 +246,21 @@ fn process_function_call(
         capability_invocation,
     });
 
+    let ordered_id = id.clone();
     state
         .capability_invocations
         .push(CapabilityInvocationDraftState {
             id,
             name: fc.name.clone(),
             args: fc.args.clone(),
+            thought_signature: thought_signature.map(String::from),
+        });
+    state
+        .ordered_content
+        .push(AssistantContent::CapabilityInvocation {
+            id: ordered_id,
+            name: fc.name.clone(),
+            arguments,
             thought_signature: thought_signature.map(String::from),
         });
 
@@ -261,31 +301,11 @@ fn handle_finish(
     // End text if active
     events.extend(state.acc.close_text(None));
 
-    // Build assistant content blocks
-    let mut content = Vec::new();
-    if !state.acc.accumulated_thinking.is_empty() {
-        content.push(AssistantContent::Thinking {
-            thinking: state.acc.accumulated_thinking.clone(),
-            signature: None,
-        });
-    }
-    if !state.acc.accumulated_text.is_empty() {
-        content.push(AssistantContent::text(&state.acc.accumulated_text));
-    }
-
-    // Add capability invocations as CapabilityInvocation content blocks
-    for tc in &state.capability_invocations {
-        let arguments: Map<String, serde_json::Value> = match &tc.args {
-            serde_json::Value::Object(map) => map.clone(),
-            _ => Map::new(),
-        };
-        content.push(AssistantContent::CapabilityInvocation {
-            id: tc.id.clone(),
-            name: tc.name.clone(),
-            arguments,
-            thought_signature: tc.thought_signature.clone(),
-        });
-    }
+    let content = if state.ordered_content.is_empty() {
+        build_bucketed_content_fallback(state)
+    } else {
+        state.ordered_content.clone()
+    };
 
     let stop_reason = map_google_stop_reason(finish_reason);
 
@@ -311,6 +331,33 @@ fn handle_finish(
     });
 
     events
+}
+
+fn build_bucketed_content_fallback(state: &StreamState) -> Vec<AssistantContent> {
+    let mut content = Vec::new();
+    if !state.acc.accumulated_thinking.is_empty() {
+        content.push(AssistantContent::Thinking {
+            thinking: state.acc.accumulated_thinking.clone(),
+            signature: None,
+        });
+    }
+    if !state.acc.accumulated_text.is_empty() {
+        content.push(AssistantContent::text(&state.acc.accumulated_text));
+    }
+
+    for tc in &state.capability_invocations {
+        let arguments: Map<String, serde_json::Value> = match &tc.args {
+            serde_json::Value::Object(map) => map.clone(),
+            _ => Map::new(),
+        };
+        content.push(AssistantContent::CapabilityInvocation {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            arguments,
+            thought_signature: tc.thought_signature.clone(),
+        });
+    }
+    content
 }
 
 fn nonzero(value: u64) -> Option<u64> {
@@ -357,6 +404,7 @@ mod tests {
         assert!(!state.acc.thinking_started);
         assert_eq!(state.capability_invocation_index, 0);
         assert!(!state.unique_prefix.is_empty());
+        assert!(state.ordered_content.is_empty());
     }
 
     // ── Error handling ───────────────────────────────────────────────
@@ -536,6 +584,64 @@ mod tests {
             matches!(&events[2], StreamEvent::CapabilityInvocationDraftEnd { capability_invocation } if capability_invocation.thought_signature.as_deref() == Some("sig-123"))
         );
         assert_eq!(state.capability_invocations.len(), 1);
+    }
+
+    #[test]
+    fn done_content_preserves_part_order() {
+        let chunk = GeminiStreamChunk {
+            candidates: Some(vec![GeminiCandidate {
+                content: Some(GeminiCandidateContent {
+                    parts: vec![
+                        GeminiPart::Text {
+                            text: "before".into(),
+                            thought: None,
+                            thought_signature: None,
+                        },
+                        GeminiPart::FunctionCall {
+                            function_call: FunctionCallData {
+                                name: "execute".into(),
+                                args: serde_json::json!({"operation": "inspect"}),
+                            },
+                            thought_signature: None,
+                        },
+                        GeminiPart::Text {
+                            text: "after".into(),
+                            thought: None,
+                            thought_signature: None,
+                        },
+                    ],
+                    role: Some("model".into()),
+                }),
+                finish_reason: Some("TOOL_USE".into()),
+                safety_ratings: None,
+            }]),
+            ..empty_chunk()
+        };
+        let mut state = create_stream_state();
+        state.unique_prefix = "order".into();
+
+        let events = process_stream_chunk(&chunk, &mut state);
+        let done = events
+            .iter()
+            .find_map(|event| match event {
+                StreamEvent::Done { message, .. } => Some(message),
+                _ => None,
+            })
+            .expect("done event");
+
+        assert_eq!(done.content.len(), 3);
+        assert!(matches!(
+            &done.content[0],
+            AssistantContent::Text { text } if text == "before"
+        ));
+        assert!(matches!(
+            &done.content[1],
+            AssistantContent::CapabilityInvocation { id, .. } if id == "call_order_0"
+        ));
+        assert!(matches!(
+            &done.content[2],
+            AssistantContent::Text { text } if text == "after"
+        ));
     }
 
     #[test]

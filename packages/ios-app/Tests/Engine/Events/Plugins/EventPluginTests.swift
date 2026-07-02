@@ -261,7 +261,6 @@ final class EventPluginTests: XCTestCase {
             "session.forked",
             "agent.thinking_start",
             "agent.response_complete",
-            "agent.thinking_end",
             "capability.invocation.batch",
             "capability.invocation.arguments_delta"
         ] {
@@ -281,6 +280,25 @@ final class EventPluginTests: XCTestCase {
             XCTAssertEqual(result?.sequence, 42)
             XCTAssertNil(result?.getResult())
         }
+    }
+
+    func testThinkingEndPluginParsesAuthoritativeSnapshot() {
+        EventRegistry.shared.registerAll()
+        let json = """
+        {
+            "type": "agent.thinking_end",
+            "sessionId": "session-thinking",
+            "sequence": 43,
+            "timestamp": "2026-06-29T10:00:01Z",
+            "data": {"thinking": "Final thinking text"}
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "agent.thinking_end", data: json)
+        let pluginResult = result?.getResult() as? ThinkingEndPlugin.Result
+
+        XCTAssertEqual(result?.eventType, "agent.thinking_end")
+        XCTAssertEqual(pluginResult?.thinking, "Final thinking text")
     }
 
     // MARK: - Session Archive/Unarchive Plugin Tests

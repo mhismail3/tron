@@ -3,6 +3,7 @@ use crate::domains::model::providers::openai::types::{
     OutputContent, OutputItemType, ResponsesOutputItem, ResponsesResponse, ResponsesUsage,
     SseEventType,
 };
+use crate::shared::protocol::content::AssistantContent;
 
 fn text_delta_event(delta: &str) -> ResponsesSseEvent {
     ResponsesSseEvent {
@@ -76,6 +77,7 @@ fn initial_state_is_empty() {
     assert!(state.acc.accumulated_text.is_empty());
     assert!(state.acc.accumulated_thinking.is_empty());
     assert!(state.capability_invocations.is_empty());
+    assert!(state.capability_invocation_order.is_empty());
     assert_eq!(state.acc.input_tokens, 0);
     assert_eq!(state.acc.output_tokens, 0);
     assert!(!state.acc.text_started);
@@ -209,6 +211,7 @@ fn accumulates_args_delta_before_added_event() {
         state.capability_invocations["call_late"].args,
         r#"{"operation":"process_run","command":"date"}"#
     );
+    assert_eq!(state.capability_invocation_order, vec!["call_late"]);
 }
 
 // ── Reasoning streaming ────────────────────────────────────────
@@ -604,6 +607,112 @@ fn completed_discovers_capability_invocations_not_seen_in_deltas() {
     if let Some(StreamEvent::Done { stop_reason, .. }) = done {
         assert_eq!(stop_reason, "capability_invocation");
     }
+}
+
+#[test]
+fn completed_done_content_follows_response_output_order() {
+    let mut state = create_stream_state();
+    let event = completed_event(
+        vec![
+            ResponsesOutputItem {
+                item_type: OutputItemType::Message,
+                content: Some(vec![OutputContent {
+                    content_type: "output_text".into(),
+                    text: Some("before".into()),
+                }]),
+                ..Default::default()
+            },
+            ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_mid".into()),
+                name: Some("execute".into()),
+                arguments: Some(r#"{"operation":"inspect"}"#.into()),
+                ..Default::default()
+            },
+            ResponsesOutputItem {
+                item_type: OutputItemType::Message,
+                content: Some(vec![OutputContent {
+                    content_type: "output_text".into(),
+                    text: Some("after".into()),
+                }]),
+                ..Default::default()
+            },
+        ],
+        Some(ResponsesUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..Default::default()
+        }),
+    );
+
+    let events = process_stream_event(&event, &mut state);
+    let done = events
+        .iter()
+        .find_map(|event| match event {
+            StreamEvent::Done { message, .. } => Some(message),
+            _ => None,
+        })
+        .expect("done event");
+
+    assert_eq!(done.content.len(), 3);
+    assert!(matches!(
+        &done.content[0],
+        AssistantContent::Text { text } if text == "before"
+    ));
+    assert!(matches!(
+        &done.content[1],
+        AssistantContent::CapabilityInvocation { id, .. } if id == "call_mid"
+    ));
+    assert!(matches!(
+        &done.content[2],
+        AssistantContent::Text { text } if text == "after"
+    ));
+}
+
+#[test]
+fn completed_toolcall_end_uses_first_seen_capability_order() {
+    let mut state = create_stream_state();
+    let _ = process_stream_event(
+        &function_args_delta_event("call_b", r#"{"operation":"second"}"#),
+        &mut state,
+    );
+    let _ = process_stream_event(
+        &function_args_delta_event("call_a", r#"{"operation":"first"}"#),
+        &mut state,
+    );
+
+    let event = completed_event(
+        vec![
+            ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_a".into()),
+                name: Some("execute".into()),
+                arguments: Some(r#"{"operation":"first"}"#.into()),
+                ..Default::default()
+            },
+            ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_b".into()),
+                name: Some("execute".into()),
+                arguments: Some(r#"{"operation":"second"}"#.into()),
+                ..Default::default()
+            },
+        ],
+        None,
+    );
+
+    let events = process_stream_event(&event, &mut state);
+    let ended_ids: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::CapabilityInvocationDraftEnd {
+                capability_invocation,
+            } => Some(capability_invocation.id.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(ended_ids, vec!["call_b", "call_a"]);
 }
 
 #[test]

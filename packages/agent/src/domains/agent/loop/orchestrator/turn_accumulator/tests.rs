@@ -52,6 +52,41 @@ fn append_thinking_updates_content_sequence() {
 }
 
 #[test]
+fn finish_thinking_replaces_current_thinking_snapshot() {
+    let mut acc = TurnAccumulator::new();
+    acc.append_thinking("summary ");
+    acc.append_thinking("delta");
+    acc.finish_thinking("authoritative final thinking");
+
+    assert_eq!(acc.thinking, "authoritative final thinking");
+    assert_eq!(acc.content_sequence.len(), 1);
+    assert!(matches!(
+        &acc.content_sequence[0],
+        ContentSequenceItem::Thinking(t) if t == "authoritative final thinking"
+    ));
+}
+
+#[test]
+fn thinking_end_event_replaces_accumulated_thinking() {
+    let map = TurnAccumulatorMap::new();
+    map.update_from_event(&TronEvent::TurnStart {
+        base: BaseEvent::now("s1"),
+        turn: 1,
+    });
+    map.update_from_event(&TronEvent::ThinkingDelta {
+        base: BaseEvent::now("s1"),
+        delta: "summary".into(),
+    });
+    map.update_from_event(&TronEvent::ThinkingEnd {
+        base: BaseEvent::now("s1"),
+        thinking: "full final thinking".into(),
+    });
+
+    let (_, _, sequence) = map.get_state("s1").unwrap();
+    assert_eq!(sequence[0]["thinking"], "full final thinking");
+}
+
+#[test]
 fn interleaved_text_and_thinking_creates_separate_sequence_items() {
     let mut acc = TurnAccumulator::new();
     acc.append_thinking("hmm");

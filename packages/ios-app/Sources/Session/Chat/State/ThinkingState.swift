@@ -41,6 +41,12 @@ final class ThinkingState {
         isStreaming = true
     }
 
+    /// Handle the authoritative final thinking snapshot from the server.
+    func handleThinkingEnd(_ thinking: String) {
+        currentText = thinking
+        isStreaming = false
+    }
+
     /// Mark streaming as complete without clearing accumulated text.
     /// Called when text deltas start arriving (thinking block is done but turn continues).
     func markStreamingComplete() {

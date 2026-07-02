@@ -202,6 +202,22 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertTrue(viewModel.thinkingState.currentText.contains("Deep thought"))
     }
 
+    func test_thinkingEnd_replacesThinkingMessageAndStopsStreaming() {
+        viewModel.handleThinkingDelta("summary")
+
+        viewModel.handleThinkingEnd("full final thinking")
+
+        XCTAssertEqual(viewModel.thinkingState.currentText, "full final thinking")
+        XCTAssertFalse(viewModel.thinkingState.isStreaming)
+        guard let thinkingId = viewModel.thinkingMessageId,
+              let message = viewModel.messages.first(where: { $0.id == thinkingId }),
+              case .thinking(let visible, _, let isStreaming) = message.content else {
+            return XCTFail("Expected thinking message")
+        }
+        XCTAssertEqual(visible, "full final thinking")
+        XCTAssertFalse(isStreaming)
+    }
+
     // MARK: - Capability Start Routing Tests
 
     func test_capabilityInvocationStarted_createsCapabilityMessage() {

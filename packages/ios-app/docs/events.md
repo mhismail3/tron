@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-30 (server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
+> Last verified: 2026-07-02 (agent.thinking_end authoritative final snapshot; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -53,7 +53,7 @@ of ordinary source and docs.
 Server stream event labels under `packages/agent/src/transport/runtime/streams`
 must have an iOS plugin entry even when they intentionally render no UI. Marker
 plugins such as `agent.start`, `agent.response_complete`,
-`agent.thinking_start`, `agent.thinking_end`, `agent.interrupted`,
+`agent.thinking_start`, `agent.interrupted`,
 `agent.retry`, `context.warning`, `session.forked`,
 `capability.invocation.batch`, and `capability.invocation.arguments_delta`
 parse only the routing envelope when their payload can contain partial
@@ -62,6 +62,11 @@ successful parse is a no-op, not a transform warning; malformed payload decode
 still logs at the parser boundary. `SourceGuardTests+EventSurface` compares the
 Rust stream labels with `EventRegistry.registerAll()` so new server events
 cannot silently become unknown in the app.
+
+`agent.thinking_end` is not a marker: it carries the server-authoritative final
+thinking text for the visible Thinking block. The live plugin replaces any
+delta-accumulated thinking text with that final snapshot and marks the block
+non-streaming so live display converges with `message.assistant` replay.
 
 ## DRC-9 replay manifest/event parity
 

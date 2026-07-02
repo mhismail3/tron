@@ -22,6 +22,16 @@ final class ThinkingStateTests: XCTestCase {
         XCTAssertTrue(state.isStreaming)
     }
 
+    func testHandleThinkingEndReplacesTextAndStopsStreaming() {
+        let state = ThinkingState()
+        state.handleThinkingDelta("summary delta")
+
+        state.handleThinkingEnd("authoritative final thinking")
+
+        XCTAssertEqual(state.currentText, "authoritative final thinking")
+        XCTAssertFalse(state.isStreaming)
+    }
+
     func testStartTurnClearsStreamingState() {
         let state = ThinkingState()
         state.handleThinkingDelta("previous thinking")

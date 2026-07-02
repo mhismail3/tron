@@ -10,8 +10,11 @@
 //!
 //! JSON lines with compact keys for write efficiency:
 //! - `{"t":"text","c":"delta content"}`
+//! - `{"t":"text_end","c":"full text content"}`
 //! - `{"t":"thinking","c":"delta content"}`
-//! - `{"t":"capability_invocation","c":"{...}"}`  (JSON-encoded capability invocation)
+//! - `{"t":"thinking_end","c":"full thinking content"}`
+//! - `{"t":"capability_invocation_start","c":"{...}"}` (JSON-encoded `id` + `name`)
+//! - `{"t":"capability_invocation","c":"{...}"}` (JSON-encoded capability invocation)
 //!
 //! Each `append_delta` writes one line and flushes, providing crash safety to
 //! line granularity.
@@ -27,9 +30,12 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
 use crate::shared::foundation::paths;
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::CapabilityInvocationDraft;
 
 /// A single delta entry in the journal WAL.
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,12 +49,127 @@ struct JournalEntry {
 /// Recovered turn data from an orphaned journal.
 #[derive(Debug)]
 pub struct RecoveredTurn {
+    /// Canonical assistant content blocks in stream order.
+    pub content: Vec<AssistantContent>,
     /// Accumulated text content from all text deltas.
     pub accumulated_text: String,
     /// Accumulated thinking/reasoning content from all thinking deltas.
     pub accumulated_thinking: String,
     /// Partial capability invocation data recovered from the journal.
-    pub capability_invocations: Vec<serde_json::Value>,
+    pub capability_invocations: Vec<CapabilityInvocationDraft>,
+}
+
+#[derive(Clone, Debug)]
+enum RecoveredContentBlock {
+    Text(String),
+    Thinking(String),
+    CapabilityInvocation {
+        draft: CapabilityInvocationDraft,
+        finalized: bool,
+    },
+}
+
+fn append_recovered_text(blocks: &mut Vec<RecoveredContentBlock>, delta: &str) {
+    if let Some(RecoveredContentBlock::Text(text)) = blocks.last_mut() {
+        text.push_str(delta);
+    } else {
+        blocks.push(RecoveredContentBlock::Text(delta.to_owned()));
+    }
+}
+
+fn finish_recovered_text(blocks: &mut Vec<RecoveredContentBlock>, text: &str) {
+    if let Some(RecoveredContentBlock::Text(current)) = blocks.last_mut() {
+        current.clear();
+        current.push_str(text);
+    } else {
+        blocks.push(RecoveredContentBlock::Text(text.to_owned()));
+    }
+}
+
+fn append_recovered_thinking(blocks: &mut Vec<RecoveredContentBlock>, delta: &str) {
+    if let Some(RecoveredContentBlock::Thinking(thinking)) = blocks.last_mut() {
+        thinking.push_str(delta);
+    } else {
+        blocks.push(RecoveredContentBlock::Thinking(delta.to_owned()));
+    }
+}
+
+fn finish_recovered_thinking(blocks: &mut Vec<RecoveredContentBlock>, thinking: &str) {
+    if let Some(RecoveredContentBlock::Thinking(current)) = blocks.last_mut() {
+        current.clear();
+        current.push_str(thinking);
+    } else {
+        blocks.push(RecoveredContentBlock::Thinking(thinking.to_owned()));
+    }
+}
+
+fn parse_capability_invocation(value: &Value) -> Option<CapabilityInvocationDraft> {
+    let inner = value.get("capability_invocation").unwrap_or(value);
+    let id = inner
+        .get("id")
+        .or_else(|| inner.get("invocationId"))
+        .and_then(Value::as_str)?
+        .to_owned();
+    let name = inner.get("name").and_then(Value::as_str)?.to_owned();
+    let arguments = inner
+        .get("arguments")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_else(Map::new);
+    let mut draft = CapabilityInvocationDraft::new(id, name, arguments);
+    if let Some(signature) = inner.get("thoughtSignature").and_then(Value::as_str) {
+        draft = draft.with_thought_signature(signature);
+    }
+    Some(draft)
+}
+
+fn upsert_recovered_capability(
+    blocks: &mut Vec<RecoveredContentBlock>,
+    draft: CapabilityInvocationDraft,
+    finalized: bool,
+) {
+    if let Some(RecoveredContentBlock::CapabilityInvocation {
+        draft: current,
+        finalized: current_finalized,
+    }) = blocks.iter_mut().find(|block| {
+        matches!(
+            block,
+            RecoveredContentBlock::CapabilityInvocation { draft: existing, .. }
+                if existing.id == draft.id
+        )
+    }) {
+        *current = draft;
+        *current_finalized |= finalized;
+        return;
+    }
+
+    blocks.push(RecoveredContentBlock::CapabilityInvocation { draft, finalized });
+}
+
+fn recovered_content_blocks(blocks: &[RecoveredContentBlock]) -> Vec<AssistantContent> {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            RecoveredContentBlock::Text(text) => {
+                let trimmed = text.trim_end();
+                (!trimmed.is_empty()).then(|| AssistantContent::text(trimmed))
+            }
+            RecoveredContentBlock::Thinking(thinking) => {
+                (!thinking.is_empty()).then(|| AssistantContent::Thinking {
+                    thinking: thinking.clone(),
+                    signature: None,
+                })
+            }
+            RecoveredContentBlock::CapabilityInvocation { draft, finalized } => {
+                finalized.then(|| AssistantContent::CapabilityInvocation {
+                    id: draft.id.clone(),
+                    name: draft.name.clone(),
+                    arguments: draft.arguments.clone(),
+                    thought_signature: draft.thought_signature.clone(),
+                })
+            }
+        })
+        .collect()
 }
 
 /// Append-only WAL for a single turn's streaming output.
@@ -144,7 +265,8 @@ impl StreamingJournal {
         let reader = BufReader::new(file);
         let mut text = String::new();
         let mut thinking = String::new();
-        let mut capability_invocations: Vec<serde_json::Value> = Vec::new();
+        let mut recovered_blocks = Vec::new();
+        let mut capability_invocations: Vec<CapabilityInvocationDraft> = Vec::new();
         let mut recovered_lines = 0u64;
 
         for line_result in reader.lines() {
@@ -181,11 +303,35 @@ impl StreamingJournal {
             };
 
             match entry.t.as_str() {
-                "text" => text.push_str(&entry.c),
-                "thinking" => thinking.push_str(&entry.c),
+                "text" => {
+                    text.push_str(&entry.c);
+                    append_recovered_text(&mut recovered_blocks, &entry.c);
+                }
+                "text_end" => {
+                    text.clone_from(&entry.c);
+                    finish_recovered_text(&mut recovered_blocks, &entry.c);
+                }
+                "thinking" => {
+                    thinking.push_str(&entry.c);
+                    append_recovered_thinking(&mut recovered_blocks, &entry.c);
+                }
+                "thinking_end" => {
+                    thinking.clone_from(&entry.c);
+                    finish_recovered_thinking(&mut recovered_blocks, &entry.c);
+                }
+                "capability_invocation_start" => {
+                    if let Ok(val) = serde_json::from_str::<Value>(&entry.c)
+                        && let Some(draft) = parse_capability_invocation(&val)
+                    {
+                        upsert_recovered_capability(&mut recovered_blocks, draft, false);
+                    }
+                }
                 "capability_invocation" => {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&entry.c) {
-                        capability_invocations.push(val);
+                    if let Ok(val) = serde_json::from_str::<Value>(&entry.c)
+                        && let Some(draft) = parse_capability_invocation(&val)
+                    {
+                        capability_invocations.push(draft.clone());
+                        upsert_recovered_capability(&mut recovered_blocks, draft, true);
                     }
                 }
                 other => {
@@ -215,6 +361,7 @@ impl StreamingJournal {
         );
 
         Ok(Some(RecoveredTurn {
+            content: recovered_content_blocks(&recovered_blocks),
             accumulated_text: text,
             accumulated_thinking: thinking,
             capability_invocations,
@@ -466,6 +613,41 @@ mod tests {
         assert_eq!(thinking, "I should greet");
         assert_eq!(capability_invocations.len(), 1);
         assert_eq!(capability_invocations[0]["name"], "execute");
+    }
+
+    #[test]
+    fn recovered_content_preserves_stream_order_and_canonical_capability_shape() {
+        let mut blocks = Vec::new();
+        append_recovered_text(&mut blocks, "before");
+        upsert_recovered_capability(
+            &mut blocks,
+            CapabilityInvocationDraft::new("tc1", "execute", Map::new()),
+            false,
+        );
+        append_recovered_text(&mut blocks, "after");
+        let mut args = Map::new();
+        let _ = args.insert("operation".to_owned(), serde_json::json!("inspect"));
+        upsert_recovered_capability(
+            &mut blocks,
+            CapabilityInvocationDraft::new("tc1", "execute", args),
+            true,
+        );
+
+        let content = recovered_content_blocks(&blocks);
+        assert_eq!(content.len(), 3);
+        assert!(matches!(
+            &content[0],
+            AssistantContent::Text { text } if text == "before"
+        ));
+        assert!(matches!(
+            &content[1],
+            AssistantContent::CapabilityInvocation { id, arguments, .. }
+                if id == "tc1" && arguments["operation"] == "inspect"
+        ));
+        assert!(matches!(
+            &content[2],
+            AssistantContent::Text { text } if text == "after"
+        ));
     }
 
     // ── Test 6: load_recovery_nonexistent_returns_none ─────────────────────

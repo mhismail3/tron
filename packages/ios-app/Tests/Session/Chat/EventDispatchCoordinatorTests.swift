@@ -54,6 +54,18 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleThinkingDeltaCalledWith, "Let me think...")
     }
 
+    func testDispatch_thinkingEnd_callsHandleThinkingEnd() {
+        let result = ThinkingEndPlugin.Result(thinking: "Final thinking snapshot")
+
+        coordinator.dispatch(
+            type: ThinkingEndPlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.handleThinkingEndCalledWith, "Final thinking snapshot")
+    }
+
     // MARK: - Capability Event Tests
 
     func testDispatch_capabilityInvocationStarted_callsHandleCapabilityInvocationStart() {
@@ -319,7 +331,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             AgentStartPlugin.eventType,
             AgentResponseCompletePlugin.eventType,
             ThinkingStartPlugin.eventType,
-            ThinkingEndPlugin.eventType,
             CapabilityInvocationBatchPlugin.eventType
         ] {
             mockContext.resetLogs()
@@ -377,6 +388,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Text/Thinking
     var handleTextDeltaCalledWith: String?
     var handleThinkingDeltaCalledWith: String?
+    var handleThinkingEndCalledWith: String?
 
     // MARK: - Capabilities
     var handleCapabilityInvocationGeneratingCalledWith: CapabilityInvocationGeneratingPlugin.Result?
@@ -410,6 +422,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleThinkingDelta(_ delta: String) {
         handleThinkingDeltaCalledWith = delta
+    }
+
+    func handleThinkingEnd(_ thinking: String) {
+        handleThinkingEndCalledWith = thinking
     }
 
     func handleCapabilityInvocationGenerating(_ result: CapabilityInvocationGeneratingPlugin.Result) {

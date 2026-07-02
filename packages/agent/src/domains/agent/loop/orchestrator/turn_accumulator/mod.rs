@@ -7,7 +7,7 @@
 //! ## Lifecycle
 //!
 //! - `TurnStart` → creates/resets the accumulator for that session
-//! - `MessageUpdate` / `ThinkingDelta` / `CapabilityInvocation*` → appends to the accumulator
+//! - `MessageUpdate` / `ThinkingDelta` / `ThinkingEnd` / `CapabilityInvocation*` → appends to or finalizes the accumulator
 //! - `TurnEnd` / `AgentEnd` → removes the accumulator (turn is complete)
 //!
 //! ## Thread Safety
@@ -135,7 +135,8 @@ pub struct CurrentCapabilitySnapshot {
 pub struct TurnAccumulator {
     /// Concatenated assistant text output so far.
     pub text: String,
-    /// Concatenated thinking/reasoning output so far.
+    /// Concatenated thinking/reasoning output so far. `ThinkingEnd` replaces
+    /// this with the server-authoritative final snapshot.
     pub thinking: String,
     /// All capability invocations tracked in this turn.
     pub capability_invocations: Vec<AccumulatedCapabilityInvocation>,
@@ -176,8 +177,33 @@ impl TurnAccumulator {
         }
     }
 
+    /// Replace the current thinking block with an authoritative final snapshot.
+    pub fn finish_thinking(&mut self, thinking: &str) {
+        self.thinking.clear();
+        self.thinking.push_str(thinking);
+        if let Some(ContentSequenceItem::Thinking(t)) = self
+            .content_sequence
+            .iter_mut()
+            .rev()
+            .find(|item| matches!(item, ContentSequenceItem::Thinking(_)))
+        {
+            t.clear();
+            t.push_str(thinking);
+        } else if !thinking.is_empty() {
+            self.content_sequence
+                .push(ContentSequenceItem::Thinking(thinking.to_string()));
+        }
+    }
+
     /// Add a new capability invocation in "generating" state.
     pub fn add_capability_generating(&mut self, invocation_id: &str, model_primitive_name: &str) {
+        if self
+            .capability_invocations
+            .iter()
+            .any(|tc| tc.invocation_id == invocation_id)
+        {
+            return;
+        }
         self.capability_invocations
             .push(AccumulatedCapabilityInvocation {
                 invocation_id: invocation_id.to_string(),
@@ -299,6 +325,13 @@ impl TurnAccumulatorMap {
     pub fn handle_thinking_delta(&self, session_id: &str, delta: &str) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
             acc.append_thinking(delta);
+        }
+    }
+
+    /// Replace active thinking with the final full thinking snapshot.
+    pub fn handle_thinking_end(&self, session_id: &str, thinking: &str) {
+        if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
+            acc.finish_thinking(thinking);
         }
     }
 
@@ -429,6 +462,9 @@ impl TurnAccumulatorMap {
             }
             TronEvent::ThinkingDelta { delta, .. } => {
                 self.handle_thinking_delta(session_id, delta);
+            }
+            TronEvent::ThinkingEnd { thinking, .. } => {
+                self.handle_thinking_end(session_id, thinking);
             }
             TronEvent::CapabilityInvocationGenerating {
                 invocation_id,
