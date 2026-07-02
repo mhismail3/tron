@@ -2,9 +2,10 @@
 //!
 //! `StreamState` accumulates content blocks (text, thinking, capability invocations) as
 //! they arrive from the LLM stream. The ordered content accumulator is the
-//! canonical source for assistant message content whenever any stream block was
-//! observed; provider `Done` messages still supply token usage and stop reason,
-//! but their provider-specific bucket order does not overwrite stream order.
+//! canonical source for assistant message content after real streamed content
+//! deltas or capability starts are observed; provider `Done` messages remain
+//! canonical for final-only responses whose providers synthesize close events
+//! immediately before `Done`.
 //! Two handler methods—`handle_normal_event` and `handle_drain_event`—classify
 //! each `StreamEvent` into a `StreamAction` that the caller (`process_stream`)
 //! uses to drive the select loop.
@@ -77,6 +78,9 @@ pub(super) struct StreamState {
     pub(super) thinking_signature: Option<String>,
     pub(super) stream_start: Instant,
     pub(super) ttft_ms: Option<u64>,
+    /// True after the provider emits real streamed content, not just finalizer
+    /// close events synthesized from its terminal response payload.
+    pub(super) saw_streamed_content: bool,
     /// When true, skip all content events (text, thinking, capability invocations) but keep
     /// reading the stream to capture token usage from the Done event.
     pub(super) draining: bool,
@@ -96,6 +100,7 @@ impl StreamState {
             thinking_signature: None,
             stream_start: Instant::now(),
             ttft_ms: None,
+            saw_streamed_content: false,
             draining: false,
         }
     }
@@ -127,6 +132,7 @@ impl StreamState {
             "model stream text delta"
         );
         self.text_acc.push_str(&delta);
+        self.saw_streamed_content = true;
         self.ordered_content.append_text(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -164,6 +170,7 @@ impl StreamState {
             "model stream thinking delta"
         );
         self.thinking_acc.push_str(&delta);
+        self.saw_streamed_content = true;
         self.ordered_content.append_thinking(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -238,6 +245,7 @@ impl StreamState {
             self.ordered_content.finish_capability_invocation(&draft);
         }
 
+        self.saw_streamed_content = true;
         self.current_invocation_id = Some(invocation_id.clone());
         self.current_model_primitive_name = Some(name.clone());
         self.current_capability_args.clear();
@@ -299,6 +307,7 @@ impl StreamState {
             accumulated_len = self.current_capability_args.len() + arguments_delta.len(),
             "model stream capability invocation arguments delta"
         );
+        self.saw_streamed_content = true;
         self.current_capability_args.push_str(&arguments_delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -383,7 +392,7 @@ impl StreamState {
             self.ordered_content.finish_capability_invocation(&draft);
         }
 
-        let message = if self.ordered_content.is_empty() {
+        let message = if self.ordered_content.is_empty() || !self.saw_streamed_content {
             final_message.unwrap_or_else(|| {
                 build_message(
                     &self.text_acc,
@@ -554,7 +563,11 @@ impl StreamState {
                         );
                     }
                 }
-                self.ordered_content.finish_text(&text);
+                if self.saw_streamed_content {
+                    self.ordered_content.close_text();
+                } else {
+                    self.ordered_content.finish_text(&text);
+                }
                 tracing::trace!(
                     component = "agent.stream",
                     agent_event = "stream_text_end",

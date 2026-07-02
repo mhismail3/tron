@@ -6,6 +6,15 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use super::super::stream_state::{build_message, finalize_capability_invocation};
+use crate::domains::model::providers::google::stream_handler as google_stream_handler;
+use crate::domains::model::providers::google::types::{
+    FunctionCallData, GeminiCandidate, GeminiCandidateContent, GeminiPart, GeminiStreamChunk,
+};
+use crate::domains::model::providers::openai::stream_handler as openai_stream_handler;
+use crate::domains::model::providers::openai::types::{
+    OutputContent, OutputItemType, ResponsesOutputItem, ResponsesResponse, ResponsesSseEvent,
+    ResponsesUsage, SseEventType,
+};
 use crate::domains::model::responder::{ModelResponseError, ModelResponseStream};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
@@ -17,6 +26,12 @@ fn make_emitter() -> Arc<EventEmitter> {
 
 fn no_stopping_capabilities() -> HashSet<String> {
     HashSet::new()
+}
+
+fn stream_from_provider_events(events: Vec<StreamEvent>) -> ModelResponseStream {
+    Box::pin(futures::stream::iter(
+        events.into_iter().map(Ok::<_, ModelResponseError>),
+    ))
 }
 
 fn text_stream(text: &str) -> ModelResponseStream {
@@ -103,6 +118,150 @@ fn capability_invocation_stream() -> ModelResponseStream {
         });
     };
     Box::pin(s)
+}
+
+#[tokio::test]
+async fn openai_final_only_text_function_text_uses_provider_done_order() {
+    let mut provider_state = openai_stream_handler::create_stream_state();
+    let provider_events = openai_stream_handler::process_stream_event(
+        &ResponsesSseEvent {
+            event_type: SseEventType::Completed,
+            response: Some(ResponsesResponse {
+                id: Some("resp-final-only".into()),
+                output: vec![
+                    ResponsesOutputItem {
+                        item_type: OutputItemType::Message,
+                        content: Some(vec![OutputContent {
+                            content_type: "output_text".into(),
+                            text: Some("before".into()),
+                        }]),
+                        ..Default::default()
+                    },
+                    ResponsesOutputItem {
+                        item_type: OutputItemType::FunctionCall,
+                        call_id: Some("call_mid".into()),
+                        name: Some("execute".into()),
+                        arguments: Some(r#"{"operation":"inspect"}"#.into()),
+                        ..Default::default()
+                    },
+                    ResponsesOutputItem {
+                        item_type: OutputItemType::Message,
+                        content: Some(vec![OutputContent {
+                            content_type: "output_text".into(),
+                            text: Some("after".into()),
+                        }]),
+                        ..Default::default()
+                    },
+                ],
+                usage: Some(ResponsesUsage {
+                    input_tokens: 12,
+                    output_tokens: 8,
+                    total_tokens: 20,
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        },
+        &mut provider_state,
+    );
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        stream_from_provider_events(provider_events),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.token_usage.as_ref().unwrap().input_tokens, 12);
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.message.content.len(), 3);
+    assert!(matches!(
+        &result.message.content[0],
+        AssistantContent::Text { text } if text == "before"
+    ));
+    assert!(matches!(
+        &result.message.content[1],
+        AssistantContent::CapabilityInvocation { id, name, .. }
+            if id == "call_mid" && name == "execute"
+    ));
+    assert!(matches!(
+        &result.message.content[2],
+        AssistantContent::Text { text } if text == "after"
+    ));
+}
+
+#[tokio::test]
+async fn google_streamed_text_function_text_keeps_block_boundaries() {
+    let mut provider_state = google_stream_handler::create_stream_state();
+    let provider_events = google_stream_handler::process_stream_chunk(
+        &GeminiStreamChunk {
+            candidates: Some(vec![GeminiCandidate {
+                content: Some(GeminiCandidateContent {
+                    parts: vec![
+                        GeminiPart::Text {
+                            text: "before".into(),
+                            thought: None,
+                            thought_signature: None,
+                        },
+                        GeminiPart::FunctionCall {
+                            function_call: FunctionCallData {
+                                name: "execute".into(),
+                                args: serde_json::json!({"operation": "inspect"}),
+                            },
+                            thought_signature: None,
+                        },
+                        GeminiPart::Text {
+                            text: "after".into(),
+                            thought: None,
+                            thought_signature: None,
+                        },
+                    ],
+                    role: None,
+                }),
+                finish_reason: Some("TOOL_USE".into()),
+                safety_ratings: None,
+            }]),
+            ..Default::default()
+        },
+        &mut provider_state,
+    );
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        stream_from_provider_events(provider_events),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.message.content.len(), 3);
+    assert!(matches!(
+        &result.message.content[0],
+        AssistantContent::Text { text } if text == "before"
+    ));
+    assert!(matches!(
+        &result.message.content[1],
+        AssistantContent::CapabilityInvocation { name, .. } if name == "execute"
+    ));
+    assert!(matches!(
+        &result.message.content[2],
+        AssistantContent::Text { text } if text == "after"
+    ));
 }
 
 #[tokio::test]

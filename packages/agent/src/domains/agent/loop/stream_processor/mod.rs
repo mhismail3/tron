@@ -26,9 +26,11 @@ use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
 /// When a capability in `turn_stopping_capabilities` completes (via `CapabilityInvocationDraftEnd`), the
 /// processor enters **drain mode**: it stops accumulating content (text,
 /// thinking, further capability invocations) but keeps reading the stream to capture
-/// accurate token usage from the `Done` event. The result is built from
-/// accumulators (which contain only pre-drain content), not from the
-/// provider's final message.
+/// accurate token usage from the `Done` event. After real streamed content has
+/// been observed, the result is built from accumulators (which contain only
+/// pre-drain content), not from the provider's final message. Final-only
+/// responses still use the provider `Done` message because some providers
+/// synthesize block close events from that same terminal payload.
 #[cfg(test)]
 pub async fn process_stream(
     stream: ModelResponseStream,

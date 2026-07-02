@@ -21,7 +21,8 @@ enum OrderedContentBlock {
 
 /// Canonical assistant content builder keyed by the order stream blocks first
 /// appeared. Provider final payloads are still useful for token metadata, but
-/// content replay uses this order so live, reconnect, and persisted views agree.
+/// content replay uses this order once the provider has emitted real streamed
+/// content so live, reconnect, and persisted views agree.
 #[derive(Clone, Debug, Default)]
 pub(super) struct OrderedAssistantContent {
     blocks: Vec<OrderedContentBlock>,
@@ -75,6 +76,10 @@ impl OrderedAssistantContent {
         }
     }
 
+    pub(super) fn close_text(&mut self) {
+        self.active_text_index = None;
+    }
+
     pub(super) fn start_thinking(&mut self) {
         if self.active_thinking_index.is_some() {
             return;
@@ -122,6 +127,9 @@ impl OrderedAssistantContent {
     }
 
     pub(super) fn start_capability_invocation(&mut self, id: &str, name: &str) {
+        self.active_text_index = None;
+        self.active_thinking_index = None;
+
         if let Some(idx) = self.capability_indices.get(id).copied() {
             if let Some(OrderedContentBlock::CapabilityInvocation { draft, .. }) =
                 self.blocks.get_mut(idx)
