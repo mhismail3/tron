@@ -23,6 +23,7 @@ extension ChatView {
                         .font(TronTypography.button)
                         .foregroundStyle(.tronEmerald)
                 }
+                .accessibilityLabel("Back")
             }
         }
     }
@@ -77,6 +78,7 @@ extension ChatView {
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(.tronEmerald)
             }
+            .accessibilityLabel("Chat settings")
         }
     }
 }

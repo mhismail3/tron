@@ -136,6 +136,83 @@ final class DashboardHitTargetUITests: XCTestCase {
     }
 
     @MainActor
+    func testRecentChatOpensAtLatestTurnRepeatedly() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("--tron-ui-test-onboarding-complete")
+        app.launch()
+
+        for attempt in 1...3 {
+            try openRecentChatIfNeeded(in: app)
+
+            let latestMessage = app.descendants(matching: .any)
+                .matching(identifier: "chat-message-latest")
+                .firstMatch
+            XCTAssertTrue(
+                latestMessage.waitForExistence(timeout: 20),
+                "Open attempt \(attempt) should render the latest message after initial bottom anchoring"
+            )
+            XCTAssertTrue(
+                latestMessage.isHittable,
+                "Open attempt \(attempt) should land at the bottom with the latest message in the viewport"
+            )
+            XCTAssertFalse(
+                app.otherElements["chat-initial-loading-indicator"].exists,
+                "Open attempt \(attempt) should remove the initial loader after the bottom anchor settles"
+            )
+            keepScreenshot(named: "chat-latest-open-\(attempt)")
+
+            let backButton = app.buttons.matching(
+                NSPredicate(format: "label == %@ OR label CONTAINS[c] %@", "Back", "back")
+            ).firstMatch
+            XCTAssertTrue(backButton.waitForExistence(timeout: 10), "Back button should return to dashboard")
+            backButton.tap()
+            XCTAssertTrue(
+                app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "last active"))
+                    .firstMatch
+                    .waitForExistence(timeout: 15),
+                "Dashboard session rows should be visible before the next open attempt"
+            )
+        }
+    }
+
+    @MainActor
+    func testBottomRubberBandDoesNotDisplaceLatestTurn() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("--tron-ui-test-onboarding-complete")
+        app.launch()
+        try openRecentChatIfNeeded(in: app)
+
+        let messageScrollView = app.scrollViews["chat-message-scroll-view"].firstMatch
+        XCTAssertTrue(
+            messageScrollView.waitForExistence(timeout: 20),
+            "Chat should expose a stable message scroll view for bottom rubber-band validation"
+        )
+
+        let latestMessage = app.descendants(matching: .any)
+            .matching(identifier: "chat-message-latest")
+            .firstMatch
+        XCTAssertTrue(latestMessage.waitForExistence(timeout: 20))
+        XCTAssertTrue(latestMessage.isHittable)
+
+        for attempt in 1...3 {
+            messageScrollView.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.7))
+
+            XCTAssertTrue(
+                latestMessage.isHittable,
+                "Bottom rubber-band attempt \(attempt) should keep the latest message in the viewport"
+            )
+            XCTAssertGreaterThan(
+                visibleMessageElementCount(in: app),
+                0,
+                "Bottom rubber-band attempt \(attempt) must not leave the message viewport blank"
+            )
+        }
+
+        keepScreenshot(named: "chat-bottom-rubber-band-stable")
+    }
+
+    @MainActor
     private func openRecentChatIfNeeded(in app: XCUIApplication) throws {
         if app.scrollViews["chat-message-scroll-view"].waitForExistence(timeout: 5) {
             return

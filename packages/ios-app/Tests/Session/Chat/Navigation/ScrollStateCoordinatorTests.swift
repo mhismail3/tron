@@ -146,6 +146,29 @@ struct ScrollStateCoordinatorTests {
         coordinator.geometryChanged(isNearBottom: false)
 
         #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
+
+        coordinator.scrollPhaseChanged(from: .animating, to: .idle)
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("Rubber-band rebound at bottom suppresses auto-scroll until idle")
+    func testRubberBandReboundSuppressesAutoScrollUntilIdle() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: true)
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
+
+        coordinator.scrollPhaseChanged(from: .interacting, to: .animating)
+        coordinator.geometryChanged(isNearBottom: true)
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
+
+        coordinator.scrollPhaseChanged(from: .animating, to: .idle)
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
     }
 
     // MARK: - Auto-scroll pause during interaction
@@ -272,6 +295,7 @@ struct ScrollStateCoordinatorTests {
         coordinator.willPrependHistory(anchor: ScrollViewportAnchor(messageId: anchorId))
 
         #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
     }
 
     @Test("willPrependHistory with nil anchor handles gracefully")
@@ -512,6 +536,7 @@ struct ScrollStateCoordinatorTests {
         coordinator.geometryChanged(isNearBottom: false)
         // animating is NOT user interaction, hadUserInteraction is false → no re-trigger
         #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
 
         // Animation completes at bottom
         coordinator.geometryChanged(isNearBottom: true)

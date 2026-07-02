@@ -256,12 +256,19 @@ The chat timeline owns only truthful local/session presentation state:
 - Earlier chat history autoloads from noninteractive scroll intent after
   initial load. The timeline does not expose a manual load control; loading
   state is limited to a small `ProgressView` with an accessibility label. A
+  newly opened existing session shows an intentional "Loading latest messages"
+  state while server reconstruction, scroll-proxy readiness, stable lazy-stack
+  height, and measured bottom-distance convergence complete, then fades in the
+  latest transcript from the settled bottom position. A
   one-shot scroll-phase prefetch starts as soon as the user leaves the bottom,
   then a viewport-relative top-detent loader requests additional pages before
   the 1px top sentinel must appear. Returning to the bottom re-arms the prefetch.
   Prepends preserve the first visible row identity by restoring it to `.top`;
   viewport-relative offsets are not replayed as SwiftUI target anchors because
-  that can strand lazy content in empty space. Reconnect reconstruction preserves
+  that can strand lazy content in empty space. Bottom autoscroll is centralized
+  through `ScrollStateCoordinator`: the view suppresses programmatic bottom
+  jumps while the user is interacting, the scroll view is rubber-band/programmatic
+  animating, or older history is being prepended. Reconnect reconstruction preserves
   the user's already-expanded visible history window, merges it with the new
   server-authoritative suffix, and performs bounded older-page backfill when the
   suffix would otherwise leave an event-sequence gap. Server reconstruction
@@ -476,8 +483,10 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 `SettingsSupport.swift`.
 
 Settings main groups controls by ownership rather than by old product modules.
-Engine owns server-mirrored defaults, context compaction, transcription, log
-level, and storage retention policy. Accounts owns provider credential setup.
+Engine owns actionable server-mirrored defaults, context compaction,
+transcription, log level, and storage retention policy; provider routing follows
+the selected model rather than a separate default-provider control. Accounts
+owns provider credential setup.
 Servers owns local pairing/connection and redacted local logs. App owns local
 appearance and device behavior. Settings main does not grow a server-health
 dashboard; core engine visibility lives on the dashboard Engine Cockpit.

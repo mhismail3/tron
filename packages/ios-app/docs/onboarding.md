@@ -166,8 +166,9 @@ host and port.
   Saved service keys use the same right-aligned masked preview layout as
   optional model providers.
 - **Default model** reuses `ModelPickerSheet`, then writes
-  `server.defaultModel`. The separate `server.defaultProvider` control lives in
-  Engine settings because it is a retained server setting, not a credential.
+  `server.defaultModel`. The retained `server.defaultProvider` field is decoded
+  for settings parity, but iOS does not expose it as a control because provider
+  routing is inferred from the selected model.
 
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
@@ -261,12 +262,12 @@ dismissing the banner. Normal reconnect keeps issuing short foreground probes
 at a bounded cadence until the server returns, the app backgrounds, or
 authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
-The Agent and Context settings sheets follow the same top summary-card pattern
-and divide server settings by ownership. Agent owns the retained quick-session
-defaults that still exist in the current settings schema: provider, model, and
-workspace. Each setting keeps its own glass container and description unless
-controls are intentionally coupled.
-Context owns retained context-management behavior: compaction only. Deleted
+The Engine settings sheet follows the same top summary-card pattern and divides
+server settings by ownership. Engine owns the retained quick-session defaults
+that still exist as actionable iOS controls: model and workspace. The retained
+`server.defaultProvider` field stays in the server schema, but iOS does not
+surface it because runtime provider selection follows the selected model.
+Context controls retain context-management behavior: compaction only. Deleted
 plugin-source, hook, rules, memory-retain, prompt-history, and prompt-library
 controls must not reappear as separate Settings destinations or destructive
 actions.

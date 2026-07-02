@@ -87,7 +87,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 /// UI-owned settings mutation vocabulary translated to wire DTOs inside the
 /// settings repository boundary.
 enum SettingsMutation {
-    case defaultProvider(String)
     case defaultWorkspace(String)
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)

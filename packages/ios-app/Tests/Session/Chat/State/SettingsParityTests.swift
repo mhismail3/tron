@@ -25,7 +25,6 @@ final class SettingsParityTests: XCTestCase {
     /// not that it's actually displayed, but the intent is explicit.
     private let KNOWN_UI_FIELDS: Set<String> = [
         // General
-        "defaultProvider",
         "defaultModel",
         "quickSessionWorkspace",
         // Context compaction
@@ -43,6 +42,7 @@ final class SettingsParityTests: XCTestCase {
     /// NOT user-editable settings. Adding a waiver requires a reason.
     private let WAIVER: [String: String] = [
         "availableModels": "cached model list from models.list engine protocol — not a setting",
+        "defaultProvider": "legacy server field retained for settings decode/parity; runtime provider is inferred from defaultModel, so iOS exposes model selection only",
         "isLoaded": "UI loading flag — not persisted",
         "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",

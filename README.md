@@ -2649,12 +2649,14 @@ packages/ios-app/Sources/
   input backed by the local transcription domain after a readiness check and
   cancellation-aware through startup and cancelled with any in-flight
   transcription when leaving chat,
-  a blank empty/loading chat, app-global connection toasts, ephemeral in-chat
-  local error notifications, streamed thinking content with one app-owned
-  neural-spark fallback indicator and provider-authored reasoning-summary
-  labels, including legacy OpenAI replay blocks without explicit `kind`
-  metadata, one-line generic capability evidence chips, local reconstruction,
-  diagnostics, and generic runtime surfaces.
+  a blank empty chat plus an intentional loading state that fades existing
+  sessions in only after measured latest-bottom transcript anchoring,
+  app-global connection toasts, ephemeral in-chat local error notifications,
+  streamed thinking content with one app-owned neural-spark fallback indicator
+  and provider-authored reasoning-summary labels, including legacy OpenAI
+  replay blocks without explicit `kind` metadata, one-line generic capability
+  evidence chips, local reconstruction, diagnostics, and generic runtime
+  surfaces.
   Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management
   panels, extension-source surfaces, voice-note storage, memory-retain, rules,

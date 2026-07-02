@@ -114,6 +114,11 @@ extension ChatView {
                             .opacity(messageIsVisible(at: index, total: viewModel.messages.count) ? 1 : 0)
                             .offset(y: messageIsVisible(at: index, total: viewModel.messages.count) ? 0 : 6)
                             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                            .accessibilityIdentifier(
+                                index == viewModel.messages.count - 1
+                                    ? "chat-message-latest"
+                                    : "chat-message-row"
+                            )
                         }
                         // Animate message insertions/removals ONLY after initial load.
                         // During initial load, messages appear at opacity 0 and the
@@ -164,16 +169,30 @@ extension ChatView {
                     scheduleEarlierHistoryPrefetchIfNeeded()
 
                 }
-                // Track near-bottom geometry — fires only when the Bool changes.
-                // Threshold includes contentInsets.bottom to account for the input
-                // bar + safe area that sits between the content edge and the viewport.
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    let distanceFromBottom = geometry.contentSize.height
-                        - geometry.contentOffset.y
-                        - geometry.containerSize.height
-                    return distanceFromBottom < (100 + geometry.contentInsets.bottom)
-                } action: { _, isNearBottom in
-                    guard initialLoadComplete else { return }
+                // Track bottom geometry continuously. Initial-load reveal waits
+                // for measured bottom convergence; after reveal this feeds the
+                // normal scroll-away/new-content coordinator.
+                .onScrollGeometryChange(for: ChatScrollGeometryMetrics.self) { geometry in
+                    ChatScrollGeometryMetrics(
+                        distanceFromBottom: ChatTranscriptRevealPolicy.bottomDistance(
+                            contentHeight: geometry.contentSize.height,
+                            contentOffsetY: geometry.contentOffset.y,
+                            containerHeight: geometry.containerSize.height,
+                            bottomInset: geometry.contentInsets.bottom
+                        ),
+                        viewportHeight: geometry.containerSize.height
+                    )
+                } action: { _, metrics in
+                    messageViewportHeight = metrics.viewportHeight
+
+                    guard initialLoadComplete else {
+                        initDistanceFromBottom = metrics.distanceFromBottom
+                        return
+                    }
+
+                    let isNearBottom = ChatTranscriptRevealPolicy.isNearBottomForAutoscroll(
+                        distanceFromBottom: metrics.distanceFromBottom
+                    )
                     scrollCoordinator.geometryChanged(isNearBottom: isNearBottom)
                     if !isNearBottom {
                         scheduleEarlierHistoryPrefetchIfNeeded()
@@ -187,11 +206,6 @@ extension ChatView {
                 } action: { _, contentH in
                     guard !initialLoadComplete else { return }
                     initContentHeight = contentH
-                }
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.containerSize.height
-                } action: { _, height in
-                    messageViewportHeight = height
                 }
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
@@ -224,11 +238,11 @@ extension ChatView {
                     guard initialLoadComplete else { return }
 
                     scrollCoordinator.contentDidArrive()
-                    if scrollCoordinator.shouldAutoScroll {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
+                    scrollToBottomIfAllowed(
+                        animated: true,
+                        animation: .easeOut(duration: 0.2),
+                        reason: "new message"
+                    )
                 }
                 // Content arrival tracking during streaming — 30fps (cheap: just sets a bool flag)
                 .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
@@ -238,23 +252,20 @@ extension ChatView {
                 // Scroll-to tracking during streaming — ~10fps (expensive: triggers ScrollView layout pass)
                 .onChange(of: viewModel.streamingManager.scrollVersion) { _, _ in
                     guard initialLoadComplete else { return }
-                    if scrollCoordinator.shouldAutoScroll {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
+                    scrollToBottomIfAllowed(reason: "streaming update")
                 }
                 // Auto-scroll when processing state changes
                 .onChange(of: viewModel.isProcessing) { _, _ in
                     guard initialLoadComplete else { return }
-                    if scrollCoordinator.shouldAutoScroll {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
+                    scrollToBottomIfAllowed(
+                        animated: true,
+                        animation: .easeOut(duration: 0.2),
+                        reason: "processing state"
+                    )
                 }
                 // Re-anchor scroll position after live session pruning
                 .onChange(of: viewModel.prunedVersion) { _, _ in
-                    guard scrollCoordinator.shouldAutoScroll else { return }
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                    scrollToBottomIfAllowed(reason: "session pruning")
                 }
                 // Scroll to bottom when keyboard appears
                 .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
@@ -264,13 +275,20 @@ extension ChatView {
 
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(50))
-                        if scrollCoordinator.shouldAutoScroll {
-                            withAnimation(.easeOut(duration: 0.25)) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
-                        }
+                        scrollToBottomIfAllowed(
+                            animated: true,
+                            animation: .easeOut(duration: 0.25),
+                            reason: "keyboard reveal"
+                        )
                     }
                 }
+            }
+            .opacity(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: initialLoadComplete))
+            .animation(.easeOut(duration: 0.28), value: initialLoadComplete)
+
+            if ChatTranscriptRevealPolicy.loadingOverlayVisible(initialLoadComplete: initialLoadComplete) {
+                initialTranscriptLoadingView
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
 
             // Floating "New Content" pill — shows when user scrolled away and new content arrived
@@ -283,14 +301,39 @@ extension ChatView {
         .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
     }
 
+    var initialTranscriptLoadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(0.9)
+                .tint(.tronEmerald)
+
+            Text("Loading latest messages")
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+
+            Text("Opening the session at the latest turn")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.22)),
+            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+        )
+        .padding(.horizontal, 40)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading latest messages")
+        .accessibilityIdentifier("chat-initial-loading-indicator")
+    }
+
     // MARK: - Scroll to Bottom Button
 
     var scrollToBottomButton: some View {
         Button {
             scrollCoordinator.userTappedScrollToBottom()
-            withAnimation(.tronStandard) {
-                scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            }
+            scrollToBottom(animated: true, animation: .tronStandard)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
@@ -438,6 +481,11 @@ enum ChatHistoryAutoloadPolicy {
 
 private enum ChatMessageScrollCoordinateSpace {
     static let name = "chat-message-scroll-viewport"
+}
+
+private struct ChatScrollGeometryMetrics: Equatable {
+    let distanceFromBottom: CGFloat
+    let viewportHeight: CGFloat
 }
 
 private struct MessageViewportProbe: View {

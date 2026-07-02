@@ -8,8 +8,10 @@ import SwiftUI
 /// Two independent input signals drive the state machine:
 ///
 /// 1. **Phase signal** (`scrollPhaseChanged`) — tracks whether the user is physically
-///    touching/flicking the scroll view. Phases `.interacting`, `.tracking`, and
-///    `.decelerating` count as user interaction; `.animating` and `.idle` do not.
+///    touching/flicking the scroll view and whether the scroll view is still
+///    settling. Phases `.interacting`, `.tracking`, and `.decelerating` count as
+///    user interaction; `.animating` is not user intent, but it still suppresses
+///    new programmatic bottom scrolls until the rebound/programmatic animation ends.
 ///
 /// 2. **Geometry signal** (`geometryChanged`) — tracks whether the viewport is near
 ///    the bottom of the content. The threshold is computed in the view layer and
@@ -27,9 +29,10 @@ import SwiftUI
 /// the viewport returns to bottom, which prevents phase and geometry callbacks from
 /// requesting multiple pages for a single drag.
 ///
-/// The key invariant: **auto-scroll is suppressed whenever the user is interacting OR
-/// has scrolled away.** This prevents programmatic `scrollTo` calls from fighting the
-/// user's gesture during streaming.
+/// The key invariant: **auto-scroll is suppressed whenever the user is interacting,
+/// the scroll view is settling, history is being prepended, OR the user has scrolled
+/// away.** This prevents programmatic `scrollTo` calls from fighting live gestures,
+/// rubber-band rebound, lazy-stack anchor restoration, or streaming updates.
 ///
 /// A `hadUserInteraction` flag covers the callback ordering race — `onScrollPhaseChange`
 /// can fire before `onScrollGeometryChange` in the same frame, so the flag ensures a
@@ -60,6 +63,11 @@ final class ScrollStateCoordinator {
     /// (touching, tracking, or decelerating from a flick).
     private var isUserInteracting = false
 
+    /// True while SwiftUI reports an animation phase for either a programmatic
+    /// scroll or a rubber-band rebound. It is not user intent, but it is still
+    /// an unstable interval where additional bottom scrolls can cause jumps.
+    private var isScrollSettling = false
+
     /// Bridges the phase→geometry callback ordering race. Set when interaction
     /// starts, consumed by the next geometry update after interaction ends.
     private var hadUserInteraction = false
@@ -79,6 +87,7 @@ final class ScrollStateCoordinator {
     func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase) {
         let wasUserInteracting = isUserInteracting
         isUserInteracting = newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating
+        isScrollSettling = newPhase == .animating
 
         if isUserInteracting && !wasUserInteracting {
             hadUserInteraction = true
@@ -176,7 +185,11 @@ final class ScrollStateCoordinator {
 
     func didPrependHistory(using proxy: ScrollViewProxy?) {
         if let anchor = prependAnchor {
-            proxy?.scrollTo(anchor.messageId, anchor: .top)
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy?.scrollTo(anchor.messageId, anchor: .top)
+            }
             prependAnchor = nil
         }
         isPrependingHistory = false
@@ -195,7 +208,7 @@ final class ScrollStateCoordinator {
     // MARK: - Query
 
     var shouldAutoScroll: Bool {
-        !userScrolledAway && !isUserInteracting
+        !userScrolledAway && !isUserInteracting && !isScrollSettling && !isPrependingHistory
     }
 
     var shouldShowNewContentPill: Bool {

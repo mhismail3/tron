@@ -1,0 +1,52 @@
+import CoreGraphics
+
+/// Owns the first-open transcript reveal invariant for chat sessions.
+///
+/// Existing sessions can take a short moment to reconstruct and settle their
+/// bottom scroll anchor. During that window the shell should show an
+/// intentional loading state instead of a blank transcript, then fade the
+/// already-bottom-anchored content in once initial load is complete.
+enum ChatTranscriptRevealPolicy {
+    static let initialBottomTolerance: CGFloat = 16
+    static let initialBottomSettleAttempts = 18
+    static let initialScrollProxyWaitAttempts = 20
+    static let initialSettleDelayMilliseconds = 35
+
+    static func contentOpacity(initialLoadComplete: Bool) -> Double {
+        initialLoadComplete ? 1 : 0
+    }
+
+    static func loadingOverlayVisible(initialLoadComplete: Bool) -> Bool {
+        !initialLoadComplete
+    }
+
+    static func bottomDistance(
+        contentHeight: CGFloat,
+        contentOffsetY: CGFloat,
+        containerHeight: CGFloat,
+        bottomInset: CGFloat
+    ) -> CGFloat {
+        // SwiftUI reports the settled bottom roughly one effective bottom inset
+        // above mathematical zero when a `safeAreaInset` input bar participates in
+        // layout. Normalize that away so "at bottom" means the latest transcript
+        // is pinned above the composer, not hidden below it.
+        let rawDistance = contentHeight - contentOffsetY - containerHeight - bottomInset
+        guard rawDistance.isFinite else { return .greatestFiniteMagnitude }
+        return max(0, rawDistance)
+    }
+
+    static func isNearBottomForAutoscroll(distanceFromBottom: CGFloat) -> Bool {
+        distanceFromBottom < 100
+    }
+
+    static func isReadyToReveal(
+        hasScrollProxy: Bool,
+        contentHeightStable: Bool,
+        distanceFromBottom: CGFloat
+    ) -> Bool {
+        hasScrollProxy
+            && contentHeightStable
+            && distanceFromBottom.isFinite
+            && distanceFromBottom <= initialBottomTolerance
+    }
+}

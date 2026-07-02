@@ -80,6 +80,30 @@ struct ServerSettingsPageTests {
         #expect(PairedServerMenuLayout.hitTargetSize == 36)
     }
 
+    @Test("server rows keep intrinsic height across sheet detents")
+    func serverRowsKeepIntrinsicHeightAcrossSheetDetents() throws {
+        let connectionPage = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Settings",
+            "Pages",
+            "ConnectionSettingsPage.swift",
+        ])
+        let pairedRow = try section(
+            in: connectionPage,
+            from: "private func pairedServerRow(_ server: PairedServer) -> some View {",
+            to: "private var onboardRow: some View {"
+        )
+        let onboardRow = try section(
+            in: connectionPage,
+            from: "private var onboardRow: some View {",
+            to: "private func manageServerMenu("
+        )
+
+        #expect(pairedRow.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(onboardRow.contains(".fixedSize(horizontal: false, vertical: true)"))
+    }
+
     @Test("server onboarding userInfo carries paired server id")
     func serverOnboardingUserInfoCarriesServerId() {
         #expect(ServerOnboardingLauncher.userInfo(serverId: "studio") == [
