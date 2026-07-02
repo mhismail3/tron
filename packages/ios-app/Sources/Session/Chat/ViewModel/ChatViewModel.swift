@@ -123,6 +123,8 @@ final class ChatViewModel {
     var sequenceHighWaterMark: Int64 = -1
     /// Oldest event ID from the loaded reconstruction window (for pagination cursor).
     var reconstructionOldestEventId: String?
+    /// Whether the server reported older reconstruction pages before `reconstructionOldestEventId`.
+    var hasOlderServerReconstructionPages = false
     /// Raw reconstruction events already loaded into the timeline window.
     ///
     /// Older pages are transformed with this newer context so an assistant

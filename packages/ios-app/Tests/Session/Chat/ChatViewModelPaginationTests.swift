@@ -16,6 +16,35 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(viewModel.prunedLiveMessages.count, 50)
     }
 
+    func testTopDetentAutoloadContinuesToServerAfterPrunedBufferDrains() async {
+        let (viewModel, sessions) = makeViewModel()
+        populateMessages(viewModel, count: 210)
+        viewModel.reconstructionOldestEventId = "cursor-1"
+        viewModel.hasOlderServerReconstructionPages = true
+        viewModel.hasMoreMessages = true
+        viewModel.pruneOldMessagesIfNeeded()
+
+        sessions.reconstructHandler = { _, _, beforeEventId in
+            XCTAssertEqual(beforeEventId, "cursor-1")
+            return self.reconstructResult(
+                events: [self.rawEvent(id: "event-user-1", type: "message.user", content: "older prompt", sequence: 1)],
+                hasMoreEvents: false,
+                oldestEventId: "cursor-0"
+            )
+        }
+
+        let firstPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
+        let finalPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
+        let serverLoad = await viewModel.loadEarlierMessagesForTopDetent()
+
+        XCTAssertEqual(firstPrunedLoad, ChatViewModel.additionalMessageBatchSize)
+        XCTAssertEqual(finalPrunedLoad, 10)
+        XCTAssertEqual(serverLoad, 1)
+        XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["cursor-1"])
+        XCTAssertEqual(viewModel.reconstructionOldestEventId, "cursor-0")
+        XCTAssertFalse(viewModel.hasMoreMessages)
+    }
+
     func testTopDetentAutoloadLoadsFromInMemoryReconstruction() async {
         let (viewModel, _) = makeViewModel()
         let reconstructed = (0..<150).map { index in

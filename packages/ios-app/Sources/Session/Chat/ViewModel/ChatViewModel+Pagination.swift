@@ -6,6 +6,13 @@ extension ChatViewModel {
 
     private static let maxEmptyAutoloadServerPages = 3
 
+    /// Recompute the top-detent paging gate from every older-history source.
+    func recomputeHasMoreMessages() {
+        hasMoreMessages = !prunedLiveMessages.isEmpty
+            || allReconstructedMessages.count > displayedMessageCount
+            || hasOlderServerReconstructionPages
+    }
+
     /// Set the event store manager reference (used when injected via environment)
     /// Call this BEFORE connectAndReconstruct() so event store is available.
     func setEventStoreManager(_ manager: EventStoreManager, workspaceId: String) {
@@ -118,8 +125,8 @@ extension ChatViewModel {
         // Replace display array (rebuilds MessageIndex)
         replaceAllMessages(with: kept)
 
-        hasMoreMessages = true
         displayedMessageCount = messages.count
+        recomputeHasMoreMessages()
         prunedVersion += 1
 
         logger.info("Live session prune: \(countBefore) → \(messages.count) messages, buffer: \(prunedLiveMessages.count)", category: .session)
@@ -138,7 +145,7 @@ extension ChatViewModel {
     private func loadPrunedMessagesBatch() -> Int {
         let batchSize = min(Self.additionalMessageBatchSize, prunedLiveMessages.count)
         guard batchSize > 0 else {
-            hasMoreMessages = false
+            recomputeHasMoreMessages()
             return 0
         }
 
@@ -149,9 +156,7 @@ extension ChatViewModel {
 
         insertAtFrontOfMessages(batch)
 
-        // More available if buffer has entries OR if historical messages exist
-        hasMoreMessages = !prunedLiveMessages.isEmpty
-            || allReconstructedMessages.count > displayedMessageCount
+        recomputeHasMoreMessages()
         return batchSize
     }
 
@@ -173,7 +178,7 @@ extension ChatViewModel {
         displayedMessageCount += batchToLoad
 
         logger.debug("Loaded \(batchToLoad) more messages, now showing \(displayedMessageCount) historical + new", category: .session)
-        hasMoreMessages = displayedMessageCount < historicalCount
+        recomputeHasMoreMessages()
         return batchToLoad
     }
 
@@ -183,7 +188,8 @@ extension ChatViewModel {
         while hasMoreMessages, emptyPageCount < Self.maxEmptyAutoloadServerPages {
             guard let oldestEventId = reconstructionOldestEventId else {
                 logger.warning("[RECONSTRUCT] loadMore: no oldestEventId tracked, cannot paginate", category: .session)
-                hasMoreMessages = false
+                hasOlderServerReconstructionPages = false
+                recomputeHasMoreMessages()
                 return 0
             }
 
@@ -196,7 +202,8 @@ extension ChatViewModel {
 
                 guard result.oldestEventId != oldestEventId else {
                     logger.warning("[RECONSTRUCT] loadMore: oldestEventId did not advance; stopping pagination", category: .session)
-                    hasMoreMessages = false
+                    hasOlderServerReconstructionPages = false
+                    recomputeHasMoreMessages()
                     return 0
                 }
 
@@ -207,7 +214,8 @@ extension ChatViewModel {
                 )
                 loadedReconstructionEvents.insert(contentsOf: result.events, at: 0)
                 reconstructionOldestEventId = result.oldestEventId
-                hasMoreMessages = result.hasMoreEvents
+                hasOlderServerReconstructionPages = result.hasMoreEvents && result.oldestEventId != nil
+                recomputeHasMoreMessages()
 
                 guard !olderMessages.isEmpty else {
                     emptyPageCount += 1
@@ -217,6 +225,7 @@ extension ChatViewModel {
                 allReconstructedMessages.insert(contentsOf: olderMessages, at: 0)
                 insertAtFrontOfMessages(olderMessages)
                 displayedMessageCount += olderMessages.count
+                recomputeHasMoreMessages()
                 return olderMessages.count
             } catch {
                 logger.warning("Failed to load earlier messages: \(error)", category: .session)

@@ -20,7 +20,6 @@ extension ChatViewModel {
         allReconstructedMessages = state.messages
         let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
         displayedMessageCount = batchSize
-        hasMoreMessages = result.hasMoreEvents || allReconstructedMessages.count > batchSize
 
         if batchSize > 0 {
             let startIndex = allReconstructedMessages.count - batchSize
@@ -31,6 +30,8 @@ extension ChatViewModel {
 
         // 3. Track oldest sequence for load-more pagination
         reconstructionOldestEventId = result.oldestEventId
+        hasOlderServerReconstructionPages = result.hasMoreEvents && result.oldestEventId != nil
+        recomputeHasMoreMessages()
         loadedReconstructionEvents = result.events
 
         // 4. Update session metadata from reconstruction

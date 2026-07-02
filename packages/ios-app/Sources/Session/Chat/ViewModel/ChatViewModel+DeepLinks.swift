@@ -144,7 +144,7 @@ extension ChatViewModel {
 
         messages = Array(allReconstructedMessages[startIndex...])
         displayedMessageCount = messages.count
-        hasMoreMessages = startIndex > 0
+        recomputeHasMoreMessages()
 
         logger.info("Expanded message window to include deep link target at index \(index), now showing \(displayedMessageCount) messages", category: .session)
     }
