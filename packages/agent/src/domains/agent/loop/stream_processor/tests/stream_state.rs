@@ -188,8 +188,15 @@ async fn abort_mid_thinking_preserves_signature() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ThinkingStart);
-        yield Ok(StreamEvent::ThinkingDelta { delta: "deep thought".into() });
-        yield Ok(StreamEvent::ThinkingEnd { thinking: "deep thought".into(), signature: Some("sig-xyz".into()) });
+        yield Ok(StreamEvent::ThinkingDelta {
+            delta: "deep thought".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        });
+        yield Ok(StreamEvent::ThinkingEnd {
+            thinking: "deep thought".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: Some("sig-xyz".into()),
+        });
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
         cancel_clone.cancel();

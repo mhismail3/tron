@@ -54,7 +54,9 @@ fn thinking_delta_emits_start_on_first_call() {
     let events = acc.process_thinking_delta("thinking...");
     assert_eq!(events.len(), 2);
     assert!(matches!(events[0], StreamEvent::ThinkingStart));
-    assert!(matches!(&events[1], StreamEvent::ThinkingDelta { delta } if delta == "thinking..."));
+    assert!(
+        matches!(&events[1], StreamEvent::ThinkingDelta { delta, .. } if delta == "thinking...")
+    );
     assert!(acc.thinking_started);
     assert_eq!(acc.accumulated_thinking, "thinking...");
 }
@@ -65,7 +67,7 @@ fn thinking_delta_only_delta_on_subsequent() {
     let _ = acc.process_thinking_delta("first");
     let events = acc.process_thinking_delta(" second");
     assert_eq!(events.len(), 1);
-    assert!(matches!(&events[0], StreamEvent::ThinkingDelta { delta } if delta == " second"));
+    assert!(matches!(&events[0], StreamEvent::ThinkingDelta { delta, .. } if delta == " second"));
     assert_eq!(acc.accumulated_thinking, "first second");
 }
 
@@ -307,6 +309,7 @@ fn close_thinking_emits_end_when_started() {
         StreamEvent::ThinkingEnd {
             thinking,
             signature,
+            ..
         } => {
             assert_eq!(thinking, "thought");
             assert_eq!(signature.as_deref(), Some("sig"));

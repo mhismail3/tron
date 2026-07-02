@@ -1,3 +1,4 @@
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::events::TronEvent;
 use serde_json::json;
 
@@ -10,16 +11,20 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             "agent.thinking_start",
             Some(json!({})),
         )),
-        TronEvent::ThinkingDelta { delta, .. } => Some(session_scoped(
-            event,
-            "agent.thinking_delta",
-            Some(json!({ "delta": delta })),
-        )),
-        TronEvent::ThinkingEnd { thinking, .. } => Some(session_scoped(
-            event,
-            "agent.thinking_end",
-            Some(json!({ "thinking": thinking })),
-        )),
+        TronEvent::ThinkingDelta { delta, kind, .. } => {
+            let mut data = json!({ "delta": delta });
+            if *kind != ThinkingContentKind::Thinking {
+                data["kind"] = json!(kind);
+            }
+            Some(session_scoped(event, "agent.thinking_delta", Some(data)))
+        }
+        TronEvent::ThinkingEnd { thinking, kind, .. } => {
+            let mut data = json!({ "thinking": thinking });
+            if *kind != ThinkingContentKind::Thinking {
+                data["kind"] = json!(kind);
+            }
+            Some(session_scoped(event, "agent.thinking_end", Some(data)))
+        }
         _ => None,
     }
 }
@@ -34,6 +39,7 @@ mod tests {
         let event = TronEvent::ThinkingDelta {
             base: BaseEvent::now("sess-1"),
             delta: "thinking".into(),
+            kind: ThinkingContentKind::Thinking,
         };
         let projected = convert(&event).expect("should convert");
         assert_eq!(projected.server_event.event_type, "agent.thinking_delta");
@@ -44,6 +50,7 @@ mod tests {
         let event = TronEvent::ThinkingDelta {
             base: BaseEvent::now("sess-1"),
             delta: "thinking".into(),
+            kind: ThinkingContentKind::Thinking,
         };
         let projected = convert(&event).expect("should convert");
         let data = projected
@@ -59,6 +66,7 @@ mod tests {
         let event = TronEvent::ThinkingDelta {
             base: BaseEvent::now("sess-42"),
             delta: "d".into(),
+            kind: ThinkingContentKind::Thinking,
         };
         let projected = convert(&event).expect("should convert");
         assert_eq!(

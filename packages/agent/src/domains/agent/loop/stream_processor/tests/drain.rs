@@ -163,8 +163,15 @@ async fn drain_preserves_thinking_and_text_before_stopping_execute() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ThinkingStart);
-        yield Ok(StreamEvent::ThinkingDelta { delta: "deep thought".into() });
-        yield Ok(StreamEvent::ThinkingEnd { thinking: "deep thought".into(), signature: Some("sig-1".into()) });
+        yield Ok(StreamEvent::ThinkingDelta {
+            delta: "deep thought".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        });
+        yield Ok(StreamEvent::ThinkingEnd {
+            thinking: "deep thought".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: Some("sig-1".into()),
+        });
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "answer".into() });
         yield Ok(StreamEvent::TextEnd { text: "answer".into(), signature: None });
@@ -214,6 +221,7 @@ async fn drain_preserves_thinking_and_text_before_stopping_execute() {
     if let AssistantContent::Thinking {
         thinking: t,
         signature,
+        ..
     } = thinking.unwrap()
     {
         assert_eq!(t, "deep thought");

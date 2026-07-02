@@ -436,6 +436,7 @@ mod tests {
             content: vec![
                 AssistantContent::Thinking {
                     thinking: "hmm".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: None,
                 },
                 AssistantContent::text("result"),

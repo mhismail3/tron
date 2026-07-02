@@ -44,7 +44,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         XCTAssertEqual(messages.count, 2)
 
         // First: thinking message
-        if case .thinking(let visible, let isExpanded, let isStreaming) = messages[0].content {
+        if case .thinking(let visible, let isExpanded, let isStreaming, _) = messages[0].content {
             XCTAssertEqual(visible, "Let me think about this...")
             XCTAssertFalse(isExpanded)
             XCTAssertFalse(isStreaming)
@@ -57,6 +57,61 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
             XCTAssertEqual(text, "Here's my response")
         } else {
             XCTFail("Expected text content")
+        }
+    }
+
+    func testReasoningSummaryBlocksPreserveDisplayKind() {
+        let events: [RawEvent] = [
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    [
+                        "type": "thinking",
+                        "kind": "reasoning_summary",
+                        "thinking": "The model summarized its reasoning without exposing hidden thought."
+                    ],
+                    ["type": "text", "text": "Done"]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 2)
+        if case .thinking(let visible, _, let isStreaming, let kind) = messages[0].content {
+            XCTAssertEqual(visible, "The model summarized its reasoning without exposing hidden thought.")
+            XCTAssertFalse(isStreaming)
+            XCTAssertEqual(kind, .reasoningSummary)
+        } else {
+            XCTFail("Expected reasoning summary content")
+        }
+    }
+
+    func testLegacyOpenAIThinkingBlocksRenderAsReasoningSummary() {
+        let events: [RawEvent] = [
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    [
+                        "type": "thinking",
+                        "thinking": "Provider-authored summary from a legacy event without a kind field."
+                    ],
+                    ["type": "text", "text": "Done"]
+                ]),
+                "providerType": AnyCodable("openai"),
+                "model": AnyCodable("gpt-5.5"),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 2)
+        if case .thinking(let visible, _, let isStreaming, let kind) = messages[0].content {
+            XCTAssertEqual(visible, "Provider-authored summary from a legacy event without a kind field.")
+            XCTAssertFalse(isStreaming)
+            XCTAssertEqual(kind, .reasoningSummary)
+        } else {
+            XCTFail("Expected legacy OpenAI reasoning summary content")
         }
     }
 
@@ -88,7 +143,7 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
         XCTAssertEqual(messages.count, 3)
-        if case .thinking(let visible, _, _) = messages[0].content {
+        if case .thinking(let visible, _, _, _) = messages[0].content {
             XCTAssertEqual(visible, "Planning a short task")
         } else {
             XCTFail("Expected one thinking block")

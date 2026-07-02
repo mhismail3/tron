@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Map;
 
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::AssistantMessage;
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
 
@@ -11,6 +11,7 @@ enum OrderedContentBlock {
     Text(String),
     Thinking {
         thinking: String,
+        kind: ThinkingContentKind,
         signature: Option<String>,
     },
     CapabilityInvocation {
@@ -80,7 +81,7 @@ impl OrderedAssistantContent {
         self.active_text_index = None;
     }
 
-    pub(super) fn start_thinking(&mut self) {
+    pub(super) fn start_thinking(&mut self, kind: ThinkingContentKind) {
         if self.active_thinking_index.is_some() {
             return;
         }
@@ -94,14 +95,15 @@ impl OrderedAssistantContent {
         let idx = self.blocks.len();
         self.blocks.push(OrderedContentBlock::Thinking {
             thinking: String::new(),
+            kind,
             signature: None,
         });
         self.active_thinking_index = Some(idx);
     }
 
-    pub(super) fn append_thinking(&mut self, delta: &str) {
+    pub(super) fn append_thinking(&mut self, delta: &str, kind: ThinkingContentKind) {
         if self.active_thinking_index.is_none() {
-            self.start_thinking();
+            self.start_thinking(kind);
         }
         if let Some(idx) = self.active_thinking_index
             && let Some(OrderedContentBlock::Thinking { thinking, .. }) = self.blocks.get_mut(idx)
@@ -110,18 +112,25 @@ impl OrderedAssistantContent {
         }
     }
 
-    pub(super) fn finish_thinking(&mut self, thinking: &str, signature: Option<String>) {
+    pub(super) fn finish_thinking(
+        &mut self,
+        thinking: &str,
+        kind: ThinkingContentKind,
+        signature: Option<String>,
+    ) {
         if self.active_thinking_index.is_none() {
-            self.start_thinking();
+            self.start_thinking(kind);
         }
         if let Some(idx) = self.active_thinking_index.take()
             && let Some(OrderedContentBlock::Thinking {
                 thinking: current,
+                kind: current_kind,
                 signature: current_signature,
             }) = self.blocks.get_mut(idx)
         {
             current.clear();
             current.push_str(thinking);
+            *current_kind = kind;
             *current_signature = signature;
         }
     }
@@ -179,9 +188,11 @@ impl OrderedAssistantContent {
                 }
                 OrderedContentBlock::Thinking {
                     thinking,
+                    kind,
                     signature,
                 } => (!thinking.is_empty()).then(|| AssistantContent::Thinking {
                     thinking: thinking.clone(),
+                    kind: *kind,
                     signature: signature.clone(),
                 }),
                 OrderedContentBlock::CapabilityInvocation { draft, finalized } => {
@@ -258,6 +269,7 @@ pub(super) fn build_message(
     if !thinking.is_empty() {
         content.push(AssistantContent::Thinking {
             thinking: thinking.to_owned(),
+            kind: ThinkingContentKind::Thinking,
             signature: thinking_signature.map(String::from),
         });
     }

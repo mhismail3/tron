@@ -12,20 +12,22 @@ enum ThinkingEndPlugin: DispatchableEventPlugin {
 
         struct DataPayload: Decodable, Sendable {
             let thinking: String
+            let kind: String?
         }
     }
 
     struct Result: EventResult {
         let thinking: String
+        let kind: ThinkingDisplayKind
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(thinking: event.data.thinking)
+        Result(thinking: event.data.thinking, kind: ThinkingDisplayKind(serverValue: event.data.kind))
     }
 
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
         guard let r = result as? Result else { return }
-        context.handleThinkingEnd(r.thinking)
+        context.handleThinkingEnd(r.thinking, kind: r.kind)
     }
 }

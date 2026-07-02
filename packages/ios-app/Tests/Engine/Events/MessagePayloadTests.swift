@@ -11,14 +11,19 @@ final class AssistantMessagePayloadTests: XCTestCase {
         content: AnyCodable,
         turn: Int = 1,
         model: String = "claude-sonnet-4",
-        stopReason: String = "end_turn"
+        stopReason: String = "end_turn",
+        providerType: String? = nil
     ) -> [String: AnyCodable] {
-        [
+        var payload: [String: AnyCodable] = [
             "content": content,
             "turn": AnyCodable(turn),
             "model": AnyCodable(model),
             "stopReason": AnyCodable(stopReason)
         ]
+        if let providerType {
+            payload["providerType"] = AnyCodable(providerType)
+        }
+        return payload
     }
 
     func testParsesContentBlockArray() {
@@ -75,6 +80,17 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.turn, 3)
     }
 
+    func testParsesProviderTypeWhenPresent() {
+        let payload = validPayload(
+            content: AnyCodable([[String: Any]]()),
+            providerType: "openai"
+        )
+
+        let parsed = AssistantMessagePayload(from: payload)
+
+        XCTAssertEqual(parsed?.providerType, "openai")
+    }
+
     func testMissingTurnFailsDecode() {
         // `turn` is non-optional on the Rust payload. Regression guard
         // against the removed "default to 1" back-compat behavior.
@@ -105,6 +121,34 @@ final class AssistantMessagePayloadTests: XCTestCase {
         ]
 
         XCTAssertNil(AssistantMessagePayload(from: payload))
+    }
+}
+
+final class ThinkingCompletePayloadTests: XCTestCase {
+    func testToDictionaryPersistsReasoningSummaryKind() {
+        let payload = ThinkingCompletePayload(
+            turnNumber: 7,
+            content: "A provider-authored reasoning summary.",
+            model: "gpt-5.5",
+            kind: .reasoningSummary
+        )
+
+        let dict = payload.toDictionary()
+
+        XCTAssertEqual(dict["kind"] as? String, "reasoning_summary")
+    }
+
+    func testToDictionaryOmitsDefaultThinkingKind() {
+        let payload = ThinkingCompletePayload(
+            turnNumber: 7,
+            content: "Append-only thinking text.",
+            model: "claude-sonnet-4",
+            kind: .thinking
+        )
+
+        let dict = payload.toDictionary()
+
+        XCTAssertNil(dict["kind"])
     }
 }
 

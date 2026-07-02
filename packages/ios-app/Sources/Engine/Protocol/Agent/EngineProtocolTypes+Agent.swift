@@ -81,11 +81,11 @@ struct CurrentTurnCapabilityInvocation: Decodable {
 /// Structured content sequence item (interleaved text/thinking/capability_ref)
 enum ContentSequenceItem: Decodable {
     case text(String)
-    case thinking(String)
+    case thinking(String, kind: ThinkingDisplayKind)
     case capabilityRef(invocationId: String)
 
     private enum CodingKeys: String, CodingKey {
-        case type, text, thinking, invocationId
+        case type, text, thinking, kind, invocationId
     }
 
     init(from decoder: Decoder) throws {
@@ -95,7 +95,11 @@ enum ContentSequenceItem: Decodable {
         case "text":
             self = .text(try container.decode(String.self, forKey: .text))
         case "thinking":
-            self = .thinking(try container.decode(String.self, forKey: .thinking))
+            let thinking = try container.decode(String.self, forKey: .thinking)
+            let kind = ThinkingDisplayKind(
+                serverValue: try container.decodeIfPresent(String.self, forKey: .kind)
+            )
+            self = .thinking(thinking, kind: kind)
         case "capability_ref":
             self = .capabilityRef(invocationId: try container.decode(String.self, forKey: .invocationId))
         default:

@@ -71,6 +71,7 @@ fn convert_assistant_thinking_with_signature() {
     let content = vec![
         AssistantContent::Thinking {
             thinking: "let me think".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: Some("sig123".into()),
         },
         AssistantContent::text("answer"),
@@ -87,6 +88,7 @@ fn convert_assistant_thinking_without_signature_filtered() {
     let content = vec![
         AssistantContent::Thinking {
             thinking: "display only".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         },
         AssistantContent::text("answer"),

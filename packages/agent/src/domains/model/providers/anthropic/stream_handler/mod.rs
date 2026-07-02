@@ -12,7 +12,7 @@
 use tracing::{debug, warn};
 
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::TokenUsage;
 
@@ -163,6 +163,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                     }
                     events.push(StreamEvent::ThinkingDelta {
                         delta: thinking.clone(),
+                        kind: ThinkingContentKind::Thinking,
                     });
                 }
                 events
@@ -194,6 +195,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                     }
                     vec![StreamEvent::ThinkingDelta {
                         delta: thinking.clone(),
+                        kind: ThinkingContentKind::Thinking,
                     }]
                 }
                 SseDelta::SignatureDelta { signature } => {
@@ -262,10 +264,12 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
             let signature = state.acc.take_signature();
             state.content_blocks.push(AssistantContent::Thinking {
                 thinking: thinking.clone(),
+                kind: ThinkingContentKind::Thinking,
                 signature: signature.clone(),
             });
             vec![StreamEvent::ThinkingEnd {
                 thinking,
+                kind: ThinkingContentKind::Thinking,
                 signature,
             }]
         }

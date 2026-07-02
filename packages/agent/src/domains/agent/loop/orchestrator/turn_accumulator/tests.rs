@@ -1,4 +1,5 @@
 use super::*;
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::events::BaseEvent;
 
 // ── TurnAccumulator unit tests ──
@@ -35,34 +36,38 @@ fn append_text_updates_content_sequence() {
 #[test]
 fn append_thinking_accumulates() {
     let mut acc = TurnAccumulator::new();
-    acc.append_thinking("step 1 ");
-    acc.append_thinking("step 2");
+    acc.append_thinking("step 1 ", ThinkingContentKind::Thinking);
+    acc.append_thinking("step 2", ThinkingContentKind::Thinking);
     assert_eq!(acc.thinking, "step 1 step 2");
 }
 
 #[test]
 fn append_thinking_updates_content_sequence() {
     let mut acc = TurnAccumulator::new();
-    acc.append_thinking("think");
+    acc.append_thinking("think", ThinkingContentKind::Thinking);
     assert_eq!(acc.content_sequence.len(), 1);
     assert!(matches!(
         &acc.content_sequence[0],
-        ContentSequenceItem::Thinking(t) if t == "think"
+        ContentSequenceItem::Thinking { text, kind } if text == "think" && *kind == ThinkingContentKind::Thinking
     ));
 }
 
 #[test]
 fn finish_thinking_replaces_current_thinking_snapshot() {
     let mut acc = TurnAccumulator::new();
-    acc.append_thinking("summary ");
-    acc.append_thinking("delta");
-    acc.finish_thinking("authoritative final thinking");
+    acc.append_thinking("summary ", ThinkingContentKind::Thinking);
+    acc.append_thinking("delta", ThinkingContentKind::Thinking);
+    acc.finish_thinking(
+        "authoritative final thinking",
+        ThinkingContentKind::Thinking,
+    );
 
     assert_eq!(acc.thinking, "authoritative final thinking");
     assert_eq!(acc.content_sequence.len(), 1);
     assert!(matches!(
         &acc.content_sequence[0],
-        ContentSequenceItem::Thinking(t) if t == "authoritative final thinking"
+        ContentSequenceItem::Thinking { text, kind }
+            if text == "authoritative final thinking" && *kind == ThinkingContentKind::Thinking
     ));
 }
 
@@ -76,10 +81,12 @@ fn thinking_end_event_replaces_accumulated_thinking() {
     map.update_from_event(&TronEvent::ThinkingDelta {
         base: BaseEvent::now("s1"),
         delta: "summary".into(),
+        kind: ThinkingContentKind::Thinking,
     });
     map.update_from_event(&TronEvent::ThinkingEnd {
         base: BaseEvent::now("s1"),
         thinking: "full final thinking".into(),
+        kind: ThinkingContentKind::Thinking,
     });
 
     let (_, _, sequence) = map.get_state("s1").unwrap();
@@ -89,12 +96,12 @@ fn thinking_end_event_replaces_accumulated_thinking() {
 #[test]
 fn interleaved_text_and_thinking_creates_separate_sequence_items() {
     let mut acc = TurnAccumulator::new();
-    acc.append_thinking("hmm");
+    acc.append_thinking("hmm", ThinkingContentKind::Thinking);
     acc.append_text("answer");
     assert_eq!(acc.content_sequence.len(), 2);
     assert!(matches!(
         &acc.content_sequence[0],
-        ContentSequenceItem::Thinking(_)
+        ContentSequenceItem::Thinking { .. }
     ));
     assert!(matches!(
         &acc.content_sequence[1],
@@ -223,11 +230,26 @@ fn to_json_text_uses_text_key() {
 
 #[test]
 fn to_json_thinking_uses_thinking_key() {
-    let item = ContentSequenceItem::Thinking("hmm".into());
+    let item = ContentSequenceItem::Thinking {
+        text: "hmm".into(),
+        kind: ThinkingContentKind::Thinking,
+    };
     let json = item.to_json();
     assert_eq!(json["type"], "thinking");
     assert_eq!(json["thinking"], "hmm");
     assert!(json.get("content").is_none());
+}
+
+#[test]
+fn to_json_reasoning_summary_includes_kind() {
+    let item = ContentSequenceItem::Thinking {
+        text: "summary".into(),
+        kind: ThinkingContentKind::ReasoningSummary,
+    };
+    let json = item.to_json();
+    assert_eq!(json["type"], "thinking");
+    assert_eq!(json["thinking"], "summary");
+    assert_eq!(json["kind"], "reasoning_summary");
 }
 
 #[test]
@@ -330,7 +352,7 @@ fn map_text_delta_without_turn_start_is_noop() {
 fn map_full_event_sequence() {
     let map = TurnAccumulatorMap::new();
     map.handle_turn_start("s1");
-    map.handle_thinking_delta("s1", "let me think...");
+    map.handle_thinking_delta("s1", "let me think...", ThinkingContentKind::Thinking);
     map.handle_text_delta("s1", "The answer is ");
     map.handle_text_delta("s1", "42");
     map.handle_capability_generating("s1", "tc_1", "execute");
@@ -423,6 +445,7 @@ fn update_from_thinking_delta_event() {
     map.update_from_event(&TronEvent::ThinkingDelta {
         base: BaseEvent::now("s1"),
         delta: "hmm".into(),
+        kind: ThinkingContentKind::Thinking,
     });
     let (_, _, sequence) = map.get_state("s1").unwrap();
     let seq = sequence.as_array().unwrap();

@@ -56,13 +56,21 @@ struct ThinkingCompletePayload: Codable {
     let preview: String
     let characterCount: Int
     let model: String?
+    let kind: ThinkingDisplayKind
     let timestamp: Date
 
-    init(turnNumber: Int, content: String, model: String?, timestamp: Date = Date()) {
+    init(
+        turnNumber: Int,
+        content: String,
+        model: String?,
+        kind: ThinkingDisplayKind = .thinking,
+        timestamp: Date = Date()
+    ) {
         self.turnNumber = turnNumber
         self.content = content
         self.characterCount = content.count
         self.model = model
+        self.kind = kind
         self.timestamp = timestamp
 
         // Extract first 3 lines for preview
@@ -93,6 +101,7 @@ struct ThinkingCompletePayload: Codable {
             ?? ThinkingCompletePayload.extractPreview(from: content)
         self.characterCount = content.count
         self.model = payload.string("model")
+        self.kind = ThinkingDisplayKind(serverValue: payload.string("kind"))
 
         if let timestampStr = payload.string("timestamp") {
             self.timestamp = DateParser.parseOrNow(timestampStr)
@@ -122,6 +131,9 @@ struct ThinkingCompletePayload: Codable {
         ]
         if let model = model {
             dict["model"] = model
+        }
+        if kind != .thinking {
+            dict["kind"] = kind.rawValue
         }
         return dict
     }

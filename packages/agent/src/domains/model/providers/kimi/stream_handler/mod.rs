@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 
@@ -203,6 +203,7 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
             state.thinking_text.push_str(reasoning);
             events.push(StreamEvent::ThinkingDelta {
                 delta: reasoning.clone(),
+                kind: ThinkingContentKind::Thinking,
             });
         }
 
@@ -216,10 +217,12 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 let thinking = std::mem::take(&mut state.thinking_text);
                 state.content_blocks.push(AssistantContent::Thinking {
                     thinking: thinking.clone(),
+                    kind: ThinkingContentKind::Thinking,
                     signature: None,
                 });
                 events.push(StreamEvent::ThinkingEnd {
                     thinking,
+                    kind: ThinkingContentKind::Thinking,
                     signature: None,
                 });
             }
@@ -241,10 +244,12 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 let thinking = std::mem::take(&mut state.thinking_text);
                 state.content_blocks.push(AssistantContent::Thinking {
                     thinking: thinking.clone(),
+                    kind: ThinkingContentKind::Thinking,
                     signature: None,
                 });
                 events.push(StreamEvent::ThinkingEnd {
                     thinking,
+                    kind: ThinkingContentKind::Thinking,
                     signature: None,
                 });
             }
@@ -348,10 +353,12 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
         let thinking = std::mem::take(&mut state.thinking_text);
         state.content_blocks.push(AssistantContent::Thinking {
             thinking: thinking.clone(),
+            kind: ThinkingContentKind::Thinking,
             signature: None,
         });
         events.push(StreamEvent::ThinkingEnd {
             thinking,
+            kind: ThinkingContentKind::Thinking,
             signature: None,
         });
     }

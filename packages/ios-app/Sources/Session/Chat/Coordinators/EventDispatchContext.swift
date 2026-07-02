@@ -4,8 +4,8 @@ import Foundation
 
 @MainActor protocol StreamingEventHandler: AnyObject {
     func handleTextDelta(_ delta: String)
-    func handleThinkingDelta(_ delta: String)
-    func handleThinkingEnd(_ thinking: String)
+    func handleThinkingDelta(_ delta: String, kind: ThinkingDisplayKind)
+    func handleThinkingEnd(_ thinking: String, kind: ThinkingDisplayKind)
 }
 
 @MainActor protocol CapabilityInvocationEventHandler: AnyObject {

@@ -299,6 +299,37 @@ final class EventPluginTests: XCTestCase {
 
         XCTAssertEqual(result?.eventType, "agent.thinking_end")
         XCTAssertEqual(pluginResult?.thinking, "Final thinking text")
+        XCTAssertEqual(pluginResult?.kind, .thinking)
+    }
+
+    func testThinkingPluginsParseReasoningSummaryKind() {
+        EventRegistry.shared.registerAll()
+        let deltaJson = """
+        {
+            "type": "agent.thinking_delta",
+            "sessionId": "session-thinking",
+            "sequence": 44,
+            "timestamp": "2026-06-29T10:00:02Z",
+            "data": {"delta": "Summary", "kind": "reasoning_summary"}
+        }
+        """.data(using: .utf8)!
+        let endJson = """
+        {
+            "type": "agent.thinking_end",
+            "sessionId": "session-thinking",
+            "sequence": 45,
+            "timestamp": "2026-06-29T10:00:03Z",
+            "data": {"thinking": "Summary", "kind": "reasoning_summary"}
+        }
+        """.data(using: .utf8)!
+
+        let deltaResult = EventRegistry.shared.parse(type: "agent.thinking_delta", data: deltaJson)?
+            .getResult() as? ThinkingDeltaPlugin.Result
+        let endResult = EventRegistry.shared.parse(type: "agent.thinking_end", data: endJson)?
+            .getResult() as? ThinkingEndPlugin.Result
+
+        XCTAssertEqual(deltaResult?.kind, .reasoningSummary)
+        XCTAssertEqual(endResult?.kind, .reasoningSummary)
     }
 
     // MARK: - Session Archive/Unarchive Plugin Tests

@@ -122,6 +122,7 @@ fn content_block_to_json(block: &AssistantContent) -> Value {
         AssistantContent::Thinking {
             thinking,
             signature,
+            ..
         } => {
             let mut obj = json!({ "type": "thinking", "thinking": thinking });
             if let Some(sig) = signature {
@@ -195,6 +196,7 @@ mod tests {
     fn build_content_json_thinking_block() {
         let content = vec![AssistantContent::Thinking {
             thinking: "let me think".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: Some("sig".into()),
         }];
         let json = build_content_json(&content);
@@ -207,6 +209,7 @@ mod tests {
     fn build_content_json_thinking_no_signature() {
         let content = vec![AssistantContent::Thinking {
             thinking: "hmm".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         }];
         let json = build_content_json(&content);

@@ -110,6 +110,7 @@ fn convert_assistant_thinking_blocks_skipped() {
         content: vec![
             AssistantContent::Thinking {
                 thinking: "Let me think...".into(),
+                kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: None,
             },
             AssistantContent::text("The answer is 42"),
@@ -129,6 +130,7 @@ fn convert_empty_assistant_skipped() {
     let messages = vec![Message::Assistant {
         content: vec![AssistantContent::Thinking {
             thinking: "hmm".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         }],
         usage: None,
@@ -662,6 +664,7 @@ fn assistant_thinking_text_and_tool_calls() {
         content: vec![
             AssistantContent::Thinking {
                 thinking: "Let me plan this...".into(),
+                kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: None,
             },
             AssistantContent::text("I'll search for that."),

@@ -6,6 +6,29 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Source contract for assistant reasoning-like content.
+///
+/// `Thinking` is reserved for provider streams that expose append-only extended
+/// thinking text. `ReasoningSummary` is provider-authored summary material; it
+/// may be compressed or non-verbatim and must not be presented as raw thinking.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingContentKind {
+    /// Append-only provider thinking text.
+    #[default]
+    Thinking,
+    /// Provider-authored reasoning summary, not raw chain-of-thought.
+    ReasoningSummary,
+}
+
+impl ThinkingContentKind {
+    /// Returns true for the default historical thinking kind.
+    #[must_use]
+    pub fn is_thinking(kind: &Self) -> bool {
+        *kind == Self::Thinking
+    }
+}
+
 /// Text content block.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename = "text")]
@@ -45,6 +68,9 @@ pub struct DocumentContent {
 pub struct ThinkingContent {
     /// The thinking text.
     pub thinking: String,
+    /// Source contract for the thinking-like text.
+    #[serde(default, skip_serializing_if = "ThinkingContentKind::is_thinking")]
+    pub kind: ThinkingContentKind,
     /// Verification signature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
@@ -105,6 +131,9 @@ pub enum AssistantContent {
     Thinking {
         /// The thinking text.
         thinking: String,
+        /// Source contract for the thinking-like text.
+        #[serde(default, skip_serializing_if = "ThinkingContentKind::is_thinking")]
+        kind: ThinkingContentKind,
         /// Verification signature.
         #[serde(skip_serializing_if = "Option::is_none")]
         signature: Option<String>,
@@ -174,6 +203,7 @@ impl ThinkingContent {
     pub fn new(thinking: impl Into<String>) -> Self {
         Self {
             thinking: thinking.into(),
+            kind: ThinkingContentKind::Thinking,
             signature: None,
         }
     }
@@ -374,6 +404,7 @@ mod tests {
     fn thinking_content_with_signature() {
         let tc = ThinkingContent {
             thinking: "deep thought".into(),
+            kind: ThinkingContentKind::Thinking,
             signature: Some("sig123".into()),
         };
         let json = serde_json::to_value(&tc).unwrap();
@@ -440,6 +471,7 @@ mod tests {
     fn assistant_content_thinking() {
         let ac = AssistantContent::Thinking {
             thinking: "hmm".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         };
         assert!(ac.is_thinking());

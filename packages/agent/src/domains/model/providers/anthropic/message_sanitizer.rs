@@ -68,6 +68,7 @@ pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
                         }
                         AssistantContent::Thinking {
                             thinking,
+                            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                             signature: Some(_),
                         } => {
                             debug!(
@@ -187,6 +188,7 @@ fn has_content_surviving_conversion(content: &[AssistantContent]) -> bool {
         !matches!(
             block,
             AssistantContent::Thinking {
+                kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: None,
                 ..
             }
@@ -274,6 +276,7 @@ mod tests {
             Message::user("hello"),
             assistant_with_content(vec![AssistantContent::Thinking {
                 thinking: "display only".into(),
+                kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: None,
             }]),
             Message::assistant("visible"),
@@ -291,6 +294,7 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: "deep thought".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("sig123".into()),
                 },
                 AssistantContent::text("answer"),
@@ -480,6 +484,7 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: "Let me search for that.".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("d7f2ef852b1a3c4e5f6a7b8c9d0e1f2a3b4c5d6e".into()),
                 },
                 capability_invocation("call_abc123", "execute"),
@@ -508,6 +513,7 @@ mod tests {
             Message::user("hello"),
             assistant_with_content(vec![AssistantContent::Thinking {
                 thinking: "just thinking".into(),
+                kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: Some("somesig".into()),
             }]),
         ];
@@ -529,10 +535,12 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: "first thought".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("sig1".into()),
                 },
                 AssistantContent::Thinking {
                     thinking: "second thought".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("sig2".into()),
                 },
                 capability_invocation("tc-1", "execute"),
@@ -562,10 +570,12 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: "signed reasoning".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("sig_abc".into()),
                 },
                 AssistantContent::Thinking {
                     thinking: "unsigned display-only".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: None,
                 },
                 AssistantContent::text("visible answer"),
@@ -592,6 +602,7 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: original_text.into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("sig".into()),
                 },
                 AssistantContent::text("answer"),
@@ -612,6 +623,7 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: "empty sig thinking".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some(String::new()),
                 },
                 AssistantContent::text("answer"),
@@ -634,6 +646,7 @@ mod tests {
             assistant_with_content(vec![
                 AssistantContent::Thinking {
                     thinking: "reasoning".into(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: Some("sig_xyz".into()),
                 },
                 AssistantContent::text("answer"),

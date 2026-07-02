@@ -1,12 +1,33 @@
 import Foundation
 
+enum ThinkingDisplayKind: String, Codable, Equatable {
+    case thinking
+    case reasoningSummary = "reasoning_summary"
+
+    init(serverValue: String?) {
+        switch serverValue {
+        case Self.reasoningSummary.rawValue:
+            self = .reasoningSummary
+        default:
+            self = .thinking
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .thinking: "Thinking"
+        case .reasoningSummary: "Reasoning Summary"
+        }
+    }
+}
+
 // MARK: - Message Content
 
 enum MessageContent: Equatable {
     // Core content types
     case text(String)
     case streaming(String)
-    case thinking(visible: String, isExpanded: Bool, isStreaming: Bool)
+    case thinking(visible: String, isExpanded: Bool, isStreaming: Bool, kind: ThinkingDisplayKind)
     case capabilityInvocation(CapabilityInvocationData)
     case capabilityResult(CapabilityInvocationResultData)
     case error(String)
@@ -70,7 +91,7 @@ enum MessageContent: Equatable {
         switch self {
         case .text(let text), .streaming(let text):
             return text
-        case .thinking(let visible, _, _):
+        case .thinking(let visible, _, _, _):
             return visible
         case .capabilityInvocation(let invocation):
             return "[\(invocation.displayName)]"

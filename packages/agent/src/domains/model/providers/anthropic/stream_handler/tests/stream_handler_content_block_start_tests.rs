@@ -68,7 +68,7 @@ fn content_block_start_thinking_with_initial_text_emits_delta() {
     assert_eq!(events.len(), 2);
     assert!(matches!(events[0], StreamEvent::ThinkingStart));
     match &events[1] {
-        StreamEvent::ThinkingDelta { delta } => assert_eq!(delta, "Initial thought"),
+        StreamEvent::ThinkingDelta { delta, .. } => assert_eq!(delta, "Initial thought"),
         _ => panic!("expected ThinkingDelta"),
     }
     assert_eq!(state.current_block_type, Some(BlockType::Thinking));

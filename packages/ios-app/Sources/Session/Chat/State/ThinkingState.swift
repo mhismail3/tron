@@ -15,6 +15,9 @@ final class ThinkingState {
     /// Whether thinking is currently being streamed
     private(set) var isStreaming: Bool = false
 
+    /// Source contract for the current thinking-like text.
+    private(set) var kind: ThinkingDisplayKind = .thinking
+
     /// Current turn number for the streaming thinking
     private var currentTurnNumber: Int = 0
 
@@ -28,21 +31,24 @@ final class ThinkingState {
     // MARK: - Catch-Up Seeding
 
     /// Seed thinking state from catch-up content so future deltas append correctly
-    func seedCatchUpThinking(_ text: String, isStreaming: Bool) {
+    func seedCatchUpThinking(_ text: String, isStreaming: Bool, kind: ThinkingDisplayKind = .thinking) {
         currentText = text
         self.isStreaming = isStreaming
+        self.kind = kind
     }
 
     // MARK: - Streaming Methods
 
     /// Handle incoming thinking delta from streaming
-    func handleThinkingDelta(_ delta: String) {
+    func handleThinkingDelta(_ delta: String, kind: ThinkingDisplayKind = .thinking) {
+        self.kind = kind
         currentText += delta
         isStreaming = true
     }
 
     /// Handle the authoritative final thinking snapshot from the server.
-    func handleThinkingEnd(_ thinking: String) {
+    func handleThinkingEnd(_ thinking: String, kind: ThinkingDisplayKind = .thinking) {
+        self.kind = kind
         currentText = thinking
         isStreaming = false
     }
@@ -57,6 +63,7 @@ final class ThinkingState {
     func startTurn(_ turnNumber: Int, model: String?) {
         currentText = ""
         isStreaming = false
+        kind = .thinking
         currentTurnNumber = turnNumber
         currentModel = model
     }
@@ -72,7 +79,8 @@ final class ThinkingState {
         let payload = ThinkingCompletePayload(
             turnNumber: currentTurnNumber,
             content: currentText,
-            model: currentModel
+            model: currentModel,
+            kind: kind
         )
 
         isStreaming = false
@@ -84,5 +92,6 @@ final class ThinkingState {
     func clearCurrentStreaming() {
         currentText = ""
         isStreaming = false
+        kind = .thinking
     }
 }

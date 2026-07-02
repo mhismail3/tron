@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
 /// Events emitted during LLM response streaming.
@@ -45,6 +46,9 @@ pub enum StreamEvent {
     ThinkingDelta {
         /// Thinking text fragment.
         delta: String,
+        /// Source contract for this thinking-like stream.
+        #[serde(default, skip_serializing_if = "ThinkingContentKind::is_thinking")]
+        kind: ThinkingContentKind,
     },
 
     /// Thinking block completed.
@@ -52,6 +56,9 @@ pub enum StreamEvent {
     ThinkingEnd {
         /// Full thinking text.
         thinking: String,
+        /// Source contract for this thinking-like stream.
+        #[serde(default, skip_serializing_if = "ThinkingContentKind::is_thinking")]
+        kind: ThinkingContentKind,
         /// Verification signature.
         #[serde(skip_serializing_if = "Option::is_none")]
         signature: Option<String>,

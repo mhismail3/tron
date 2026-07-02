@@ -21,7 +21,7 @@ use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::domains::model::providers::{
     CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
 };
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
@@ -40,6 +40,8 @@ pub struct StreamState {
     pub seen_thinking_texts: HashSet<String>,
     /// Whether we received full reasoning text (vs only summary).
     pub has_reasoning_text: bool,
+    /// Source contract for the currently accumulated thinking-like content.
+    pub thinking_kind: ThinkingContentKind,
 }
 
 /// State for an individual capability invocation being accumulated.
@@ -63,6 +65,7 @@ pub fn create_stream_state() -> StreamState {
         capability_argument_failed: false,
         seen_thinking_texts: HashSet::new(),
         has_reasoning_text: false,
+        thinking_kind: ThinkingContentKind::Thinking,
     }
 }
 
@@ -160,6 +163,7 @@ fn handle_reasoning_text_delta(
     if let Some(delta) = &event.delta {
         if !state.has_reasoning_text {
             state.has_reasoning_text = true;
+            state.thinking_kind = ThinkingContentKind::Thinking;
             if !state.acc.accumulated_thinking.is_empty() {
                 state.acc.accumulated_thinking.clear();
             }
@@ -181,7 +185,10 @@ fn handle_reasoning_summary_text_delta(
         && !state.seen_thinking_texts.contains(delta.as_str())
     {
         let _ = state.seen_thinking_texts.insert(delta.clone());
-        state.acc.process_thinking_delta(delta)
+        state.thinking_kind = ThinkingContentKind::ReasoningSummary;
+        state
+            .acc
+            .process_thinking_delta_with_kind(delta, ThinkingContentKind::ReasoningSummary)
     } else {
         Vec::new()
     }
@@ -266,12 +273,14 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
                 && let Some(text) = &part.text
             {
                 let _ = state.seen_thinking_texts.insert(text.clone());
+                state.thinking_kind = ThinkingContentKind::ReasoningSummary;
                 if let Some(error) = state.acc.accumulate_thinking(text) {
                     events.push(error);
                     return events;
                 }
                 events.push(StreamEvent::ThinkingDelta {
                     delta: text.clone(),
+                    kind: ThinkingContentKind::ReasoningSummary,
                 });
             }
         }
@@ -323,7 +332,11 @@ fn process_completed_response(
     merge_completed_output_items(response, state, &mut events);
 
     // Emit thinking_end if we had thinking
-    events.extend(state.acc.close_thinking(None));
+    events.extend(
+        state
+            .acc
+            .close_thinking_with_kind(None, state.thinking_kind),
+    );
 
     // Emit text_end if we had text
     events.extend(state.acc.close_text(None));
@@ -484,6 +497,11 @@ fn build_done_event(
                 {
                     content.push(AssistantContent::Thinking {
                         thinking,
+                        kind: if state.has_reasoning_text {
+                            ThinkingContentKind::Thinking
+                        } else {
+                            ThinkingContentKind::ReasoningSummary
+                        },
                         signature: None,
                     });
                 }
@@ -538,6 +556,7 @@ fn build_done_event(
                 0,
                 AssistantContent::Thinking {
                     thinking,
+                    kind: state.thinking_kind,
                     signature: None,
                 },
             );
@@ -552,6 +571,7 @@ fn build_done_event(
         if !state.acc.accumulated_thinking.is_empty() {
             content.push(AssistantContent::Thinking {
                 thinking: state.acc.accumulated_thinking.clone(),
+                kind: state.thinking_kind,
                 signature: None,
             });
         }

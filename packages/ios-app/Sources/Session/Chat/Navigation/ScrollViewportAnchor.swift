@@ -30,4 +30,16 @@ enum ScrollViewportAnchorResolver {
 
         return nil
     }
+
+    static func captureOrFirstLoaded(
+        frames: [UUID: CGRect],
+        viewportHeight: CGFloat,
+        orderedMessageIds: [UUID]
+    ) -> ScrollViewportAnchor? {
+        capture(
+            frames: frames,
+            viewportHeight: viewportHeight,
+            orderedMessageIds: orderedMessageIds
+        ) ?? orderedMessageIds.first.map(ScrollViewportAnchor.init(messageId:))
+    }
 }

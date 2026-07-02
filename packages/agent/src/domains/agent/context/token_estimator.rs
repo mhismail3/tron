@@ -559,6 +559,7 @@ mod tests {
     fn typed_assistant_thinking_chars() {
         let block = AssistantContent::Thinking {
             thinking: "a".repeat(40),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         };
         assert_eq!(estimate_assistant_content_chars(&block), 40);

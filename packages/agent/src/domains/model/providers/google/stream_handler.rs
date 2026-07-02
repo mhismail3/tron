@@ -12,7 +12,7 @@
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 use serde_json::Map;
@@ -82,6 +82,7 @@ impl StreamState {
         } else {
             self.ordered_content.push(AssistantContent::Thinking {
                 thinking: thinking.to_owned(),
+                kind: ThinkingContentKind::Thinking,
                 signature: None,
             });
         }
@@ -338,6 +339,7 @@ fn build_bucketed_content_fallback(state: &StreamState) -> Vec<AssistantContent>
     if !state.acc.accumulated_thinking.is_empty() {
         content.push(AssistantContent::Thinking {
             thinking: state.acc.accumulated_thinking.clone(),
+            kind: ThinkingContentKind::Thinking,
             signature: None,
         });
     }
@@ -522,7 +524,7 @@ mod tests {
         let events = process_stream_chunk(&chunk, &mut state);
         assert!(matches!(events[0], StreamEvent::ThinkingStart));
         assert!(
-            matches!(&events[1], StreamEvent::ThinkingDelta { delta } if delta == "thinking...")
+            matches!(&events[1], StreamEvent::ThinkingDelta { delta, .. } if delta == "thinking...")
         );
     }
 

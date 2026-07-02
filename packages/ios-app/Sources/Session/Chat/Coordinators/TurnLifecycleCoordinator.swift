@@ -102,8 +102,13 @@ final class TurnLifecycleCoordinator {
         // This removes the pulsing thinking icon and "Thinking" header
         if let id = context.thinkingMessageId,
            let index = MessageFinder.indexById(id, in: context.messages),
-           case .thinking(let visible, let isExpanded, _) = context.messages[index].content {
-            context.messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
+           case .thinking(let visible, let isExpanded, _, let kind) = context.messages[index].content {
+            context.messages[index].content = .thinking(
+                visible: visible,
+                isExpanded: isExpanded,
+                isStreaming: false,
+                kind: kind
+            )
             context.logDebug("Marked thinking message as no longer streaming")
         }
 

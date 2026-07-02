@@ -255,6 +255,7 @@ fn extract_capability_invocations_from_content() {
         },
         AssistantContent::Thinking {
             thinking: "hmm".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         },
         AssistantContent::CapabilityInvocation {

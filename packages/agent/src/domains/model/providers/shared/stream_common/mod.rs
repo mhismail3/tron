@@ -11,6 +11,7 @@
 use serde_json::Map;
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
 
@@ -106,6 +107,15 @@ impl StreamAccumulator {
 
     /// Process a thinking delta. Emits `ThinkingStart` on the first call, then `ThinkingDelta`.
     pub fn process_thinking_delta(&mut self, text: &str) -> Vec<StreamEvent> {
+        self.process_thinking_delta_with_kind(text, ThinkingContentKind::Thinking)
+    }
+
+    /// Process a thinking-like delta with an explicit content source contract.
+    pub fn process_thinking_delta_with_kind(
+        &mut self,
+        text: &str,
+        kind: ThinkingContentKind,
+    ) -> Vec<StreamEvent> {
         let mut events = Vec::new();
         if let Some(error) = append_with_limit(
             &mut self.accumulated_thinking,
@@ -121,6 +131,7 @@ impl StreamAccumulator {
         }
         events.push(StreamEvent::ThinkingDelta {
             delta: text.to_string(),
+            kind,
         });
         events
     }
@@ -299,10 +310,20 @@ impl StreamAccumulator {
     /// Returns the event with accumulated thinking text and optional signature.
     /// Resets `thinking_started` to `false`.
     pub fn close_thinking(&mut self, signature: Option<String>) -> Vec<StreamEvent> {
+        self.close_thinking_with_kind(signature, ThinkingContentKind::Thinking)
+    }
+
+    /// Emit `ThinkingEnd` with an explicit content source contract.
+    pub fn close_thinking_with_kind(
+        &mut self,
+        signature: Option<String>,
+        kind: ThinkingContentKind,
+    ) -> Vec<StreamEvent> {
         if self.thinking_started {
             self.thinking_started = false;
             vec![StreamEvent::ThinkingEnd {
                 thinking: self.accumulated_thinking.clone(),
+                kind,
                 signature,
             }]
         } else {

@@ -237,10 +237,15 @@ fn emits_thinking_delta_for_reasoning_summary() {
     assert_eq!(
         events[0],
         StreamEvent::ThinkingDelta {
-            delta: "Analyzing...".into()
+            delta: "Analyzing...".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::ReasoningSummary,
         }
     );
     assert_eq!(state.acc.accumulated_thinking, "Analyzing...");
+    assert_eq!(
+        state.thinking_kind,
+        crate::shared::protocol::content::ThinkingContentKind::ReasoningSummary
+    );
 }
 
 #[test]
@@ -280,6 +285,17 @@ fn handles_reasoning_from_output_item_done() {
         .collect();
     assert_eq!(types, vec!["thinking_start", "thinking_delta"]);
     assert_eq!(state.acc.accumulated_thinking, "The approach is correct.");
+    assert_eq!(
+        state.thinking_kind,
+        crate::shared::protocol::content::ThinkingContentKind::ReasoningSummary
+    );
+    assert!(matches!(
+        &events[1],
+        StreamEvent::ThinkingDelta {
+            kind: crate::shared::protocol::content::ThinkingContentKind::ReasoningSummary,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -720,7 +736,11 @@ fn completed_done_content_dedupes_repeated_thinking_snapshot() {
     assert_eq!(done.content.len(), 2);
     assert!(matches!(
         &done.content[0],
-        AssistantContent::Thinking { thinking, .. } if thinking == "same reasoning"
+        AssistantContent::Thinking {
+            thinking,
+            kind: crate::shared::protocol::content::ThinkingContentKind::ReasoningSummary,
+            ..
+        } if thinking == "same reasoning"
     ));
     assert!(matches!(
         &done.content[1],
@@ -891,7 +911,8 @@ fn reasoning_text_delta_emits_thinking_events() {
     assert_eq!(
         events[1],
         StreamEvent::ThinkingDelta {
-            delta: "Let me think about this...".into()
+            delta: "Let me think about this...".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
         }
     );
     assert!(state.has_reasoning_text);
@@ -925,7 +946,8 @@ fn reasoning_text_replaces_prior_summary() {
     assert_eq!(
         events[0],
         StreamEvent::ThinkingDelta {
-            delta: "Full reasoning content here...".into()
+            delta: "Full reasoning content here...".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
         }
     );
 }

@@ -136,8 +136,11 @@ struct ChatView: View {
             viewModel.clearLocalNotifications()
             viewModel.cancelRecording()
             viewModel.stopLiveEventStream()
-            // Reset for next entry
-            initialLoadComplete = false
+            // Do not reset `initialLoadComplete` here. SwiftUI can send
+            // `onDisappear` for transient app/sheet/navigation transitions
+            // while the same view state may return; clearing it hides the
+            // transcript until a fresh reconstruction cycle completes.
+            // A truly new ChatView instance starts with the default false.
             // Full reset of animation state when leaving session
             viewModel.animationCoordinator.fullReset()
         }

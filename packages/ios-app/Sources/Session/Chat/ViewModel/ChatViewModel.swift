@@ -453,12 +453,17 @@ final class ChatViewModel {
     func markThinkingMessageCompleteIfNeeded() {
         guard let id = thinkingMessageId,
               let index = messageIndex.index(for: id),
-              case .thinking(let visible, let isExpanded, let isStreaming) = messages[index].content,
+              case .thinking(let visible, let isExpanded, let isStreaming, let kind) = messages[index].content,
               isStreaming else {
             return
         }
 
-        messages[index].content = .thinking(visible: visible, isExpanded: isExpanded, isStreaming: false)
+        messages[index].content = .thinking(
+            visible: visible,
+            isExpanded: isExpanded,
+            isStreaming: false,
+            kind: kind
+        )
         thinkingState.markStreamingComplete()
     }
 
@@ -558,7 +563,7 @@ final class ChatViewModel {
     private var isThinkingActivelyStreaming: Bool {
         guard let id = thinkingMessageId,
               let index = messageIndex.index(for: id),
-              case .thinking(_, _, let isStreaming) = messages[index].content else {
+              case .thinking(_, _, let isStreaming, _) = messages[index].content else {
             return false
         }
         return isStreaming

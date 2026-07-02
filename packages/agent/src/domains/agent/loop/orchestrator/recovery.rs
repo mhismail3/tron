@@ -250,6 +250,7 @@ mod tests {
             crate::shared::protocol::content::AssistantContent::text("Hello world"),
             crate::shared::protocol::content::AssistantContent::Thinking {
                 thinking: "Let me think".to_owned(),
+                kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                 signature: None,
             },
             crate::shared::protocol::content::AssistantContent::CapabilityInvocation {

@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use crate::engine::{InvocationId, TraceId};
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
@@ -153,6 +154,7 @@ impl StreamState {
     fn handle_thinking_delta(
         &mut self,
         delta: String,
+        kind: ThinkingContentKind,
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
@@ -171,12 +173,13 @@ impl StreamState {
         );
         self.thinking_acc.push_str(&delta);
         self.saw_streamed_content = true;
-        self.ordered_content.append_thinking(&delta);
+        self.ordered_content.append_thinking(&delta, kind);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ThinkingDelta {
                     base: trace_context.base_event(session_id),
                     delta,
+                    kind,
                 },
                 counter,
             );
@@ -184,6 +187,7 @@ impl StreamState {
             let _ = emitter.emit(TronEvent::ThinkingDelta {
                 base: trace_context.base_event(session_id),
                 delta,
+                kind,
             });
         }
     }
@@ -192,6 +196,7 @@ impl StreamState {
         &mut self,
         thinking: String,
         signature: Option<String>,
+        kind: ThinkingContentKind,
         session_id: &str,
         emitter: &EventEmitter,
         counter: Option<&AtomicI64>,
@@ -200,7 +205,7 @@ impl StreamState {
         self.thinking_acc.clone_from(&thinking);
         self.thinking_signature = signature;
         self.ordered_content
-            .finish_thinking(&thinking, self.thinking_signature.clone());
+            .finish_thinking(&thinking, kind, self.thinking_signature.clone());
         tracing::trace!(
             component = "agent.stream",
             agent_event = "stream_thinking_end",
@@ -216,6 +221,7 @@ impl StreamState {
                 TronEvent::ThinkingEnd {
                     base: trace_context.base_event(session_id),
                     thinking,
+                    kind,
                 },
                 counter,
             );
@@ -223,6 +229,7 @@ impl StreamState {
             let _ = emitter.emit(TronEvent::ThinkingEnd {
                 base: trace_context.base_event(session_id),
                 thinking,
+                kind,
             });
         }
     }
@@ -581,7 +588,8 @@ impl StreamState {
             }
 
             StreamEvent::ThinkingStart => {
-                self.ordered_content.start_thinking();
+                self.ordered_content
+                    .start_thinking(ThinkingContentKind::Thinking);
                 tracing::trace!(
                     component = "agent.stream",
                     agent_event = "stream_thinking_started",
@@ -604,7 +612,7 @@ impl StreamState {
                 }
             }
 
-            StreamEvent::ThinkingDelta { delta } => {
+            StreamEvent::ThinkingDelta { delta, kind } => {
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("thinking", &delta) {
                         tracing::warn!(session_id, error = %e, "journal write failed for thinking delta");
@@ -612,6 +620,7 @@ impl StreamState {
                 }
                 self.handle_thinking_delta(
                     delta,
+                    kind,
                     session_id,
                     emitter,
                     sequence_counter,
@@ -621,6 +630,7 @@ impl StreamState {
 
             StreamEvent::ThinkingEnd {
                 thinking,
+                kind,
                 signature,
             } => {
                 if let Some(j) = journal {
@@ -645,6 +655,7 @@ impl StreamState {
                 self.handle_thinking_end(
                     thinking,
                     signature,
+                    kind,
                     session_id,
                     emitter,
                     sequence_counter,

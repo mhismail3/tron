@@ -322,19 +322,25 @@ extension ChatViewModel {
                     if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = textMessage.id }
                 }
 
-            case .thinking(let thinkingText):
+            case .thinking(let thinkingText, let kind):
                 guard !thinkingText.isEmpty else { continue }
                 let isThinkingStreaming = isLastInSequence && inFlight.streaming?.type == "thinking"
                 accumulatedThinking += thinkingText
 
-                thinkingState.seedCatchUpThinking(accumulatedThinking, isStreaming: isThinkingStreaming)
+                thinkingState.seedCatchUpThinking(
+                    accumulatedThinking,
+                    isStreaming: isThinkingStreaming,
+                    kind: kind
+                )
 
                 // Dedup: check thinkingMessageId first, then scan for existing thinking
                 // message from persisted events (thinkingMessageId is nil after cleanUpStreamingState)
                 let existingThinkingIdx: Int? = thinkingMessageId.flatMap { id in
                     MessageFinder.indexById(id, in: messages)
                 } ?? messages.lastIndex(where: { msg in
-                    if case .thinking = msg.content { return true }
+                    if case .thinking(_, _, _, let existingKind) = msg.content {
+                        return existingKind == kind
+                    }
                     return false
                 })
 
@@ -342,11 +348,16 @@ extension ChatViewModel {
                     messages[idx].content = .thinking(
                         visible: accumulatedThinking,
                         isExpanded: false,
-                        isStreaming: isThinkingStreaming
+                        isStreaming: isThinkingStreaming,
+                        kind: kind
                     )
                     thinkingMessageId = messages[idx].id
                 } else {
-                    let msg = ChatMessage.thinking(accumulatedThinking, isStreaming: isThinkingStreaming)
+                    let msg = ChatMessage.thinking(
+                        accumulatedThinking,
+                        isStreaming: isThinkingStreaming,
+                        kind: kind
+                    )
                     messages.append(msg)
                     thinkingMessageId = msg.id
                 }
@@ -409,7 +420,9 @@ extension ChatViewModel {
         let messageId = UUID(uuidString: capabilityInvocation.invocationId) ?? UUID()
 
             let status: CapabilityInvocationStatus = switch capabilityInvocation.status {
-            case CapabilityInvocationStatusDTO.generating.rawValue, CapabilityInvocationStatusDTO.running.rawValue:
+            case CapabilityInvocationStatusDTO.generating.rawValue:
+                .generating
+            case CapabilityInvocationStatusDTO.running.rawValue:
                 .running
             case CapabilityInvocationStatusDTO.paused.rawValue:
                 .paused

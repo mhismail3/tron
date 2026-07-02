@@ -9,14 +9,22 @@ struct ThinkingContentView: View {
     let content: String
     let isExpanded: Bool
     let isStreaming: Bool
+    let kind: ThinkingDisplayKind
     var onTap: (() -> Void)?
 
     @State private var expanded: Bool
 
-    init(content: String, isExpanded: Bool, isStreaming: Bool = false, onTap: (() -> Void)? = nil) {
+    init(
+        content: String,
+        isExpanded: Bool,
+        isStreaming: Bool = false,
+        kind: ThinkingDisplayKind = .thinking,
+        onTap: (() -> Void)? = nil
+    ) {
         self.content = content
         self.isExpanded = isExpanded
         self.isStreaming = isStreaming
+        self.kind = kind
         self.onTap = onTap
         self._expanded = State(initialValue: isExpanded)
     }
@@ -46,11 +54,12 @@ struct ThinkingContentView: View {
                 .padding(.trailing, 12)
 
             VStack(alignment: .leading, spacing: 4) {
-                // Header with thinking icon - ONLY shown when actively streaming
-                if isStreaming {
+                // Header with source contract - shown while streaming and for
+                // reasoning summaries whose text is not raw append-only thinking.
+                if isStreaming || kind == .reasoningSummary {
                     HStack(spacing: 6) {
                         PulsingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
-                        Text("Thinking")
+                        Text(kind.title)
                             .font(TronTypography.caption)
                             .fontWeight(.medium)
                             .foregroundStyle(Color.secondary.opacity(0.8))

@@ -2230,7 +2230,8 @@ and use those row sequences; for a batch of parallel model-requested calls, all
 persisted `started` rows are broadcast before any child execution begins so
 active clients can render every execution chip immediately. Transient
 `capability.invocation.generating` remains a model-stream drafting hint, not
-durable execution state.
+durable execution state, but active clients still render it immediately and
+reconstruct it on reconnect while the invocation is in flight.
 Active runtime/UI identity is primitive-execution native: payloads carry the
 model-visible primitive name, invocation id, trace id, turn, operation
 arguments, result content, error state, and duration. iOS renders active work
@@ -2631,7 +2632,7 @@ packages/ios-app/Sources/
 - **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`; registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
-- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries, persisted duplicate thinking snapshots inside one assistant message are collapsed defensively, and reconnect reconstruction preserves expanded visible history and backfills bounded event gaps before rebuilding the displayed window.
+- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries, persisted duplicate thinking snapshots inside one assistant message are collapsed defensively, reasoning summaries stay labeled separately from raw append-only thinking, and reconnect reconstruction preserves expanded visible history, in-flight generating capability chips, and bounded event gaps before rebuilding the displayed window.
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session
@@ -2650,8 +2651,10 @@ packages/ios-app/Sources/
   transcription when leaving chat,
   a blank empty/loading chat, app-global connection toasts, ephemeral in-chat
   local error notifications, streamed thinking content with one app-owned
-  neural-spark fallback indicator, one-line generic capability evidence chips,
-  local reconstruction, diagnostics, and generic runtime surfaces.
+  neural-spark fallback indicator and provider-authored reasoning-summary
+  labels, including legacy OpenAI replay blocks without explicit `kind`
+  metadata, one-line generic capability evidence chips, local reconstruction,
+  diagnostics, and generic runtime surfaces.
   Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management
   panels, extension-source surfaces, voice-note storage, memory-retain, rules,

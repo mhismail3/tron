@@ -157,6 +157,7 @@ fn recovered_content_blocks(blocks: &[RecoveredContentBlock]) -> Vec<AssistantCo
             RecoveredContentBlock::Thinking(thinking) => {
                 (!thinking.is_empty()).then(|| AssistantContent::Thinking {
                     thinking: thinking.clone(),
+                    kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
                     signature: None,
                 })
             }

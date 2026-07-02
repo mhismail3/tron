@@ -23,7 +23,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use tracing::{debug, info};
 
-use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::content::{AssistantContent, ThinkingContentKind};
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 
@@ -146,6 +146,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         state.thinking_text.push_str(thinking);
         events.push(StreamEvent::ThinkingDelta {
             delta: thinking.clone(),
+            kind: ThinkingContentKind::Thinking,
         });
     }
 
@@ -157,10 +158,12 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             let thinking = std::mem::take(&mut state.thinking_text);
             state.content_blocks.push(AssistantContent::Thinking {
                 thinking: thinking.clone(),
+                kind: ThinkingContentKind::Thinking,
                 signature: None,
             });
             events.push(StreamEvent::ThinkingEnd {
                 thinking,
+                kind: ThinkingContentKind::Thinking,
                 signature: None,
             });
         }
@@ -182,10 +185,12 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             let thinking = std::mem::take(&mut state.thinking_text);
             state.content_blocks.push(AssistantContent::Thinking {
                 thinking: thinking.clone(),
+                kind: ThinkingContentKind::Thinking,
                 signature: None,
             });
             events.push(StreamEvent::ThinkingEnd {
                 thinking,
+                kind: ThinkingContentKind::Thinking,
                 signature: None,
             });
         }
@@ -290,10 +295,12 @@ fn finalize_open_blocks(state: &mut OllamaStreamState, events: &mut Vec<StreamEv
         let thinking = std::mem::take(&mut state.thinking_text);
         state.content_blocks.push(AssistantContent::Thinking {
             thinking: thinking.clone(),
+            kind: ThinkingContentKind::Thinking,
             signature: None,
         });
         events.push(StreamEvent::ThinkingEnd {
             thinking,
+            kind: ThinkingContentKind::Thinking,
             signature: None,
         });
     }

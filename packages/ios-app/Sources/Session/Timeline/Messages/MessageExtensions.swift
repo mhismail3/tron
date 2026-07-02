@@ -89,8 +89,21 @@ extension ChatMessage {
     }
 
     /// Thinking block message (appears before the text response)
-    static func thinking(_ text: String, isExpanded: Bool = false, isStreaming: Bool = false) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .thinking(visible: text, isExpanded: isExpanded, isStreaming: isStreaming))
+    static func thinking(
+        _ text: String,
+        isExpanded: Bool = false,
+        isStreaming: Bool = false,
+        kind: ThinkingDisplayKind = .thinking
+    ) -> ChatMessage {
+        ChatMessage(
+            role: .assistant,
+            content: .thinking(
+                visible: text,
+                isExpanded: isExpanded,
+                isStreaming: isStreaming,
+                kind: kind
+            )
+        )
     }
 
     /// In-chat notification for provider API errors

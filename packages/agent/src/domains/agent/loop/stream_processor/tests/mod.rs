@@ -61,15 +61,26 @@ fn thinking_then_text_stream() -> ModelResponseStream {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ThinkingStart);
-        yield Ok(StreamEvent::ThinkingDelta { delta: "Let me think".into() });
-        yield Ok(StreamEvent::ThinkingEnd { thinking: "Let me think".into(), signature: None });
+        yield Ok(StreamEvent::ThinkingDelta {
+            delta: "Let me think".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        });
+        yield Ok(StreamEvent::ThinkingEnd {
+            thinking: "Let me think".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: None,
+        });
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "Answer".into() });
         yield Ok(StreamEvent::TextEnd { text: "Answer".into(), signature: None });
         yield Ok(StreamEvent::Done {
             message: AssistantMessage {
                 content: vec![
-                    AssistantContent::Thinking { thinking: "Let me think".into(), signature: None },
+                    AssistantContent::Thinking {
+                        thinking: "Let me think".into(),
+                        kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+                        signature: None,
+                    },
                     AssistantContent::text("Answer"),
                 ],
                 token_usage: None,
@@ -397,8 +408,15 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ThinkingStart);
-        yield Ok(StreamEvent::ThinkingDelta { delta: "summary".into() });
-        yield Ok(StreamEvent::ThinkingEnd { thinking: "full thinking".into(), signature: None });
+        yield Ok(StreamEvent::ThinkingDelta {
+            delta: "summary".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        });
+        yield Ok(StreamEvent::ThinkingEnd {
+            thinking: "full thinking".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: None,
+        });
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "before".into() });
         yield Ok(StreamEvent::TextEnd { text: "before".into(), signature: None });
@@ -412,7 +430,11 @@ async fn stream_order_overrides_bucketed_provider_done_content() {
         yield Ok(StreamEvent::Done {
             message: AssistantMessage {
                 content: vec![
-                    AssistantContent::Thinking { thinking: "full thinking".into(), signature: None },
+                    AssistantContent::Thinking {
+                        thinking: "full thinking".into(),
+                        kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+                        signature: None,
+                    },
                     AssistantContent::text("beforeafter"),
                     AssistantContent::CapabilityInvocation {
                         id: "tc-1".into(),

@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-02 (agent.thinking_end authoritative final snapshot; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
+> Last verified: 2026-07-02 (thinking vs reasoning-summary stream contracts; generating capability chip reconstruction; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -25,8 +25,10 @@ Capability execution chips are server-truth-backed. Live
 come from persisted session rows and carry those row sequences; when the server
 receives several parallel invocation requests, it broadcasts every persisted
 `started` row before execution begins. iOS treats
-`capability.invocation.generating` as pre-execution draft state only, not as the
-durable source for execution chips.
+`capability.invocation.generating` as pre-execution draft state only, but still
+renders it immediately so the user sees pending parallel work before execution
+finishes. Reconnect reconstruction preserves that `generating` state when the
+server reports an in-flight invocation.
 
 ## Plugin Boundary
 
@@ -64,9 +66,16 @@ Rust stream labels with `EventRegistry.registerAll()` so new server events
 cannot silently become unknown in the app.
 
 `agent.thinking_end` is not a marker: it carries the server-authoritative final
-thinking text for the visible Thinking block. The live plugin replaces any
-delta-accumulated thinking text with that final snapshot and marks the block
+thinking-like text for the visible block. The live plugin replaces any
+delta-accumulated text with that final snapshot and marks the block
 non-streaming so live display converges with `message.assistant` replay.
+Providers that expose append-only extended thinking use the default `thinking`
+contract. Provider-authored reasoning summaries use `reasoning_summary`; those
+summaries may be compressed or non-verbatim and must be labeled separately in
+the UI rather than presented as raw chain-of-thought. Legacy OpenAI
+`message.assistant` replay blocks that predate the explicit `kind` field are
+also rendered as reasoning summaries based on their persisted `providerType`
+so old sessions do not overpromise raw thinking.
 
 ## DRC-9 replay manifest/event parity
 

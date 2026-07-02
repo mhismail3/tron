@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 use parking_lot::Mutex;
 
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::events::{TronEvent, TronEventObserver};
 use serde_json::Value;
 
@@ -31,8 +32,13 @@ use serde_json::Value;
 pub enum ContentSequenceItem {
     /// Accumulated text content.
     Text(String),
-    /// Accumulated thinking content.
-    Thinking(String),
+    /// Accumulated thinking-like content.
+    Thinking {
+        /// The accumulated text.
+        text: String,
+        /// Source contract for the text.
+        kind: ThinkingContentKind,
+    },
     /// Reference to a capability invocation by ID.
     CapabilityRef {
         /// The capability invocation this item refers to.
@@ -44,7 +50,13 @@ impl ContentSequenceItem {
     fn to_json(&self) -> Value {
         match self {
             Self::Text(t) => serde_json::json!({ "type": "text", "text": t }),
-            Self::Thinking(t) => serde_json::json!({ "type": "thinking", "thinking": t }),
+            Self::Thinking { text, kind } => {
+                let mut item = serde_json::json!({ "type": "thinking", "thinking": text });
+                if *kind != ThinkingContentKind::Thinking {
+                    item["kind"] = serde_json::json!(kind);
+                }
+                item
+            }
             Self::CapabilityRef { invocation_id } => {
                 serde_json::json!({ "type": "capability_ref", "invocationId": invocation_id })
             }
@@ -167,31 +179,44 @@ impl TurnAccumulator {
     }
 
     /// Append thinking content, coalescing with the last Thinking item in the sequence.
-    pub fn append_thinking(&mut self, delta: &str) {
+    pub fn append_thinking(&mut self, delta: &str, kind: ThinkingContentKind) {
         self.thinking.push_str(delta);
-        if let Some(ContentSequenceItem::Thinking(t)) = self.content_sequence.last_mut() {
-            t.push_str(delta);
+        if let Some(ContentSequenceItem::Thinking {
+            text,
+            kind: current_kind,
+        }) = self.content_sequence.last_mut()
+        {
+            text.push_str(delta);
+            *current_kind = kind;
         } else {
-            self.content_sequence
-                .push(ContentSequenceItem::Thinking(delta.to_string()));
+            self.content_sequence.push(ContentSequenceItem::Thinking {
+                text: delta.to_string(),
+                kind,
+            });
         }
     }
 
     /// Replace the current thinking block with an authoritative final snapshot.
-    pub fn finish_thinking(&mut self, thinking: &str) {
+    pub fn finish_thinking(&mut self, thinking: &str, kind: ThinkingContentKind) {
         self.thinking.clear();
         self.thinking.push_str(thinking);
-        if let Some(ContentSequenceItem::Thinking(t)) = self
+        if let Some(ContentSequenceItem::Thinking {
+            text,
+            kind: current_kind,
+        }) = self
             .content_sequence
             .iter_mut()
             .rev()
-            .find(|item| matches!(item, ContentSequenceItem::Thinking(_)))
+            .find(|item| matches!(item, ContentSequenceItem::Thinking { .. }))
         {
-            t.clear();
-            t.push_str(thinking);
+            text.clear();
+            text.push_str(thinking);
+            *current_kind = kind;
         } else if !thinking.is_empty() {
-            self.content_sequence
-                .push(ContentSequenceItem::Thinking(thinking.to_string()));
+            self.content_sequence.push(ContentSequenceItem::Thinking {
+                text: thinking.to_string(),
+                kind,
+            });
         }
     }
 
@@ -322,16 +347,16 @@ impl TurnAccumulatorMap {
     }
 
     /// Append a thinking delta to the session's accumulator.
-    pub fn handle_thinking_delta(&self, session_id: &str, delta: &str) {
+    pub fn handle_thinking_delta(&self, session_id: &str, delta: &str, kind: ThinkingContentKind) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
-            acc.append_thinking(delta);
+            acc.append_thinking(delta, kind);
         }
     }
 
     /// Replace active thinking with the final full thinking snapshot.
-    pub fn handle_thinking_end(&self, session_id: &str, thinking: &str) {
+    pub fn handle_thinking_end(&self, session_id: &str, thinking: &str, kind: ThinkingContentKind) {
         if let Some(acc) = self.accumulators.lock().get_mut(session_id) {
-            acc.finish_thinking(thinking);
+            acc.finish_thinking(thinking, kind);
         }
     }
 
@@ -460,11 +485,11 @@ impl TurnAccumulatorMap {
                 tracing::trace!(session_id, len = content.len(), "accumulator: text_delta");
                 self.handle_text_delta(session_id, content);
             }
-            TronEvent::ThinkingDelta { delta, .. } => {
-                self.handle_thinking_delta(session_id, delta);
+            TronEvent::ThinkingDelta { delta, kind, .. } => {
+                self.handle_thinking_delta(session_id, delta, *kind);
             }
-            TronEvent::ThinkingEnd { thinking, .. } => {
-                self.handle_thinking_end(session_id, thinking);
+            TronEvent::ThinkingEnd { thinking, kind, .. } => {
+                self.handle_thinking_end(session_id, thinking, *kind);
             }
             TronEvent::CapabilityInvocationGenerating {
                 invocation_id,

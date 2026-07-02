@@ -166,7 +166,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         // And it should be a thinking message
         if let lastMessage = viewModel.messages.last,
-           case .thinking(let visible, _, let isStreaming) = lastMessage.content {
+           case .thinking(let visible, _, let isStreaming, _) = lastMessage.content {
             XCTAssertTrue(visible.contains("Thinking"))
             XCTAssertTrue(isStreaming)
         } else {
@@ -188,7 +188,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.thinkingMessageId, thinkingId)
 
         if let thinkingMessage = viewModel.messages.first(where: { $0.id == thinkingId }),
-           case .thinking(let visible, _, _) = thinkingMessage.content {
+           case .thinking(let visible, _, _, _) = thinkingMessage.content {
             XCTAssertTrue(visible.contains("First"))
             XCTAssertTrue(visible.contains("Second"))
         }
@@ -211,7 +211,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertFalse(viewModel.thinkingState.isStreaming)
         guard let thinkingId = viewModel.thinkingMessageId,
               let message = viewModel.messages.first(where: { $0.id == thinkingId }),
-              case .thinking(let visible, _, let isStreaming) = message.content else {
+              case .thinking(let visible, _, let isStreaming, _) = message.content else {
             return XCTFail("Expected thinking message")
         }
         XCTAssertEqual(visible, "full final thinking")
@@ -219,6 +219,46 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     }
 
     // MARK: - Capability Start Routing Tests
+
+    func test_capabilityInvocationGenerating_createsVisibleGeneratingMessageImmediately() {
+        let result = CapabilityInvocationGeneratingPlugin.Result(
+            modelPrimitiveName: "execute",
+            invocationId: "toolu_generating123",
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "process_run")
+        )
+
+        viewModel.handleCapabilityInvocationGenerating(result)
+
+        XCTAssertEqual(viewModel.messages.count, 1)
+        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("toolu_generating123"))
+        guard case .capabilityInvocation(let invocation) = viewModel.messages[0].content else {
+            return XCTFail("Expected capability invocation chip")
+        }
+        XCTAssertEqual(invocation.id, "toolu_generating123")
+        XCTAssertEqual(invocation.status, .generating)
+        XCTAssertEqual(invocation.identity.operationName, "process_run")
+    }
+
+    func test_parallelCapabilityInvocationGenerating_preservesArrivalOrderBeforeCompletion() {
+        viewModel.handleCapabilityInvocationGenerating(CapabilityInvocationGeneratingPlugin.Result(
+            modelPrimitiveName: "execute",
+            invocationId: "toolu_first",
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "trace_list")
+        ))
+        viewModel.handleCapabilityInvocationGenerating(CapabilityInvocationGeneratingPlugin.Result(
+            modelPrimitiveName: "execute",
+            invocationId: "toolu_second",
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "program_execution_list")
+        ))
+
+        let invocationIds = viewModel.messages.compactMap { message -> String? in
+            guard case .capabilityInvocation(let invocation) = message.content else { return nil }
+            return invocation.id
+        }
+        XCTAssertEqual(invocationIds, ["toolu_first", "toolu_second"])
+        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("toolu_first"))
+        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("toolu_second"))
+    }
 
     func test_capabilityInvocationStarted_createsCapabilityMessage() {
         // Given

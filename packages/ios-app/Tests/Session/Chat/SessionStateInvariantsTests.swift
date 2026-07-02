@@ -123,7 +123,7 @@ final class SessionStateInvariantsTests: XCTestCase {
         XCTAssertEqual(vm.runningCapabilityInvocationCount, 0)
         XCTAssertTrue(vm.currentCapabilityInvocationMessages.isEmpty)
         XCTAssertTrue(vm.currentTurnCapabilityInvocations.isEmpty)
-        guard case .thinking(_, _, let isStreaming) = vm.messages[0].content else {
+        guard case .thinking(_, _, let isStreaming, _) = vm.messages[0].content else {
             return XCTFail("expected thinking message")
         }
         XCTAssertFalse(isStreaming)

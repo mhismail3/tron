@@ -116,6 +116,7 @@ struct AssistantMessagePayload {
     let stopReason: StopReason?
     let latencyMs: Int?
     let model: String
+    let providerType: String?
     let hasThinking: Bool?
     let interrupted: Bool?
 
@@ -171,6 +172,7 @@ struct AssistantMessagePayload {
         self.contentBlocks = blocks
         self.turn = turn
         self.model = model
+        self.providerType = payload.string("providerType")
         self.stopReason = StopReason(rawValue: stopStr)
 
         self.tokenRecord = TokenRecord.from(dict: payload.dict("tokenRecord"))

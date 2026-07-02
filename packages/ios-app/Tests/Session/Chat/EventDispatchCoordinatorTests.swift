@@ -41,7 +41,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
     func testDispatch_thinkingDelta_callsHandleThinkingDelta() {
         // Given: A thinking delta result
-        let result = ThinkingDeltaPlugin.Result(delta: "Let me think...")
+        let result = ThinkingDeltaPlugin.Result(delta: "Let me think...", kind: .thinking)
 
         // When: Dispatching
         coordinator.dispatch(
@@ -52,10 +52,11 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
         // Then: Handler should be called with correct delta
         XCTAssertEqual(mockContext.handleThinkingDeltaCalledWith, "Let me think...")
+        XCTAssertEqual(mockContext.handleThinkingDeltaKindCalledWith, .thinking)
     }
 
     func testDispatch_thinkingEnd_callsHandleThinkingEnd() {
-        let result = ThinkingEndPlugin.Result(thinking: "Final thinking snapshot")
+        let result = ThinkingEndPlugin.Result(thinking: "Final thinking snapshot", kind: .thinking)
 
         coordinator.dispatch(
             type: ThinkingEndPlugin.eventType,
@@ -64,6 +65,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(mockContext.handleThinkingEndCalledWith, "Final thinking snapshot")
+        XCTAssertEqual(mockContext.handleThinkingEndKindCalledWith, .thinking)
     }
 
     // MARK: - Capability Event Tests
@@ -388,7 +390,9 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Text/Thinking
     var handleTextDeltaCalledWith: String?
     var handleThinkingDeltaCalledWith: String?
+    var handleThinkingDeltaKindCalledWith: ThinkingDisplayKind?
     var handleThinkingEndCalledWith: String?
+    var handleThinkingEndKindCalledWith: ThinkingDisplayKind?
 
     // MARK: - Capabilities
     var handleCapabilityInvocationGeneratingCalledWith: CapabilityInvocationGeneratingPlugin.Result?
@@ -420,12 +424,14 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleTextDeltaCalledWith = delta
     }
 
-    func handleThinkingDelta(_ delta: String) {
+    func handleThinkingDelta(_ delta: String, kind: ThinkingDisplayKind) {
         handleThinkingDeltaCalledWith = delta
+        handleThinkingDeltaKindCalledWith = kind
     }
 
-    func handleThinkingEnd(_ thinking: String) {
+    func handleThinkingEnd(_ thinking: String, kind: ThinkingDisplayKind) {
         handleThinkingEndCalledWith = thinking
+        handleThinkingEndKindCalledWith = kind
     }
 
     func handleCapabilityInvocationGenerating(_ result: CapabilityInvocationGeneratingPlugin.Result) {

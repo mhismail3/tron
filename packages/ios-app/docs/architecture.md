@@ -266,10 +266,16 @@ The chat timeline owns only truthful local/session presentation state:
   server-authoritative suffix, and performs bounded older-page backfill when the
   suffix would otherwise leave an event-sequence gap. Server reconstruction
   failures close the server-history source for that pagination epoch so the top
-  detent does not retry the same failed cursor.
+  detent does not retry the same failed cursor. Once reconstruction has produced
+  real messages, row visibility fails open if the view-local initial-load flag
+  becomes stale; no animation state is allowed to hide the entire transcript.
 - Thinking fallback is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.
+  Provider-authored reasoning summaries are rendered as reasoning summaries, not
+  raw append-only thinking, because providers may compress or rewrite them.
+  Legacy OpenAI replay blocks without an explicit `kind` field use the same
+  reasoning-summary presentation based on persisted provider type.
 - Capability evidence uses `CapabilityEvidencePresentation` as the pure mapper
   for one-line chat chips and sectioned detail sheets. Chips stay compact; the
   detail sheet shows summary, target/input/result/error, and technical

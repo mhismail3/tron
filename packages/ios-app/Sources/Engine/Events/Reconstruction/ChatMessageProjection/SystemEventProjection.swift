@@ -63,7 +63,12 @@ enum SystemEventProjection {
 
         return ChatMessage(
             role: .assistant,
-            content: .thinking(visible: displayText, isExpanded: false, isStreaming: false),
+            content: .thinking(
+                visible: displayText,
+                isExpanded: false,
+                isStreaming: false,
+                kind: parsed.kind
+            ),
             timestamp: timestamp
         )
     }

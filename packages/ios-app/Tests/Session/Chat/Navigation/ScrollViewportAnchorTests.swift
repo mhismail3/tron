@@ -53,4 +53,29 @@ struct ScrollViewportAnchorTests {
 
         #expect(anchor == nil)
     }
+
+    @Test("falls back to first loaded message when frames are unavailable")
+    func fallsBackToFirstLoadedMessageWhenFramesAreUnavailable() {
+        let first = UUID()
+        let second = UUID()
+
+        let anchor = ScrollViewportAnchorResolver.captureOrFirstLoaded(
+            frames: [:],
+            viewportHeight: 700,
+            orderedMessageIds: [first, second]
+        )
+
+        #expect(anchor?.messageId == first)
+    }
+
+    @Test("does not fabricate anchor without loaded messages")
+    func noFallbackWithoutLoadedMessages() {
+        let anchor = ScrollViewportAnchorResolver.captureOrFirstLoaded(
+            frames: [:],
+            viewportHeight: 700,
+            orderedMessageIds: []
+        )
+
+        #expect(anchor == nil)
+    }
 }

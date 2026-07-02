@@ -311,12 +311,17 @@ extension ChatView {
 
     /// Check if message at index should be visible based on cascade state
     func messageIsVisible(at index: Int, total: Int) -> Bool {
-        // During initial cascade, use coordinator
-        if viewModel.animationCoordinator.isCascading || !initialLoadComplete {
-            return viewModel.animationCoordinator.isCascadeVisibleFromBottom(index: index, total: total)
-        }
-        // After cascade complete, all messages visible
-        return true
+        ChatMessageVisibilityPolicy.isVisible(
+            index: index,
+            total: total,
+            initialLoadComplete: initialLoadComplete,
+            hasReconstructedState: viewModel.hasInitiallyLoaded,
+            isCascading: viewModel.animationCoordinator.isCascading,
+            cascadeAllowsVisibility: viewModel.animationCoordinator.isCascadeVisibleFromBottom(
+                index: index,
+                total: total
+            )
+        )
     }
 
     // MARK: - Earlier Message Autoload
@@ -342,13 +347,19 @@ extension ChatView {
             return 0
         }
 
-        let anchor = ScrollViewportAnchorResolver.capture(
+        let orderedMessageIds = viewModel.messages.map(\.id)
+        let measuredAnchor = ScrollViewportAnchorResolver.capture(
             frames: messageViewportFrames,
             viewportHeight: messageViewportHeight,
-            orderedMessageIds: viewModel.messages.map(\.id)
+            orderedMessageIds: orderedMessageIds
+        )
+        let anchor = ScrollViewportAnchorResolver.captureOrFirstLoaded(
+            frames: messageViewportFrames,
+            viewportHeight: messageViewportHeight,
+            orderedMessageIds: orderedMessageIds
         )
         logger.debug(
-            "[HISTORY] autoload requested anchor=\(anchor?.messageId.uuidString ?? "none") displayed=\(viewModel.messages.count)",
+            "[HISTORY] autoload requested anchor=\(anchor?.messageId.uuidString ?? "none") measured=\(measuredAnchor != nil) displayed=\(viewModel.messages.count)",
             category: .ui
         )
         scrollCoordinator.willPrependHistory(anchor: anchor)

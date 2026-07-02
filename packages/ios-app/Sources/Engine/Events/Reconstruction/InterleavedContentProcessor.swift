@@ -65,6 +65,7 @@ enum InterleavedContentProcessor {
                 if let message = processThinkingBlock(
                     block,
                     timestamp: timestamp,
+                    parsed: parsed,
                     emittedSnapshots: &emittedThinkingSnapshots
                 ) {
                     messages.append(message)
@@ -117,6 +118,7 @@ enum InterleavedContentProcessor {
     private static func processThinkingBlock(
         _ block: [String: Any],
         timestamp: Date,
+        parsed: AssistantMessagePayload,
         emittedSnapshots: inout Set<String>
     ) -> ChatMessage? {
         guard let thinkingText = block["thinking"] as? String, !thinkingText.isEmpty else {
@@ -126,10 +128,26 @@ enum InterleavedContentProcessor {
         guard !normalized.isEmpty, emittedSnapshots.insert(normalized).inserted else {
             return nil
         }
+        let kind: ThinkingDisplayKind
+        if let serverKind = block["kind"] as? String {
+            kind = ThinkingDisplayKind(serverValue: serverKind)
+        } else if parsed.providerType == "openai" {
+            // Legacy OpenAI events predate the server `kind` field. Those
+            // blocks are provider-authored reasoning summaries, not raw
+            // append-only thinking, so avoid overpromising in persisted UI.
+            kind = .reasoningSummary
+        } else {
+            kind = .thinking
+        }
 
         return ChatMessage(
             role: .assistant,
-            content: .thinking(visible: thinkingText, isExpanded: false, isStreaming: false),
+            content: .thinking(
+                visible: thinkingText,
+                isExpanded: false,
+                isStreaming: false,
+                kind: kind
+            ),
             timestamp: timestamp
         )
     }

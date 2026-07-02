@@ -118,7 +118,16 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let thinkingId = UUID()
         mockContext.thinkingMessageId = thinkingId
         mockContext.messages = [
-            ChatMessage(id: thinkingId, role: .assistant, content: .thinking(visible: "thinking...", isExpanded: false, isStreaming: true))
+            ChatMessage(
+                id: thinkingId,
+                role: .assistant,
+                content: .thinking(
+                    visible: "thinking...",
+                    isExpanded: false,
+                    isStreaming: true,
+                    kind: .thinking
+                )
+            )
         ]
 
         // When
@@ -130,7 +139,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         coordinator.handleTurnEnd(pluginResult, context: mockContext)
 
         // Then
-        if case .thinking(_, _, let isStreaming) = mockContext.messages[0].content {
+        if case .thinking(_, _, let isStreaming, _) = mockContext.messages[0].content {
             XCTAssertFalse(isStreaming)
         } else {
             XCTFail("Expected thinking content")

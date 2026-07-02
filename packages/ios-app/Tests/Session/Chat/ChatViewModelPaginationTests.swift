@@ -282,6 +282,50 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(textContent(viewModel.messages.last), "message 200")
     }
 
+    func testReconnectReconstructionPreservesGeneratingCapabilityChip() async {
+        let (viewModel, _) = makeViewModel()
+
+        await viewModel.processReconstructionResult(
+            reconstructResult(
+                events: [],
+                hasMoreEvents: false,
+                oldestEventId: nil,
+                inFlight: InFlightState(
+                    capabilityInvocations: [
+                        CurrentTurnCapabilityInvocation(
+                            invocationId: "capability-generating-1",
+                            arguments: nil,
+                            status: "generating",
+                            result: nil,
+                            isError: nil,
+                            startedAt: nil,
+                            completedAt: nil,
+                            streamingOutput: nil,
+                            modelPrimitiveName: "execute",
+                            operationName: "process_run",
+                            operation: nil,
+                            traceId: nil,
+                            rootInvocationId: nil,
+                            themeColor: nil,
+                            presentationHints: nil
+                        )
+                    ],
+                    contentSequence: [.capabilityRef(invocationId: "capability-generating-1")],
+                    streaming: nil
+                )
+            )
+        )
+
+        XCTAssertEqual(viewModel.messages.count, 1)
+        guard case .capabilityInvocation(let invocation) = viewModel.messages[0].content else {
+            return XCTFail("Expected visible in-flight capability chip")
+        }
+        XCTAssertEqual(invocation.id, "capability-generating-1")
+        XCTAssertEqual(invocation.status, .generating)
+        XCTAssertEqual(invocation.identity.operationName, "process_run")
+        XCTAssertTrue(viewModel.animationCoordinator.isCapabilityInvocationVisible("capability-generating-1"))
+    }
+
     func testSuccessfulReconnectReconstructionClearsStalePrunedLiveBuffer() async {
         let (viewModel, _) = makeViewModel()
         viewModel.loadedReconstructionEvents = rawMessageEvents(range: 1...100)
@@ -350,16 +394,17 @@ final class ChatViewModelPaginationTests: XCTestCase {
     private func reconstructResult(
         events: [RawEvent],
         hasMoreEvents: Bool,
-        oldestEventId: String?
+        oldestEventId: String?,
+        inFlight: InFlightState? = nil
     ) -> SessionReconstructResult {
         SessionReconstructResult(
             events: events,
             hasMoreEvents: hasMoreEvents,
             oldestEventId: oldestEventId,
-            inFlight: nil,
+            inFlight: inFlight,
             lastSequence: Int64(events.map(\.sequence).max() ?? 0),
-            isRunning: false,
-            agentPhase: "idle",
+            isRunning: inFlight != nil,
+            agentPhase: inFlight == nil ? "idle" : "processing",
             metadata: ReconstructMetadata(
                 model: nil,
                 turnCount: nil,

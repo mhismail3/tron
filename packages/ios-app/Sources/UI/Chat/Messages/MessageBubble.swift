@@ -56,8 +56,13 @@ struct MessageBubble: View {
         case .streaming(let text):
             StreamingContentView(text: text)
 
-        case .thinking(let visible, let isExpanded, let isStreaming):
-            ThinkingContentView(content: visible, isExpanded: isExpanded, isStreaming: isStreaming) {
+        case .thinking(let visible, let isExpanded, let isStreaming, let kind):
+            ThinkingContentView(
+                content: visible,
+                isExpanded: isExpanded,
+                isStreaming: isStreaming,
+                kind: kind
+            ) {
                 onTap?(.thinking(visible))
             }
 

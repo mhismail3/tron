@@ -15,6 +15,7 @@ enum ThinkingDeltaPlugin: DispatchableEventPlugin {
 
         struct DataPayload: Decodable, Sendable {
             let delta: String
+            let kind: String?
         }
     }
 
@@ -22,17 +23,18 @@ enum ThinkingDeltaPlugin: DispatchableEventPlugin {
 
     struct Result: EventResult {
         let delta: String
+        let kind: ThinkingDisplayKind
     }
 
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(delta: event.data.delta)
+        Result(delta: event.data.delta, kind: ThinkingDisplayKind(serverValue: event.data.kind))
     }
 
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
         guard let r = result as? Result else { return }
-        context.handleThinkingDelta(r.delta)
+        context.handleThinkingDelta(r.delta, kind: r.kind)
     }
 }

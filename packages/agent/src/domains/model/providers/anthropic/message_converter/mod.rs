@@ -231,6 +231,7 @@ fn convert_assistant_content(
         AssistantContent::Thinking {
             thinking,
             signature,
+            ..
         } => {
             // Only include thinking blocks with signatures (extended thinking models).
             // Display-only thinking (no signature) MUST NOT be sent back.

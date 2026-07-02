@@ -175,10 +175,12 @@ fn tron_event_all_event_types() {
         TronEvent::ThinkingDelta {
             base: base.clone(),
             delta: "d".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
         },
         TronEvent::ThinkingEnd {
             base: base.clone(),
             thinking: "t".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
         },
         TronEvent::SessionCreated {
             base: base.clone(),

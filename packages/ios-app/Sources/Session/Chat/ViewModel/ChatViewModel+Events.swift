@@ -38,16 +38,20 @@ extension ChatViewModel {
         logger.verbose("Text delta received: +\(delta.count) chars, total: \(streamingManager.streamingText.count)", category: .events)
     }
 
-    func handleThinkingDelta(_ delta: String) {
+    func handleThinkingDelta(_ delta: String, kind: ThinkingDisplayKind = .thinking) {
         // Route to ThinkingState for accumulation and sheet/history functionality
-        thinkingState.handleThinkingDelta(delta)
+        thinkingState.handleThinkingDelta(delta, kind: kind)
         let accumulatedText = thinkingState.currentText
 
         // Create thinking message on first delta (so it appears BEFORE the text response)
         // With adaptive thinking, text deltas may arrive before thinking deltas,
         // so we insert before any existing streaming message to maintain visual order.
         if thinkingMessageId == nil {
-            let thinkingMessage = ChatMessage.thinking(accumulatedText, isStreaming: true)
+            let thinkingMessage = ChatMessage.thinking(
+                accumulatedText,
+                isStreaming: true,
+                kind: kind
+            )
 
             if let streamingId = streamingManager.streamingMessageId,
                let streamingIndex = messageIndex.index(for: streamingId) {
@@ -63,14 +67,19 @@ extension ChatViewModel {
         } else if let id = thinkingMessageId,
                   let index = messageIndex.index(for: id) {
             // Update existing thinking message with accumulated content
-            messages[index].content = .thinking(visible: accumulatedText, isExpanded: false, isStreaming: true)
+            messages[index].content = .thinking(
+                visible: accumulatedText,
+                isExpanded: false,
+                isStreaming: true,
+                kind: kind
+            )
         }
 
         logger.verbose("Thinking delta: +\(delta.count) chars, total: \(accumulatedText.count)", category: .events)
     }
 
-    func handleThinkingEnd(_ thinking: String) {
-        thinkingState.handleThinkingEnd(thinking)
+    func handleThinkingEnd(_ thinking: String, kind: ThinkingDisplayKind = .thinking) {
+        thinkingState.handleThinkingEnd(thinking, kind: kind)
         guard !thinking.isEmpty else {
             markThinkingMessageCompleteIfNeeded()
             return
@@ -78,9 +87,14 @@ extension ChatViewModel {
 
         if let id = thinkingMessageId,
            let index = messageIndex.index(for: id) {
-            messages[index].content = .thinking(visible: thinking, isExpanded: false, isStreaming: false)
+            messages[index].content = .thinking(
+                visible: thinking,
+                isExpanded: false,
+                isStreaming: false,
+                kind: kind
+            )
         } else {
-            let thinkingMessage = ChatMessage.thinking(thinking, isStreaming: false)
+            let thinkingMessage = ChatMessage.thinking(thinking, isStreaming: false, kind: kind)
             if let streamingId = streamingManager.streamingMessageId,
                let streamingIndex = messageIndex.index(for: streamingId) {
                 insertInMessages(thinkingMessage, at: streamingIndex)

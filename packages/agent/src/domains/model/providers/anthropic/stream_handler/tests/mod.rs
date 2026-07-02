@@ -173,7 +173,7 @@ fn content_block_delta_thinking() {
     let events = process_sse_event(&event, &mut state);
     assert_eq!(events.len(), 1);
     match &events[0] {
-        StreamEvent::ThinkingDelta { delta } => assert_eq!(delta, "Let me think"),
+        StreamEvent::ThinkingDelta { delta, .. } => assert_eq!(delta, "Let me think"),
         _ => panic!("expected ThinkingDelta"),
     }
     assert_eq!(state.acc.accumulated_thinking, "Let me think");
@@ -265,6 +265,7 @@ fn content_block_stop_thinking_with_signature() {
         StreamEvent::ThinkingEnd {
             thinking,
             signature,
+            ..
         } => {
             assert_eq!(thinking, "deep thought");
             assert_eq!(signature.as_deref(), Some("sig123"));
@@ -624,6 +625,7 @@ fn full_thinking_then_text_stream() {
         StreamEvent::ThinkingEnd {
             thinking,
             signature,
+            ..
         } => {
             assert_eq!(thinking, "deep");
             assert_eq!(signature.as_deref(), Some("sig"));

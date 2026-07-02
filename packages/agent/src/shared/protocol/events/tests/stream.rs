@@ -47,6 +47,7 @@ fn stream_event_text_end_no_signature() {
 fn stream_event_thinking_delta() {
     let e = StreamEvent::ThinkingDelta {
         delta: "hmm".into(),
+        kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
     };
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["type"], "thinking_delta");
@@ -139,9 +140,13 @@ fn stream_event_all_variants_serialize() {
             signature: None,
         },
         StreamEvent::ThinkingStart,
-        StreamEvent::ThinkingDelta { delta: "d".into() },
+        StreamEvent::ThinkingDelta {
+            delta: "d".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        },
         StreamEvent::ThinkingEnd {
             thinking: "t".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
             signature: None,
         },
         StreamEvent::CapabilityInvocationDraftStart {

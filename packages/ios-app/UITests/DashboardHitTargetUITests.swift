@@ -96,17 +96,7 @@ final class DashboardHitTargetUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments.append("--tron-ui-test-onboarding-complete")
         app.launch()
-
-        if !app.scrollViews["chat-message-scroll-view"].waitForExistence(timeout: 5) {
-            let recentSession = app.buttons.matching(
-                NSPredicate(format: "label CONTAINS[c] %@", "last active")
-            ).firstMatch
-
-            guard recentSession.waitForExistence(timeout: 20) else {
-                throw XCTSkip("No session rows are available for chat history scroll validation")
-            }
-            recentSession.tap()
-        }
+        try openRecentChatIfNeeded(in: app)
 
         let messageScrollView = app.scrollViews["chat-message-scroll-view"].firstMatch
         XCTAssertTrue(
@@ -120,16 +110,45 @@ final class DashboardHitTargetUITests: XCTestCase {
             "Chat should render at least one visible message before history scrolling"
         )
 
-        messageScrollView.swipeDown()
+        for attempt in 1...4 {
+            messageScrollView.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.9))
+
+            XCTAssertGreaterThan(
+                visibleMessageElementCount(in: app),
+                0,
+                "History swipe \(attempt) must not leave the message viewport blank"
+            )
+        }
+
+        XCUIDevice.shared.press(.home)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.activate()
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
 
         XCTAssertGreaterThan(
             visibleMessageElementCount(in: app),
             0,
-            "History scrolling must not leave the message viewport blank"
+            "Foreground resume from an open chat must restore visible message history"
         )
         XCTAssertTrue(app.textViews["Message input"].exists || app.textFields["Message input"].exists)
         keepScreenshot(named: "chat-history-scroll-populated")
+    }
+
+    @MainActor
+    private func openRecentChatIfNeeded(in app: XCUIApplication) throws {
+        if app.scrollViews["chat-message-scroll-view"].waitForExistence(timeout: 5) {
+            return
+        }
+
+        let recentSession = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "last active")
+        ).firstMatch
+
+        guard recentSession.waitForExistence(timeout: 20) else {
+            throw XCTSkip("No session rows are available for chat history scroll validation")
+        }
+        recentSession.tap()
     }
 
     @MainActor

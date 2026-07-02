@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::super::{CapabilityEventIdentity, CapabilityInvocationSummary};
 use super::{BaseEvent, CompactionReason};
+use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::messages::TokenUsage;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 
@@ -383,11 +384,15 @@ tron_events! {
     /// Thinking delta.
     ThinkingDelta {
         delta: String,
+        #[serde(default, skip_serializing_if = "ThinkingContentKind::is_thinking")]
+        kind: ThinkingContentKind,
     } => "thinking_delta",
 
     /// Thinking ended.
     ThinkingEnd {
         thinking: String,
+        #[serde(default, skip_serializing_if = "ThinkingContentKind::is_thinking")]
+        kind: ThinkingContentKind,
     } => "thinking_end",
 
     // -- Session lifecycle --
