@@ -99,6 +99,7 @@ fn capability_exec_ctx<'a>(
         cancel,
         workspace_id: None,
         sequence_counter: None,
+        emit_lifecycle_events: true,
         turn: 1,
         invocation_abort_registry: None,
         engine_host: None,

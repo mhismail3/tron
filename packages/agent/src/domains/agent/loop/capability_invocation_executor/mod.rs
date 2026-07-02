@@ -8,6 +8,12 @@
 //! placed in the engine causal context for `capability::execute` so downstream
 //! domains can enforce goal, prompt-artifact, program-execution, resource,
 //! filesystem, and Git contracts without wildcard selectors.
+//!
+//! Durable capability lifecycle ownership stays in the turn runner. When a
+//! session event persister is available, the executor only returns the
+//! primitive result; the turn runner persists and broadcasts row-backed
+//! `capability.invocation.started` / `completed` events so live clients and
+//! reconstruction share the same sequence source.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -193,6 +199,12 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     pub cancel: &'a CancellationToken,
     pub workspace_id: Option<&'a str>,
     pub sequence_counter: Option<&'a AtomicI64>,
+    /// Whether the executor should emit transient lifecycle events itself.
+    ///
+    /// Turn-runner callers with a session event persister set this to `false`
+    /// because durable capability lifecycle events are broadcast from persisted
+    /// rows using persisted row sequences.
+    pub emit_lifecycle_events: bool,
     pub turn: i64,
     pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
     pub engine_host: Option<&'a EngineHostHandle>,
@@ -252,18 +264,20 @@ pub async fn execute_capability_invocation(
         ctx.parent_invocation_id,
     );
 
-    let started = TronEvent::CapabilityInvocationStarted {
-        base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
-        invocation_id: invocation_id.clone(),
-        model_primitive_name: model_primitive_name.clone(),
-        arguments: effective_args.as_object().cloned(),
-        capability_identity: primitive_identity.clone(),
-    };
-    emit(ctx, started);
-    debug!(
-        model_primitive_name,
-        invocation_id, session_id, "capability invocation started"
-    );
+    if ctx.emit_lifecycle_events {
+        let started = TronEvent::CapabilityInvocationStarted {
+            base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
+            invocation_id: invocation_id.clone(),
+            model_primitive_name: model_primitive_name.clone(),
+            arguments: effective_args.as_object().cloned(),
+            capability_identity: primitive_identity.clone(),
+        };
+        emit(ctx, started);
+        debug!(
+            model_primitive_name,
+            invocation_id, session_id, "capability invocation started"
+        );
+    }
 
     let (per_invocation_cancel, _abort_guard) = match ctx.invocation_abort_registry {
         Some(registry) => {
@@ -348,17 +362,19 @@ pub async fn execute_capability_invocation(
     metrics::histogram!("capability_invocation_duration_seconds", "capability" => model_primitive_name.clone())
         .record(start.elapsed().as_secs_f64());
 
-    let completed = TronEvent::CapabilityInvocationCompleted {
-        base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
-        invocation_id: invocation_id.clone(),
-        model_primitive_name: model_primitive_name.clone(),
-        duration: duration_ms,
-        is_error: capability_result.is_error,
-        result: Some(capability_result.clone()),
-        capability_identity: resolved_identity,
-    };
-    emit(ctx, completed);
-    debug!(capability = %model_primitive_name, duration_ms, "capability invocation completed");
+    if ctx.emit_lifecycle_events {
+        let completed = TronEvent::CapabilityInvocationCompleted {
+            base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),
+            invocation_id: invocation_id.clone(),
+            model_primitive_name: model_primitive_name.clone(),
+            duration: duration_ms,
+            is_error: capability_result.is_error,
+            result: Some(capability_result.clone()),
+            capability_identity: resolved_identity,
+        };
+        emit(ctx, completed);
+        debug!(capability = %model_primitive_name, duration_ms, "capability invocation completed");
+    }
 
     CapabilityInvocationExecutionResult {
         result: capability_result,

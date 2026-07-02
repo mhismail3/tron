@@ -1,11 +1,16 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::EventType;
+use crate::domains::session::event_store::types::payloads::capability_invocation::{
+    CapabilityInvocationCompletedPayload, CapabilityInvocationStartedPayload,
+};
 use crate::shared::protocol::events::{
     AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
 };
 use crate::shared::protocol::messages::{Provider, TokenUsage};
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use serde_json::{Value, json};
 use tracing::{error, warn};
 
@@ -32,6 +37,89 @@ fn base_event(
     )
 }
 
+fn base_event_from_row(row: &EventRow, payload: &Value) -> BaseEvent {
+    BaseEvent {
+        session_id: row.session_id.clone(),
+        timestamp: row.timestamp.clone(),
+        sequence: Some(row.sequence),
+        trace_id: payload
+            .get("traceId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        parent_invocation_id: payload
+            .get("parentInvocationId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+    }
+}
+
+fn started_event_from_row(row: &EventRow, payload_value: &Value) -> Option<TronEvent> {
+    let payload: CapabilityInvocationStartedPayload = serde_json::from_value(payload_value.clone())
+        .inspect_err(|error| {
+            warn!(
+                event_id = %row.id,
+                error = %error,
+                "failed to decode capability start row for live broadcast"
+            );
+        })
+        .ok()?;
+    let model_primitive_name = payload
+        .capability_identity
+        .model_primitive_name
+        .clone()
+        .unwrap_or_else(|| payload.name.clone());
+    let arguments = payload.arguments.as_object().cloned();
+
+    Some(TronEvent::CapabilityInvocationStarted {
+        base: base_event_from_row(row, &payload_value),
+        invocation_id: payload.invocation_id,
+        model_primitive_name,
+        arguments,
+        capability_identity: payload.capability_identity,
+    })
+}
+
+fn completed_event_from_row(row: &EventRow, payload_value: &Value) -> Option<TronEvent> {
+    let payload: CapabilityInvocationCompletedPayload =
+        serde_json::from_value(payload_value.clone())
+            .inspect_err(|error| {
+                warn!(
+                    event_id = %row.id,
+                    error = %error,
+                    "failed to decode capability completion row for live broadcast"
+                );
+            })
+            .ok()?;
+    let model_primitive_name = payload
+        .capability_identity
+        .model_primitive_name
+        .clone()
+        .unwrap_or_else(|| {
+            payload_value
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("execute")
+                .to_owned()
+        });
+    let duration = u64::try_from(payload.duration).unwrap_or(0);
+    let result = CapabilityResult {
+        content: CapabilityResultBody::Text(payload.content),
+        details: payload.details,
+        is_error: Some(payload.is_error),
+        stop_turn: None,
+    };
+
+    Some(TronEvent::CapabilityInvocationCompleted {
+        base: base_event_from_row(row, &payload_value),
+        invocation_id: payload.invocation_id,
+        model_primitive_name,
+        duration,
+        is_error: Some(payload.is_error),
+        result: Some(result),
+        capability_identity: payload.capability_identity,
+    })
+}
+
 /// Emit an event, using sequenced emission when a counter is available.
 fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Option<&AtomicI64>) {
     if let Some(counter) = counter {
@@ -52,6 +140,39 @@ fn advance_counter_at_least(counter: Option<&AtomicI64>, floor: i64) {
             Err(next) => current = next,
         }
     }
+}
+
+/// Broadcast a persisted capability start row with the row's durable sequence.
+///
+/// INVARIANT: start broadcasts are row-backed. Callers must first persist every
+/// start in a requested execution batch, then broadcast these rows before any
+/// child execution future is polled so live clients see all chips before the
+/// first completion can arrive.
+pub(super) fn emit_persisted_capability_invocation_started(
+    emitter: &Arc<EventEmitter>,
+    row: &EventRow,
+    payload: &Value,
+) {
+    let Some(event) = started_event_from_row(row, payload) else {
+        return;
+    };
+    let _ = emitter.emit(event);
+}
+
+/// Broadcast a persisted capability completion row with the row's durable sequence.
+///
+/// INVARIANT: the executor returns a result only. The turn runner owns durable
+/// completion persistence and broadcasts this row-backed event only after the
+/// write succeeds, keeping live lifecycle order identical to reconstruction.
+pub(super) fn emit_persisted_capability_invocation_completed(
+    emitter: &Arc<EventEmitter>,
+    row: &EventRow,
+    payload: &Value,
+) {
+    let Some(event) = completed_event_from_row(row, payload) else {
+        return;
+    };
+    let _ = emitter.emit(event);
 }
 
 /// Persist a `stream.turn_start` event, then broadcast the matching

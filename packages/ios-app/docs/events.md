@@ -20,6 +20,14 @@ models subscribe through `SessionEventRepository`, so event plugins receive
 parsed event contracts without SwiftUI/session code importing concrete engine
 transport or raw settings/auth protocol DTOs.
 
+Capability execution chips are server-truth-backed. Live
+`capability.invocation.started` and `capability.invocation.completed` events
+come from persisted session rows and carry those row sequences; when the server
+receives several parallel invocation requests, it broadcasts every persisted
+`started` row before execution begins. iOS treats
+`capability.invocation.generating` as pre-execution draft state only, not as the
+durable source for execution chips.
+
 ## Plugin Boundary
 
 Each live plugin parses one server event family into a UI-ready result and

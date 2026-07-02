@@ -4,6 +4,9 @@
 //! child `capability::execute` invocations, and writes the provider-facing
 //! capability result message. The bounded model-context evidence projection is
 //! owned by [`projection`] so raw execution details stay out of provider text.
+//! Live `capability.invocation.started` and `completed` broadcasts are emitted
+//! from persisted rows with persisted row sequences; a requested batch's start
+//! rows are all broadcast before any child execution future is polled.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,7 +21,7 @@ use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::capability::is_supported_operation;
-use crate::domains::session::event_store::EventType;
+use crate::domains::session::event_store::{EventRow, EventType};
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::Message;
 use serde_json::{Value, json};
@@ -152,6 +155,8 @@ pub(super) async fn execute_capability_invocation_phase(
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
     let mut persist_failed = false;
+    let mut persisted_started_rows: Vec<(EventRow, Value)> =
+        Vec::with_capacity(params.stream_result.capability_invocations.len());
     info!(
         component = "agent.capability",
         agent_event = "capability_phase_started",
@@ -186,25 +191,28 @@ pub(super) async fn execute_capability_invocation_phase(
             ) {
                 payload.extend(identity);
             }
-            if let Err(error) = persister
+            let row = match persister
                 .append_with_runtime_sequence(
                     params.session_id,
                     EventType::CapabilityInvocationStarted,
-                    payload,
+                    payload.clone(),
                     params.sequence_counter,
                 )
                 .await
             {
-                warn!(
-                    params.session_id,
-                    turn = params.turn,
-                    invocation_id = %capability_invocation.id,
-                    error = %error,
-                    "failed to persist capability-invocation event; skipping execution"
-                );
-                persist_failed = true;
-                break;
-            }
+                Ok(row) => row,
+                Err(error) => {
+                    warn!(
+                        params.session_id,
+                        turn = params.turn,
+                        invocation_id = %capability_invocation.id,
+                        error = %error,
+                        "failed to persist capability-invocation event; skipping execution"
+                    );
+                    persist_failed = true;
+                    break;
+                }
+            };
             trace!(
                 component = "agent.capability",
                 agent_event = "capability_invocation_started_persisted",
@@ -216,11 +224,20 @@ pub(super) async fn execute_capability_invocation_phase(
                 primitive_name = %capability_invocation.name,
                 "capability invocation start persisted"
             );
+            persisted_started_rows.push((row, payload));
         }
     }
 
     if persist_failed {
         return CapabilityInvocationPhaseOutcome::default();
+    }
+
+    for (row, payload) in &persisted_started_rows {
+        super::persistence::emit_persisted_capability_invocation_started(
+            params.emitter,
+            row,
+            payload,
+        );
     }
 
     super::persistence::emit_capability_invocation_batch(
@@ -287,6 +304,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         cancel: params.cancel,
                         workspace_id: params.workspace_id,
                         sequence_counter: params.sequence_counter,
+                        emit_lifecycle_events: params.persister.is_none(),
                         turn: i64::from(params.turn),
                         invocation_abort_registry: params.invocation_abort_registry,
                         engine_host: params.engine_host,
@@ -379,22 +397,31 @@ pub(super) async fn execute_capability_invocation_phase(
                         ) {
                             payload.extend(identity);
                         }
-                        if let Err(error) = persister
+                        match persister
                             .append_with_runtime_sequence(
                                 params.session_id,
                                 EventType::CapabilityInvocationCompleted,
-                                payload,
+                                payload.clone(),
                                 params.sequence_counter,
                             )
                             .await
                         {
-                            error!(
-                                params.session_id,
-                                turn = params.turn,
-                                invocation_id = %capability_invocation.id,
-                                error = %error,
-                                "failed to persist capability-result event"
-                            );
+                            Ok(row) => {
+                                super::persistence::emit_persisted_capability_invocation_completed(
+                                    params.emitter,
+                                    &row,
+                                    &payload,
+                                );
+                            }
+                            Err(error) => {
+                                error!(
+                                    params.session_id,
+                                    turn = params.turn,
+                                    invocation_id = %capability_invocation.id,
+                                    error = %error,
+                                    "failed to persist capability-result event"
+                                );
+                            }
                         }
                     }
 

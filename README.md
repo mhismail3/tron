@@ -2224,7 +2224,13 @@ while SQLite repositories stay under `event_store/sqlite/repositories`.
 model-requested `execute` calls. `completed` uses the canonical
 `content`/`isError`/`duration` payload shape for both live and reconstructed
 sessions. Failed capability completions preserve model-visible text and include
-`details.failure`, the server-authored canonical failure envelope.
+`details.failure`, the server-authored canonical failure envelope. Live
+`started` and `completed` broadcasts are emitted from the persisted event rows
+and use those row sequences; for a batch of parallel model-requested calls, all
+persisted `started` rows are broadcast before any child execution begins so
+active clients can render every execution chip immediately. Transient
+`capability.invocation.generating` remains a model-stream drafting hint, not
+durable execution state.
 Active runtime/UI identity is primitive-execution native: payloads carry the
 model-visible primitive name, invocation id, trace id, turn, operation
 arguments, result content, error state, and duration. iOS renders active work
