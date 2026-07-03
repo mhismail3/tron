@@ -221,8 +221,11 @@ final class ChatViewModel {
     static let maxReconstructionEventLimit = 1_000
     /// Maximum older pages fetched to close a reconnect history gap.
     static let maxReconstructionGapBackfillPages = 20
-    /// Number of messages to load on scroll-up
-    static let additionalMessageBatchSize = 100
+    /// Number of older messages to prepend per top-detent pass.
+    /// Keep this smaller than the initial bottom slice: older-history rows can
+    /// contain large markdown and many tool chips, and prepending them happens
+    /// while preserving an active reading viewport.
+    static let additionalMessageBatchSize = 30
     /// Prune when messages exceed this count during live sessions
     static let liveSessionPruneThreshold = 200
     /// Keep this many messages after pruning

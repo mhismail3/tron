@@ -267,10 +267,14 @@ The chat timeline owns only truthful local/session presentation state:
   measured bottom-distance convergence complete. During that window the
   composer placeholder shows an inline progress spinner and reads "Loading
   latest messages", then transitions back to "Type here" as the latest
-  transcript fades in from the settled bottom position. A
-  one-shot scroll-phase prefetch starts as soon as the user leaves the bottom,
-  then a viewport-relative top-detent loader requests additional pages before
-  the 1px top sentinel must appear. Returning to the bottom re-arms the prefetch.
+  transcript fades in from the settled bottom position. A single viewport-relative
+  geometry top-detent loader requests additional pages before the 1px top sentinel
+  must appear; leaving the bottom alone does not prepend history, because an early
+  scroll-away callback can capture a stale viewport anchor during a fast flick.
+  The top-detent loader also waits until active drag/deceleration settles before
+  prepending, waits one stable-geometry delay for frame preferences to catch up,
+  then inserts at most one page per scheduling pass and restores the current
+  viewport anchor.
   Prepends preserve the first visible row identity by restoring it to `.top`;
   viewport-relative offsets are not replayed as SwiftUI target anchors because
   that can strand lazy content in empty space. Bottom autoscroll is centralized

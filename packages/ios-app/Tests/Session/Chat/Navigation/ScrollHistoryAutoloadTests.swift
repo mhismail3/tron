@@ -2,7 +2,7 @@ import Testing
 import SwiftUI
 @testable import TronMobile
 
-/// Tests for earlier-history autoload and prefetch policy.
+/// Tests for earlier-history autoload policy.
 @Suite("Scroll History Autoload Tests")
 @MainActor
 struct ScrollHistoryAutoloadTests {
@@ -40,9 +40,14 @@ struct ScrollHistoryAutoloadTests {
 
     @Test("Top autoload threshold prefetches before literal top")
     func testTopAutoloadThresholdPrefetchesBeforeLiteralTop() {
-        #expect(ChatHistoryAutoloadPolicy.topDistanceThreshold(viewportHeight: 300) == 700)
-        #expect(ChatHistoryAutoloadPolicy.topDistanceThreshold(viewportHeight: 800) == 1_600)
-        #expect(ChatHistoryAutoloadPolicy.topDistanceThreshold(viewportHeight: 1_200) == 1_800)
+        #expect(ChatHistoryAutoloadPolicy.topDistanceThreshold(viewportHeight: 300) == 420)
+        #expect(ChatHistoryAutoloadPolicy.topDistanceThreshold(viewportHeight: 800) == 720)
+        #expect(ChatHistoryAutoloadPolicy.topDistanceThreshold(viewportHeight: 1_200) == 900)
+    }
+
+    @Test("Top autoload waits one stable geometry delay before prepending")
+    func testTopAutoloadStableGeometryDelayIsBounded() {
+        #expect(ChatHistoryAutoloadPolicy.stableGeometryDelayMilliseconds == 120)
     }
 
     @Test("Top autoload policy does not trigger away from top")
@@ -85,33 +90,45 @@ struct ScrollHistoryAutoloadTests {
         ))
     }
 
-    @Test("Earlier history prefetch waits for user scroll-away")
-    func testEarlierHistoryPrefetchWaitsForUserScrollAway() {
+    @Test("Top autoload policy waits while user interaction is active")
+    func testTopAutoloadPolicyWaitsWhileUserInteractionIsActive() {
         let coordinator = ScrollStateCoordinator()
 
-        #expect(!coordinator.shouldPrefetchEarlierMessages(
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: true,
             initialLoadComplete: true,
-            isLoadingMoreMessages: false
+            isLoadingMoreMessages: false,
+            isNearTop: true
+        ))
+
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+        #expect(coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: false,
+            isNearTop: true
         ))
     }
 
-    @Test("Earlier history prefetch starts after user scrolls away")
-    func testEarlierHistoryPrefetchStartsAfterUserScrollAway() {
+    @Test("Scroll-away alone does not trigger history autoload")
+    func testScrollAwayAloneDoesNotTriggerHistoryAutoload() {
         let coordinator = ScrollStateCoordinator()
 
         coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
         coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
 
-        #expect(coordinator.shouldPrefetchEarlierMessages(
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: true,
             initialLoadComplete: true,
-            isLoadingMoreMessages: false
+            isLoadingMoreMessages: false,
+            isNearTop: false
         ))
     }
 
-    @Test("Earlier history prefetch can start when phase marks scroll-away")
-    func testEarlierHistoryPrefetchStartsAfterPhaseMarksScrollAway() {
+    @Test("Phase-marked scroll-away still waits for top detent")
+    func testPhaseMarkedScrollAwayStillWaitsForTopDetent() {
         let coordinator = ScrollStateCoordinator()
 
         // Content growth reported not-near-bottom before the user touched the
@@ -125,60 +142,34 @@ struct ScrollHistoryAutoloadTests {
         coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
 
-        #expect(coordinator.beginEarlierHistoryPrefetchIfNeeded(
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: true,
             initialLoadComplete: true,
-            isLoadingMoreMessages: false
+            isLoadingMoreMessages: false,
+            isNearTop: false
+        ))
+        #expect(coordinator.shouldAutoloadEarlierMessages(
+            hasMoreMessages: true,
+            initialLoadComplete: true,
+            isLoadingMoreMessages: false,
+            isNearTop: true
         ))
     }
 
-    @Test("Earlier history prefetch is one-shot until returning to bottom")
-    func testEarlierHistoryPrefetchIsOneShotUntilBottom() {
-        let coordinator = ScrollStateCoordinator()
-
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
-        coordinator.geometryChanged(isNearBottom: false)
-
-        #expect(coordinator.beginEarlierHistoryPrefetchIfNeeded(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: false
-        ))
-        #expect(!coordinator.shouldPrefetchEarlierMessages(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: false
-        ))
-        #expect(!coordinator.beginEarlierHistoryPrefetchIfNeeded(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: false
-        ))
-
-        coordinator.geometryChanged(isNearBottom: true)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
-        coordinator.geometryChanged(isNearBottom: false)
-
-        #expect(coordinator.beginEarlierHistoryPrefetchIfNeeded(
-            hasMoreMessages: true,
-            initialLoadComplete: true,
-            isLoadingMoreMessages: false
-        ))
-    }
-
-    @Test("Earlier history prefetch waits during existing prepend")
-    func testEarlierHistoryPrefetchWaitsDuringExistingPrepend() {
+    @Test("Top-detent autoload waits during existing prepend")
+    func testTopDetentAutoloadWaitsDuringExistingPrepend() {
         let coordinator = ScrollStateCoordinator()
 
         coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
         coordinator.geometryChanged(isNearBottom: false)
         coordinator.willPrependHistory(anchor: nil)
 
-        #expect(!coordinator.shouldPrefetchEarlierMessages(
+        #expect(!coordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: true,
             initialLoadComplete: true,
-            isLoadingMoreMessages: false
+            isLoadingMoreMessages: false,
+            isNearTop: true
         ))
     }
 
@@ -198,6 +189,7 @@ struct ScrollHistoryAutoloadTests {
         ))
 
         coordinator.cancelPrependHistory()
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
 
         #expect(coordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: true,

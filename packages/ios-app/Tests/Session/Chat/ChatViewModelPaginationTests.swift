@@ -12,8 +12,8 @@ final class ChatViewModelPaginationTests: XCTestCase {
         let loaded = await viewModel.loadEarlierMessagesForTopDetent()
 
         XCTAssertEqual(loaded, ChatViewModel.additionalMessageBatchSize)
-        XCTAssertEqual(viewModel.messages.count, 200)
-        XCTAssertEqual(viewModel.prunedLiveMessages.count, 50)
+        XCTAssertEqual(viewModel.messages.count, ChatViewModel.liveSessionPruneTarget + ChatViewModel.additionalMessageBatchSize)
+        XCTAssertEqual(viewModel.prunedLiveMessages.count, 150 - ChatViewModel.additionalMessageBatchSize)
     }
 
     func testTopDetentAutoloadContinuesToServerAfterPrunedBufferDrains() async {
@@ -33,12 +33,14 @@ final class ChatViewModelPaginationTests: XCTestCase {
             )
         }
 
-        let firstPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
-        let finalPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
+        var prunedLoads: [Int] = []
+        while !viewModel.prunedLiveMessages.isEmpty {
+            prunedLoads.append(await viewModel.loadEarlierMessagesForTopDetent())
+        }
         let serverLoad = await viewModel.loadEarlierMessagesForTopDetent()
 
-        XCTAssertEqual(firstPrunedLoad, ChatViewModel.additionalMessageBatchSize)
-        XCTAssertEqual(finalPrunedLoad, 10)
+        let batchSize = ChatViewModel.additionalMessageBatchSize
+        XCTAssertEqual(prunedLoads, [batchSize, batchSize, batchSize, 20])
         XCTAssertEqual(serverLoad, 1)
         XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["cursor-1"])
         XCTAssertEqual(viewModel.reconstructionOldestEventId, "cursor-0")
@@ -67,15 +69,17 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(viewModel.prunedLiveMessages.count, 110)
         XCTAssertEqual(viewModel.displayedMessageCount, 40)
 
-        let firstPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
-        let finalPrunedLoad = await viewModel.loadEarlierMessagesForTopDetent()
+        var prunedLoads: [Int] = []
+        while !viewModel.prunedLiveMessages.isEmpty {
+            prunedLoads.append(await viewModel.loadEarlierMessagesForTopDetent())
+        }
         let inMemoryLoad = await viewModel.loadEarlierMessagesForTopDetent()
 
-        XCTAssertEqual(firstPrunedLoad, ChatViewModel.additionalMessageBatchSize)
-        XCTAssertEqual(finalPrunedLoad, 10)
-        XCTAssertEqual(inMemoryLoad, 40)
+        let batchSize = ChatViewModel.additionalMessageBatchSize
+        XCTAssertEqual(prunedLoads, [batchSize, batchSize, batchSize, 20])
+        XCTAssertEqual(inMemoryLoad, ChatViewModel.additionalMessageBatchSize)
         XCTAssertEqual(sessions.reconstructCalls.count, 0)
-        XCTAssertEqual(viewModel.messages.first?.id, reconstructed.first?.id)
+        XCTAssertEqual(viewModel.messages.first?.id, reconstructed[10].id)
         XCTAssertTrue(viewModel.hasMoreMessages)
     }
 
@@ -91,9 +95,9 @@ final class ChatViewModelPaginationTests: XCTestCase {
 
         let loaded = await viewModel.loadEarlierMessagesForTopDetent()
 
-        XCTAssertEqual(loaded, 100)
-        XCTAssertEqual(viewModel.messages.count, 150)
-        XCTAssertEqual(viewModel.messages.first?.id, reconstructed.first?.id)
+        XCTAssertEqual(loaded, ChatViewModel.additionalMessageBatchSize)
+        XCTAssertEqual(viewModel.messages.count, 50 + ChatViewModel.additionalMessageBatchSize)
+        XCTAssertEqual(viewModel.messages.first?.id, reconstructed[70].id)
     }
 
     func testTopDetentAutoloadDuplicateLoadGuard() async {

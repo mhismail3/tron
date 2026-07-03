@@ -2278,18 +2278,21 @@ ordered ancestor chain ending at the child head so inherited parent history and
 child events arrive in one server-authored timeline. `tree::get_ancestors`
 returns resolved wire `events` for the same reason: clients inspect lineage
 without maintaining a second tree-only event shape.
-The iOS chat timeline autoloads earlier pages from a noninteractive top detent
-after initial load and real user scroll-away; it does not show a manual
-history-loading pill. Older pages are transformed with already-loaded adjacent
+The iOS chat timeline autoloads earlier pages from a noninteractive,
+viewport-relative top detent after initial load; it does not show a manual
+history-loading pill and it does not prepend history merely because the user
+left the bottom. Older pages are transformed with already-loaded adjacent
 event context so capability chips remain completed when assistant and
 capability lifecycle events are split across page boundaries. Prepends preserve
 the first visible row identity and restore it to the top after insertion; the
 timeline intentionally does not replay viewport-relative offsets as SwiftUI
 target anchors because that can strand lazy content in empty space. Earlier
-history has two automatic triggers: a one-shot scroll-phase prefetch starts as
-soon as the user leaves the bottom, and a viewport-relative top-detent loader
-requests additional pages before the 1px top sentinel must materialize.
-Returning to the bottom arms the prefetch again. Reconnect reconstruction keeps
+history has one automatic trigger: the geometry top-detent loader requests
+additional pages before the 1px top sentinel must materialize, after active
+drag/deceleration settles and a short stable-geometry delay completes so prepends
+do not fight the user's gesture or stale viewport frames. Each scheduling pass
+inserts at most one bounded earlier page before waiting for fresh geometry.
+Reconnect reconstruction keeps
 the user's already-expanded visible history window, merges it with the latest
 server-authoritative suffix, and performs bounded older-page backfill if that
 suffix would otherwise leave an event-sequence gap. A server reconstruction

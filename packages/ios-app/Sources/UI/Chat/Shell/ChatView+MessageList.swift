@@ -168,8 +168,9 @@ extension ChatView {
                         logger.debug("[INIT] phase: \(oldPhase) → \(newPhase)", category: .ui)
                     }
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
-                    scheduleEarlierHistoryPrefetchIfNeeded()
-
+                    if isNearTopHistoryDetent {
+                        scheduleAutoloadEarlierMessages()
+                    }
                 }
                 // Track bottom geometry continuously. Initial-load reveal waits
                 // for measured bottom convergence; after reveal this feeds the
@@ -196,9 +197,6 @@ extension ChatView {
                         distanceFromBottom: metrics.distanceFromBottom
                     )
                     scrollCoordinator.geometryChanged(isNearBottom: isNearBottom)
-                    if !isNearBottom {
-                        scheduleEarlierHistoryPrefetchIfNeeded()
-                    }
                 }
                 // Track content height during initial load for convergence detection.
                 // The scroll loop reads initContentHeight to know when LazyVStack
@@ -341,24 +339,9 @@ extension ChatView {
     // MARK: - Earlier Message Autoload
 
     @discardableResult
-    func autoloadEarlierMessages(requireNearTop: Bool = true) async -> Int {
+    func autoloadEarlierMessages() async -> Int {
         let ticket = taskCoordinator.currentTicket()
-        let shouldLoad: Bool
-        if requireNearTop {
-            shouldLoad = scrollCoordinator.shouldAutoloadEarlierMessages(
-                hasMoreMessages: viewModel.hasMoreMessages,
-                initialLoadComplete: initialLoadComplete,
-                isLoadingMoreMessages: viewModel.isLoadingMoreMessages,
-                isNearTop: isNearTopHistoryDetent
-            )
-        } else {
-            shouldLoad = scrollCoordinator.beginEarlierHistoryPrefetchIfNeeded(
-                hasMoreMessages: viewModel.hasMoreMessages,
-                initialLoadComplete: initialLoadComplete,
-                isLoadingMoreMessages: viewModel.isLoadingMoreMessages
-            )
-        }
-        guard shouldLoad else {
+        guard shouldAutoloadEarlierMessagesNow() else {
             return 0
         }
 
@@ -393,7 +376,7 @@ extension ChatView {
         }
         scrollCoordinator.didPrependHistory(using: scrollProxy)
         prependCompleted = true
-        if insertedCount > 0, anchor != nil {
+        if insertedCount > 0 {
             // Re-anchoring to the old first visible row puts newly loaded rows
             // above the viewport. Require fresh geometry or another upward drag
             // before fetching the next page.
@@ -402,38 +385,27 @@ extension ChatView {
         return insertedCount
     }
 
-    func scheduleAutoloadEarlierMessages(requireNearTop: Bool = true) {
+    func scheduleAutoloadEarlierMessages() {
         guard autoloadEarlierTask == nil else { return }
+        guard shouldAutoloadEarlierMessagesNow() else { return }
         let ticket = taskCoordinator.currentTicket()
         autoloadEarlierTask = Task { @MainActor in
             defer { autoloadEarlierTask = nil }
             guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
 
-            guard requireNearTop else {
-                _ = await autoloadEarlierMessages(requireNearTop: false)
-                return
-            }
-
-            repeat {
-                let insertedCount = await autoloadEarlierMessages()
-                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-                if insertedCount == 0 { break }
-                try? await Task.sleep(for: .milliseconds(80))
-                guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
-            } while isNearTopHistoryDetent && viewModel.hasMoreMessages
+            try? await Task.sleep(for: .milliseconds(ChatHistoryAutoloadPolicy.stableGeometryDelayMilliseconds))
+            guard taskCoordinator.isCurrent(ticket), !Task.isCancelled else { return }
+            _ = await autoloadEarlierMessages()
         }
     }
 
-    func scheduleEarlierHistoryPrefetchIfNeeded() {
-        guard scrollCoordinator.shouldPrefetchEarlierMessages(
+    func shouldAutoloadEarlierMessagesNow() -> Bool {
+        scrollCoordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: viewModel.hasMoreMessages,
             initialLoadComplete: initialLoadComplete,
-            isLoadingMoreMessages: viewModel.isLoadingMoreMessages
-        ) else {
-            return
-        }
-
-        scheduleAutoloadEarlierMessages(requireNearTop: false)
+            isLoadingMoreMessages: viewModel.isLoadingMoreMessages,
+            isNearTop: isNearTopHistoryDetent
+        )
     }
 
     var topAutoloadSentinel: some View {
@@ -450,17 +422,15 @@ extension ChatView {
                     .frame(height: 1)
             }
         }
-        .onAppear {
-            isNearTopHistoryDetent = true
-            scheduleAutoloadEarlierMessages()
-        }
         .padding(.bottom, 8)
     }
 }
 
 enum ChatHistoryAutoloadPolicy {
+    static let stableGeometryDelayMilliseconds = 120
+
     static func topDistanceThreshold(viewportHeight: CGFloat) -> CGFloat {
-        min(1_800, max(700, viewportHeight * 2.0))
+        min(900, max(420, viewportHeight * 0.9))
     }
 }
 

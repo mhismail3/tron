@@ -17,17 +17,13 @@ import SwiftUI
 ///    the bottom of the content. The threshold is computed in the view layer and
 ///    accounts for `contentInsets.bottom` (input bar + safe area).
 ///
-/// Earlier-history loading has two paths:
-///
-/// - **Eager prefetch** when a real user gesture leaves the bottom. This keeps older
-///   history warm before the user hits the loaded boundary.
-/// - **Top-detent load** from view-layer top geometry. This is the boundary backup and
-///   does not depend on `userScrolledAway`, because SwiftUI can report "near top"
-///   before phase/bottom callbacks have settled.
-///
-/// Eager prefetch is one-shot per scroll-away interval. The interval resets only when
-/// the viewport returns to bottom, which prevents phase and geometry callbacks from
-/// requesting multiple pages for a single drag.
+/// Earlier-history loading is owned by the view-layer top-detent geometry.
+/// Leaving the bottom is not enough to mutate the message array: a fast upward
+/// flick can cover a large distance after the first scroll-away callback, so
+/// prepending from that early callback would restore a stale anchor and snap the
+/// user back down. The top-detent path waits until the loaded-history boundary is
+/// close enough to matter, then captures the current viewport anchor immediately
+/// before prepending.
 ///
 /// The key invariant: **auto-scroll is suppressed whenever the user is interacting,
 /// the scroll view is settling, history is being prepended, OR the user has scrolled
@@ -54,10 +50,6 @@ final class ScrollStateCoordinator {
     /// Whether new content arrived while the user was scrolled away.
     /// Drives the "New content" pill independently of processing state.
     private(set) var hasUnseenContent = false
-
-    /// Whether the current away-from-bottom interval already requested an eager
-    /// earlier-history page.
-    private var didPrefetchEarlierHistoryDuringScrollAway = false
 
     /// True while the user is physically interacting with the scroll view
     /// (touching, tracking, or decelerating from a flick).
@@ -231,36 +223,8 @@ final class ScrollStateCoordinator {
             && isNearTop
             && !isLoadingMoreMessages
             && !isPrependingHistory
-    }
-
-    func shouldPrefetchEarlierMessages(
-        hasMoreMessages: Bool,
-        initialLoadComplete: Bool,
-        isLoadingMoreMessages: Bool
-    ) -> Bool {
-        hasMoreMessages
-            && initialLoadComplete
-            && userScrolledAway
-            && !isLoadingMoreMessages
-            && !isPrependingHistory
-            && !didPrefetchEarlierHistoryDuringScrollAway
-    }
-
-    func beginEarlierHistoryPrefetchIfNeeded(
-        hasMoreMessages: Bool,
-        initialLoadComplete: Bool,
-        isLoadingMoreMessages: Bool
-    ) -> Bool {
-        guard shouldPrefetchEarlierMessages(
-            hasMoreMessages: hasMoreMessages,
-            initialLoadComplete: initialLoadComplete,
-            isLoadingMoreMessages: isLoadingMoreMessages
-        ) else {
-            return false
-        }
-
-        didPrefetchEarlierHistoryDuringScrollAway = true
-        return true
+            && !isUserInteracting
+            && !isScrollSettling
     }
 
     // MARK: - Private
@@ -271,7 +235,6 @@ final class ScrollStateCoordinator {
         userScrolledAway = false
         hasUnseenContent = false
         hadUserInteraction = false
-        didPrefetchEarlierHistoryDuringScrollAway = false
     }
 
     private struct TargetNavigationSnapshot {
