@@ -16,6 +16,7 @@ extension ChatView {
                         isRecording: viewModel.isRecording,
                         isTranscribing: viewModel.isTranscribing,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
+                        placeholderShowsProgress: !initialLoadComplete,
                         tokenUsage: viewModel.contextState.totalTokenUsage,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         contextWindow: viewModel.contextState.currentContextWindow,

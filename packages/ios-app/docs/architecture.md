@@ -265,9 +265,9 @@ The chat timeline owns only truthful local/session presentation state:
   newly opened existing session keeps the transcript hidden while server
   reconstruction, scroll-proxy readiness, stable lazy-stack height, and
   measured bottom-distance convergence complete. During that window the
-  composer placeholder reads "Loading latest messages", then transitions back
-  to "Type here" as the latest transcript fades in from the settled bottom
-  position. A
+  composer placeholder shows an inline progress spinner and reads "Loading
+  latest messages", then transitions back to "Type here" as the latest
+  transcript fades in from the settled bottom position. A
   one-shot scroll-phase prefetch starts as soon as the user leaves the bottom,
   then a viewport-relative top-detent loader requests additional pages before
   the 1px top sentinel must appear. Returning to the bottom re-arms the prefetch.

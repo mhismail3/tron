@@ -33,11 +33,16 @@ final class SendBlockReasonTests: XCTestCase {
 
     func testComposerPlaceholderDefaultsToReadyPrompt() {
         XCTAssertEqual(config().placeholderText, "Type here")
+        XCTAssertFalse(config().placeholderShowsProgress)
     }
 
     func testComposerPlaceholderCanRepresentShellOwnedLoadingState() {
-        let c = InputBarConfig(placeholderText: "Loading latest messages")
+        let c = InputBarConfig(
+            placeholderText: "Loading latest messages",
+            placeholderShowsProgress: true
+        )
         XCTAssertEqual(c.placeholderText, "Loading latest messages")
+        XCTAssertTrue(c.placeholderShowsProgress)
     }
 
     func testDisconnectedBlocks() {

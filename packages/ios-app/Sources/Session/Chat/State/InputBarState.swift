@@ -126,6 +126,8 @@ struct InputBarConfig {
     // MARK: - Status Display
     /// Placeholder shown when the prompt field is empty and unfocused.
     let placeholderText: String
+    /// Whether the placeholder represents a shell-owned loading state.
+    let placeholderShowsProgress: Bool
     let tokenUsage: TokenUsage?
     let contextPercentage: Int
     let contextWindow: Int
@@ -162,6 +164,7 @@ struct InputBarConfig {
         isRecording: Bool = false,
         isTranscribing: Bool = false,
         placeholderText: String = "Type here",
+        placeholderShowsProgress: Bool = false,
         tokenUsage: TokenUsage? = nil,
         contextPercentage: Int = 0,
         contextWindow: Int = 0,
@@ -178,6 +181,7 @@ struct InputBarConfig {
         self.isRecording = isRecording
         self.isTranscribing = isTranscribing
         self.placeholderText = placeholderText
+        self.placeholderShowsProgress = placeholderShowsProgress
         self.tokenUsage = tokenUsage
         self.contextPercentage = contextPercentage
         self.contextWindow = contextWindow

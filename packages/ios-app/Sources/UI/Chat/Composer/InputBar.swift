@@ -264,14 +264,24 @@ struct InputBar: View {
     private var textFieldGlass: some View {
         ZStack(alignment: .leading) {
             if state.text.isEmpty && !isFocused {
-                Text(config.placeholderText)
-                    .font(TronTypography.input)
-                    .foregroundStyle(.tronEmerald.opacity(0.5))
-                    .padding(.leading, 14)
-                    .padding(.vertical, 10)
-                    .contentTransition(.opacity)
-                    .id(config.placeholderText)
-                    .accessibilityIdentifier("message-input-placeholder")
+                HStack(spacing: 7) {
+                    if config.placeholderShowsProgress {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.tronEmerald.opacity(0.62))
+                            .frame(width: 14, height: 14)
+                            .accessibilityHidden(true)
+                    }
+
+                    Text(config.placeholderText)
+                        .font(TronTypography.input)
+                        .foregroundStyle(.tronEmerald.opacity(0.5))
+                        .contentTransition(.opacity)
+                }
+                .padding(.leading, 14)
+                .padding(.vertical, 10)
+                .id("\(config.placeholderText)-\(config.placeholderShowsProgress)")
+                .accessibilityIdentifier("message-input-placeholder")
             }
 
             TextField("", text: $state.text, axis: .vertical)
@@ -298,6 +308,7 @@ struct InputBar: View {
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(.tronStandard, value: shouldShowActionButton)
         .animation(.easeOut(duration: 0.18), value: config.placeholderText)
+        .animation(.easeOut(duration: 0.18), value: config.placeholderShowsProgress)
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {
