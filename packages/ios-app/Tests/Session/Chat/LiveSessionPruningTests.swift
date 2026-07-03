@@ -364,7 +364,7 @@ final class LiveSessionPruningTests: XCTestCase {
         // Pruned buffer has 110 messages
         XCTAssertEqual(viewModel.prunedLiveMessages.count, 110)
 
-        // When: load all in multiple batches (30 per batch)
+        // When: load all in multiple configured batches
         while !viewModel.prunedLiveMessages.isEmpty {
             viewModel.loadMoreMessages()
         }

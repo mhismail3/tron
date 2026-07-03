@@ -271,7 +271,9 @@ The chat timeline owns only truthful local/session presentation state:
   geometry top-detent loader requests additional pages before the 1px top sentinel
   must appear; leaving the bottom alone does not prepend history, because an early
   scroll-away callback can capture a stale viewport anchor during a fast flick.
-  The top-detent loader also waits until active drag/deceleration settles before
+  Initial reconstruction requests 300 persisted events and displays up to 300
+  recent messages; each top-detent load inserts up to 90 older messages. The
+  top-detent loader also waits until active drag/deceleration settles before
   prepending, waits one stable-geometry delay for frame preferences to catch up,
   then inserts at most one page per scheduling pass, consumes that top-detent
   sample, and restores the current viewport anchor. The consumed sample re-arms

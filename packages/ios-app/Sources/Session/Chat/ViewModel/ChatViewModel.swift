@@ -212,10 +212,12 @@ final class ChatViewModel {
 
     /// All loaded messages from EventDatabase (full set for pagination)
     var allReconstructedMessages: [ChatMessage] = []
-    /// Number of messages to show initially
-    static let initialMessageBatchSize = 100
+    /// Number of messages to show initially.
+    /// Keep this large enough that long restored sessions open with useful
+    /// recent context while still letting the timeline lazily page older rows.
+    static let initialMessageBatchSize = 300
     /// Initial persisted event count requested from `session::reconstruct`.
-    static let initialReconstructionEventLimit = 100
+    static let initialReconstructionEventLimit = 300
     /// Upper bound for a single reconnect reconstruction request. Larger gaps
     /// are filled by bounded pagination in `processReconstructionResult`.
     static let maxReconstructionEventLimit = 1_000
@@ -225,7 +227,7 @@ final class ChatViewModel {
     /// Keep this smaller than the initial bottom slice: older-history rows can
     /// contain large markdown and many tool chips, and prepending them happens
     /// while preserving an active reading viewport.
-    static let additionalMessageBatchSize = 30
+    static let additionalMessageBatchSize = 90
     /// Prune when messages exceed this count during live sessions
     static let liveSessionPruneThreshold = 200
     /// Keep this many messages after pruning

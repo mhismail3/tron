@@ -2290,9 +2290,11 @@ target anchors because that can strand lazy content in empty space. Earlier
 history has one automatic trigger: the geometry top-detent loader requests
 additional pages before the 1px top sentinel must materialize, after active
 drag/deceleration settles and a short stable-geometry delay completes so prepends
-do not fight the user's gesture or stale viewport frames. Each scheduling pass
-inserts at most one bounded earlier page, consumes that top-detent sample, and
-re-arms only when the user scrolls again or leaves and re-enters the top zone.
+do not fight the user's gesture or stale viewport frames. Initial reconstruction
+requests 300 persisted events and displays up to 300 recent messages; each
+top-detent load inserts up to 90 older messages. Each scheduling pass inserts at
+most one bounded earlier page, consumes that top-detent sample, and re-arms only
+when the user scrolls again or leaves and re-enters the top zone.
 Reconnect reconstruction keeps
 the user's already-expanded visible history window, merges it with the latest
 server-authoritative suffix, and performs bounded older-page backfill if that

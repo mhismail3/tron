@@ -40,7 +40,7 @@ final class ChatViewModelPaginationTests: XCTestCase {
         let serverLoad = await viewModel.loadEarlierMessagesForTopDetent()
 
         let batchSize = ChatViewModel.additionalMessageBatchSize
-        XCTAssertEqual(prunedLoads, [batchSize, batchSize, batchSize, 20])
+        XCTAssertEqual(prunedLoads, expectedDrainLoads(total: 110, batchSize: batchSize))
         XCTAssertEqual(serverLoad, 1)
         XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["cursor-1"])
         XCTAssertEqual(viewModel.reconstructionOldestEventId, "cursor-0")
@@ -76,10 +76,10 @@ final class ChatViewModelPaginationTests: XCTestCase {
         let inMemoryLoad = await viewModel.loadEarlierMessagesForTopDetent()
 
         let batchSize = ChatViewModel.additionalMessageBatchSize
-        XCTAssertEqual(prunedLoads, [batchSize, batchSize, batchSize, 20])
-        XCTAssertEqual(inMemoryLoad, ChatViewModel.additionalMessageBatchSize)
+        XCTAssertEqual(prunedLoads, expectedDrainLoads(total: 110, batchSize: batchSize))
+        XCTAssertEqual(inMemoryLoad, min(ChatViewModel.additionalMessageBatchSize, 40))
         XCTAssertEqual(sessions.reconstructCalls.count, 0)
-        XCTAssertEqual(viewModel.messages.first?.id, reconstructed[10].id)
+        XCTAssertEqual(viewModel.messages.first?.id, reconstructed.first?.id)
         XCTAssertTrue(viewModel.hasMoreMessages)
     }
 
@@ -95,9 +95,10 @@ final class ChatViewModelPaginationTests: XCTestCase {
 
         let loaded = await viewModel.loadEarlierMessagesForTopDetent()
 
-        XCTAssertEqual(loaded, ChatViewModel.additionalMessageBatchSize)
-        XCTAssertEqual(viewModel.messages.count, 50 + ChatViewModel.additionalMessageBatchSize)
-        XCTAssertEqual(viewModel.messages.first?.id, reconstructed[70].id)
+        let expectedLoad = min(ChatViewModel.additionalMessageBatchSize, 100)
+        XCTAssertEqual(loaded, expectedLoad)
+        XCTAssertEqual(viewModel.messages.count, 50 + expectedLoad)
+        XCTAssertEqual(viewModel.messages.first?.id, reconstructed[150 - 50 - expectedLoad].id)
     }
 
     func testTopDetentAutoloadDuplicateLoadGuard() async {
@@ -241,11 +242,11 @@ final class ChatViewModelPaginationTests: XCTestCase {
 
         XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 200)
         XCTAssertEqual(viewModel.allReconstructedMessages.count, 200)
-        XCTAssertEqual(viewModel.displayedMessageCount, 150)
-        XCTAssertEqual(viewModel.messages.count, 150)
+        XCTAssertEqual(viewModel.displayedMessageCount, 200)
+        XCTAssertEqual(viewModel.messages.count, 200)
         XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
-        XCTAssertTrue(viewModel.hasMoreMessages)
-        XCTAssertEqual(textContent(viewModel.messages.first), "message 51")
+        XCTAssertFalse(viewModel.hasMoreMessages)
+        XCTAssertEqual(textContent(viewModel.messages.first), "message 1")
     }
 
     func testReconnectReconstructionBackfillsGapBeforeRebuildingMessages() async {
@@ -278,11 +279,11 @@ final class ChatViewModelPaginationTests: XCTestCase {
         XCTAssertEqual(sessions.reconstructCalls.map(\.beforeEventId), ["event-181"])
         XCTAssertEqual(viewModel.loadedReconstructionEvents.count, 200)
         XCTAssertEqual(viewModel.allReconstructedMessages.count, 200)
-        XCTAssertEqual(viewModel.displayedMessageCount, 100)
-        XCTAssertEqual(viewModel.messages.count, 100)
+        XCTAssertEqual(viewModel.displayedMessageCount, 200)
+        XCTAssertEqual(viewModel.messages.count, 200)
         XCTAssertFalse(viewModel.hasOlderServerReconstructionPages)
-        XCTAssertTrue(viewModel.hasMoreMessages)
-        XCTAssertEqual(textContent(viewModel.messages.first), "message 101")
+        XCTAssertFalse(viewModel.hasMoreMessages)
+        XCTAssertEqual(textContent(viewModel.messages.first), "message 1")
         XCTAssertEqual(textContent(viewModel.messages.last), "message 200")
     }
 
@@ -371,6 +372,18 @@ final class ChatViewModelPaginationTests: XCTestCase {
         for index in 0..<count {
             viewModel.appendToMessages(makeMessage("message \(index)"))
         }
+    }
+
+    private func expectedDrainLoads(total: Int, batchSize: Int) -> [Int] {
+        guard total > 0, batchSize > 0 else { return [] }
+        var remaining = total
+        var loads: [Int] = []
+        while remaining > 0 {
+            let load = min(batchSize, remaining)
+            loads.append(load)
+            remaining -= load
+        }
+        return loads
     }
 
     private func makeMessage(_ text: String) -> ChatMessage {
