@@ -168,6 +168,9 @@ extension ChatView {
                         logger.debug("[INIT] phase: \(oldPhase) → \(newPhase)", category: .ui)
                     }
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
+                    if ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(newPhase) {
+                        hasConsumedTopHistoryDetent = false
+                    }
                     if isNearTopHistoryDetent {
                         scheduleAutoloadEarlierMessages()
                     }
@@ -207,15 +210,19 @@ extension ChatView {
                     guard !initialLoadComplete else { return }
                     initContentHeight = contentH
                 }
-                .onScrollGeometryChange(for: Bool.self) { geometry in
+                .onScrollGeometryChange(for: ChatHistoryTopMetrics.self) { geometry in
                     let topDistance = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
-                    return topDistance < ChatHistoryAutoloadPolicy.topDistanceThreshold(
+                    return ChatHistoryTopMetrics(
+                        topDistance: topDistance,
                         viewportHeight: geometry.containerSize.height
                     )
-                } action: { _, isNearTop in
+                } action: { _, metrics in
                     guard initialLoadComplete else { return }
-                    isNearTopHistoryDetent = isNearTop
-                    if isNearTop {
+                    isNearTopHistoryDetent = metrics.isNearTop
+                    if !metrics.isNearTop {
+                        hasConsumedTopHistoryDetent = false
+                    }
+                    if metrics.isNearTop {
                         scheduleAutoloadEarlierMessages()
                     }
                 }
@@ -378,9 +385,11 @@ extension ChatView {
         prependCompleted = true
         if insertedCount > 0 {
             // Re-anchoring to the old first visible row puts newly loaded rows
-            // above the viewport. Require fresh geometry or another upward drag
-            // before fetching the next page.
-            isNearTopHistoryDetent = false
+            // above the viewport. Consume this top-detent sample so content-size
+            // geometry changes cannot immediately chain more pages from stale
+            // frames. The latch is re-armed by the next user scroll or by leaving
+            // and re-entering the top detent.
+            hasConsumedTopHistoryDetent = true
         }
         return insertedCount
     }
@@ -400,7 +409,8 @@ extension ChatView {
     }
 
     func shouldAutoloadEarlierMessagesNow() -> Bool {
-        scrollCoordinator.shouldAutoloadEarlierMessages(
+        guard !hasConsumedTopHistoryDetent else { return false }
+        return scrollCoordinator.shouldAutoloadEarlierMessages(
             hasMoreMessages: viewModel.hasMoreMessages,
             initialLoadComplete: initialLoadComplete,
             isLoadingMoreMessages: viewModel.isLoadingMoreMessages,
@@ -429,8 +439,24 @@ extension ChatView {
 enum ChatHistoryAutoloadPolicy {
     static let stableGeometryDelayMilliseconds = 120
 
+    static func isUserDrivenScrollPhase(_ phase: ScrollPhase) -> Bool {
+        phase == .interacting || phase == .tracking || phase == .decelerating
+    }
+
     static func topDistanceThreshold(viewportHeight: CGFloat) -> CGFloat {
         min(900, max(420, viewportHeight * 0.9))
+    }
+}
+
+private struct ChatHistoryTopMetrics: Equatable {
+    let isNearTop: Bool
+    let topDistanceBucket: Int
+
+    init(topDistance: CGFloat, viewportHeight: CGFloat) {
+        isNearTop = topDistance < ChatHistoryAutoloadPolicy.topDistanceThreshold(
+            viewportHeight: viewportHeight
+        )
+        topDistanceBucket = Int((topDistance / 24).rounded(.down))
     }
 }
 

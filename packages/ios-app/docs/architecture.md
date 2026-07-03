@@ -273,8 +273,10 @@ The chat timeline owns only truthful local/session presentation state:
   scroll-away callback can capture a stale viewport anchor during a fast flick.
   The top-detent loader also waits until active drag/deceleration settles before
   prepending, waits one stable-geometry delay for frame preferences to catch up,
-  then inserts at most one page per scheduling pass and restores the current
-  viewport anchor.
+  then inserts at most one page per scheduling pass, consumes that top-detent
+  sample, and restores the current viewport anchor. The consumed sample re-arms
+  only when the user scrolls again or leaves and re-enters the top zone, which
+  allows repeated older-history paging without an uncontrolled load loop.
   Prepends preserve the first visible row identity by restoring it to `.top`;
   viewport-relative offsets are not replayed as SwiftUI target anchors because
   that can strand lazy content in empty space. Bottom autoscroll is centralized

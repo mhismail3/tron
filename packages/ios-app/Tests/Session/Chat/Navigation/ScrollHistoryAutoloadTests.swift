@@ -50,6 +50,15 @@ struct ScrollHistoryAutoloadTests {
         #expect(ChatHistoryAutoloadPolicy.stableGeometryDelayMilliseconds == 120)
     }
 
+    @Test("Top autoload re-arms from user-driven scroll phases")
+    func testTopAutoloadRearmsFromUserDrivenScrollPhases() {
+        #expect(ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.interacting))
+        #expect(ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.tracking))
+        #expect(ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.decelerating))
+        #expect(!ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.idle))
+        #expect(!ChatHistoryAutoloadPolicy.isUserDrivenScrollPhase(.animating))
+    }
+
     @Test("Top autoload policy does not trigger away from top")
     func testTopAutoloadPolicyDoesNotTriggerAwayFromTop() {
         let coordinator = ScrollStateCoordinator()

@@ -56,6 +56,10 @@ struct ChatView: View {
     @State var messageViewportFrames: [UUID: CGRect] = [:]
     @State var messageViewportHeight: CGFloat = 0
     @State var isNearTopHistoryDetent = false
+    /// True after a top-detent sample has inserted one older page. This prevents
+    /// repeated loads from the same stale geometry sample while still allowing
+    /// the next user scroll to explicitly re-arm older-history paging.
+    @State var hasConsumedTopHistoryDetent = false
 
     // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?
