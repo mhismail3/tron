@@ -262,10 +262,12 @@ The chat timeline owns only truthful local/session presentation state:
 - Earlier chat history autoloads from noninteractive scroll intent after
   initial load. The timeline does not expose a manual load control; loading
   state is limited to a small `ProgressView` with an accessibility label. A
-  newly opened existing session shows an intentional "Loading latest messages"
-  state while server reconstruction, scroll-proxy readiness, stable lazy-stack
-  height, and measured bottom-distance convergence complete, then fades in the
-  latest transcript from the settled bottom position. A
+  newly opened existing session keeps the transcript hidden while server
+  reconstruction, scroll-proxy readiness, stable lazy-stack height, and
+  measured bottom-distance convergence complete. During that window the
+  composer placeholder reads "Loading latest messages", then transitions back
+  to "Type here" as the latest transcript fades in from the settled bottom
+  position. A
   one-shot scroll-phase prefetch starts as soon as the user leaves the bottom,
   then a viewport-relative top-detent loader requests additional pages before
   the 1px top sentinel must appear. Returning to the bottom re-arms the prefetch.

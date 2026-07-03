@@ -264,11 +264,14 @@ struct InputBar: View {
     private var textFieldGlass: some View {
         ZStack(alignment: .leading) {
             if state.text.isEmpty && !isFocused {
-                Text("Type here")
+                Text(config.placeholderText)
                     .font(TronTypography.input)
                     .foregroundStyle(.tronEmerald.opacity(0.5))
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
+                    .contentTransition(.opacity)
+                    .id(config.placeholderText)
+                    .accessibilityIdentifier("message-input-placeholder")
             }
 
             TextField("", text: $state.text, axis: .vertical)
@@ -294,6 +297,7 @@ struct InputBar: View {
         .frame(minHeight: actionButtonSize)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(.tronStandard, value: shouldShowActionButton)
+        .animation(.easeOut(duration: 0.18), value: config.placeholderText)
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {

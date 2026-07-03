@@ -4,15 +4,13 @@ import CoreGraphics
 
 @Suite("Chat Transcript Reveal Policy Tests")
 struct ChatTranscriptRevealPolicyTests {
-    @Test("Initial reconstruction hides transcript behind loader")
-    func initialReconstructionShowsLoaderAndHidesTranscript() {
-        #expect(ChatTranscriptRevealPolicy.loadingOverlayVisible(initialLoadComplete: false))
+    @Test("Initial reconstruction hides transcript while composer owns loading status")
+    func initialReconstructionHidesTranscript() {
         #expect(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: false) == 0)
     }
 
-    @Test("Completed initial load reveals transcript and removes loader")
+    @Test("Completed initial load reveals transcript")
     func completedInitialLoadRevealsTranscript() {
-        #expect(!ChatTranscriptRevealPolicy.loadingOverlayVisible(initialLoadComplete: true))
         #expect(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: true) == 1)
     }
 

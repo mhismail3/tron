@@ -15,6 +15,7 @@ extension ChatView {
                         isConnected: viewModel.connectionState == .connected,
                         isRecording: viewModel.isRecording,
                         isTranscribing: viewModel.isTranscribing,
+                        placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         tokenUsage: viewModel.contextState.totalTokenUsage,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         contextWindow: viewModel.contextState.currentContextWindow,
@@ -287,11 +288,6 @@ extension ChatView {
             .opacity(ChatTranscriptRevealPolicy.contentOpacity(initialLoadComplete: initialLoadComplete))
             .animation(.easeOut(duration: 0.28), value: initialLoadComplete)
 
-            if ChatTranscriptRevealPolicy.loadingOverlayVisible(initialLoadComplete: initialLoadComplete) {
-                initialTranscriptLoadingView
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            }
-
             // Floating "New Content" pill — shows when user scrolled away and new content arrived
             if scrollCoordinator.shouldShowNewContentPill {
                 scrollToBottomButton
@@ -300,33 +296,6 @@ extension ChatView {
             }
         }
         .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
-    }
-
-    var initialTranscriptLoadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .scaleEffect(0.9)
-                .tint(.tronEmerald)
-
-            Text("Loading latest messages")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-
-            Text("Opening the session at the latest turn")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 22)
-        .padding(.vertical, 18)
-        .glassEffect(
-            .regular.tint(Color.tronPhthaloGreen.opacity(0.22)),
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-        )
-        .padding(.horizontal, 40)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading latest messages")
-        .accessibilityIdentifier("chat-initial-loading-indicator")
     }
 
     // MARK: - Scroll to Bottom Button

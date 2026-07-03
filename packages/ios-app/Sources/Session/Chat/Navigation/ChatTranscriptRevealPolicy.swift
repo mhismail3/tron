@@ -3,9 +3,9 @@ import CoreGraphics
 /// Owns the first-open transcript reveal invariant for chat sessions.
 ///
 /// Existing sessions can take a short moment to reconstruct and settle their
-/// bottom scroll anchor. During that window the shell should show an
-/// intentional loading state instead of a blank transcript, then fade the
-/// already-bottom-anchored content in once initial load is complete.
+/// bottom scroll anchor. During that window the shell keeps transcript content
+/// hidden while the composer placeholder carries the loading status, then fades
+/// the already-bottom-anchored content in once initial load is complete.
 enum ChatTranscriptRevealPolicy {
     static let initialBottomTolerance: CGFloat = 16
     static let initialBottomSettleAttempts = 18
@@ -14,10 +14,6 @@ enum ChatTranscriptRevealPolicy {
 
     static func contentOpacity(initialLoadComplete: Bool) -> Double {
         initialLoadComplete ? 1 : 0
-    }
-
-    static func loadingOverlayVisible(initialLoadComplete: Bool) -> Bool {
-        !initialLoadComplete
     }
 
     static func bottomDistance(

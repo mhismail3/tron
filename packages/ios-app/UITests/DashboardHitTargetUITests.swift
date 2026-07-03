@@ -155,10 +155,7 @@ final class DashboardHitTargetUITests: XCTestCase {
                 latestMessage.isHittable,
                 "Open attempt \(attempt) should land at the bottom with the latest message in the viewport"
             )
-            XCTAssertFalse(
-                app.otherElements["chat-initial-loading-indicator"].exists,
-                "Open attempt \(attempt) should remove the initial loader after the bottom anchor settles"
-            )
+            XCTAssertFalse(app.staticTexts["Loading latest messages"].exists)
             keepScreenshot(named: "chat-latest-open-\(attempt)")
 
             let backButton = app.buttons.matching(
