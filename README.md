@@ -2791,7 +2791,7 @@ packages/ios-app/Sources/
   Capabilities, grouping operations into user-facing areas with drill-down
   operation owner/status, replacement eligibility, binding/shadow-trial
   attempts, rollback/disable/abort availability, and request/response schema
-  bodies from the live capability map where present; verification version and
+  bodies from the live capability map where present; capability map version and
   durable `catalog_discovery_report` resources are presented there as
   contextual capability-check evidence rather than top-level telemetry.
   Replacement-disclosure rows derive from
