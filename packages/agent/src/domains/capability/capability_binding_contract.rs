@@ -1,9 +1,10 @@
 //! Provider schema additions for capability binding policy operations.
 //!
-//! These fields describe metadata-only binding requests, decisions, and policy
-//! records. They never authorize runtime routing, module hot-swapping, module
-//! activation, dispatch mutation, package-manager execution, dependency
-//! restoration, network access, or raw local material exposure.
+//! These fields describe metadata-only binding requests, decisions, policies,
+//! and the first governed shadow-trial records. They never authorize runtime
+//! routing, module hot-swapping, module activation, dispatch mutation,
+//! package-manager execution, dependency restoration, network access, or raw
+//! local material exposure.
 
 use serde_json::{Map, Value, json};
 
@@ -12,14 +13,25 @@ pub(super) const CAPABILITY_BINDING_SCHEMA_FIELDS: &[&str] = &[
     "capabilityBindingRequestResourceId",
     "capabilityBindingDecisionResourceId",
     "capabilityBindingPolicyResourceId",
+    "capabilityShadowTrialRequestResourceId",
+    "capabilityShadowTrialDecisionResourceId",
+    "capabilityShadowTrialEvidenceResourceId",
     "capabilityBindingRequestId",
     "capabilityBindingDecisionId",
     "capabilityBindingPolicyId",
+    "capabilityShadowTrialRequestId",
+    "capabilityShadowTrialDecisionId",
+    "capabilityShadowTrialRunId",
+    "capabilityShadowTrialEvidenceId",
     "targetOperation",
     "currentBuiltInOwner",
     "replacementTarget",
     "ownershipClass",
     "bindingMode",
+    "candidateAdapter",
+    "builtInProjection",
+    "candidateProjection",
+    "trialRunOutcome",
     "targetRef",
     "actorScope",
     "authorityConstraints",
@@ -28,9 +40,13 @@ pub(super) const CAPABILITY_BINDING_SCHEMA_FIELDS: &[&str] = &[
     "staleVersionGuard",
     "rollbackRef",
     "disableRef",
+    "abortRef",
     "auditRefs",
     "expectedCapabilityBindingRequestVersionId",
     "expectedCapabilityBindingDecisionVersionId",
+    "expectedCapabilityShadowTrialRequestVersionId",
+    "expectedCapabilityShadowTrialDecisionVersionId",
+    "expectedCapabilityShadowTrialEvidenceVersionId",
 ];
 
 pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
@@ -48,6 +64,18 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
             "Durable capability_binding_policy resource id for inspect.",
         ),
         (
+            "capabilityShadowTrialRequestResourceId",
+            "Durable capability_shadow_trial_request resource id for decision record.",
+        ),
+        (
+            "capabilityShadowTrialDecisionResourceId",
+            "Durable capability_shadow_trial_decision resource id for run record.",
+        ),
+        (
+            "capabilityShadowTrialEvidenceResourceId",
+            "Durable capability_shadow_trial_evidence resource id for exact-selector inspection.",
+        ),
+        (
             "capabilityBindingRequestId",
             "Optional caller-visible capability binding request id.",
         ),
@@ -58,6 +86,22 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         (
             "capabilityBindingPolicyId",
             "Optional caller-visible capability binding policy id.",
+        ),
+        (
+            "capabilityShadowTrialRequestId",
+            "Optional caller-visible capability shadow trial request id.",
+        ),
+        (
+            "capabilityShadowTrialDecisionId",
+            "Optional caller-visible capability shadow trial decision id.",
+        ),
+        (
+            "capabilityShadowTrialRunId",
+            "Optional caller-visible capability shadow trial run id.",
+        ),
+        (
+            "capabilityShadowTrialEvidenceId",
+            "Optional caller-visible capability shadow trial evidence id.",
         ),
         (
             "targetOperation",
@@ -80,6 +124,10 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
             "Requested metadata binding mode: shadow, extend, or replace where allowed.",
         ),
         (
+            "trialRunOutcome",
+            "Capability shadow trial run outcome: completed, aborted, or disabled.",
+        ),
+        (
             "actorScope",
             "Requester/actor scope for binding governance: session or workspace.",
         ),
@@ -94,6 +142,18 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         (
             "expectedCapabilityBindingDecisionVersionId",
             "Expected current capability_binding_decision version id for policy activation freshness.",
+        ),
+        (
+            "expectedCapabilityShadowTrialRequestVersionId",
+            "Expected current capability_shadow_trial_request version id for decision freshness.",
+        ),
+        (
+            "expectedCapabilityShadowTrialDecisionVersionId",
+            "Expected current capability_shadow_trial_decision version id for run freshness.",
+        ),
+        (
+            "expectedCapabilityShadowTrialEvidenceVersionId",
+            "Expected current capability_shadow_trial_evidence version id for stale-evidence rejection during inspect.",
         ),
     ] {
         insert_string(properties, name, description);
@@ -118,6 +178,22 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         (
             "disableRef",
             "Optional bounded disable or emergency-off reference; required for replace requests.",
+        ),
+        (
+            "abortRef",
+            "Bounded abort reference required for capability shadow trial request and run semantics.",
+        ),
+        (
+            "candidateAdapter",
+            "Bounded deterministic metadata-only candidate adapter description for the git_status shadow trial.",
+        ),
+        (
+            "builtInProjection",
+            "Bounded provider-safe built-in git_status projection for metadata-only shadow comparison.",
+        ),
+        (
+            "candidateProjection",
+            "Bounded provider-safe candidate git_status projection for metadata-only shadow comparison.",
         ),
     ] {
         properties.insert(

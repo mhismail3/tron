@@ -80,6 +80,11 @@
 //! rollback/disable refs, and audit refs, while proving no `capability::execute`
 //! dispatch, runtime routing, hot-swap, module activation, package-manager,
 //! dependency, or network behavior occurs.
+//! Capability-shadow-trial operations are an even narrower metadata-only path:
+//! they record request/decision/run/evidence resources for the selected
+//! read-only `git_status` target, compare bounded built-in and deterministic
+//! candidate projections, require exact selectors plus rollback/disable/abort
+//! refs, and never execute candidate modules or change live dispatch.
 //! Module-lifecycle operations are metadata-only state operations: they
 //! request/decide/list/inspect enable, disable, quarantine, and rollback
 //! lifecycle records for install-candidate modules without installing,
@@ -110,7 +115,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
-//! | `capability_binding_contract` | Capability-binding request/decision/policy schema fields |
+//! | `capability_binding_contract` | Capability-binding and shadow-trial schema fields |
 //! | `context_control_contract` | Context-control snapshot/action/epoch schema fields |
 //! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
 //! | `web_research_contract` | Web research request/review/source schema fields |

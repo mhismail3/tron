@@ -1,19 +1,24 @@
-//! Metadata-only capability binding policy custody.
+//! Metadata-only capability binding policy and shadow-trial custody.
 //!
 //! Capability binding owns durable `capability_binding_request`,
-//! `capability_binding_decision`, and `capability_binding_policy` resources for
-//! future capability replacement governance. It records who asked to shadow,
-//! extend, or replace one `capability::execute` operation, what evidence and
-//! authority constraints are required, what decision was made, and what
-//! metadata-only policy exists for later slices. It does not route execution,
-//! hot-swap modules, activate packages, or change dispatch.
+//! `capability_binding_decision`, `capability_binding_policy`, and
+//! `capability_shadow_trial_*` resources for future capability replacement
+//! governance. It records who asked to shadow, extend, or replace one
+//! `capability::execute` operation, what evidence and authority constraints are
+//! required, what decision was made, what metadata-only policy exists for later
+//! slices, and the first bounded `git_status` shadow replacement trial. It does
+//! not route execution, hot-swap modules, activate packages, or change dispatch.
 //!
 //! The provider-visible surface is limited to `capability::execute` operations
 //! `capability_binding_request_record`, `capability_binding_request_list`,
 //! `capability_binding_request_inspect`, `capability_binding_decision_record`,
 //! `capability_binding_decision_list`, `capability_binding_decision_inspect`,
 //! `capability_binding_policy_activate`, `capability_binding_policy_list`, and
-//! `capability_binding_policy_inspect`.
+//! `capability_binding_policy_inspect`, plus
+//! `capability_shadow_trial_request_record`,
+//! `capability_shadow_trial_decision_record`,
+//! `capability_shadow_trial_run_record`, and
+//! `capability_shadow_trial_evidence_inspect`.
 //!
 //! ## Submodules
 //!
@@ -26,8 +31,9 @@
 //! | `records` | Metadata-only payload, idempotency, audit, and side-effect proof builders |
 //! | `resource_store` | Resource inspection, lifecycle stream, kind/schema helpers |
 //! | `service` | Timestamp-injected record/list/inspect/activate behavior |
+//! | `shadow_trial` | Metadata-only governed `git_status` shadow trial records and evidence comparison |
 //! | `validation` | Text, ref, registry-derived target metadata, binding-mode, authority, and stale-guard checks |
-//! | `tests` | Schema, authority, replay, stale guard, locked-class, and no-routing regressions |
+//! | `tests` | Schema, authority, replay, stale guard, locked-class, shadow-trial, and no-routing regressions |
 //!
 //! # INVARIANT: binding policy is governance metadata only
 //!
@@ -42,6 +48,10 @@
 //! cannot request `replace`; `adapter_replaceable` and `module_owned` requests
 //! are accepted only as strict metadata proposals with runtime routing disabled
 //! in this slice.
+//! Shadow trials are narrower: this slice accepts only the read-only
+//! `git_status` target and stores deterministic candidate-adapter descriptions
+//! and provider-safe projections for comparison. It never executes candidate
+//! module code or changes live operation routing.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -52,6 +62,7 @@ mod projection;
 mod records;
 mod resource_store;
 pub(crate) mod service;
+pub(crate) mod shadow_trial;
 mod validation;
 
 #[derive(Clone)]
@@ -63,6 +74,10 @@ pub(crate) use crate::engine::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
     CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
 };
 
 pub(crate) fn worker_module(

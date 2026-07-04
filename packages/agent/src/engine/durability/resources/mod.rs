@@ -16,7 +16,7 @@
 //! module manifests and split module-pack manifest seeds, module validation
 //! reports, procedural skill/rule/hook/procedure custody and activation-review
 //! records, module dependency policy metadata records, metadata-only capability
-//! binding policy records, and media artifacts,
+//! binding policy and shadow-trial records, and media artifacts,
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
 //! the in-memory and SQLite persistence implementations.
 
@@ -63,6 +63,10 @@ pub(crate) use capability_binding_definitions::{
     CAPABILITY_BINDING_DECISION_PAYLOAD_SCHEMA_VERSION,
     CAPABILITY_BINDING_POLICY_PAYLOAD_SCHEMA_VERSION,
     CAPABILITY_BINDING_REQUEST_PAYLOAD_SCHEMA_VERSION,
+    CAPABILITY_SHADOW_TRIAL_DECISION_PAYLOAD_SCHEMA_VERSION,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_PAYLOAD_SCHEMA_VERSION,
+    CAPABILITY_SHADOW_TRIAL_REQUEST_PAYLOAD_SCHEMA_VERSION,
+    CAPABILITY_SHADOW_TRIAL_RUN_PAYLOAD_SCHEMA_VERSION,
 };
 pub(crate) use context_control_definitions::{
     CONTEXT_CONTROL_ACTION_PAYLOAD_SCHEMA_VERSION, CONTEXT_CONTROL_EPOCH_PAYLOAD_SCHEMA_VERSION,

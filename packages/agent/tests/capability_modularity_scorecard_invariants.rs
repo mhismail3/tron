@@ -14,7 +14,7 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-
 const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/mod.rs";
 const README_PATH: &str = "README.md";
-const EXPECTED_OPERATION_COUNT: usize = 166;
+const EXPECTED_OPERATION_COUNT: usize = 170;
 
 const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";
 
@@ -267,6 +267,9 @@ fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
         operation if operation.starts_with("capability_binding_") => {
             ("capability_binding", "governance_locked")
         }
+        operation if operation.starts_with("capability_shadow_trial_") => {
+            ("capability_binding", "governance_locked")
+        }
         operation if operation.starts_with("module_lifecycle_") => {
             ("module_lifecycle", "governance_locked")
         }
@@ -450,7 +453,7 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
                 SourceRequirement {
                     path: "packages/agent/src/domains/capability_binding/mod.rs",
                     markers: &[
-                        "Metadata-only capability binding policy custody",
+                        "Metadata-only capability binding policy and shadow-trial custody",
                         "must not route",
                         "kernel_locked",
                     ],
@@ -711,6 +714,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Kernel Boundary Lockdown Evidence",
         "Binding Policy Evidence",
         "Adapter Seam Hardening Evidence",
+        "Shadow Replacement Trial Evidence",
         "Follow-on Slices",
     ] {
         assert!(
@@ -732,6 +736,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Kernel boundary lockdown",
         "Capability binding policy",
         "Adapter seam hardening",
+        "Shadow replacement trial",
         "No runtime routing, dispatch mutation",
         "Future operations must update the TSV, this scorecard, and this manifest",
     ] {

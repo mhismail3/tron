@@ -8,13 +8,22 @@ use super::service::{
     list_capability_binding_policy_value, list_capability_binding_request_value,
     record_capability_binding_decision_value_at, record_capability_binding_request_value_at,
 };
+use super::shadow_trial::{
+    inspect_capability_shadow_trial_evidence_value,
+    record_capability_shadow_trial_decision_value_at,
+    record_capability_shadow_trial_request_value_at, record_capability_shadow_trial_run_value_at,
+};
 use super::validation::{
     CAPABILITY_BINDING_POLICY_VERSION, CAPABILITY_MODULARITY_INVENTORY_VERSION,
 };
 use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
-    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID, Deps,
+    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
@@ -249,6 +258,236 @@ impl Fixture {
     }
 }
 
+struct ShadowFixture {
+    deps: Deps,
+    session_id: String,
+    write_grant_id: AuthorityGrantId,
+    read_grant_id: AuthorityGrantId,
+}
+
+impl ShadowFixture {
+    async fn new(label: &str) -> Self {
+        let ctx = make_test_context();
+        let deps = Deps {
+            engine_host: ctx.engine_host.clone(),
+        };
+        let session_id = format!("{label}-session");
+        let write_kinds = shadow_trial_kinds();
+        let write_selectors = shadow_trial_kind_selectors();
+        let write_selector_refs = write_selectors
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let write_grant_id = derive_grant(
+            &deps,
+            &format!("{label}-shadow-write"),
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &write_kinds,
+            &write_selector_refs,
+            "none",
+        )
+        .await;
+        let read_kinds = shadow_trial_kinds();
+        let read_selectors = shadow_trial_kind_selectors();
+        let read_selector_refs = read_selectors
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let read_grant_id = derive_grant(
+            &deps,
+            &format!("{label}-shadow-read"),
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &read_kinds,
+            &read_selector_refs,
+            "none",
+        )
+        .await;
+        Self {
+            deps,
+            session_id,
+            write_grant_id,
+            read_grant_id,
+        }
+    }
+
+    async fn shadow_request(&self, key: &str) -> Value {
+        let invocation = self.write_invocation(key, shadow_request_payload(key));
+        record_capability_shadow_trial_request_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record shadow request")
+    }
+
+    async fn shadow_decision(&self, key: &str, request: &Value, decision: &str) -> Value {
+        let request_id = request["capabilityShadowTrialRequestResourceId"]
+            .as_str()
+            .expect("shadow request id");
+        let request_version_id = request["capabilityShadowTrialRequestVersionId"]
+            .as_str()
+            .expect("shadow request version id");
+        let grant_id = self
+            .exact_write_grant(&format!("{key}-shadow-request-exact"), request_id)
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityShadowTrialRequestResourceId": request_id,
+                "expectedCapabilityShadowTrialRequestVersionId": request_version_id,
+                "capabilityShadowTrialDecisionId": format!("{key}-shadow-decision"),
+                "decision": decision,
+                "reason": "Metadata-only shadow trial decision recorded.",
+                "decisionEvidence": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:shadow-decision",
+                    "role": "decision"
+                }],
+                "denialEvidence": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:shadow-denial",
+                    "role": "denial"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        record_capability_shadow_trial_decision_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record shadow decision")
+    }
+
+    async fn shadow_run(&self, key: &str, decision: &Value, outcome: &str) -> Value {
+        let decision_id = decision["capabilityShadowTrialDecisionResourceId"]
+            .as_str()
+            .expect("shadow decision id");
+        let decision_version_id = decision["capabilityShadowTrialDecisionVersionId"]
+            .as_str()
+            .expect("shadow decision version id");
+        let grant_id = self
+            .exact_write_grant(&format!("{key}-shadow-decision-exact"), decision_id)
+            .await;
+        let mut payload = json!({
+            "capabilityShadowTrialDecisionResourceId": decision_id,
+            "expectedCapabilityShadowTrialDecisionVersionId": decision_version_id,
+            "capabilityShadowTrialRunId": format!("{key}-shadow-run"),
+            "capabilityShadowTrialEvidenceId": format!("{key}-shadow-evidence"),
+            "trialRunOutcome": outcome,
+            "auditRefs": [{
+                "kind": "evidence",
+                "resourceId": "evidence:shadow-run-audit",
+                "role": "audit"
+            }]
+        });
+        if outcome == "completed" {
+            payload["builtInProjection"] = status_projection("clean");
+            payload["candidateProjection"] = status_projection("clean");
+        }
+        let invocation = invocation(
+            key,
+            payload,
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        record_capability_shadow_trial_run_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record shadow run")
+    }
+
+    async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
+        let exact_selector = format!("resource:{resource_id}");
+        let mut selectors = shadow_trial_kind_selectors();
+        selectors.push(exact_selector);
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        let kinds = shadow_trial_kinds();
+        derive_grant(
+            &self.deps,
+            suffix,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &kinds,
+            &selector_refs,
+            "none",
+        )
+        .await
+    }
+
+    async fn exact_write_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
+        let exact_selector = format!("resource:{resource_id}");
+        let mut selectors = shadow_trial_kind_selectors();
+        selectors.push(exact_selector);
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        let kinds = shadow_trial_kinds();
+        derive_grant(
+            &self.deps,
+            suffix,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &kinds,
+            &selector_refs,
+            "none",
+        )
+        .await
+    }
+
+    fn write_invocation(&self, key: &str, payload: Value) -> Invocation {
+        invocation(
+            key,
+            payload,
+            self.write_grant_id.clone(),
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        )
+    }
+
+    fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
+        invocation(
+            key,
+            payload,
+            self.read_grant_id.clone(),
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &self.session_id,
+        )
+    }
+}
+
 #[test]
 fn capability_binding_resource_types_are_registered_with_metadata_only_bounds() {
     let definitions = builtin_resource_type_definitions();
@@ -304,6 +543,61 @@ fn capability_binding_resource_types_are_registered_with_metadata_only_bounds() 
                 .as_array()
                 .expect("redaction list")
                 .contains(&json!("rawAuthorityId"))
+        );
+    }
+}
+
+#[test]
+fn capability_shadow_trial_resource_types_are_registered_with_metadata_only_bounds() {
+    let definitions = builtin_resource_type_definitions();
+    for (kind, schema_id) in [
+        (
+            CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+            CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+            CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+            CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+            CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
+        ),
+    ] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.kind == kind)
+            .expect("capability shadow trial definition");
+        assert_eq!(definition.schema_id, schema_id);
+        assert_eq!(
+            definition.versioning_mode,
+            EngineResourceVersioningMode::AppendOnly
+        );
+        assert_eq!(
+            definition.required_capabilities["read"],
+            json!([READ_SCOPE, RESOURCE_READ_SCOPE])
+        );
+        assert_eq!(
+            definition.required_capabilities["write"],
+            json!([WRITE_SCOPE, RESOURCE_WRITE_SCOPE])
+        );
+        assert_eq!(
+            definition.materialization_rules["networkPolicy"],
+            json!("none")
+        );
+        assert_eq!(
+            definition.materialization_rules["runtimeRouting"],
+            json!("forbidden_in_this_slice")
+        );
+        assert!(
+            definition.redaction_rules["neverReturn"]
+                .as_array()
+                .expect("redaction list")
+                .contains(&json!("rawCommand"))
         );
     }
 }
@@ -440,6 +734,290 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
     );
     assert_eq!(
         inspected_policy["bindingPolicy"]["bindingPolicy"]["sideEffectProof"]["moduleExecuted"],
+        json!(false)
+    );
+}
+
+#[tokio::test]
+async fn shadow_trial_records_git_status_request_decision_run_and_evidence_without_dispatch_change()
+{
+    let fixture = ShadowFixture::new("capability-shadow-flow").await;
+    let before = crate::domains::capability::operation_binding_metadata("git_status")
+        .expect("git status metadata");
+    let request = fixture.shadow_request("shadow-request").await;
+    assert_eq!(request["status"], json!("pending_review"));
+    assert_eq!(request["idempotentReplay"], json!(false));
+    assert_eq!(
+        request["shadowTrialRequest"]["operation"]["name"],
+        json!("git_status")
+    );
+    assert_eq!(
+        request["shadowTrialRequest"]["operation"]["dispatchChanged"],
+        json!(false)
+    );
+    assert_eq!(
+        request["shadowTrialRequest"]["candidate"]["executionMode"],
+        json!("metadata_only")
+    );
+    assert_eq!(
+        request["shadowTrialRequest"]["requirements"]["authority"]["networkPolicy"],
+        json!("none")
+    );
+    assert_eq!(
+        request["shadowTrialRequest"]["requirements"]["authority"]["exactSelectorsRequired"],
+        json!(true)
+    );
+    let replay = fixture.shadow_request("shadow-request").await;
+    assert_eq!(replay["idempotentReplay"], json!(true));
+
+    let decision = fixture
+        .shadow_decision("shadow-decision", &request, "approved")
+        .await;
+    assert_eq!(decision["status"], json!("approved_trial"));
+    assert_eq!(
+        decision["shadowTrialDecision"]["runGate"]["runAllowed"],
+        json!(true)
+    );
+    assert_eq!(
+        decision["shadowTrialDecision"]["sideEffectProof"]["dispatchTableMutated"],
+        json!(false)
+    );
+
+    let run = fixture
+        .shadow_run("shadow-run", &decision, "completed")
+        .await;
+    assert_eq!(run["status"], json!("passed"));
+    assert_eq!(
+        run["shadowTrialRun"]["run"]["candidateExecuted"],
+        json!(false)
+    );
+    assert_eq!(
+        run["shadowTrialRun"]["resultControls"]["rollbackAvailable"],
+        json!(true)
+    );
+    assert_eq!(
+        run["shadowTrialEvidence"]["comparison"]["result"],
+        json!("equivalent")
+    );
+    assert_eq!(
+        run["shadowTrialEvidence"]["sideEffectProof"]["runtimeRoutingChanged"],
+        json!(false)
+    );
+
+    let evidence_id = run["capabilityShadowTrialEvidenceResourceId"]
+        .as_str()
+        .expect("evidence id");
+    let evidence_version_id = run["capabilityShadowTrialEvidenceVersionId"]
+        .as_str()
+        .expect("evidence version id");
+    let evidence_grant = fixture
+        .exact_read_grant("shadow-evidence-exact", evidence_id)
+        .await;
+    let inspected = inspect_capability_shadow_trial_evidence_value(
+        &fixture.deps,
+        &invocation(
+            "shadow-evidence-inspect",
+            json!({
+                "capabilityShadowTrialEvidenceResourceId": evidence_id,
+                "expectedCapabilityShadowTrialEvidenceVersionId": evidence_version_id
+            }),
+            evidence_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({
+            "capabilityShadowTrialEvidenceResourceId": evidence_id,
+            "expectedCapabilityShadowTrialEvidenceVersionId": evidence_version_id
+        }),
+    )
+    .await
+    .expect("inspect shadow evidence");
+    assert_eq!(
+        inspected["shadowTrialEvidence"]["projection"]["providerSafe"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["shadowTrialEvidence"]["shadowTrialEvidence"]["candidateProjection"]["rawPathsStored"],
+        json!(false)
+    );
+    assert_eq!(
+        inspected["shadowTrialEvidence"]["shadowTrialEvidence"]["authority"]["agentStateInherited"],
+        json!(false)
+    );
+
+    let after = crate::domains::capability::operation_binding_metadata("git_status")
+        .expect("git status metadata after");
+    assert_eq!(before, after);
+    assert!(crate::domains::capability::supported_operation_names().contains(&"git_status"));
+    assert!(
+        crate::domains::capability::supported_operation_names()
+            .contains(&"capability_shadow_trial_run_record")
+    );
+}
+
+#[tokio::test]
+async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missing_exact_selectors()
+{
+    let fixture = ShadowFixture::new("capability-shadow-guards").await;
+
+    let mut wrong_target = shadow_request_payload("wrong-target");
+    wrong_target["targetOperation"] = json!("git_diff");
+    let wrong_invocation = fixture.write_invocation("wrong-target", wrong_target);
+    let error = record_capability_shadow_trial_request_value_at(
+        &fixture.deps,
+        &wrong_invocation,
+        &wrong_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("wrong target rejected")
+    .to_string();
+    assert!(
+        error.contains("target must be exactly git_status"),
+        "{error}"
+    );
+
+    let mut wildcard_payload = shadow_request_payload("wildcard-selector");
+    wildcard_payload["authorityConstraints"]["resourceSelectors"] = json!(["resource:*"]);
+    let wildcard_payload_invocation =
+        fixture.write_invocation("wildcard-selector", wildcard_payload);
+    let error = record_capability_shadow_trial_request_value_at(
+        &fixture.deps,
+        &wildcard_payload_invocation,
+        &wildcard_payload_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("wildcard selector rejected")
+    .to_string();
+    assert!(error.contains("non-wildcard token"), "{error}");
+
+    let wildcard_grant_id = derive_grant(
+        &fixture.deps,
+        "shadow-wildcard-wide",
+        &["*"],
+        &["*"],
+        &["*"],
+        "none",
+    )
+    .await;
+    let wildcard_invocation = invocation(
+        "shadow-wildcard-wide",
+        shadow_request_payload("shadow-wildcard-wide"),
+        wildcard_grant_id,
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    let error = record_capability_shadow_trial_request_value_at(
+        &fixture.deps,
+        &wildcard_invocation,
+        &wildcard_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("wildcard grant rejected")
+    .to_string();
+    assert!(error.contains("wildcard grants"), "{error}");
+
+    let request = fixture.shadow_request("selector-source").await;
+    let decision = fixture
+        .shadow_decision("selector-decision", &request, "approved")
+        .await;
+    let run = fixture
+        .shadow_run("selector-run", &decision, "completed")
+        .await;
+    let evidence_id = run["capabilityShadowTrialEvidenceResourceId"]
+        .as_str()
+        .expect("evidence id");
+    let selector_denied = inspect_capability_shadow_trial_evidence_value(
+        &fixture.deps,
+        &fixture.read_invocation(
+            "shadow-selector-denied",
+            json!({"capabilityShadowTrialEvidenceResourceId": evidence_id}),
+        ),
+        &json!({"capabilityShadowTrialEvidenceResourceId": evidence_id}),
+    )
+    .await
+    .expect_err("exact evidence selector required")
+    .to_string();
+    assert!(
+        selector_denied.contains("exact resource:"),
+        "{selector_denied}"
+    );
+
+    let evidence_grant = fixture
+        .exact_read_grant("shadow-stale-evidence-exact", evidence_id)
+        .await;
+    let stale = inspect_capability_shadow_trial_evidence_value(
+        &fixture.deps,
+        &invocation(
+            "shadow-stale-evidence",
+            json!({
+                "capabilityShadowTrialEvidenceResourceId": evidence_id,
+                "expectedCapabilityShadowTrialEvidenceVersionId": "old-version"
+            }),
+            evidence_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({
+            "capabilityShadowTrialEvidenceResourceId": evidence_id,
+            "expectedCapabilityShadowTrialEvidenceVersionId": "old-version"
+        }),
+    )
+    .await
+    .expect_err("stale evidence rejected")
+    .to_string();
+    assert!(
+        stale.contains("stale capability shadow trial evidence"),
+        "{stale}"
+    );
+}
+
+#[tokio::test]
+async fn shadow_trial_records_abort_and_disable_semantics_without_live_replacement() {
+    let fixture = ShadowFixture::new("capability-shadow-controls").await;
+    let request = fixture.shadow_request("control-request").await;
+    let decision = fixture
+        .shadow_decision("control-decision", &request, "approved")
+        .await;
+
+    let aborted = fixture
+        .shadow_run("control-aborted", &decision, "aborted")
+        .await;
+    assert_eq!(aborted["status"], json!("aborted"));
+    assert_eq!(
+        aborted["shadowTrialRun"]["resultControls"]["abortAvailable"],
+        json!(true)
+    );
+    assert_eq!(
+        aborted["shadowTrialRun"]["sideEffectProof"]["hotSwapPerformed"],
+        json!(false)
+    );
+    assert_eq!(
+        aborted["shadowTrialEvidence"]["comparison"]["candidateExecuted"],
+        json!(false)
+    );
+
+    let disabled = fixture
+        .shadow_run("control-disabled", &decision, "disabled")
+        .await;
+    assert_eq!(disabled["status"], json!("disabled"));
+    assert_eq!(
+        disabled["shadowTrialRun"]["resultControls"]["disableAvailable"],
+        json!(true)
+    );
+    assert_eq!(
+        disabled["shadowTrialRun"]["resultControls"]["liveReplacementPerformed"],
+        json!(false)
+    );
+    assert_eq!(
+        disabled["shadowTrialRun"]["sideEffectProof"]["dispatchTableMutated"],
         json!(false)
     );
 }
@@ -1003,6 +1581,104 @@ fn request_payload(key: &str) -> Value {
             "role": "audit"
         }]
     })
+}
+
+fn shadow_request_payload(key: &str) -> Value {
+    json!({
+        "capabilityShadowTrialRequestId": format!("{key}-shadow-request"),
+        "title": "Capability shadow trial request",
+        "targetOperation": "git_status",
+        "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
+        "replacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
+        "ownershipClass": "adapter_replaceable",
+        "bindingMode": "shadow",
+        "candidateAdapter": {
+            "adapterId": "deterministic_git_status_shadow",
+            "adapterVersion": "v1",
+            "adapterKind": "deterministic_projection",
+            "description": "Deterministic metadata-only status projection.",
+            "executionMode": "metadata_only",
+            "networkPolicy": "none",
+            "moduleExecution": false,
+            "packageManagerUsed": false,
+            "runtimeRoutingEnabled": false,
+            "agentStateInherited": false
+        },
+        "rationale": "Governed metadata trial records a deterministic projection without routing changes.",
+        "contractEvidenceRefs": [{
+            "kind": "evidence",
+            "resourceId": "evidence:shadow-contract",
+            "role": "contract"
+        }],
+        "evidenceRefs": [{
+            "kind": "evidence",
+            "resourceId": "evidence:shadow-scorecard",
+            "role": "scorecard"
+        }],
+        "authorityConstraints": {
+            "networkPolicy": "none",
+            "authorityScopes": ["capability.execute", "git.read", "resource.read"],
+            "resourceKinds": ["git_status_shadow_projection"],
+            "resourceSelectors": ["resource:git_status_shadow_projection:current"],
+            "agentStateInherited": false
+        },
+        "staleVersionGuard": {
+            "expectedInventoryVersion": CAPABILITY_MODULARITY_INVENTORY_VERSION,
+            "expectedPolicyVersion": CAPABILITY_BINDING_POLICY_VERSION
+        },
+        "rollbackRef": {
+            "kind": "evidence",
+            "resourceId": "evidence:shadow-rollback",
+            "role": "rollback"
+        },
+        "disableRef": {
+            "kind": "evidence",
+            "resourceId": "evidence:shadow-disable",
+            "role": "disable"
+        },
+        "abortRef": {
+            "kind": "evidence",
+            "resourceId": "evidence:shadow-abort",
+            "role": "abort"
+        },
+        "auditRefs": [{
+            "kind": "evidence",
+            "resourceId": "evidence:shadow-audit",
+            "role": "audit"
+        }]
+    })
+}
+
+fn status_projection(status: &str) -> Value {
+    json!({
+        "operation": "git_status",
+        "status": status,
+        "headState": "known",
+        "indexState": "known",
+        "worktreeState": status,
+        "truncation": "none",
+        "evidenceRef": {
+            "kind": "evidence",
+            "resourceId": "evidence:status-projection",
+            "role": "projection"
+        }
+    })
+}
+
+fn shadow_trial_kinds() -> [&'static str; 4] {
+    [
+        CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+        CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+        CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+    ]
+}
+
+fn shadow_trial_kind_selectors() -> Vec<String> {
+    shadow_trial_kinds()
+        .iter()
+        .map(|kind| format!("kind:{kind}"))
+        .collect()
 }
 
 fn invocation(

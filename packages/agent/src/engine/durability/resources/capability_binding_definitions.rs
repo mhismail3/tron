@@ -1,8 +1,9 @@
-//! Capability binding request, decision, and policy resource definitions.
+//! Capability binding and shadow-trial resource definitions.
 //!
 //! These resources store governance metadata for future capability replacement
-//! only. They never route execution, hot-swap modules, mutate dispatch,
-//! activate modules, run package managers, or access networks.
+//! and the first metadata-only shadow trial. They never route execution,
+//! hot-swap modules, mutate dispatch, activate modules, run package managers,
+//! or access networks.
 
 use serde_json::json;
 
@@ -10,6 +11,10 @@ use super::types::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
     CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
+    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
     EngineResourceVersioningMode, RegisterResourceType,
 };
 use crate::engine::kernel::ids::WorkerId;
@@ -20,12 +25,24 @@ pub(crate) const CAPABILITY_BINDING_DECISION_PAYLOAD_SCHEMA_VERSION: &str =
     "tron.capability_binding_decision.v1";
 pub(crate) const CAPABILITY_BINDING_POLICY_PAYLOAD_SCHEMA_VERSION: &str =
     "tron.capability_binding_policy.v1";
+pub(crate) const CAPABILITY_SHADOW_TRIAL_REQUEST_PAYLOAD_SCHEMA_VERSION: &str =
+    "tron.capability_shadow_trial_request.v1";
+pub(crate) const CAPABILITY_SHADOW_TRIAL_DECISION_PAYLOAD_SCHEMA_VERSION: &str =
+    "tron.capability_shadow_trial_decision.v1";
+pub(crate) const CAPABILITY_SHADOW_TRIAL_RUN_PAYLOAD_SCHEMA_VERSION: &str =
+    "tron.capability_shadow_trial_run.v1";
+pub(crate) const CAPABILITY_SHADOW_TRIAL_EVIDENCE_PAYLOAD_SCHEMA_VERSION: &str =
+    "tron.capability_shadow_trial_evidence.v1";
 
 pub(super) fn capability_binding_resource_type_definitions() -> Vec<RegisterResourceType> {
     vec![
         binding_request_definition(),
         binding_decision_definition(),
         binding_policy_definition(),
+        shadow_trial_request_definition(),
+        shadow_trial_decision_definition(),
+        shadow_trial_run_definition(),
+        shadow_trial_evidence_definition(),
     ]
 }
 
@@ -179,6 +196,232 @@ fn binding_policy_definition() -> RegisterResourceType {
                 "binding": {"type": "object"},
                 "requirements": {"type": "object"},
                 "activation": {"type": "object"},
+                "auditRefs": {"type": "array", "maxItems": 25, "items": {"type": "object"}}
+            }
+        }),
+    )
+}
+
+fn shadow_trial_request_definition() -> RegisterResourceType {
+    definition(
+        CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+        CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
+        CAPABILITY_SHADOW_TRIAL_REQUEST_PAYLOAD_SCHEMA_VERSION,
+        "capability_shadow_trial_request",
+        ["pending_review", "disabled", "aborted", "archived"].as_slice(),
+        [
+            "shadow_trial_for",
+            "target_operation",
+            "candidate_adapter",
+            "rollback_proof",
+            "disable_proof",
+            "abort_proof",
+            "evidence_for",
+            "derived_from",
+            "supersedes",
+        ]
+        .as_slice(),
+        json!({
+            "required": [
+                "schemaVersion",
+                "state",
+                "trialRequestId",
+                "scope",
+                "title",
+                "operation",
+                "candidate",
+                "requirements",
+                "trialDecision",
+                "rationale",
+                "auditRefs",
+                "traceRefs",
+                "replayRefs",
+                "authority",
+                "idempotency",
+                "sideEffectProof",
+                "createdAt",
+                "updatedAt",
+                "revision"
+            ],
+            "properties": {
+                "trialRequestId": {"type": "string"},
+                "title": {"type": "string"},
+                "operation": {"type": "object"},
+                "candidate": {"type": "object"},
+                "requirements": {"type": "object"},
+                "trialDecision": {"type": "object"},
+                "rationale": {"type": "string"},
+                "auditRefs": {"type": "array", "maxItems": 25, "items": {"type": "object"}}
+            }
+        }),
+    )
+}
+
+fn shadow_trial_decision_definition() -> RegisterResourceType {
+    definition(
+        CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+        CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
+        CAPABILITY_SHADOW_TRIAL_DECISION_PAYLOAD_SCHEMA_VERSION,
+        "capability_shadow_trial_decision",
+        [
+            "approved_trial",
+            "rejected",
+            "disabled",
+            "aborted",
+            "archived",
+        ]
+        .as_slice(),
+        [
+            "decision_for",
+            "shadow_trial_request",
+            "evidence_for",
+            "derived_from",
+            "supersedes",
+        ]
+        .as_slice(),
+        json!({
+            "required": [
+                "schemaVersion",
+                "state",
+                "trialDecisionId",
+                "scope",
+                "request",
+                "operation",
+                "candidate",
+                "requirements",
+                "decision",
+                "runGate",
+                "auditRefs",
+                "traceRefs",
+                "replayRefs",
+                "authority",
+                "idempotency",
+                "sideEffectProof",
+                "createdAt",
+                "updatedAt",
+                "revision"
+            ],
+            "properties": {
+                "trialDecisionId": {"type": "string"},
+                "request": {"type": "object"},
+                "operation": {"type": "object"},
+                "candidate": {"type": "object"},
+                "requirements": {"type": "object"},
+                "decision": {"type": "object"},
+                "runGate": {"type": "object"},
+                "auditRefs": {"type": "array", "maxItems": 25, "items": {"type": "object"}}
+            }
+        }),
+    )
+}
+
+fn shadow_trial_run_definition() -> RegisterResourceType {
+    definition(
+        CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+        CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
+        CAPABILITY_SHADOW_TRIAL_RUN_PAYLOAD_SCHEMA_VERSION,
+        "capability_shadow_trial_run",
+        ["passed", "failed", "disabled", "aborted", "archived"].as_slice(),
+        [
+            "run_for",
+            "shadow_trial_decision",
+            "shadow_trial_request",
+            "shadow_trial_evidence",
+            "evidence_for",
+            "derived_from",
+            "supersedes",
+        ]
+        .as_slice(),
+        json!({
+            "required": [
+                "schemaVersion",
+                "state",
+                "trialRunId",
+                "scope",
+                "decision",
+                "request",
+                "operation",
+                "candidate",
+                "run",
+                "evidence",
+                "resultControls",
+                "auditRefs",
+                "traceRefs",
+                "replayRefs",
+                "authority",
+                "idempotency",
+                "sideEffectProof",
+                "createdAt",
+                "updatedAt",
+                "revision"
+            ],
+            "properties": {
+                "trialRunId": {"type": "string"},
+                "decision": {"type": "object"},
+                "request": {"type": "object"},
+                "operation": {"type": "object"},
+                "candidate": {"type": "object"},
+                "run": {"type": "object"},
+                "evidence": {"type": "object"},
+                "resultControls": {"type": "object"},
+                "auditRefs": {"type": "array", "maxItems": 25, "items": {"type": "object"}}
+            }
+        }),
+    )
+}
+
+fn shadow_trial_evidence_definition() -> RegisterResourceType {
+    definition(
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_PAYLOAD_SCHEMA_VERSION,
+        "capability_shadow_trial_evidence",
+        ["accepted", "rejected", "disabled", "aborted", "archived"].as_slice(),
+        [
+            "evidence_for",
+            "shadow_trial_run",
+            "shadow_trial_decision",
+            "shadow_trial_request",
+            "derived_from",
+            "supersedes",
+        ]
+        .as_slice(),
+        json!({
+            "required": [
+                "schemaVersion",
+                "state",
+                "trialEvidenceId",
+                "scope",
+                "run",
+                "decision",
+                "request",
+                "operation",
+                "candidate",
+                "builtInProjection",
+                "candidateProjection",
+                "comparison",
+                "resultControls",
+                "auditRefs",
+                "traceRefs",
+                "replayRefs",
+                "authority",
+                "idempotency",
+                "sideEffectProof",
+                "createdAt",
+                "updatedAt",
+                "revision"
+            ],
+            "properties": {
+                "trialEvidenceId": {"type": "string"},
+                "run": {"type": "object"},
+                "decision": {"type": "object"},
+                "request": {"type": "object"},
+                "operation": {"type": "object"},
+                "candidate": {"type": "object"},
+                "builtInProjection": {"type": "object"},
+                "candidateProjection": {"type": "object"},
+                "comparison": {"type": "object"},
+                "resultControls": {"type": "object"},
                 "auditRefs": {"type": "array", "maxItems": 25, "items": {"type": "object"}}
             }
         }),

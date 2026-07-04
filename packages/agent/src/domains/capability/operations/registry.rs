@@ -145,6 +145,10 @@ pub(crate) const SUPPORTED_OPERATION_NAMES: &[&str] = &[
     "capability_binding_policy_activate",
     "capability_binding_policy_list",
     "capability_binding_policy_inspect",
+    "capability_shadow_trial_request_record",
+    "capability_shadow_trial_decision_record",
+    "capability_shadow_trial_run_record",
+    "capability_shadow_trial_evidence_inspect",
     "module_lifecycle_request",
     "module_lifecycle_decision",
     "module_lifecycle_list",
@@ -419,6 +423,12 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "domains::capability::operations::capability_binding + domains::capability_binding",
             "governance_locked",
             "binding_policy_governance_pipeline",
+        ),
+        operation if operation.starts_with("capability_shadow_trial_") => (
+            "capability_binding",
+            "domains::capability::operations::capability_binding + domains::capability_binding",
+            "governance_locked",
+            "shadow_trial_governance_pipeline",
         ),
         operation if operation.starts_with("module_lifecycle_") => (
             "module_lifecycle",
