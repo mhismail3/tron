@@ -1,0 +1,523 @@
+//! Static invariants for the capability modularity scorecard.
+//!
+//! The scorecard is intentionally documentation-first: it does not route
+//! capabilities through modules. These tests make sure the documentation stays
+//! complete and prevents accidental replacement semantics from sneaking into
+//! kernel or governance operations.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+const SCORECARD_PATH: &str = "packages/agent/docs/capability-modularity-scorecard.md";
+const INVENTORY_PATH: &str = "packages/agent/docs/capability-modularity-inventory.tsv";
+const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-manifest.md";
+const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
+const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/mod.rs";
+const README_PATH: &str = "README.md";
+const EXPECTED_OPERATION_COUNT: usize = 157;
+
+const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";
+
+const SCORE_FIELDS: [&str; 9] = [
+    "contractScore",
+    "authorityScore",
+    "evidenceScore",
+    "providerSafetyScore",
+    "replayScore",
+    "bindingScore",
+    "rollbackScore",
+    "visibilityScore",
+    "testScore",
+];
+
+const OWNERSHIP_CLASSES: [&str; 6] = [
+    "kernel_locked",
+    "governance_locked",
+    "record_plane",
+    "adapter_replaceable",
+    "module_owned",
+    "deferred",
+];
+
+const NEXT_ACTIONS: [&str; 6] = [
+    "none",
+    "document",
+    "add_tests",
+    "add_adapter_seam",
+    "add_binding_policy",
+    "split_kernel",
+];
+
+#[derive(Debug)]
+struct InventoryRow {
+    operation: String,
+    family: String,
+    current_owner: String,
+    ownership_class: String,
+    replacement_target: String,
+    scores: BTreeMap<&'static str, u8>,
+    next_action: String,
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("agent crate should live under packages/agent")
+        .to_path_buf()
+}
+
+fn repo_path(path: &str) -> PathBuf {
+    repo_root().join(path)
+}
+
+fn read_repo_file(path: &str) -> String {
+    let full_path = repo_path(path);
+    std::fs::read_to_string(&full_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
+}
+
+fn registry_operations() -> Vec<String> {
+    let registry = read_repo_file(REGISTRY_PATH);
+    let mut in_registry = false;
+    let mut operations = Vec::new();
+    for line in registry.lines() {
+        if line.contains("SUPPORTED_OPERATION_NAMES") {
+            in_registry = true;
+            continue;
+        }
+        if in_registry && line.trim() == "];" {
+            break;
+        }
+        if !in_registry {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.starts_with('"') {
+            let operation = trimmed
+                .split('"')
+                .nth(1)
+                .unwrap_or_else(|| panic!("registry operation row is malformed: {line}"));
+            operations.push(operation.to_owned());
+        }
+    }
+    operations
+}
+
+fn dispatch_operations() -> Vec<String> {
+    let dispatch = read_repo_file(DISPATCH_PATH);
+    let mut in_match = false;
+    let mut operations = Vec::new();
+    for line in dispatch.lines() {
+        if line.contains("Ok(match operation {") {
+            in_match = true;
+            continue;
+        }
+        if in_match && line.contains("other => return Err(unsupported_operation(other))") {
+            break;
+        }
+        if !in_match {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.starts_with('"') {
+            let operation = trimmed
+                .split('"')
+                .nth(1)
+                .unwrap_or_else(|| panic!("dispatch operation row is malformed: {line}"));
+            operations.push(operation.to_owned());
+        }
+    }
+    operations
+}
+
+fn parse_inventory() -> Vec<InventoryRow> {
+    let inventory = read_repo_file(INVENTORY_PATH);
+    let mut lines = inventory.lines();
+    assert_eq!(
+        lines.next(),
+        Some(INVENTORY_HEADER),
+        "capability modularity inventory header drifted"
+    );
+    lines
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let columns: Vec<_> = line.split('\t').collect();
+            assert_eq!(
+                columns.len(),
+                15,
+                "inventory row must have 15 tab-separated columns: {line}"
+            );
+            let mut scores = BTreeMap::new();
+            for (offset, field) in SCORE_FIELDS.iter().enumerate() {
+                let score = columns[5 + offset]
+                    .parse::<u8>()
+                    .unwrap_or_else(|error| panic!("{field} must be numeric in {line}: {error}"));
+                assert!(score <= 3, "{field} must be between 0 and 3 in {line}");
+                scores.insert(*field, score);
+            }
+            InventoryRow {
+                operation: columns[0].to_owned(),
+                family: columns[1].to_owned(),
+                current_owner: columns[2].to_owned(),
+                ownership_class: columns[3].to_owned(),
+                replacement_target: columns[4].to_owned(),
+                scores,
+                next_action: columns[14].to_owned(),
+            }
+        })
+        .collect()
+}
+
+fn duplicate_values(values: &[String]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut duplicate = BTreeSet::new();
+    for value in values {
+        if !seen.insert(value.clone()) {
+            duplicate.insert(value.clone());
+        }
+    }
+    duplicate.into_iter().collect()
+}
+
+fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
+    match operation {
+        "observe" | "replay_manifest" => ("core", "kernel_locked"),
+        "process_run" => ("core", "adapter_replaceable"),
+        operation if operation.starts_with("state_") => ("state", "kernel_locked"),
+        operation if operation.starts_with("trace_") => ("trace", "kernel_locked"),
+        operation if operation.starts_with("log_") => ("logs", "kernel_locked"),
+        operation if operation.starts_with("catalog_") => ("catalog_discovery", "kernel_locked"),
+        operation if operation.starts_with("filesystem_") => ("filesystem", "adapter_replaceable"),
+        operation if operation.starts_with("git_") => ("git", "adapter_replaceable"),
+        operation if operation.starts_with("job_") => ("jobs", "adapter_replaceable"),
+        operation if operation.starts_with("goal_") || operation.starts_with("question_") => {
+            ("goals_questions", "record_plane")
+        }
+        operation if operation.starts_with("schedule_") => ("scheduler", "record_plane"),
+        operation if operation.starts_with("context_control_") => {
+            ("context_control", "record_plane")
+        }
+        operation if operation.starts_with("memory_") => ("memory", "record_plane"),
+        operation if operation.starts_with("media_") => ("media", "record_plane"),
+        operation if operation.starts_with("import_history_") => ("import_history", "record_plane"),
+        operation if operation.starts_with("repository_tree_") => {
+            ("repository_tree", "record_plane")
+        }
+        operation if operation.starts_with("import_preview_") => ("import_preview", "record_plane"),
+        operation if operation.starts_with("program_execution_") => {
+            ("program_execution", "record_plane")
+        }
+        operation if operation.starts_with("prompt_artifact_") => {
+            ("prompt_artifacts", "record_plane")
+        }
+        operation if operation.starts_with("update_diagnostic_") => {
+            ("update_diagnostics", "record_plane")
+        }
+        "device_register" | "device_unregister" => ("device", "governance_locked"),
+        operation if operation.starts_with("device_") => ("device", "record_plane"),
+        "notification_send" => ("notifications", "governance_locked"),
+        operation if operation.starts_with("notification_") => ("notifications", "record_plane"),
+        operation if operation.starts_with("procedural_") => ("procedural", "governance_locked"),
+        operation if operation.starts_with("tool_source_") => ("tool_sources", "governance_locked"),
+        operation if operation.starts_with("worker_package_") => {
+            ("worker_packages", "governance_locked")
+        }
+        operation if operation.starts_with("subagent_task_") => ("subagents", "record_plane"),
+        operation if operation.starts_with("subagent_") => ("subagents", "adapter_replaceable"),
+        operation if operation.starts_with("module_program_execution_") => {
+            ("module_program_execution", "module_owned")
+        }
+        "module_list" | "module_inspect" => ("module_registry", "governance_locked"),
+        operation if operation.starts_with("module_proposal_") => {
+            ("module_authoring", "governance_locked")
+        }
+        operation if operation.starts_with("module_validation_") => {
+            ("module_validation", "governance_locked")
+        }
+        operation if operation.starts_with("module_install_") => {
+            ("module_install", "governance_locked")
+        }
+        operation if operation.starts_with("module_dependency_") => {
+            ("module_dependencies", "governance_locked")
+        }
+        operation if operation.starts_with("module_lifecycle_") => {
+            ("module_lifecycle", "governance_locked")
+        }
+        operation if operation.starts_with("module_runtime_") => {
+            ("module_runtime", "governance_locked")
+        }
+        operation if operation.starts_with("web_research_") => ("web_research", "record_plane"),
+        operation if operation.starts_with("web_") => ("web", "adapter_replaceable"),
+        _ => panic!("operation has no deterministic modularity classification: {operation}"),
+    }
+}
+
+#[test]
+fn capability_modularity_artifacts_are_linked_and_described() {
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    let evidence = read_repo_file(EVIDENCE_PATH);
+    let readme = read_repo_file(README_PATH);
+
+    for required in [
+        "# Capability Modularity Scorecard",
+        "Current score:",
+        "Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`",
+        "Provider-visible surface: one tool, `capability::execute`",
+        "CMS-0 registry/dispatch baseline",
+        "CMS-8 docs and static gates",
+        "Follow-on Slices",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "scorecard missing required text: {required}"
+        );
+    }
+    for class in OWNERSHIP_CLASSES {
+        assert!(
+            scorecard.contains(class),
+            "scorecard must define ownership class {class}"
+        );
+    }
+
+    for required in [
+        "Registry count",
+        "Dispatch parity",
+        "Machine inventory",
+        "No runtime routing or execution behavior changed",
+        "Future operations must update the TSV, this scorecard, and this manifest",
+    ] {
+        assert!(
+            evidence.contains(required),
+            "evidence manifest missing required text: {required}"
+        );
+    }
+
+    for required in [SCORECARD_PATH, INVENTORY_PATH, EVIDENCE_PATH] {
+        assert!(
+            readme.contains(required),
+            "README must link capability modularity artifact {required}"
+        );
+    }
+    for required in [
+        "kernel_locked",
+        "governance_locked",
+        "adapter_replaceable",
+        "module_owned",
+        "capability_modularity_scorecard_invariants",
+    ] {
+        assert!(
+            readme.contains(required),
+            "README missing capability modularity invariant text: {required}"
+        );
+    }
+}
+
+#[test]
+fn capability_modularity_inventory_matches_deterministic_prefix_policy() {
+    for row in parse_inventory() {
+        let (expected_family, expected_class) = expected_family_and_class(&row.operation);
+        assert_eq!(
+            row.family, expected_family,
+            "{} family drifted; update prefix policy and evidence intentionally",
+            row.operation
+        );
+        assert_eq!(
+            row.ownership_class, expected_class,
+            "{} ownership class drifted; update prefix policy and evidence intentionally",
+            row.operation
+        );
+    }
+}
+
+#[test]
+fn capability_modularity_inventory_covers_execute_registry_once() {
+    let registry_operations = registry_operations();
+    let rows = parse_inventory();
+    let inventory_operations: Vec<_> = rows.iter().map(|row| row.operation.clone()).collect();
+
+    assert_eq!(
+        registry_operations.len(),
+        EXPECTED_OPERATION_COUNT,
+        "verified baseline operation count changed; update the scorecard intentionally"
+    );
+    assert_eq!(
+        rows.len(),
+        EXPECTED_OPERATION_COUNT,
+        "inventory must classify every current operation exactly once"
+    );
+    assert_eq!(
+        duplicate_values(&registry_operations),
+        Vec::<String>::new(),
+        "registry has duplicate operation names"
+    );
+    assert_eq!(
+        duplicate_values(&inventory_operations),
+        Vec::<String>::new(),
+        "inventory has duplicate operation rows"
+    );
+
+    let registry_set: BTreeSet<_> = registry_operations.iter().cloned().collect();
+    let inventory_set: BTreeSet<_> = inventory_operations.into_iter().collect();
+    let missing: Vec<_> = registry_set.difference(&inventory_set).cloned().collect();
+    let extra: Vec<_> = inventory_set.difference(&registry_set).cloned().collect();
+    assert!(
+        missing.is_empty(),
+        "inventory missing operations: {missing:?}"
+    );
+    assert!(
+        extra.is_empty(),
+        "inventory has unknown operations: {extra:?}"
+    );
+}
+
+#[test]
+fn capability_modularity_dispatch_registry_parity_is_static() {
+    let registry_operations = registry_operations();
+    let dispatch_operations = dispatch_operations();
+
+    assert_eq!(
+        dispatch_operations.len(),
+        EXPECTED_OPERATION_COUNT,
+        "dispatch arm count changed; update registry and scorecard together"
+    );
+    assert_eq!(
+        duplicate_values(&dispatch_operations),
+        Vec::<String>::new(),
+        "dispatch has duplicate operation arms"
+    );
+
+    let registry_set: BTreeSet<_> = registry_operations.into_iter().collect();
+    let dispatch_set: BTreeSet<_> = dispatch_operations.into_iter().collect();
+    let missing_dispatch: Vec<_> = registry_set.difference(&dispatch_set).cloned().collect();
+    let extra_dispatch: Vec<_> = dispatch_set.difference(&registry_set).cloned().collect();
+    assert!(
+        missing_dispatch.is_empty(),
+        "registry operations missing dispatch arms: {missing_dispatch:?}"
+    );
+    assert!(
+        extra_dispatch.is_empty(),
+        "dispatch arms missing registry entries: {extra_dispatch:?}"
+    );
+}
+
+#[test]
+fn capability_modularity_rows_have_valid_classes_scores_and_actions() {
+    let allowed_classes: BTreeSet<_> = OWNERSHIP_CLASSES.into_iter().collect();
+    let allowed_actions: BTreeSet<_> = NEXT_ACTIONS.into_iter().collect();
+
+    for row in parse_inventory() {
+        assert!(
+            !row.family.trim().is_empty(),
+            "family must be set for {}",
+            row.operation
+        );
+        assert!(
+            !row.current_owner.trim().is_empty(),
+            "currentOwner must be set for {}",
+            row.operation
+        );
+        assert!(
+            !row.replacement_target.trim().is_empty(),
+            "replacementTarget must be set for {}",
+            row.operation
+        );
+        assert!(
+            allowed_classes.contains(row.ownership_class.as_str()),
+            "invalid ownershipClass for {}: {}",
+            row.operation,
+            row.ownership_class
+        );
+        assert!(
+            allowed_actions.contains(row.next_action.as_str()),
+            "invalid nextAction for {}: {}",
+            row.operation,
+            row.next_action
+        );
+    }
+}
+
+#[test]
+fn capability_modularity_kernel_and_governance_rows_are_not_replaceable() {
+    for row in parse_inventory() {
+        if row.ownership_class != "kernel_locked" && row.ownership_class != "governance_locked" {
+            continue;
+        }
+        assert_eq!(
+            row.scores["bindingScore"], 0,
+            "{} is {} and must not expose a binding seam",
+            row.operation, row.ownership_class
+        );
+        assert_eq!(
+            row.scores["rollbackScore"], 0,
+            "{} is {} and must not expose replacement rollback",
+            row.operation, row.ownership_class
+        );
+        assert!(
+            !row.replacement_target.contains("replace"),
+            "{} is {} but replacementTarget implies replacement: {}",
+            row.operation,
+            row.ownership_class,
+            row.replacement_target
+        );
+    }
+}
+
+#[test]
+fn capability_modularity_replaceable_and_module_owned_rows_name_controls() {
+    for row in parse_inventory() {
+        match row.ownership_class.as_str() {
+            "adapter_replaceable" => {
+                assert!(
+                    row.scores["bindingScore"] >= 1,
+                    "{} is adapter_replaceable but lacks a documented binding seam",
+                    row.operation
+                );
+                assert!(
+                    row.next_action == "add_adapter_seam"
+                        || row.next_action == "add_binding_policy",
+                    "{} is adapter_replaceable and must point at a binding follow-up",
+                    row.operation
+                );
+                assert!(
+                    row.replacement_target.contains("policy")
+                        || row.replacement_target.contains("evidence")
+                        || row.replacement_target.contains("authority"),
+                    "{} is adapter_replaceable but does not name a policy/evidence/authority constraint",
+                    row.operation
+                );
+            }
+            "module_owned" => {
+                assert!(
+                    row.scores["bindingScore"] >= 2,
+                    "{} is module_owned but lacks a concrete binding score",
+                    row.operation
+                );
+                assert!(
+                    row.scores["rollbackScore"] >= 2,
+                    "{} is module_owned but lacks rollback visibility",
+                    row.operation
+                );
+                assert!(
+                    row.replacement_target.contains("supervised"),
+                    "{} is module_owned and must name supervised replacement constraints",
+                    row.operation
+                );
+            }
+            "record_plane" => {
+                assert!(
+                    row.replacement_target.contains("record")
+                        || row.replacement_target.contains("custody")
+                        || row.replacement_target.contains("policy"),
+                    "{} is record_plane but does not name record custody or policy constraints",
+                    row.operation
+                );
+            }
+            "deferred" => panic!(
+                "{} is deferred; the baseline must not hide unclassified operations",
+                row.operation
+            ),
+            _ => {}
+        }
+    }
+}

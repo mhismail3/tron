@@ -92,6 +92,15 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
   primitive and provider export.
+- `packages/agent/docs/capability-modularity-scorecard.md`: active scorecard
+  for classifying all current `capability::execute` operations as
+  kernel-locked, governance-locked, record-plane, adapter-replaceable,
+  module-owned, or deferred so future modular replacement work is measurable.
+- `packages/agent/docs/capability-modularity-inventory.tsv`:
+  machine-readable 157-row inventory for the capability modularity scorecard.
+- `packages/agent/docs/capability-modularity-evidence-manifest.md`:
+  companion evidence manifest for capability modularity baseline facts and
+  validation commands.
 - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
   clean-break primitive engine teardown scorecard for stripping hard-coded
   capabilities, policies, skills, rules, helper launch products, and fixed iOS product
@@ -1166,6 +1175,20 @@ operation values behind that single `execute` provider surface:
 | Provider tool | Engine function | Purpose |
 |---------------|-----------------|---------|
 | `execute` | `capability::execute` | Run one primitive host operation and return a bounded observation/result to the turn loop. |
+
+Capability modularity is tracked in
+`packages/agent/docs/capability-modularity-scorecard.md`, with the
+machine-readable inventory in
+`packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
+in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
+`capability_modularity_scorecard_invariants` test locks the current 157
+operation baseline, registry/dispatch parity, and the ownership classes used for
+future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
+`adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
+governed contract-compatible substitution with authority, evidence, visibility,
+and rollback constraints; it does not mean arbitrary hot swapping. Kernel and
+module-governance operations are intentionally non-replaceable in v1 because
+they are the substrate that validates future replacement.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -2685,6 +2708,11 @@ packages/ios-app/Sources/
   the live catalog; catalog snapshot revision and
   durable `catalog_discovery_report` resources are presented there as
   contextual verification proof rather than top-level telemetry.
+  Future replacement-disclosure rows should derive implementation owner,
+  built-in/module status, verification state, failed replacement attempts, and
+  rollback availability from the capability modularity scorecard/binding
+  evidence instead of exposing raw operation ids, grants, authority ids, or
+  internal resource handles at top level.
   Deeper worker/package/surface tabs appear only when server evidence exists.
   The sheet renders live worker lifecycle catalog rows, capability schema/health gaps,
   package/resource status,
