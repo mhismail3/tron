@@ -583,6 +583,20 @@ async fn adapter_and_module_owned_replacement_paths_require_rollback_metadata() 
     .expect_err("rollback ref required")
     .to_string();
     assert!(error.contains("rollbackRef"), "{error}");
+
+    let mut missing_disable = request_payload("missing-disable");
+    missing_disable["disableRef"] = Value::Null;
+    let invocation = fixture.write_invocation("missing-disable", missing_disable);
+    let error = record_capability_binding_request_value_at(
+        &fixture.deps,
+        &invocation,
+        &invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("disable ref required")
+    .to_string();
+    assert!(error.contains("disableRef"), "{error}");
 }
 
 #[tokio::test]
@@ -942,7 +956,7 @@ fn request_payload(key: &str) -> Value {
         "title": "Capability binding policy request",
         "targetOperation": "git_status",
         "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
-        "replacementTarget": "future_module_may_shadow_then_replace_after_exact_git_binding_policy",
+        "replacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
         "ownershipClass": "adapter_replaceable",
         "bindingMode": "replace",
         "targetRef": {

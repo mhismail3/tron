@@ -1,4 +1,10 @@
 //! Process primitive execute operations.
+//!
+//! `process_run` is a short synchronous adapter seam, not the durable jobs
+//! lifecycle. Future replacement must preserve trusted working-directory authority,
+//! `networkPolicy: none`, bounded output, provider-safe result projection,
+//! replay/idempotency evidence, and rollback/disable metadata before binding
+//! policy may later consider routing.
 
 use std::time::Duration;
 

@@ -1,8 +1,8 @@
 # Capability Modularity Evidence Manifest
 
-Status: active / capability-binding-policy-complete
+Status: active / adapter-seam-hardening-complete
 
-This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard and binding policy slices add documentation, invariants, and metadata-only governance records; they add no runtime routing behavior.
+This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard, binding policy, and adapter seam hardening slices add documentation, invariants, source-backed seam contracts, and metadata-only governance records; they add no runtime routing behavior.
 
 ## Reviewed Source Files
 
@@ -10,11 +10,19 @@ This manifest records the evidence reviewed for the capability modularity scorec
 |---|---|
 | Operation registry | `packages/agent/src/domains/capability/operations/registry.rs` |
 | Operation dispatch | `packages/agent/src/domains/capability/operations/mod.rs` |
+| Process adapter seam | `packages/agent/src/domains/capability/operations/process.rs` |
 | Capability binding operations | `packages/agent/src/domains/capability/operations/capability_binding.rs` |
 | Capability contract | `packages/agent/src/domains/capability/contract.rs` |
 | Capability binding schema fields | `packages/agent/src/domains/capability/capability_binding_contract.rs` |
 | Capability binding docs/service | `packages/agent/src/domains/capability_binding/mod.rs` |
 | Capability binding resource definitions | `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
+| Filesystem adapter seam | `packages/agent/src/domains/filesystem/mod.rs` |
+| Git adapter seam | `packages/agent/src/domains/git/mod.rs` |
+| Jobs adapter seam | `packages/agent/src/domains/jobs/mod.rs` |
+| Web adapter seam | `packages/agent/src/domains/web/mod.rs` |
+| Subagent adapter seam | `packages/agent/src/domains/subagents/mod.rs` |
+| Context-control strategy seam | `packages/agent/src/domains/context_control/mod.rs` |
+| Context compaction strategy seam | `packages/agent/src/domains/agent/context/mod.rs` |
 | Grant authorization policy | `packages/agent/src/engine/authority/grants/authorization.rs` |
 | Engine fabric docs | `packages/agent/src/engine/mod.rs` |
 | Authority/grants docs | `packages/agent/src/engine/authority/mod.rs` |
@@ -53,6 +61,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |
 | Kernel boundary lockdown | Static invariants require source anchors for authority/grants, event/session log, resource store, redaction/provider-safety, trace/audit/replay/catalog, transport boundary, and module governance pipeline before locked rows can change ownership class. |
 | Capability binding policy | `capability_binding_request`, `capability_binding_decision`, and `capability_binding_policy` resources record metadata-only replacement governance with exact selectors, idempotency, stale-version guards, rollback/disable refs, and provider-safe projections. |
+| Adapter seam hardening | Adapter-replaceable families and the compaction strategy seam now name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites in source docs, inventory metadata, scorecard prose, and static tests. |
 | Runtime behavior | No runtime routing, dispatch mutation, module hot-swap, install, activation, execution, package-manager, dependency-restore, or network behavior changed in this slice. |
 
 ## Kernel Boundary Lockdown Evidence
@@ -72,10 +81,22 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Evidence | Source |
 |---|---|
 | Request records model operation name, current built-in owner, requested target, ownership class, binding mode, actor scope, rationale, contract/evidence refs, authority/network constraints, stale-version guard, rollback/disable refs, audit refs, and idempotency fingerprint. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/domains/capability_binding/service.rs` |
-| Locked ownership classes cannot request replacement; adapter/module replacement proposals require rollback metadata and remain metadata only. | `packages/agent/src/domains/capability_binding/validation.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
+| Locked ownership classes cannot request replacement; adapter/module replacement proposals require rollback/disable metadata and remain metadata only. | `packages/agent/src/domains/capability_binding/validation.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
 | Provider-visible operations require exact selectors for inspect/linked writes, explicit non-wildcard grants, `networkPolicy: none`, and bounded provider-safe projections with no `agent_state` inheritance. | `packages/agent/src/engine/authority/grants/authorization.rs`, `packages/agent/src/domains/capability_binding/authority.rs`, `packages/agent/src/domains/capability_binding/projection.rs` |
 | Decision/policy records revalidate expected request/decision versions and preserve audit history through resource versions/events. | `packages/agent/src/domains/capability_binding/service.rs`, `packages/agent/src/domains/capability_binding/resource_store.rs` |
 | Side-effect proof explicitly records no runtime routing, dispatch mutation, hot-swap, module activation/execution, dependency restore, package-manager, network, raw path/command/log/file/grant/authority exposure, or repo-managed skill touch. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
+
+## Adapter Seam Hardening Evidence
+
+| Family | Source-backed seam evidence |
+|---|---|
+| `filesystem` | `packages/agent/src/domains/filesystem/mod.rs` records exact root authority, preview/commit evidence, bounded file side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
+| `git` | `packages/agent/src/domains/git/mod.rs` records exact repository authority, HEAD/index evidence, guarded Git side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
+| `process_run` | `packages/agent/src/domains/capability/operations/process.rs` records trusted working-directory authority, networkPolicy none, bounded process side effects, provider-safe result projection, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
+| `jobs` | `packages/agent/src/domains/jobs/mod.rs` records supervised runtime authority, lifecycle evidence, bounded job side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
+| `web` | `packages/agent/src/domains/web/mod.rs` records exact network authority, robots/source evidence, fail-closed side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
+| `subagents` | `packages/agent/src/domains/subagents/mod.rs` records exact task/runtime/job authority, merge evidence, bounded subagent side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
+| `context_control_compact` | `packages/agent/src/domains/context_control/mod.rs` and `packages/agent/src/domains/agent/context/mod.rs` record the summarizer strategy seam, provider-safe summary, context audit records, replay/idempotency evidence, and rollback/disable metadata while keeping context-control records server-owned. |
 
 ## Validation Commands
 
@@ -97,7 +118,8 @@ cargo check --manifest-path packages/agent/Cargo.toml
 
 - `kernel_locked` and `governance_locked` rows intentionally have binding and rollback scores of `0`; that is a lock, not a missing implementation.
 - Capability Binding Policy is a metadata-only governance plane. It adds provider-visible request/decision/policy custody operations, but no runtime capability routing, module replacement, package installation, worker enablement, dependency restore, package-manager behavior, or network behavior.
-- `adapter_replaceable` rows name the later replacement target and currently retain follow-up actions for adapter seams or binding policy.
+- `adapter_replaceable` rows now name required authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites and hand off to the shadow replacement trial.
 - `record_plane` rows allow module producers or workflow extension while preserving server-owned custody records and provider-safe projections.
+- `context_control_compact` is the only compaction-like strategy seam in this slice: a future summarizer replacement cannot bypass context audit records or expose raw prompt material.
 - `module_program_execution_*` is the first module-owned execution pack and is used as the baseline template for later governed replacement.
 - Future operations must update the TSV, this scorecard, and this manifest before the invariant test will pass.

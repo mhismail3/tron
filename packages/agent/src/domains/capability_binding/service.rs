@@ -87,6 +87,7 @@ pub(crate) async fn record_capability_binding_request_value_at(
         &target_metadata.ownership_class,
         &binding_mode,
         &rollback_ref,
+        &disable_ref,
     )?;
     let audit_refs = validate_ref_array(
         "auditRefs",

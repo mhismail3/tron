@@ -39,13 +39,14 @@ const OWNERSHIP_CLASSES: [&str; 6] = [
     "deferred",
 ];
 
-const NEXT_ACTIONS: [&str; 6] = [
+const NEXT_ACTIONS: [&str; 7] = [
     "none",
     "document",
     "add_tests",
     "add_adapter_seam",
     "add_binding_policy",
     "split_kernel",
+    "shadow_trial",
 ];
 
 #[derive(Debug)]
@@ -70,6 +71,15 @@ struct KernelBoundaryArea {
     locked_families: &'static [&'static str],
     locked_operations: &'static [&'static str],
     allowed_classes: &'static [&'static str],
+}
+
+struct AdapterSeamArea {
+    family: &'static str,
+    operations: &'static [&'static str],
+    source: &'static [SourceRequirement],
+    inventory_markers: &'static [&'static str],
+    docs_markers: &'static [&'static str],
+    record_plane_strategy: bool,
 }
 
 fn repo_root() -> PathBuf {
@@ -481,6 +491,210 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
     ]
 }
 
+fn adapter_seam_areas() -> Vec<AdapterSeamArea> {
+    vec![
+        AdapterSeamArea {
+            family: "filesystem",
+            operations: &[],
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/filesystem/mod.rs",
+                markers: &[
+                    "exact-root authority",
+                    "preview/commit parity",
+                    "provider-safe refs",
+                    "replay/idempotency evidence",
+                    "rollback/disable metadata",
+                ],
+            }],
+            inventory_markers: &[
+                "authority",
+                "preview_commit_evidence",
+                "provider_safe_refs",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "exact root authority",
+                "preview/commit evidence",
+                "bounded file side effects",
+            ],
+            record_plane_strategy: false,
+        },
+        AdapterSeamArea {
+            family: "git",
+            operations: &[],
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/git/mod.rs",
+                markers: &[
+                    "exact repository authority",
+                    "HEAD/index parity",
+                    "provider-safe refs",
+                    "replay/idempotency evidence",
+                    "rollback/disable metadata",
+                ],
+            }],
+            inventory_markers: &[
+                "authority",
+                "head_index_evidence",
+                "provider_safe_refs",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "exact repository authority",
+                "HEAD/index evidence",
+                "guarded Git side effects",
+            ],
+            record_plane_strategy: false,
+        },
+        AdapterSeamArea {
+            family: "core",
+            operations: &["process_run"],
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/capability/operations/process.rs",
+                markers: &[
+                    "trusted working-directory authority",
+                    "networkPolicy: none",
+                    "bounded output",
+                    "provider-safe result projection",
+                    "rollback/disable metadata",
+                ],
+            }],
+            inventory_markers: &[
+                "authority",
+                "network_none",
+                "bounded_output",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "trusted working-directory authority",
+                "networkPolicy none",
+                "bounded process side effects",
+            ],
+            record_plane_strategy: false,
+        },
+        AdapterSeamArea {
+            family: "jobs",
+            operations: &[],
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/jobs/mod.rs",
+                markers: &[
+                    "supervised-runtime",
+                    "durable lifecycle parity",
+                    "provider-safe refs",
+                    "bounded side effects",
+                    "rollback/disable metadata",
+                ],
+            }],
+            inventory_markers: &[
+                "authority",
+                "lifecycle_evidence",
+                "provider_safe_refs",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "supervised runtime authority",
+                "lifecycle evidence",
+                "bounded job side effects",
+            ],
+            record_plane_strategy: false,
+        },
+        AdapterSeamArea {
+            family: "web",
+            operations: &[],
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/web/mod.rs",
+                markers: &[
+                    "exact network authority",
+                    "robots/source parity",
+                    "provider-safe refs",
+                    "fail-closed side effects",
+                    "rollback/disable metadata",
+                ],
+            }],
+            inventory_markers: &[
+                "authority",
+                "robots_source_evidence",
+                "provider_safe_refs",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "exact network authority",
+                "robots/source evidence",
+                "fail-closed side effects",
+            ],
+            record_plane_strategy: false,
+        },
+        AdapterSeamArea {
+            family: "subagents",
+            operations: &[
+                "subagent_launch",
+                "subagent_status",
+                "subagent_result",
+                "subagent_cancel",
+            ],
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/subagents/mod.rs",
+                markers: &[
+                    "exact task/runtime/job",
+                    "reviewable merge-proposal parity",
+                    "provider-safe refs",
+                    "bounded side effects",
+                    "rollback/disable metadata",
+                ],
+            }],
+            inventory_markers: &[
+                "authority",
+                "merge_evidence",
+                "provider_safe_refs",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "exact task/runtime/job authority",
+                "merge evidence",
+                "bounded subagent side effects",
+            ],
+            record_plane_strategy: false,
+        },
+        AdapterSeamArea {
+            family: "context_control",
+            operations: &["context_control_compact"],
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/domains/context_control/mod.rs",
+                    markers: &[
+                        "summarizer strategy only",
+                        "server-owned",
+                        "provider-safe projections",
+                        "rollback/disable metadata",
+                    ],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/agent/context/mod.rs",
+                    markers: &["summarizer implementation", "record-plane custody"],
+                },
+            ],
+            inventory_markers: &[
+                "summarizer_seam",
+                "provider_safe_summary",
+                "context_audit_records",
+                "replay_idempotency",
+                "rollback_disable_refs",
+            ],
+            docs_markers: &[
+                "summarizer strategy",
+                "context audit records",
+                "provider-safe summary",
+            ],
+            record_plane_strategy: true,
+        },
+    ]
+}
+
 #[test]
 fn capability_modularity_artifacts_are_linked_and_described() {
     let scorecard = read_repo_file(SCORECARD_PATH);
@@ -496,6 +710,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "CMS-8 docs and static gates",
         "Kernel Boundary Lockdown Evidence",
         "Binding Policy Evidence",
+        "Adapter Seam Hardening Evidence",
         "Follow-on Slices",
     ] {
         assert!(
@@ -516,6 +731,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Machine inventory",
         "Kernel boundary lockdown",
         "Capability binding policy",
+        "Adapter seam hardening",
         "No runtime routing, dispatch mutation",
         "Future operations must update the TSV, this scorecard, and this manifest",
     ] {
@@ -776,6 +992,156 @@ fn capability_modularity_kernel_boundary_lockdown_is_source_backed() {
 }
 
 #[test]
+fn capability_modularity_adapter_seams_are_source_backed_and_measurable() {
+    let rows = parse_inventory();
+    let row_by_operation: BTreeMap<_, _> = rows
+        .iter()
+        .map(|row| (row.operation.as_str(), row))
+        .collect();
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    let evidence = read_repo_file(EVIDENCE_PATH);
+    let mut covered_adapter_operations = BTreeSet::new();
+
+    for area in adapter_seam_areas() {
+        for source in area.source {
+            assert!(
+                evidence.contains(source.path),
+                "evidence manifest must cite {} for {} adapter seam",
+                source.path,
+                area.family
+            );
+            let source_text = read_repo_file(source.path);
+            for marker in source.markers {
+                assert!(
+                    source_text.contains(marker),
+                    "{} adapter seam source marker drifted in {}: {marker}",
+                    area.family,
+                    source.path
+                );
+            }
+        }
+
+        for marker in area.docs_markers {
+            assert!(
+                scorecard.contains(marker),
+                "scorecard must name {marker} for {} adapter seam",
+                area.family
+            );
+            assert!(
+                evidence.contains(marker),
+                "evidence manifest must name {marker} for {} adapter seam",
+                area.family
+            );
+        }
+
+        let seam_rows: Vec<&InventoryRow> = if area.operations.is_empty() {
+            rows.iter()
+                .filter(|row| {
+                    row.family == area.family && row.ownership_class == "adapter_replaceable"
+                })
+                .collect()
+        } else {
+            area.operations
+                .iter()
+                .map(|operation| {
+                    *row_by_operation.get(operation).unwrap_or_else(|| {
+                        panic!(
+                            "{} seam references unknown operation {operation}",
+                            area.family
+                        )
+                    })
+                })
+                .collect()
+        };
+        assert!(
+            !seam_rows.is_empty(),
+            "{} seam must cover at least one operation",
+            area.family
+        );
+
+        for row in seam_rows {
+            if area.record_plane_strategy {
+                assert_eq!(
+                    row.ownership_class, "record_plane",
+                    "{} strategy seam must keep record custody server-owned",
+                    row.operation
+                );
+                assert!(
+                    row.replacement_target.contains("context_audit_records"),
+                    "{} compaction strategy seam must preserve context audit records",
+                    row.operation
+                );
+                assert!(
+                    row.scores["bindingScore"] >= 1,
+                    "{} strategy seam must name binding prerequisites",
+                    row.operation
+                );
+            } else {
+                assert_eq!(
+                    row.ownership_class, "adapter_replaceable",
+                    "{} must stay adapter_replaceable for seam hardening",
+                    row.operation
+                );
+                covered_adapter_operations.insert(row.operation.as_str());
+                assert!(
+                    row.scores["bindingScore"] >= 2,
+                    "{} adapter seam must be backed by binding-policy metadata",
+                    row.operation
+                );
+            }
+
+            for marker in area.inventory_markers {
+                assert!(
+                    row.replacement_target.contains(marker),
+                    "{} replacementTarget must name {marker}: {}",
+                    row.operation,
+                    row.replacement_target
+                );
+            }
+            assert!(
+                row.scores["providerSafetyScore"] >= 3,
+                "{} seam must retain provider-safe projection evidence",
+                row.operation
+            );
+            assert!(
+                row.scores["replayScore"] >= 2,
+                "{} seam must retain replay/idempotency evidence",
+                row.operation
+            );
+            assert!(
+                row.scores["rollbackScore"] >= 1,
+                "{} seam must name rollback/disable prerequisites",
+                row.operation
+            );
+            assert!(
+                row.scores["testScore"] >= 3,
+                "{} seam must be locked by focused tests",
+                row.operation
+            );
+            assert_eq!(
+                row.next_action, "shadow_trial",
+                "{} seam hardening should hand off to the shadow trial",
+                row.operation
+            );
+        }
+    }
+
+    let adapter_operations: BTreeSet<_> = rows
+        .iter()
+        .filter(|row| row.ownership_class == "adapter_replaceable")
+        .map(|row| row.operation.as_str())
+        .collect();
+    let uncovered: Vec<_> = adapter_operations
+        .difference(&covered_adapter_operations)
+        .copied()
+        .collect();
+    assert!(
+        uncovered.is_empty(),
+        "adapter_replaceable operations missing seam coverage: {uncovered:?}"
+    );
+}
+
+#[test]
 fn capability_modularity_replaceable_and_module_owned_rows_name_controls() {
     for row in parse_inventory() {
         match row.ownership_class.as_str() {
@@ -786,9 +1152,8 @@ fn capability_modularity_replaceable_and_module_owned_rows_name_controls() {
                     row.operation
                 );
                 assert!(
-                    row.next_action == "add_adapter_seam"
-                        || row.next_action == "add_binding_policy",
-                    "{} is adapter_replaceable and must point at a binding follow-up",
+                    row.next_action == "shadow_trial",
+                    "{} is adapter_replaceable and must hand off to shadow-trial follow-up",
                     row.operation
                 );
                 assert!(

@@ -117,7 +117,7 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         ),
         (
             "disableRef",
-            "Optional bounded disable or emergency-off reference.",
+            "Optional bounded disable or emergency-off reference; required for replace requests.",
         ),
     ] {
         properties.insert(

@@ -51,6 +51,10 @@
 //! already-present local upstream refs, reports oversized last-commit metadata
 //! as truncated row evidence, and never fetches, switches, creates, deletes,
 //! renames, or contacts remotes.
+//! The adapter seam for future module replacement is exact repository authority
+//! plus HEAD/index parity: a replacement must preserve provider-safe refs,
+//! replay/idempotency evidence, guarded mutation evidence, and
+//! rollback/disable metadata before binding policy may later consider routing.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
