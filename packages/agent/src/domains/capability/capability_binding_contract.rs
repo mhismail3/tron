@@ -61,19 +61,19 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         ),
         (
             "targetOperation",
-            "Exact capability::execute operation name covered by the binding request.",
+            "Exact supported capability::execute operation name covered by the binding request; unknown operations are rejected.",
         ),
         (
             "currentBuiltInOwner",
-            "Bounded current built-in owner path or label from the scorecard inventory.",
+            "Caller assertion for the current built-in owner; the server verifies it against execute-registry metadata.",
         ),
         (
             "replacementTarget",
-            "Bounded replacement or extension target label from the scorecard inventory.",
+            "Caller assertion for the replacement or extension target label; the server verifies it against execute-registry metadata.",
         ),
         (
             "ownershipClass",
-            "Capability modularity ownership class for the target operation.",
+            "Caller assertion for the capability modularity ownership class; the server verifies it against execute-registry metadata before replacement eligibility.",
         ),
         (
             "bindingMode",

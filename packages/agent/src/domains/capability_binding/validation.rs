@@ -1,5 +1,6 @@
 use serde_json::{Map, Value, json};
 
+use crate::domains::capability::operation_binding_metadata;
 use crate::engine::{EngineResourceScope, Invocation};
 use crate::shared::server::errors::CapabilityError;
 
@@ -201,6 +202,41 @@ pub(super) fn operation_name(payload: &Value) -> Result<String, CapabilityError>
         &required_string(payload, "targetOperation")?,
         TOKEN_MAX_BYTES,
     )
+}
+
+pub(super) struct TargetOperationBindingMetadata {
+    pub(super) operation_name: String,
+    pub(super) current_owner: String,
+    pub(super) ownership_class: String,
+    pub(super) replacement_target: String,
+}
+
+pub(super) fn target_operation_binding_metadata(
+    payload: &Value,
+) -> Result<TargetOperationBindingMetadata, CapabilityError> {
+    let operation_name = operation_name(payload)?;
+    let metadata = operation_binding_metadata(&operation_name)
+        .ok_or_else(|| invalid(format!("unknown targetOperation {operation_name}")))?;
+    let supplied_owner = current_owner(payload)?;
+    if supplied_owner != metadata.current_owner {
+        return Err(invalid(format!(
+            "currentBuiltInOwner mismatch for {operation_name}: expected {}",
+            metadata.current_owner
+        )));
+    }
+    let supplied_class = ownership_class(payload)?;
+    if supplied_class != metadata.ownership_class {
+        return Err(invalid(format!(
+            "ownershipClass mismatch for {operation_name}: expected {}",
+            metadata.ownership_class
+        )));
+    }
+    Ok(TargetOperationBindingMetadata {
+        operation_name,
+        current_owner: metadata.current_owner.to_owned(),
+        ownership_class: metadata.ownership_class.to_owned(),
+        replacement_target: metadata.replacement_target.to_owned(),
+    })
 }
 
 pub(super) fn current_owner(payload: &Value) -> Result<String, CapabilityError> {

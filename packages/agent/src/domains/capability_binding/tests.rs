@@ -445,13 +445,79 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 }
 
 #[tokio::test]
-async fn locked_classes_cannot_request_replacement() {
-    let fixture = Fixture::new("capability-binding-locked").await;
-    for ownership_class in ["kernel_locked", "governance_locked"] {
-        let mut payload = request_payload(ownership_class);
+async fn authoritative_target_metadata_rejects_spoofed_locked_replacement() {
+    let fixture = Fixture::new("capability-binding-locked-spoof").await;
+
+    let mut kernel_spoof = request_payload("kernel-spoof");
+    kernel_spoof["targetOperation"] = json!("observe");
+    kernel_spoof["currentBuiltInOwner"] = json!("domains::capability::operations::common");
+    kernel_spoof["ownershipClass"] = json!("adapter_replaceable");
+    kernel_spoof["replacementTarget"] = json!("future_git_adapter");
+    kernel_spoof["bindingMode"] = json!("replace");
+    let invocation = fixture.write_invocation("kernel-spoof", kernel_spoof);
+    let error = record_capability_binding_request_value_at(
+        &fixture.deps,
+        &invocation,
+        &invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("kernel spoof rejected")
+    .to_string();
+    assert!(
+        error.contains("ownershipClass mismatch for observe: expected kernel_locked"),
+        "{error}"
+    );
+
+    let mut governance_spoof = request_payload("governance-spoof");
+    governance_spoof["targetOperation"] = json!("notification_send");
+    governance_spoof["currentBuiltInOwner"] =
+        json!("domains::capability::operations::notifications + domains::notifications");
+    governance_spoof["ownershipClass"] = json!("adapter_replaceable");
+    governance_spoof["replacementTarget"] = json!("future_git_adapter");
+    governance_spoof["bindingMode"] = json!("replace");
+    let invocation = fixture.write_invocation("governance-spoof", governance_spoof);
+    let error = record_capability_binding_request_value_at(
+        &fixture.deps,
+        &invocation,
+        &invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("governance spoof rejected")
+    .to_string();
+    assert!(
+        error.contains("ownershipClass mismatch for notification_send: expected governance_locked"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn authoritative_locked_classes_cannot_request_replacement() {
+    let fixture = Fixture::new("capability-binding-locked-authoritative").await;
+    for (key, target_operation, current_owner, ownership_class, replacement_target) in [
+        (
+            "kernel-locked",
+            "observe",
+            "domains::capability::operations::common",
+            "kernel_locked",
+            "kernel_diagnostic_stays_engine_owned",
+        ),
+        (
+            "governance-locked",
+            "notification_send",
+            "domains::capability::operations::notifications + domains::notifications",
+            "governance_locked",
+            "delivery_policy_stays_server_governed_until_push_transport_policy_exists",
+        ),
+    ] {
+        let mut payload = request_payload(key);
+        payload["targetOperation"] = json!(target_operation);
+        payload["currentBuiltInOwner"] = json!(current_owner);
         payload["ownershipClass"] = json!(ownership_class);
+        payload["replacementTarget"] = json!(replacement_target);
         payload["bindingMode"] = json!("replace");
-        let invocation = fixture.write_invocation(ownership_class, payload);
+        let invocation = fixture.write_invocation(key, payload);
         let error = record_capability_binding_request_value_at(
             &fixture.deps,
             &invocation,
@@ -480,10 +546,12 @@ async fn adapter_and_module_owned_replacement_paths_require_rollback_metadata() 
 
     let mut module_payload = request_payload("module-owned");
     module_payload["targetOperation"] = json!("module_program_execution_start");
-    module_payload["currentBuiltInOwner"] =
-        json!("domains::capability::operations::module_program_execution");
+    module_payload["currentBuiltInOwner"] = json!(
+        "domains::capability::operations::module_program_execution + module_program_execution pack"
+    );
     module_payload["ownershipClass"] = json!("module_owned");
-    module_payload["replacementTarget"] = json!("future_module_runtime_adapter");
+    module_payload["replacementTarget"] =
+        json!("already_module_owned_template_for_supervised_replacement");
     let invocation = fixture.write_invocation("module-owned", module_payload);
     let module_request = record_capability_binding_request_value_at(
         &fixture.deps,
@@ -515,6 +583,62 @@ async fn adapter_and_module_owned_replacement_paths_require_rollback_metadata() 
     .expect_err("rollback ref required")
     .to_string();
     assert!(error.contains("rollbackRef"), "{error}");
+}
+
+#[tokio::test]
+async fn unknown_target_and_owner_or_target_mismatches_are_rejected() {
+    let fixture = Fixture::new("capability-binding-authoritative-mismatch").await;
+
+    let mut unknown = request_payload("unknown-target");
+    unknown["targetOperation"] = json!("future_unknown_operation");
+    let invocation = fixture.write_invocation("unknown-target", unknown);
+    let error = record_capability_binding_request_value_at(
+        &fixture.deps,
+        &invocation,
+        &invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("unknown target rejected")
+    .to_string();
+    assert!(
+        error.contains("unknown targetOperation future_unknown_operation"),
+        "{error}"
+    );
+
+    let mut owner_mismatch = request_payload("owner-mismatch");
+    owner_mismatch["currentBuiltInOwner"] = json!("domains::capability::operations::common");
+    let invocation = fixture.write_invocation("owner-mismatch", owner_mismatch);
+    let error = record_capability_binding_request_value_at(
+        &fixture.deps,
+        &invocation,
+        &invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("owner mismatch rejected")
+    .to_string();
+    assert!(
+        error.contains("currentBuiltInOwner mismatch for git_status"),
+        "{error}"
+    );
+
+    let mut target_mismatch = request_payload("target-mismatch");
+    target_mismatch["replacementTarget"] = json!("different_future_adapter");
+    let invocation = fixture.write_invocation("target-mismatch", target_mismatch);
+    let error = record_capability_binding_request_value_at(
+        &fixture.deps,
+        &invocation,
+        &invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("replacement target mismatch rejected")
+    .to_string();
+    assert!(
+        error.contains("replacementTarget mismatch for git_status"),
+        "{error}"
+    );
 }
 
 #[tokio::test]
@@ -817,8 +941,8 @@ fn request_payload(key: &str) -> Value {
         "capabilityBindingRequestId": format!("{key}-binding-request"),
         "title": "Capability binding policy request",
         "targetOperation": "git_status",
-        "currentBuiltInOwner": "domains::capability::operations::git",
-        "replacementTarget": "future_git_adapter",
+        "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
+        "replacementTarget": "future_module_may_shadow_then_replace_after_exact_git_binding_policy",
         "ownershipClass": "adapter_replaceable",
         "bindingMode": "replace",
         "targetRef": {

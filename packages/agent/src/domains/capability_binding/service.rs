@@ -62,11 +62,15 @@ pub(crate) async fn record_capability_binding_request_value_at(
         &required_string(payload, "title")?,
         TITLE_MAX_BYTES,
     )?;
-    let operation_name = operation_name(payload)?;
-    let current_owner = current_owner(payload)?;
-    let replacement_target = replacement_target(payload)?;
-    let ownership_class = ownership_class(payload)?;
+    let target_metadata = target_operation_binding_metadata(payload)?;
     let binding_mode = binding_mode(payload)?;
+    let replacement_target = replacement_target(payload)?;
+    if replacement_target != target_metadata.replacement_target {
+        return Err(invalid(format!(
+            "replacementTarget mismatch for {}: expected {}",
+            target_metadata.operation_name, target_metadata.replacement_target
+        )));
+    }
     let target_ref = required_ref(payload, "targetRef")?;
     let actor_scope = actor_scope(payload)?;
     let rationale = bounded_text(
@@ -79,7 +83,11 @@ pub(crate) async fn record_capability_binding_request_value_at(
     let stale_version_guard = stale_version_guard(payload)?;
     let rollback_ref = optional_ref(payload, "rollbackRef")?;
     let disable_ref = optional_ref(payload, "disableRef")?;
-    ensure_binding_mode_allowed(&ownership_class, &binding_mode, &rollback_ref)?;
+    ensure_binding_mode_allowed(
+        &target_metadata.ownership_class,
+        &binding_mode,
+        &rollback_ref,
+    )?;
     let audit_refs = validate_ref_array(
         "auditRefs",
         &optional_array(payload, "auditRefs")?.unwrap_or_default(),
@@ -119,10 +127,10 @@ pub(crate) async fn record_capability_binding_request_value_at(
         state: &state,
         scope: &scope,
         title: &title,
-        operation_name: &operation_name,
-        current_owner: &current_owner,
-        ownership_class: &ownership_class,
-        replacement_target: &replacement_target,
+        operation_name: &target_metadata.operation_name,
+        current_owner: &target_metadata.current_owner,
+        ownership_class: &target_metadata.ownership_class,
+        replacement_target: &target_metadata.replacement_target,
         binding_mode: &binding_mode,
         target_ref,
         actor_scope: &actor_scope,
@@ -172,8 +180,8 @@ pub(crate) async fn record_capability_binding_request_value_at(
         &resource,
         json!({
             "bindingRequestState": state,
-            "targetOperation": operation_name,
-            "ownershipClass": ownership_class,
+            "targetOperation": target_metadata.operation_name,
+            "ownershipClass": target_metadata.ownership_class,
             "bindingMode": binding_mode,
             "metadataOnly": true,
             "reviewRequired": true,
