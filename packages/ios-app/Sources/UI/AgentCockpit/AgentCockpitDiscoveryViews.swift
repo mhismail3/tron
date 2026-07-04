@@ -33,7 +33,7 @@ struct CapabilitiesSummaryCard: View {
             }
             HStack(spacing: 8) {
                 capabilityMetric("Areas", overview.groups.count)
-                capabilityMetric("Operations", overview.operationCount > 0 ? overview.operationCount : overview.functionCount)
+                capabilityMetric("Operations", operationMetricCount)
                 capabilityMetric("Workers", overview.workerCount)
                 capabilityMetric("Triggers", overview.triggerCount)
             }
@@ -71,11 +71,22 @@ struct CapabilitiesSummaryCard: View {
         if overview.functionCount == 0, overview.operationCount == 0 {
             return overview.detail
         }
+        if let operationList = overview.capabilityVisibility?.operationList, operationList.truncated {
+            return "\(operationList.returnedOperations) of \(operationList.totalOperations) operations are visible. \(operationList.label)."
+        }
+        if let resourceScan = overview.capabilityVisibility?.resourceScan, resourceScan.truncated {
+            return "\(overview.operationCount) operations are visible. \(resourceScan.label)."
+        }
         if overview.degradedFunctionCount + overview.missingSchemaCount + overview.catalogDecodeIssueCount > 0 {
             return overview.detail
         }
         let visibleOperations = overview.operationCount > 0 ? overview.operationCount : overview.functionCount
         return "\(visibleOperations) operations are visible across \(overview.groups.count) capability areas."
+    }
+
+    private var operationMetricCount: Int {
+        overview.capabilityVisibility?.operationList.totalOperations
+            ?? (overview.operationCount > 0 ? overview.operationCount : overview.functionCount)
     }
 
     private var statusColor: Color {
@@ -341,9 +352,9 @@ private struct CapabilityOperationCard: View {
 
     private var activitySummary: String {
         if operation.activityCount > 0 {
-            return "\(operation.bindingRequested) binding, \(operation.shadowRuns) shadow runs, rollback \(operation.rollbackAvailable ? "available" : "not active")"
+            return "\(operation.bindingRequested) binding, \(operation.shadowRuns) shadow runs, \(operation.readinessLabel.lowercased())"
         }
-        return operation.replacementLabel
+        return "\(operation.readinessLabel) · \(operation.readinessNextActionLabel)"
     }
 
     private var symbol: String {
@@ -414,6 +425,7 @@ private struct CapabilityOperationDetailSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     summary
                     ownership
+                    readiness
                     replacement
                     attempts
                     rollback
@@ -454,6 +466,9 @@ private struct CapabilityOperationDetailSheet: View {
             Text("Part of \(group.title).")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
+            Text(operation.readinessLabel)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(.tronTextSecondary)
         }
         .padding(13)
         .sectionFill(operation.isLocked ? .tronTextMuted : .tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
@@ -465,7 +480,8 @@ private struct CapabilityOperationDetailSheet: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
             detailRow("Owner now", operation.ownerLabel)
-            detailRow("Backend owner", operation.backendOwnerLabel)
+            detailRow("Metadata source", operation.metadataSourceLabel)
+            detailRow("Projection source", operation.projectionSourceLabel)
             detailRow("Family", operation.familyLabel)
             detailRow("Status", operation.statusLabel)
             Text(operation.ownerDetail)
@@ -477,17 +493,42 @@ private struct CapabilityOperationDetailSheet: View {
         .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
     }
 
+    private var readiness: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Readiness")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("State", operation.readinessLabel)
+            detailRow("Next", operation.readinessNextActionLabel)
+            Text(operation.readinessDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(operation.readinessNextActionDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(.tronInfo, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
     private var replacement: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Replacement")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
             detailRow("Policy", operation.replacementLabel)
+            detailRow("Target", operation.replacementTargetLabel)
             detailRow("Boundary", operation.governanceBoundary)
             WrapRow(items: replacementChips, tint: .tronInfo)
             Text(operation.replacementDetail)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(operation.replacementTargetDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(13)

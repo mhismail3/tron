@@ -62,11 +62,13 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .response_schema(json!({
             "type": "object",
             "additionalProperties": true,
-            "required": ["schemaVersion", "operation", "summary", "families", "operations", "scope", "projection"],
+            "required": ["schemaVersion", "operation", "summary", "operationList", "resourceScan", "families", "operations", "scope", "projection"],
             "properties": {
                 "schemaVersion": {"type": "string"},
                 "operation": {"const": "capability_binding_cockpit_overview"},
                 "summary": {"type": "object"},
+                "operationList": {"type": "object"},
+                "resourceScan": {"type": "object"},
                 "families": {"type": "array"},
                 "operations": {"type": "array"},
                 "scope": {"type": "object"},

@@ -172,7 +172,8 @@ mod scheduler_contract;
 
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
-    is_supported_operation, operation_binding_metadata, operation_list_text,
+    OperationBindingMetadata, is_supported_operation, operation_binding_metadata,
+    operation_list_text,
 };
 mod update_diagnostics_contract;
 mod web_research_contract;

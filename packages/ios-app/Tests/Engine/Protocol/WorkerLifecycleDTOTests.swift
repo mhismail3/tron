@@ -248,6 +248,178 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.projection.rawPayloadsReturned == false)
     }
 
+    @Test("Capability cockpit overview decodes server-owned truth fields")
+    func capabilityCockpitOverviewDecodesServerProjectionTruth() throws {
+        let json = """
+        {
+          "schemaVersion": "tron.capability_binding.cockpit_overview.v1",
+          "operation": "capability_binding_cockpit_overview",
+          "summary": {
+            "totalOperations": 170,
+            "returnedOperations": 1,
+            "operationListComplete": false,
+            "operationListTruncated": true,
+            "resourceScanComplete": false,
+            "resourceScanTruncated": true,
+            "kernelLocked": 1,
+            "governanceLocked": 0,
+            "recordPlane": 0,
+            "adapterReplaceable": 1,
+            "moduleOwned": 0,
+            "deferred": 0,
+            "bindingRequests": 100,
+            "bindingApproved": 0,
+            "bindingRejected": 1,
+            "activePolicies": 0,
+            "shadowRequests": 1,
+            "shadowRuns": 1,
+            "rollbackAvailable": 1,
+            "title": "Capability ownership visible",
+            "detail": "1 of 170 operations returned; resource counts are bounded lower-bound facts"
+          },
+          "operationList": {
+            "totalOperations": 170,
+            "returnedOperations": 1,
+            "requestedLimit": 1,
+            "complete": false,
+            "truncated": true,
+            "state": "truncated",
+            "label": "Operation list truncated",
+            "detail": "1 of 170 operations are returned because the client requested limit 1."
+          },
+          "resourceScan": {
+            "queries": 14,
+            "scannedResources": 100,
+            "appliedResources": 100,
+            "limitPerKindScope": 100,
+            "complete": false,
+            "truncated": true,
+            "truncatedQueries": 1,
+            "state": "bounded_degraded",
+            "label": "Resource scan bounded",
+            "detail": "1 of 14 kind/scope scans reached the per-scan limit of 100; binding and shadow counts are lower-bound facts."
+          },
+          "families": [],
+          "operations": [
+            {
+              "name": "git_status",
+              "family": "git",
+              "familyLabel": "Git",
+              "owner": {
+                "label": "Built-in Git adapter",
+                "detail": "A built-in adapter owns execution today and can be proposed for governed replacement later.",
+                "source": "capability execute registry redacted ownership metadata plus scoped capability binding resources",
+                "metadataSourceLabel": "Capability execute registry",
+                "projectionSourceLabel": "Capability binding cockpit projection"
+              },
+              "status": {
+                "kind": "built_in_adapter",
+                "label": "Built-in adapter",
+                "detail": "Built-in execution can be shadowed or replaced only after governed evidence. Family: Git.",
+                "builtIn": true,
+                "moduleOwned": false,
+                "locked": false
+              },
+              "replacement": {
+                "canShadow": true,
+                "canReplace": true,
+                "canExtend": true,
+                "label": "Shadow or replace after review",
+                "detail": "Future modules can request shadow or replacement with exact authority, parity evidence, and rollback/disable metadata. Area: Git.",
+                "target": {
+                  "label": "Governed Git adapter",
+                  "detail": "Any future target must satisfy exact authority, parity evidence, bounded provider-safe refs, replay/idempotency proof, and rollback/disable metadata."
+                },
+                "governanceBoundary": "capability binding policy"
+              },
+              "readiness": {
+                "state": "needs_governance_review",
+                "label": "Review needed",
+                "detail": "Server-derived readiness only.",
+                "nextActionLabel": "Inspect decisions",
+                "nextActionDetail": "Do not infer readiness locally."
+              },
+              "binding": {
+                "requested": 100,
+                "approved": 0,
+                "rejected": 1,
+                "activePolicies": 0,
+                "failedReplacementAttempts": 1,
+                "latestState": "rejected",
+                "lastUpdatedAt": "2026-06-27T12:00:00Z",
+                "detail": "1 binding decision rejected; no runtime routing changed."
+              },
+              "shadowTrial": {
+                "requested": 1,
+                "approved": 1,
+                "rejected": 0,
+                "runs": 1,
+                "passed": 1,
+                "failed": 0,
+                "aborted": 0,
+                "disabled": 0,
+                "latestState": "passed",
+                "lastUpdatedAt": "2026-06-27T12:00:00Z",
+                "availableForThisOperation": true,
+                "detail": "1 metadata-only shadow run recorded; candidate execution and routing stayed disabled."
+              },
+              "rollback": {
+                "available": true,
+                "disableAvailable": true,
+                "abortAvailable": true,
+                "boundary": "capability binding governance",
+                "detail": "Rollback metadata is available for the recorded policy or shadow trial; live routing still has not changed."
+              }
+            }
+          ],
+          "scope": {
+            "sessionScoped": true,
+            "workspaceScoped": true,
+            "exactScopeRequired": true,
+            "source": "trusted invocation causal context"
+          },
+          "projection": {
+            "allowlist": "capability_binding_cockpit_visibility_redacted_v1",
+            "serverOwnedTruth": true,
+            "projectionOnly": true,
+            "metadataOnly": true,
+            "autonomyBehaviorCreated": false,
+            "runtimeRoutingChanged": false,
+            "dispatchTableMutated": false,
+            "hotSwapPerformed": false,
+            "moduleActivated": false,
+            "moduleExecuted": false,
+            "rawResourceIdsReturned": false,
+            "rawLocalPathsReturned": false,
+            "rawEnvValuesReturned": false,
+            "rawSecretsReturned": false,
+            "rawCommandsReturned": false,
+            "rawLogsReturned": false,
+            "rawCodeReturned": false,
+            "rawFileContentsReturned": false,
+            "rawGrantIdsReturned": false,
+            "rawAuthorityIdsReturned": false,
+            "traceIdsReturned": false,
+            "invocationIdsReturned": false,
+            "tokenLikeMaterialReturned": false,
+            "hiddenChainOfThoughtReturned": false,
+            "boundedItems": true
+          }
+        }
+        """
+
+        let overview = try JSONDecoder().decode(CapabilityCockpitOverviewDTO.self, from: Data(json.utf8))
+
+        #expect(overview.summary.totalOperations == 170)
+        #expect(overview.summary.returnedOperations == 1)
+        #expect(overview.operationList.truncated == true)
+        #expect(overview.resourceScan.state == "bounded_degraded")
+        #expect(overview.operations.first?.owner.metadataSourceLabel == "Capability execute registry")
+        #expect(overview.operations.first?.replacement.target.label == "Governed Git adapter")
+        #expect(overview.operations.first?.readiness.nextActionLabel == "Inspect decisions")
+        #expect(overview.projection.runtimeRoutingChanged == false)
+    }
+
     @Test("Agent briefing overview decodes server-owned projection")
     func agentBriefingOverviewDecodesServerProjection() throws {
         let json = """

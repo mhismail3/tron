@@ -173,7 +173,8 @@ use worker_packages::{worker_package_inspect, worker_package_list};
 
 pub(crate) use registry::supported_operation_names;
 pub(crate) use registry::{
-    is_supported_operation, operation_binding_metadata, operation_list_text,
+    OperationBindingMetadata, is_supported_operation, operation_binding_metadata,
+    operation_list_text,
 };
 
 pub(crate) async fn execute_value(

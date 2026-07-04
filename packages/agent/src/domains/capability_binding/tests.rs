@@ -1087,6 +1087,14 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         json!(super::contract::COCKPIT_VISIBILITY_SCHEMA_VERSION)
     );
     assert_eq!(overview["summary"]["totalOperations"], json!(170));
+    assert_eq!(overview["summary"]["returnedOperations"], json!(170));
+    assert_eq!(overview["summary"]["operationListComplete"], json!(true));
+    assert_eq!(overview["summary"]["resourceScanComplete"], json!(true));
+    assert_eq!(overview["operationList"]["totalOperations"], json!(170));
+    assert_eq!(overview["operationList"]["returnedOperations"], json!(170));
+    assert_eq!(overview["operationList"]["truncated"], json!(false));
+    assert_eq!(overview["resourceScan"]["complete"], json!(true));
+    assert_eq!(overview["resourceScan"]["truncated"], json!(false));
     assert_eq!(overview["summary"]["bindingRequests"], json!(1));
     assert_eq!(overview["summary"]["bindingRejected"], json!(1));
     assert_eq!(overview["summary"]["shadowRequests"], json!(1));
@@ -1098,8 +1106,29 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
 
     let git_status = operation_projection(&overview, "git_status");
     assert_eq!(git_status["owner"]["label"], json!("Built-in Git adapter"));
+    assert_eq!(
+        git_status["owner"]["metadataSourceLabel"],
+        json!("Capability execute registry")
+    );
+    assert_eq!(
+        git_status["owner"]["projectionSourceLabel"],
+        json!("Capability binding cockpit projection")
+    );
+    assert!(git_status["owner"].get("backendOwner").is_none());
     assert_eq!(git_status["status"]["kind"], json!("built_in_adapter"));
     assert_eq!(git_status["replacement"]["canReplace"], json!(true));
+    assert_eq!(
+        git_status["replacement"]["target"]["label"],
+        json!("Governed Git adapter")
+    );
+    assert_eq!(
+        git_status["readiness"]["state"],
+        json!("needs_governance_review")
+    );
+    assert_eq!(
+        git_status["readiness"]["nextActionLabel"],
+        json!("Inspect decisions")
+    );
     assert_eq!(git_status["binding"]["requested"], json!(1));
     assert_eq!(git_status["binding"]["rejected"], json!(1));
     assert_eq!(git_status["binding"]["failedReplacementAttempts"], json!(1));
@@ -1119,6 +1148,14 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(observe["owner"]["label"], json!("Engine kernel"));
     assert_eq!(observe["status"]["kind"], json!("kernel_locked"));
     assert_eq!(observe["replacement"]["canReplace"], json!(false));
+    assert_eq!(
+        observe["replacement"]["target"]["label"],
+        json!("Engine-owned kernel responsibility")
+    );
+    assert_eq!(
+        observe["readiness"]["nextActionLabel"],
+        json!("Observe only")
+    );
     assert_eq!(observe["rollback"]["available"], json!(false));
 
     let goal_create = operation_projection(&overview, "goal_create");
@@ -1141,6 +1178,67 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     let other_git_status = operation_projection(&other_scope, "git_status");
     assert_eq!(other_git_status["binding"]["requested"], json!(0));
     assert_eq!(other_git_status["shadowTrial"]["requested"], json!(0));
+}
+
+#[tokio::test]
+async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_truth() {
+    let fixture = Fixture::new("capability-cockpit-truth").await;
+    for index in 0..=100 {
+        let key = format!("cockpit-truth-{index}");
+        let request = fixture.binding_request(&key).await;
+        assert_eq!(request["status"], json!("pending_review"));
+    }
+
+    let limited = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation("cockpit-overview-limit", json!({"limit": 1})),
+    )
+    .await
+    .expect("limited cockpit overview");
+    assert_eq!(limited["summary"]["totalOperations"], json!(170));
+    assert_eq!(limited["summary"]["returnedOperations"], json!(1));
+    assert_eq!(limited["summary"]["operationListComplete"], json!(false));
+    assert_eq!(limited["summary"]["operationListTruncated"], json!(true));
+    assert_eq!(limited["operationList"]["totalOperations"], json!(170));
+    assert_eq!(limited["operationList"]["returnedOperations"], json!(1));
+    assert_eq!(limited["operationList"]["requestedLimit"], json!(1));
+    assert_eq!(limited["operationList"]["state"], json!("truncated"));
+    assert_eq!(
+        limited["operations"].as_array().expect("operations").len(),
+        1
+    );
+
+    let full = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation("cockpit-overview-bounded-scan", json!({"limit": 200})),
+    )
+    .await
+    .expect("bounded scan cockpit overview");
+    assert_eq!(full["summary"]["totalOperations"], json!(170));
+    assert_eq!(full["summary"]["returnedOperations"], json!(170));
+    assert_eq!(full["summary"]["resourceScanComplete"], json!(false));
+    assert_eq!(full["summary"]["resourceScanTruncated"], json!(true));
+    assert_eq!(full["resourceScan"]["complete"], json!(false));
+    assert_eq!(full["resourceScan"]["truncated"], json!(true));
+    assert_eq!(full["resourceScan"]["truncatedQueries"], json!(1));
+    assert_eq!(full["resourceScan"]["limitPerKindScope"], json!(100));
+    assert_eq!(full["resourceScan"]["state"], json!("bounded_degraded"));
+    assert_eq!(full["resourceScan"]["scannedResources"], json!(100));
+    assert_eq!(full["resourceScan"]["appliedResources"], json!(100));
+
+    let git_status = operation_projection(&full, "git_status");
+    assert_eq!(git_status["binding"]["requested"], json!(100));
+    assert!(
+        full["resourceScan"]["detail"]
+            .as_str()
+            .expect("resource scan detail")
+            .contains("lower-bound facts")
+    );
+    assert!(super::cockpit_visibility::test_serialized_has_no_raw_cockpit_material(&full));
+    assert_eq!(full["projection"]["runtimeRoutingChanged"], json!(false));
+    assert_eq!(full["projection"]["dispatchTableMutated"], json!(false));
+    assert_eq!(full["projection"]["moduleActivated"], json!(false));
+    assert_eq!(full["projection"]["moduleExecuted"], json!(false));
 }
 
 #[tokio::test]

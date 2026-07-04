@@ -464,19 +464,24 @@ The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
 and sheet header are the core engine summary: connection state, visible
 capability count, issue count, and plain catalog trust state from server-owned
 facts. The sheet opens on Capabilities, grouping visible operations into
-user-facing areas before drilling into operation owner, backend owner label,
-locked/built-in/module status, replacement/shadow/extension eligibility,
-binding and shadow-trial attempts, rollback/disable/abort availability,
-effect/risk, schema-health, worker, trigger, tags, request/response schema
-bodies, and safe verification details. Catalog
+user-facing areas before drilling into server-supplied operation owner,
+metadata/projection source labels, total/returned operation completeness,
+bounded resource-scan state, locked/built-in/module status, redacted
+replacement target, readiness/next-action labels,
+replacement/shadow/extension eligibility, binding and shadow-trial attempts,
+rollback/disable/abort availability, effect/risk, schema-health, worker,
+trigger, tags, request/response schema bodies, and safe verification details.
+Catalog
 snapshot revision and recent `catalog_discovery_report` resources are rendered
 inside the cockpit as catalog verification proof, not as top-level telemetry.
 Capability modularity rows come from `capability_binding::cockpit_overview`,
 which is a server-owned redacted projection over registry metadata plus scoped
 binding/shadow-trial records. iOS may shape display labels and grouping, but it
-must not infer ownership class, replacement policy, attempt state, or rollback
-availability locally. The top-level cockpit must stay high-signal; binding,
-shadow-trial, and rollback details belong in group and operation drill-down.
+must not infer ownership class, replacement policy, readiness, attempt state,
+or rollback availability locally. `capability_binding` is a projection source,
+not an operation owner. The top-level cockpit must stay high-signal; binding,
+shadow-trial, readiness, scan completeness, and rollback details belong in
+group and operation drill-down.
 Dashboard and operation cards use the whole glass container as the disclosure
 target instead of decorative chevron glyphs; drill-down is communicated by the
 surface hierarchy and tap target, while functional navigation and expansion
@@ -573,9 +578,10 @@ For shell-affecting changes:
 - Run `SourceGuardTests`, which compiles the full app/test target and enforces
   deleted product roots.
 - For cockpit capability visibility changes, run the focused
-  `AgentCockpitStateTests` and `AgentCockpitViewModelTests` on the iPhone
-  simulator so server-owned DTO decoding, display shaping, and degraded states
-  stay covered.
+  `WorkerLifecycleDTOTests`, `WorkerLifecycleClientTests`,
+  `AgentCockpitStateTests`, and `AgentCockpitViewModelTests` on the iPhone
+  simulator so server-owned DTO decoding, transport context, display shaping,
+  and degraded states stay covered.
 - Keep chat tests under the same owner names as production chat code:
   `Coordinators`, `Messaging`, `Navigation`, `State`, and `ViewModel`.
 - Capture iPhone and iPad simulator screenshots when UI behavior changes.

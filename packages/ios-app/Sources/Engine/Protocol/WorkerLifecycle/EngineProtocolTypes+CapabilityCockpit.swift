@@ -8,6 +8,8 @@ struct CapabilityCockpitOverviewDTO: Codable, Equatable, Sendable {
     var schemaVersion: String
     var operation: String
     var summary: CapabilityCockpitSummaryDTO
+    var operationList: CapabilityCockpitOperationListDTO
+    var resourceScan: CapabilityCockpitResourceScanDTO
     var families: [CapabilityCockpitFamilyDTO]
     var operations: [CapabilityCockpitOperationDTO]
     var scope: CapabilityCockpitScopeDTO
@@ -16,6 +18,11 @@ struct CapabilityCockpitOverviewDTO: Codable, Equatable, Sendable {
 
 struct CapabilityCockpitSummaryDTO: Codable, Equatable, Sendable {
     var totalOperations: Int
+    var returnedOperations: Int
+    var operationListComplete: Bool
+    var operationListTruncated: Bool
+    var resourceScanComplete: Bool
+    var resourceScanTruncated: Bool
     var kernelLocked: Int
     var governanceLocked: Int
     var recordPlane: Int
@@ -30,6 +37,30 @@ struct CapabilityCockpitSummaryDTO: Codable, Equatable, Sendable {
     var shadowRuns: Int
     var rollbackAvailable: Int
     var title: String
+    var detail: String
+}
+
+struct CapabilityCockpitOperationListDTO: Codable, Equatable, Sendable {
+    var totalOperations: Int
+    var returnedOperations: Int
+    var requestedLimit: Int
+    var complete: Bool
+    var truncated: Bool
+    var state: String
+    var label: String
+    var detail: String
+}
+
+struct CapabilityCockpitResourceScanDTO: Codable, Equatable, Sendable {
+    var queries: Int
+    var scannedResources: Int
+    var appliedResources: Int
+    var limitPerKindScope: Int
+    var complete: Bool
+    var truncated: Bool
+    var truncatedQueries: Int
+    var state: String
+    var label: String
     var detail: String
 }
 
@@ -55,6 +86,7 @@ struct CapabilityCockpitOperationDTO: Codable, Equatable, Identifiable, Sendable
     var owner: CapabilityCockpitOwnerDTO
     var status: CapabilityCockpitStatusDTO
     var replacement: CapabilityCockpitReplacementDTO
+    var readiness: CapabilityCockpitReadinessDTO
     var binding: CapabilityCockpitBindingDTO
     var shadowTrial: CapabilityCockpitShadowTrialDTO
     var rollback: CapabilityCockpitRollbackDTO
@@ -65,8 +97,9 @@ struct CapabilityCockpitOperationDTO: Codable, Equatable, Identifiable, Sendable
 struct CapabilityCockpitOwnerDTO: Codable, Equatable, Sendable {
     var label: String
     var detail: String
-    var backendOwner: String
     var source: String
+    var metadataSourceLabel: String
+    var projectionSourceLabel: String
 }
 
 struct CapabilityCockpitStatusDTO: Codable, Equatable, Sendable {
@@ -84,7 +117,21 @@ struct CapabilityCockpitReplacementDTO: Codable, Equatable, Sendable {
     var canExtend: Bool
     var label: String
     var detail: String
+    var target: CapabilityCockpitReplacementTargetDTO
     var governanceBoundary: String
+}
+
+struct CapabilityCockpitReplacementTargetDTO: Codable, Equatable, Sendable {
+    var label: String
+    var detail: String
+}
+
+struct CapabilityCockpitReadinessDTO: Codable, Equatable, Sendable {
+    var state: String
+    var label: String
+    var detail: String
+    var nextActionLabel: String
+    var nextActionDetail: String
 }
 
 struct CapabilityCockpitBindingDTO: Codable, Equatable, Sendable {
