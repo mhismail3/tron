@@ -59,6 +59,19 @@ struct InventoryRow {
     next_action: String,
 }
 
+struct SourceRequirement {
+    path: &'static str,
+    markers: &'static [&'static str],
+}
+
+struct KernelBoundaryArea {
+    area: &'static str,
+    source: &'static [SourceRequirement],
+    locked_families: &'static [&'static str],
+    locked_operations: &'static [&'static str],
+    allowed_classes: &'static [&'static str],
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -253,6 +266,209 @@ fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
     }
 }
 
+fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
+    vec![
+        KernelBoundaryArea {
+            area: "authority/grants",
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/engine/authority/mod.rs",
+                    markers: &[
+                        "Grants are resolved",
+                        "engine-owned store",
+                        "provider clients",
+                    ],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/engine/mod.rs",
+                    markers: &[
+                        "engine-owned grant store before any handler runs",
+                        "intent-shaped",
+                    ],
+                },
+            ],
+            locked_families: &[],
+            locked_operations: &["observe"],
+            allowed_classes: &["kernel_locked"],
+        },
+        KernelBoundaryArea {
+            area: "event/session log",
+            source: &[SourceRequirement {
+                path: "packages/agent/src/domains/session/event_store/mod.rs",
+                markers: &["transactional facade", "append-only", "deterministic"],
+            }],
+            locked_families: &["logs"],
+            locked_operations: &[],
+            allowed_classes: &["kernel_locked"],
+        },
+        KernelBoundaryArea {
+            area: "resource store",
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/engine/durability/mod.rs",
+                    markers: &["Durable records", "source of truth", "Typed resource"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/engine/durability/resources/mod.rs",
+                    markers: &[
+                        "resource kernel",
+                        "durable object model",
+                        "projections over this store",
+                    ],
+                },
+            ],
+            locked_families: &[
+                "goals_questions",
+                "import_history",
+                "import_preview",
+                "media",
+                "memory",
+                "program_execution",
+                "prompt_artifacts",
+                "repository_tree",
+                "scheduler",
+                "update_diagnostics",
+                "web_research",
+            ],
+            locked_operations: &[],
+            allowed_classes: &["record_plane"],
+        },
+        KernelBoundaryArea {
+            area: "redaction/provider-safety",
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/shared/foundation/redaction.rs",
+                    markers: &["redaction helpers", "credential shapes"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/session/event_store/redaction.rs",
+                    markers: &["event payloads", "foundation redactor"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/capability/mod.rs",
+                    markers: &["redacted", "bounded refs"],
+                },
+            ],
+            locked_families: &[
+                "trace",
+                "catalog_discovery",
+                "module_authoring",
+                "module_validation",
+            ],
+            locked_operations: &["log_recent", "replay_manifest"],
+            allowed_classes: &["kernel_locked", "governance_locked"],
+        },
+        KernelBoundaryArea {
+            area: "trace/audit/replay/catalog",
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/domains/capability/operations/mod.rs",
+                    markers: &["trace evidence", "replay_manifest", "trace_bypassed"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/engine/durability/replay.rs",
+                    markers: &["Replay read DTOs", "no replay executor"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/catalog_discovery/mod.rs",
+                    markers: &[
+                        "does not route",
+                        "discovered capabilities",
+                        "not invocation",
+                    ],
+                },
+            ],
+            locked_families: &["trace", "catalog_discovery"],
+            locked_operations: &["replay_manifest"],
+            allowed_classes: &["kernel_locked"],
+        },
+        KernelBoundaryArea {
+            area: "transport boundary",
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/transport/mod.rs",
+                    markers: &[
+                        "Thin client-facing",
+                        "do not own domain behavior",
+                        "must not implement",
+                        "handler-shaped",
+                    ],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/transport/engine/mod.rs",
+                    markers: &[
+                        "Transport-neutral",
+                        "caller-provided authority",
+                        "runtime metadata",
+                    ],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/transport/http/auth.rs",
+                    markers: &["bearer-token", "/engine/workers", "bearer token"],
+                },
+            ],
+            locked_families: &[],
+            locked_operations: &["observe"],
+            allowed_classes: &["kernel_locked"],
+        },
+        KernelBoundaryArea {
+            area: "module governance pipeline",
+            source: &[
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_registry/mod.rs",
+                    markers: &["not module activation", "must never install"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_authoring/mod.rs",
+                    markers: &["proposals", "installed modules", "non-executable"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_validation/mod.rs",
+                    markers: &["validation reports", "metadata only"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_install/mod.rs",
+                    markers: &["install candidates", "metadata gate", "execute module code"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_dependencies/mod.rs",
+                    markers: &["policy activation", "metadata only", "downloads"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_lifecycle/mod.rs",
+                    markers: &["lifecycle", "metadata state", "execute module code"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/module_runtime/mod.rs",
+                    markers: &["runtime supervision", "metadata gate", "PTYs/browsers"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/tool_sources/mod.rs",
+                    markers: &["not activation", "MCP servers", "register catalog"],
+                },
+                SourceRequirement {
+                    path: "packages/agent/src/domains/worker_lifecycle/mod.rs",
+                    markers: &["launch policy", "worker protocol", "bypass scoped tokens"],
+                },
+            ],
+            locked_families: &[
+                "module_authoring",
+                "module_dependencies",
+                "module_install",
+                "module_lifecycle",
+                "module_registry",
+                "module_runtime",
+                "module_validation",
+                "procedural",
+                "tool_sources",
+                "worker_packages",
+            ],
+            locked_operations: &["device_register", "device_unregister", "notification_send"],
+            allowed_classes: &["governance_locked"],
+        },
+    ]
+}
+
 #[test]
 fn capability_modularity_artifacts_are_linked_and_described() {
     let scorecard = read_repo_file(SCORECARD_PATH);
@@ -266,6 +482,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Provider-visible surface: one tool, `capability::execute`",
         "CMS-0 registry/dispatch baseline",
         "CMS-8 docs and static gates",
+        "Kernel Boundary Lockdown Evidence",
         "Follow-on Slices",
     ] {
         assert!(
@@ -284,6 +501,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Registry count",
         "Dispatch parity",
         "Machine inventory",
+        "Kernel boundary lockdown",
         "No runtime routing or execution behavior changed",
         "Future operations must update the TSV, this scorecard, and this manifest",
     ] {
@@ -302,6 +520,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
     for required in [
         "kernel_locked",
         "governance_locked",
+        "Kernel Boundary Lockdown",
         "adapter_replaceable",
         "module_owned",
         "capability_modularity_scorecard_invariants",
@@ -460,6 +679,83 @@ fn capability_modularity_kernel_and_governance_rows_are_not_replaceable() {
             row.ownership_class,
             row.replacement_target
         );
+    }
+}
+
+#[test]
+fn capability_modularity_kernel_boundary_lockdown_is_source_backed() {
+    let rows = parse_inventory();
+    let row_by_operation: BTreeMap<_, _> = rows
+        .iter()
+        .map(|row| (row.operation.as_str(), row))
+        .collect();
+    let evidence = read_repo_file(EVIDENCE_PATH);
+    let scorecard = read_repo_file(SCORECARD_PATH);
+
+    for area in kernel_boundary_areas() {
+        assert!(
+            evidence.contains(area.area),
+            "evidence manifest must record kernel-boundary area {}",
+            area.area
+        );
+        assert!(
+            scorecard.contains(area.area),
+            "scorecard must record kernel-boundary area {}",
+            area.area
+        );
+
+        for source in area.source {
+            assert!(
+                evidence.contains(source.path),
+                "evidence manifest must cite {} for {}",
+                source.path,
+                area.area
+            );
+            let source_text = read_repo_file(source.path);
+            for marker in source.markers {
+                assert!(
+                    source_text.contains(marker),
+                    "{} source marker drifted in {}: {marker}",
+                    area.area,
+                    source.path
+                );
+            }
+        }
+
+        let allowed_classes: BTreeSet<_> = area.allowed_classes.iter().copied().collect();
+        for row in rows.iter().filter(|row| {
+            area.locked_families.contains(&row.family.as_str())
+                || area.locked_operations.contains(&row.operation.as_str())
+        }) {
+            assert!(
+                allowed_classes.contains(row.ownership_class.as_str()),
+                "{} belongs to the {} boundary and must not move to {} without updating the scorecard, binding policy, and boundary evidence",
+                row.operation,
+                area.area,
+                row.ownership_class
+            );
+            assert!(
+                row.ownership_class != "adapter_replaceable"
+                    && row.ownership_class != "module_owned",
+                "{} belongs to the {} boundary and must not be adapter/module-routed",
+                row.operation,
+                area.area
+            );
+            assert!(
+                row.scores["providerSafetyScore"] >= 3,
+                "{} belongs to the {} boundary and must retain provider-safe projections",
+                row.operation,
+                area.area
+            );
+        }
+
+        for operation in area.locked_operations {
+            assert!(
+                row_by_operation.contains_key(operation),
+                "{} boundary references unknown operation {operation}",
+                area.area
+            );
+        }
     }
 }
 

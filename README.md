@@ -100,7 +100,7 @@ Current living entry points:
   machine-readable 157-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
-  validation commands.
+  Kernel Boundary Lockdown validation commands.
 - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
   clean-break primitive engine teardown scorecard for stripping hard-coded
   capabilities, policies, skills, rules, helper launch products, and fixed iOS product
@@ -1188,7 +1188,11 @@ future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 governed contract-compatible substitution with authority, evidence, visibility,
 and rollback constraints; it does not mean arbitrary hot swapping. Kernel and
 module-governance operations are intentionally non-replaceable in v1 because
-they are the substrate that validates future replacement.
+they are the substrate that validates future replacement. Kernel Boundary
+Lockdown evidence now source-checks authority/grants, event/session log,
+resource store, redaction/provider-safety, trace/audit/replay/catalog,
+transport boundary, and the module governance pipeline before those areas can
+move toward binding policy.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific

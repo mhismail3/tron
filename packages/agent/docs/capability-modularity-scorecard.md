@@ -1,8 +1,8 @@
 # Capability Modularity Scorecard
 
-Status: active / inventory-complete
+Status: active / kernel-boundary-lockdown-complete
 
-Current score: inventory coverage 157/157; replacement readiness is scored per operation and not yet closed.
+Current score: inventory coverage 157/157; kernel boundary lockdown evidence is source-backed; replacement readiness is scored per operation and not yet closed.
 
 Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
 
@@ -96,12 +96,26 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 | CMS-0 registry/dispatch baseline | 10 | Passed | 157 registry names and 157 dispatch arms are statically compared. |
 | CMS-1 ownership taxonomy | 10 | Passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
 | CMS-2 per-operation inventory | 20 | Passed | `capability-modularity-inventory.tsv` lists all 157 operations exactly once. |
-| CMS-3 kernel/governance lock | 12 | Passed | Invariant test rejects binding/rollback routes for locked rows. |
+| CMS-3 kernel/governance lock | 12 | Passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
 | CMS-4 adapter replacement targets | 12 | Documented gap | Filesystem, Git, jobs, process, web, and subagent adapters name replacement targets but still need binding policy. |
 | CMS-5 record-plane custody | 10 | Passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
 | CMS-6 module-owned template | 8 | Passed | `module_program_execution_*` is classified as the first governed module-owned execution template. |
 | CMS-7 cockpit visibility contract | 8 | Planned | README future-work notes point cockpit disclosure at owner, replacement, verification, and rollback state. |
-| CMS-8 docs and static gates | 10 | Passed | README links, evidence manifest, and invariant tests lock the inventory baseline. |
+| CMS-8 docs and static gates | 10 | Passed | README links, evidence manifest, and invariant tests lock the inventory baseline plus Kernel Boundary Lockdown evidence. |
+
+## Kernel Boundary Lockdown Evidence
+
+This follow-on slice records source-backed evidence for the substrate that must not be adapter/module-routed without a future scorecard and binding-policy change.
+
+| Area | Lock |
+|---|---|
+| `authority/grants` | Engine-owned grant resolution and least-privilege authority stay outside module replacement. |
+| `event/session log` | Session event/log truth, deterministic reconstruction, and append-only lifecycle semantics stay server-owned. |
+| `resource store` | The generic typed resource store remains the durable custody substrate; record-plane producers must not bypass it. |
+| `redaction/provider-safety` | Shared redaction and provider-safe projections remain kernel/governance requirements for visible evidence. |
+| `trace/audit/replay/catalog` | Trace, replay manifest, and catalog discovery remain engine-owned audit/discovery substrate, not invocation routes. |
+| `transport boundary` | `/engine` and `/engine/workers` stay authenticated transport framing over canonical engine requests, not domain behavior. |
+| `module governance pipeline` | Module registry, authoring, validation, install, dependency, lifecycle, runtime, procedural/tool-source/worker provenance gates remain governance-owned. |
 
 ## Hard Rules
 
@@ -114,7 +128,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 ## Follow-on Slices
 
-1. Kernel Boundary Lockdown: lock authority, event log, resource store, redaction, trace/audit, catalog, transport, and governance as non-replaceable substrate.
+1. Kernel Boundary Lockdown: complete. Static/source-backed invariants now lock authority, event log, resource store, redaction, trace/audit, catalog, transport, and governance as non-replaceable substrate.
 2. Capability Binding Policy: add metadata-only binding request, decision, policy, and history records for future replacement routing.
 3. Adapter Seam Hardening: document or introduce seams for filesystem, Git, jobs/process, web, and compaction-like strategies.
 4. Shadow Replacement Trial: pick one low-risk read-only operation and prove built-in versus module-owned shadow execution, audit, visibility, and rollback.
