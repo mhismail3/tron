@@ -328,6 +328,18 @@ final class DefaultWorkerLifecycleRepository: WorkerLifecycleRepository {
         )
     }
 
+    func capabilityCockpitOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> CapabilityCockpitOverviewDTO {
+        try await client.capabilityCockpitOverview(
+            limit: limit,
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+    }
+
     func agentBriefingOverview(
         limit: UInt64,
         sessionId: String?,

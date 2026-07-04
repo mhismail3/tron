@@ -343,6 +343,12 @@ protocol WorkerLifecycleRepository: AnyObject {
         workspaceId: String?
     ) async throws -> ModuleActivityOverviewDTO
 
+    func capabilityCockpitOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> CapabilityCockpitOverviewDTO
+
     func agentBriefingOverview(
         limit: UInt64,
         sessionId: String?,

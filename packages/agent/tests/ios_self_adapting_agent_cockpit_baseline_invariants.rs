@@ -349,7 +349,7 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
         "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift",
         &[
             "struct AgentCockpitSheet",
-            "SheetTitle(title: \"Runtime Cockpit\", color: .tronEmerald)",
+            "SheetTitle(title: \"Engine Cockpit\", color: .tronEmerald)",
             "SheetDismissButton(color: .tronEmerald)",
             "TronSegmentedControl(",
             ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)",
@@ -383,19 +383,21 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
     }
 
     assert_contains_all(
-        "packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift",
+        "packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift",
         &[
-            "ConnectionSettingsDiagnosticsSheet",
-            "ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel",
+            "showEngineCockpit",
             "AgentCockpitSheet(",
             "repository: dependencies.workerLifecycleRepository",
-            "sessionId: dependencies.sessionEventRepository.currentSessionId",
+            "sessionId: briefingSessionId",
             "workspaceId: nil",
         ],
     );
     assert_contains_all(
         "packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift",
-        &["Runtime Cockpit", "server-sourced runtime diagnostics"],
+        &[
+            "ConnectionSettingsDiagnosticsCopy",
+            "Engine visibility now lives in the dashboard cockpit.",
+        ],
     );
     assert_contains_all(
         "packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift",

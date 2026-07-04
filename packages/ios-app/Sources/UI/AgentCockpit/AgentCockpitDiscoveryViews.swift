@@ -33,7 +33,7 @@ struct CapabilitiesSummaryCard: View {
             }
             HStack(spacing: 8) {
                 capabilityMetric("Areas", overview.groups.count)
-                capabilityMetric("Operations", overview.functionCount)
+                capabilityMetric("Operations", overview.operationCount > 0 ? overview.operationCount : overview.functionCount)
                 capabilityMetric("Workers", overview.workerCount)
                 capabilityMetric("Triggers", overview.triggerCount)
             }
@@ -68,13 +68,14 @@ struct CapabilitiesSummaryCard: View {
     }
 
     private var summaryDetail: String {
-        if overview.functionCount == 0 {
+        if overview.functionCount == 0, overview.operationCount == 0 {
             return overview.detail
         }
         if overview.degradedFunctionCount + overview.missingSchemaCount + overview.catalogDecodeIssueCount > 0 {
             return overview.detail
         }
-        return "\(overview.functionCount) operations are visible across \(overview.groups.count) capability areas."
+        let visibleOperations = overview.operationCount > 0 ? overview.operationCount : overview.functionCount
+        return "\(visibleOperations) operations are visible across \(overview.groups.count) capability areas."
     }
 
     private var statusColor: Color {
@@ -148,9 +149,9 @@ struct CapabilityGroupCard: View {
                     .countBadge(group.hasIssues ? .tronWarning : .tronInfo)
             }
             HStack(spacing: 8) {
-                compactMetric("Ops", group.functionCount)
+                compactMetric("Ops", group.operationCount > 0 ? group.operationCount : group.functionCount)
+                compactMetric("Catalog", group.functionCount)
                 compactMetric("Workers", group.workerCount)
-                compactMetric("Triggers", group.triggerCount)
             }
             Text(group.ownerSummary)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -214,7 +215,8 @@ struct CapabilityGroupDetailSheet: View {
     let group: AgentCockpitCapabilityGroupRow
     let latestReport: AgentCockpitDiscoveryReportRow?
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedOperation: AgentCockpitFunctionRow?
+    @State private var selectedOperation: AgentCockpitOperationRow?
+    @State private var selectedFunction: AgentCockpitFunctionRow?
 
     var body: some View {
         NavigationStack {
@@ -228,14 +230,23 @@ struct CapabilityGroupDetailSheet: View {
                             .padding(11)
                             .sectionFill(.tronInfo, cornerRadius: 10, subtle: true, interactive: false)
                     }
+                    ForEach(group.operations) { operation in
+                        Button {
+                            selectedOperation = operation
+                        } label: {
+                            CapabilityOperationCard(operation: operation)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("operation-row-\(operation.id)")
+                    }
                     ForEach(group.functions) { function in
                         Button {
-                            selectedOperation = function
+                            selectedFunction = function
                         } label: {
                             CapabilityFunctionCard(function: function)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("operation-row-\(function.id)")
+                        .accessibilityIdentifier("catalog-function-row-\(function.id)")
                     }
                     if let latestReport {
                         CatalogVerificationRow(report: latestReport)
@@ -257,7 +268,10 @@ struct CapabilityGroupDetailSheet: View {
             }
         }
         .sheet(item: $selectedOperation) { operation in
-            OperationDetailSheet(operation: operation, group: group, latestReport: latestReport)
+            CapabilityOperationDetailSheet(operation: operation, group: group, latestReport: latestReport)
+        }
+        .sheet(item: $selectedFunction) { function in
+            OperationDetailSheet(operation: function, group: group, latestReport: latestReport)
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
@@ -273,9 +287,9 @@ struct CapabilityGroupDetailSheet: View {
                 .foregroundStyle(.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                detailMetric("Operations", group.functionCount)
+                detailMetric("Primitive Ops", group.operationCount)
+                detailMetric("Catalog", group.functionCount)
                 detailMetric("Workers", group.workerCount)
-                detailMetric("Triggers", group.triggerCount)
                 detailMetric("Issues", group.degradedCount + group.missingSchemaCount)
             }
         }
@@ -293,6 +307,56 @@ struct CapabilityGroupDetailSheet: View {
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct CapabilityOperationCard: View {
+    let operation: AgentCockpitOperationRow
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(operation.name)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("\(operation.ownerLabel) · \(operation.statusLabel)")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(2)
+                Text(activitySummary)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(11)
+        .sectionFill(tint, cornerRadius: 10, subtle: true, interactive: true)
+    }
+
+    private var activitySummary: String {
+        if operation.activityCount > 0 {
+            return "\(operation.bindingRequested) binding, \(operation.shadowRuns) shadow runs, rollback \(operation.rollbackAvailable ? "available" : "not active")"
+        }
+        return operation.replacementLabel
+    }
+
+    private var symbol: String {
+        if operation.isLocked { return "lock.shield" }
+        if operation.isModuleOwned { return "shippingbox" }
+        if operation.canReplace { return "arrow.triangle.2.circlepath" }
+        return "doc.text.magnifyingglass"
+    }
+
+    private var tint: Color {
+        if operation.isLocked { return .tronTextMuted }
+        if operation.canReplace { return .tronInfo }
+        return .tronEmerald
     }
 }
 
@@ -336,6 +400,195 @@ private struct CapabilityFunctionCard: View {
 
     private var riskSummary: String {
         "\(standardized(function.riskLevel)) risk"
+    }
+}
+
+private struct CapabilityOperationDetailSheet: View {
+    let operation: AgentCockpitOperationRow
+    let group: AgentCockpitCapabilityGroupRow
+    let latestReport: AgentCockpitDiscoveryReportRow?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    summary
+                    ownership
+                    replacement
+                    attempts
+                    rollback
+                    verification
+                }
+                .padding(18)
+            }
+            .scrollContentBackground(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Operation Detail", color: .tronEmerald)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronEmerald)
+                }
+            }
+        }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(.tronEmerald)
+        .accessibilityIdentifier("operation-detail-\(operation.id)")
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(operation.statusLabel, systemImage: operation.isLocked ? "lock.shield" : "checkmark.shield")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(operation.isLocked ? .tronTextMuted : .tronSuccess)
+            Text(operation.name)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(.tronTextPrimary)
+                .textSelection(.enabled)
+            Text(operation.statusDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Part of \(group.title).")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+        }
+        .padding(13)
+        .sectionFill(operation.isLocked ? .tronTextMuted : .tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var ownership: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Ownership")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("Owner now", operation.ownerLabel)
+            detailRow("Backend owner", operation.backendOwnerLabel)
+            detailRow("Family", operation.familyLabel)
+            detailRow("Status", operation.statusLabel)
+            Text(operation.ownerDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var replacement: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Replacement")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("Policy", operation.replacementLabel)
+            detailRow("Boundary", operation.governanceBoundary)
+            WrapRow(items: replacementChips, tint: .tronInfo)
+            Text(operation.replacementDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var attempts: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Attempts")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("Binding", "\(operation.bindingRequested) requested, \(operation.bindingApproved) approved, \(operation.bindingRejected) rejected")
+            detailRow("Failed replacements", "\(operation.failedReplacementAttempts)")
+            detailRow("Shadow trial", "\(operation.shadowRequested) requested, \(operation.shadowApproved) approved, \(operation.shadowRuns) run")
+            detailRow("Shadow result", "\(operation.shadowPassed) passed, \(operation.shadowFailed) failed")
+            if let latest = safeTimestamp(operation.bindingLastUpdatedAt) ?? operation.bindingLatestState.map(standardized) {
+                detailRow("Binding latest", latest)
+            }
+            if let latest = safeTimestamp(operation.shadowLastUpdatedAt) ?? operation.shadowLatestState.map(standardized) {
+                detailRow("Shadow latest", latest)
+            }
+            Text(operation.bindingDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(operation.shadowDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(operation.failedReplacementAttempts > 0 || operation.shadowFailed > 0 ? .tronWarning : .tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var rollback: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Rollback")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("Rollback", operation.rollbackAvailable ? "Available" : "Not active")
+            detailRow("Disable", operation.disableAvailable ? "Available" : "Not active")
+            detailRow("Abort", operation.abortAvailable ? "Available" : "Not active")
+            detailRow("Boundary", operation.rollbackBoundary)
+            Text(operation.rollbackDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(operation.rollbackAvailable ? .tronSuccess : .tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var verification: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Verification")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            Text(verificationCopy)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var replacementChips: [String] {
+        [
+            operation.canShadow ? "Shadow allowed" : "No shadow",
+            operation.canReplace ? "Replace allowed" : "No replace",
+            operation.canExtend ? "Extend allowed" : "No extend"
+        ]
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+            Spacer(minLength: 12)
+            Text(value.nilIfEmpty ?? "Not published")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(.tronTextSecondary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(3)
+                .truncationMode(.middle)
+        }
+    }
+
+    private var verificationCopy: String {
+        guard let latestReport else {
+            return "No catalog verification proof has been published yet."
+        }
+        let lifecycle = AgentCockpitProjection.normalized(latestReport.lifecycle)
+        if lifecycle == "passed" {
+            return "The latest catalog verification passed at \(safeTimestamp(latestReport.updatedAt) ?? "the recorded audit time")."
+        }
+        if lifecycle == "failed" || lifecycle == "quarantined" {
+            return "The latest catalog verification needs review before trusting this operation snapshot."
+        }
+        return "Catalog verification state: \(standardized(latestReport.lifecycle))."
     }
 }
 

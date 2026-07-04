@@ -659,6 +659,7 @@
 		EF413C72012033D45B326721 /* AppConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2336A1C7EF3414DECF955C66 /* AppConstantsTests.swift */; };
 		EF873DD30266C9D44B1EC7C7 /* ChatViewModel+DeepLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5281B0360F46F5C0F92FBEC /* ChatViewModel+DeepLinks.swift */; };
 		F037CBC89B6809D749B5639F /* WorkerLifecycleDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 801563C47F13D8F56FA69C87 /* WorkerLifecycleDTOTests.swift */; };
+		F044BCFDE533043F210AF421 /* EngineProtocolTypes+CapabilityCockpit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8894FFF665B97D11860DF39 /* EngineProtocolTypes+CapabilityCockpit.swift */; };
 		F0B420A14F5EE7142B894453 /* DatabaseActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F977E304FB3B1961F025FC07 /* DatabaseActor.swift */; };
 		F116FE82B67F87F1113464B6 /* SessionSwitchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DAC1D06ECD97480BDD4CEAA /* SessionSwitchingTests.swift */; };
 		F1C51B19780BF90562C3460E /* LocalChatNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003B53B59A5793783CDC6648 /* LocalChatNotificationTests.swift */; };
@@ -1255,6 +1256,7 @@
 		B86C0D640BBD64BB5B1F50C7 /* InitializationErrorViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitializationErrorViewTests.swift; sourceTree = "<group>"; };
 		B870F02EBA4EC86AF24528C3 /* WorkerLifecycleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerLifecycleClient.swift; sourceTree = "<group>"; };
 		B887318DCFA22610354E465C /* EventPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventPluginTests.swift; sourceTree = "<group>"; };
+		B8894FFF665B97D11860DF39 /* EngineProtocolTypes+CapabilityCockpit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+CapabilityCockpit.swift"; sourceTree = "<group>"; };
 		B88FC9BCDF9E0E91C85E5B09 /* ChatViewModel+CapabilityInvocationContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+CapabilityInvocationContext.swift"; sourceTree = "<group>"; };
 		B8A197D9422D601919874A9B /* EngineProtocolTypes+AgentBriefing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+AgentBriefing.swift"; sourceTree = "<group>"; };
 		B961CE075F1D400D2296F441 /* SQLiteHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteHelpers.swift; sourceTree = "<group>"; };
@@ -1920,6 +1922,7 @@
 			isa = PBXGroup;
 			children = (
 				B8A197D9422D601919874A9B /* EngineProtocolTypes+AgentBriefing.swift */,
+				B8894FFF665B97D11860DF39 /* EngineProtocolTypes+CapabilityCockpit.swift */,
 				7B4795146AE56839A6C24E6E /* EngineProtocolTypes+ModuleActivity.swift */,
 				AC113E49DE95DABEB4FB9D5D /* EngineProtocolTypes+WorkerLifecycle.swift */,
 			);
@@ -3855,6 +3858,7 @@
 				ACF6AE437F8C7F719E7165A9 /* EngineProtocolTypes+AgentBriefing.swift in Sources */,
 				D8EC44435F229DA51C20AC51 /* EngineProtocolTypes+Auth.swift in Sources */,
 				5FE0392534145F90F108F5CE /* EngineProtocolTypes+Capability.swift in Sources */,
+				F044BCFDE533043F210AF421 /* EngineProtocolTypes+CapabilityCockpit.swift in Sources */,
 				DC8010FCFCF9FEDFE22DD397 /* EngineProtocolTypes+Catalog.swift in Sources */,
 				3C914A08CDA9C8E1D5D5EEAE /* EngineProtocolTypes+Events.swift in Sources */,
 				3ADA151A12DB4F9A5E5E57B2 /* EngineProtocolTypes+Filesystem.swift in Sources */,

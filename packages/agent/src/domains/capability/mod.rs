@@ -170,7 +170,6 @@ mod prompt_artifacts_contract;
 mod repository_tree_contract;
 mod scheduler_contract;
 
-#[cfg(test)]
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
     is_supported_operation, operation_binding_metadata, operation_list_text,
