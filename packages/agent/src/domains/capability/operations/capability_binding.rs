@@ -215,6 +215,96 @@ pub(super) async fn capability_binding_policy_inspect(
     ))
 }
 
+pub(super) async fn capability_shadow_trial_request_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::shadow_trial::record_capability_shadow_trial_request_value_at(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await?;
+    Ok(shadow_result(
+        "Capability shadow trial request recorded.",
+        "capability_shadow_trial_request_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_shadow_trial_decision_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::shadow_trial::record_capability_shadow_trial_decision_value_at(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await?;
+    Ok(shadow_result(
+        "Capability shadow trial decision recorded.",
+        "capability_shadow_trial_decision_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_shadow_trial_run_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::shadow_trial::record_capability_shadow_trial_run_value_at(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await?;
+    Ok(shadow_result(
+        "Capability shadow trial run recorded.",
+        "capability_shadow_trial_run_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_shadow_trial_evidence_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::shadow_trial::inspect_capability_shadow_trial_evidence_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    Ok(shadow_result(
+        "Inspected capability shadow trial evidence.",
+        "capability_shadow_trial_evidence_inspect",
+        details,
+    ))
+}
+
 fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
     ok_result(
         text.to_owned(),
@@ -222,6 +312,17 @@ fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
             "primitiveOperation": operation,
             "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
             "capabilityBinding": details
+        }),
+    )
+}
+
+fn shadow_result(text: &str, operation: &str, details: Value) -> CapabilityResult {
+    ok_result(
+        text.to_owned(),
+        json!({
+            "primitiveOperation": operation,
+            "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
+            "capabilityShadowTrial": details
         }),
     )
 }

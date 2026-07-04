@@ -211,6 +211,26 @@ pub const CAPABILITY_BINDING_DECISION_SCHEMA_ID: &str =
 pub const CAPABILITY_BINDING_POLICY_KIND: &str = "capability_binding_policy";
 /// Built-in metadata-only capability binding policy resource schema id.
 pub const CAPABILITY_BINDING_POLICY_SCHEMA_ID: &str = "tron.resource.capability_binding_policy.v1";
+/// Built-in metadata-only capability shadow trial request resource kind.
+pub const CAPABILITY_SHADOW_TRIAL_REQUEST_KIND: &str = "capability_shadow_trial_request";
+/// Built-in metadata-only capability shadow trial request resource schema id.
+pub const CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID: &str =
+    "tron.resource.capability_shadow_trial_request.v1";
+/// Built-in metadata-only capability shadow trial decision resource kind.
+pub const CAPABILITY_SHADOW_TRIAL_DECISION_KIND: &str = "capability_shadow_trial_decision";
+/// Built-in metadata-only capability shadow trial decision resource schema id.
+pub const CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID: &str =
+    "tron.resource.capability_shadow_trial_decision.v1";
+/// Built-in metadata-only capability shadow trial run resource kind.
+pub const CAPABILITY_SHADOW_TRIAL_RUN_KIND: &str = "capability_shadow_trial_run";
+/// Built-in metadata-only capability shadow trial run resource schema id.
+pub const CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID: &str =
+    "tron.resource.capability_shadow_trial_run.v1";
+/// Built-in metadata-only capability shadow trial evidence resource kind.
+pub const CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND: &str = "capability_shadow_trial_evidence";
+/// Built-in metadata-only capability shadow trial evidence resource schema id.
+pub const CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID: &str =
+    "tron.resource.capability_shadow_trial_evidence.v1";
 /// Built-in metadata-only module lifecycle state resource kind.
 pub const MODULE_LIFECYCLE_STATE_KIND: &str = "module_lifecycle_state";
 /// Built-in metadata-only module lifecycle state resource schema id.

@@ -1,14 +1,14 @@
 # Capability Modularity Scorecard
 
-Status: active / adapter-seam-hardening-complete
+Status: active / shadow-replacement-trial-complete
 
-Current score: inventory coverage 166/166; kernel boundary lockdown, binding-policy evidence, and adapter seam requirements are source-backed; replacement readiness is measurable without runtime routing.
+Current score: inventory coverage 170/170; kernel boundary lockdown, binding-policy evidence, adapter seam requirements, and the first metadata-only shadow replacement trial are source-backed; replacement readiness is measurable without runtime routing.
 
 Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
 
 Provider-visible surface: one tool, `capability::execute`
 
-This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, and governance-owned binding-policy records only; they do not add runtime binding or routing behavior.
+This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, and a metadata-only `git_status` shadow trial; they do not add runtime binding or routing behavior.
 
 ## Artifacts
 
@@ -43,7 +43,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 | Ownership class | Operations |
 |---|---:|
 | `kernel_locked` | 11 |
-| `governance_locked` | 56 |
+| `governance_locked` | 60 |
 | `record_plane` | 64 |
 | `adapter_replaceable` | 31 |
 | `module_owned` | 4 |
@@ -53,7 +53,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 | Family | Operations | Default decision |
 |---|---:|---|
-| `capability_binding` | 9 | Governance substrate for metadata-only binding requests, decisions, and policies; no runtime routing. |
+| `capability_binding` | 13 | Governance substrate for metadata-only binding requests, decisions, policies, and the `git_status` shadow trial; no runtime routing. |
 | `catalog_discovery` | 3 | Engine-owned catalog trust and freshness substrate. |
 | `context_control` | 5 | Record-plane epoch/action custody; the compaction summarizer strategy is replaceable only behind a server-owned context-audit seam. |
 | `core` | 3 | Kernel diagnostics plus adapter review for `process_run`. |
@@ -94,9 +94,9 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 | Item | Weight | Status | Evidence |
 |---|---:|---|---|
-| CMS-0 registry/dispatch baseline | 10 | Passed | 166 registry names and 166 dispatch arms are statically compared. |
+| CMS-0 registry/dispatch baseline | 10 | Passed | 170 registry names and 170 dispatch arms are statically compared. |
 | CMS-1 ownership taxonomy | 10 | Passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
-| CMS-2 per-operation inventory | 20 | Passed | `capability-modularity-inventory.tsv` lists all 166 operations exactly once. |
+| CMS-2 per-operation inventory | 20 | Passed | `capability-modularity-inventory.tsv` lists all 170 operations exactly once. |
 | CMS-3 kernel/governance lock | 12 | Passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
 | CMS-4 adapter replacement targets | 12 | Passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; binding policy can record proposals but cannot route execution in this slice. |
 | CMS-5 record-plane custody | 10 | Passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
@@ -132,6 +132,19 @@ Provider-visible operations are limited to request/decision/policy record, list,
 
 This slice does not mutate dispatch, route execution, hot-swap modules, install/activate packages, execute modules, restore dependencies, run package managers, access networks, inherit `agent_state`, or expose raw paths/secrets/commands/logs/grant IDs/authority IDs/debug payloads.
 
+## Shadow Replacement Trial Evidence
+
+The Shadow Replacement Trial slice proves one low-risk metadata-only replacement path for `git_status`, the read-only Git status operation selected from the adapter-replaceable Git family.
+
+| Record | Evidence |
+|---|---|
+| `capability_shadow_trial_request` | Stores the exact `git_status` target, authoritative built-in owner/class/target metadata, deterministic metadata-only candidate adapter description, exact-selector authority constraints, stale-version guard, rollback/disable/abort refs, safe audit refs, idempotency fingerprint, and `networkPolicy: none`. |
+| `capability_shadow_trial_decision` | Revalidates the exact request selector and expected request version before approving, rejecting, disabling, or aborting the trial gate; it records decision evidence without enabling runtime routing. |
+| `capability_shadow_trial_run` | Revalidates the exact approved decision selector and expected decision version, records a metadata-only run result, preserves rollback/disable/abort controls, and proves the candidate was not executed. |
+| `capability_shadow_trial_evidence` | Stores bounded provider-safe built-in and deterministic candidate `git_status` projections plus server-computed comparison evidence; exact evidence inspection rejects stale expected evidence versions. |
+
+Provider-visible shadow-trial operations are limited to request/decision/run record and evidence inspect through `capability::execute`. They require explicit `capability_binding.read` / `capability_binding.write` plus resource authority, non-wildcard kind selectors, exact linked-resource selectors, exact metadata selectors in the request, `networkPolicy: none`, no `agent_state` inheritance, no raw commands/logs/paths/files/grant IDs/authority IDs, idempotency, stale-version guards, and rollback/disable/abort refs. They do not execute candidate modules, re-run built-in Git behavior, mutate dispatch, route execution, hot-swap modules, install or activate packages, restore dependencies, run package managers, or access networks.
+
 ## Adapter Seam Hardening Evidence
 
 The Adapter Seam Hardening slice records source-backed replacement prerequisites for adapter-replaceable families and the compaction-like strategy seam. These contracts are documentation and metadata gates only; they do not add runtime routing.
@@ -151,6 +164,7 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 - `kernel_locked` operations must not be routed through module replacement.
 - `governance_locked` operations must not be routed through module replacement; they are the trust pipeline for future replacement.
 - Binding-policy records are governance-owned metadata only; an active policy is not a runtime route.
+- Shadow-trial records are governance-owned metadata only; an accepted trial result is not a runtime route or replacement.
 - `adapter_replaceable` operations must name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable constraints before any binding policy can route them.
 - `record_plane` operations may gain module producers, but records, resource refs, trace refs, redaction, and replay custody stay server-owned.
 - `module_owned` operations must keep lifecycle/runtime prerequisites, inspectability, rollback, and provider-safe projections.
@@ -161,5 +175,5 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 1. Kernel Boundary Lockdown: complete. Static/source-backed invariants now lock authority, event log, resource store, redaction, trace/audit, catalog, transport, and governance as non-replaceable substrate.
 2. Capability Binding Policy: complete. Metadata-only binding request, decision, policy, and history records now make future replacement proposals measurable without routing.
 3. Adapter Seam Hardening: complete. Source-backed invariants now lock seam prerequisites for filesystem, Git, jobs/process, web, subagent, and compaction-like strategies.
-4. Shadow Replacement Trial: pick one low-risk read-only operation and prove built-in versus module-owned shadow execution, audit, visibility, and rollback.
+4. Shadow Replacement Trial: complete. `git_status` now has governed request/decision/run/evidence records comparing built-in and deterministic candidate provider-safe projections with rollback/disable/abort controls and no runtime routing.
 5. Cockpit Visibility: show operation owner, built-in/module status, last verification, failed replacement attempts, and rollback availability through progressive disclosure.

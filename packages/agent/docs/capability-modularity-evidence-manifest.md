@@ -1,8 +1,8 @@
 # Capability Modularity Evidence Manifest
 
-Status: active / adapter-seam-hardening-complete
+Status: active / shadow-replacement-trial-complete
 
-This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard, binding policy, and adapter seam hardening slices add documentation, invariants, source-backed seam contracts, and metadata-only governance records; they add no runtime routing behavior.
+This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard, binding policy, adapter seam hardening, and shadow replacement trial slices add documentation, invariants, source-backed seam contracts, and metadata-only governance records; they add no runtime routing behavior.
 
 ## Reviewed Source Files
 
@@ -15,6 +15,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Capability contract | `packages/agent/src/domains/capability/contract.rs` |
 | Capability binding schema fields | `packages/agent/src/domains/capability/capability_binding_contract.rs` |
 | Capability binding docs/service | `packages/agent/src/domains/capability_binding/mod.rs` |
+| Capability shadow trial service | `packages/agent/src/domains/capability_binding/shadow_trial.rs` |
 | Capability binding resource definitions | `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
 | Filesystem adapter seam | `packages/agent/src/domains/filesystem/mod.rs` |
 | Git adapter seam | `packages/agent/src/domains/git/mod.rs` |
@@ -54,13 +55,14 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 | Fact | Evidence |
 |---|---|
-| Registry count | 166 entries in `SUPPORTED_OPERATION_NAMES`. |
-| Dispatch parity | 166 static dispatch arms in `execute_operation`; no missing or extra names. |
+| Registry count | 170 entries in `SUPPORTED_OPERATION_NAMES`. |
+| Dispatch parity | 170 static dispatch arms in `execute_operation`; no missing or extra names. |
 | Provider surface | One model-facing tool, `capability::execute`. |
 | Machine inventory | `packages/agent/docs/capability-modularity-inventory.tsv` lists every operation exactly once. |
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |
 | Kernel boundary lockdown | Static invariants require source anchors for authority/grants, event/session log, resource store, redaction/provider-safety, trace/audit/replay/catalog, transport boundary, and module governance pipeline before locked rows can change ownership class. |
 | Capability binding policy | `capability_binding_request`, `capability_binding_decision`, and `capability_binding_policy` resources record metadata-only replacement governance with exact selectors, idempotency, stale-version guards, rollback/disable refs, and provider-safe projections. |
+| Shadow replacement trial | `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` resources record a governed metadata-only `git_status` trial with exact selectors, stale evidence rejection, rollback/disable/abort refs, provider-safe projections, and no dispatch mutation. |
 | Adapter seam hardening | Adapter-replaceable families and the compaction strategy seam now name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites in source docs, inventory metadata, scorecard prose, and static tests. |
 | Runtime behavior | No runtime routing, dispatch mutation, module hot-swap, install, activation, execution, package-manager, dependency-restore, or network behavior changed in this slice. |
 
@@ -86,6 +88,16 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Decision/policy records revalidate expected request/decision versions and preserve audit history through resource versions/events. | `packages/agent/src/domains/capability_binding/service.rs`, `packages/agent/src/domains/capability_binding/resource_store.rs` |
 | Side-effect proof explicitly records no runtime routing, dispatch mutation, hot-swap, module activation/execution, dependency restore, package-manager, network, raw path/command/log/file/grant/authority exposure, or repo-managed skill touch. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
 
+## Shadow Replacement Trial Evidence
+
+| Evidence | Source |
+|---|---|
+| The first trial target is exactly `git_status`; other target operations are rejected before a trial request is recorded. | `packages/agent/src/domains/capability_binding/shadow_trial.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
+| Trial requests require a deterministic metadata-only candidate adapter description, exact non-wildcard resource selectors, `networkPolicy: none`, rollback/disable/abort refs, stale inventory/policy guards, and no `agent_state` inheritance. | `packages/agent/src/domains/capability_binding/shadow_trial.rs`, `packages/agent/src/domains/capability/capability_binding_contract.rs` |
+| Trial decisions and runs revalidate exact linked-resource selectors and expected current versions before writing append-only decision, run, and evidence resources. | `packages/agent/src/domains/capability_binding/shadow_trial.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
+| Trial evidence stores only bounded built-in/candidate `git_status` projections and server-computed comparison evidence; evidence inspect requires an exact resource selector and rejects stale expected evidence versions. | `packages/agent/src/domains/capability_binding/shadow_trial.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
+| No dispatch mutation or live replacement occurs: `git_status` remains owned by the built-in Git adapter, and shadow-trial side-effect proof records no runtime routing, hot-swap, candidate execution, module activation, package-manager, dependency, or network behavior. | `packages/agent/src/domains/capability/operations/mod.rs`, `packages/agent/src/domains/capability/operations/registry.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
+
 ## Adapter Seam Hardening Evidence
 
 | Family | Source-backed seam evidence |
@@ -102,7 +114,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 ```bash
 cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
-cargo test --manifest-path packages/agent/Cargo.toml capability_binding --lib
+cargo test --manifest-path packages/agent/Cargo.toml domains::capability_binding::tests -- --nocapture
 git diff --check
 git diff --cached --check
 ```
@@ -117,7 +129,8 @@ cargo check --manifest-path packages/agent/Cargo.toml
 ## Evidence Notes
 
 - `kernel_locked` and `governance_locked` rows intentionally have binding and rollback scores of `0`; that is a lock, not a missing implementation.
-- Capability Binding Policy is a metadata-only governance plane. It adds provider-visible request/decision/policy custody operations, but no runtime capability routing, module replacement, package installation, worker enablement, dependency restore, package-manager behavior, or network behavior.
+- Capability Binding Policy is a metadata-only governance plane. It adds provider-visible request/decision/policy and shadow-trial custody operations, but no runtime capability routing, module replacement, package installation, worker enablement, dependency restore, package-manager behavior, or network behavior.
+- Shadow replacement trial evidence is intentionally metadata-only. It compares bounded built-in and deterministic candidate projections for `git_status`; it does not execute a candidate module or change live operation routing.
 - `adapter_replaceable` rows now name required authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites and hand off to the shadow replacement trial.
 - `record_plane` rows allow module producers or workflow extension while preserving server-owned custody records and provider-safe projections.
 - `context_control_compact` is the only compaction-like strategy seam in this slice: a future summarizer replacement cannot bypass context audit records or expose raw prompt material.

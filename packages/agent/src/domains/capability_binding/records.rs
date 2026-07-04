@@ -258,7 +258,7 @@ pub(super) fn capability_binding_policy_resource_id(
     )
 }
 
-fn stable_resource_id(
+pub(super) fn stable_resource_id(
     kind: &str,
     scope: &EngineResourceScope,
     visible_id: &str,
@@ -291,7 +291,7 @@ fn operation_record(
     })
 }
 
-fn idempotency_evidence(idempotency_key: &str, algorithm: &str, domain: &[u8]) -> Value {
+pub(super) fn idempotency_evidence(idempotency_key: &str, algorithm: &str, domain: &[u8]) -> Value {
     json!({
         "fingerprint": idempotency_fingerprint(idempotency_key, domain),
         "fingerprintAlgorithm": algorithm,

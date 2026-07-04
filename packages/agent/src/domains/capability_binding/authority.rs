@@ -4,7 +4,9 @@ use crate::shared::server::errors::CapabilityError;
 use super::Deps;
 use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_POLICY_KIND,
-    CAPABILITY_BINDING_REQUEST_KIND,
+    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+    CAPABILITY_SHADOW_TRIAL_RUN_KIND,
     contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE},
 };
 
@@ -63,6 +65,61 @@ pub(super) async fn inspect_read_grant(
     Ok(grant)
 }
 
+pub(super) async fn ensure_shadow_trial_write_authority(
+    deps: &Deps,
+    invocation: &Invocation,
+    operation: &str,
+) -> Result<EngineGrant, CapabilityError> {
+    for scope in [
+        READ_SCOPE,
+        WRITE_SCOPE,
+        RESOURCE_READ_SCOPE,
+        RESOURCE_WRITE_SCOPE,
+    ] {
+        if !invocation.causal_context.has_scope(scope) {
+            return Err(invalid(format!("{operation} requires {scope}")));
+        }
+    }
+    if is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id) {
+        return Err(invalid(format!(
+            "{operation} requires a derived non-bootstrap grant"
+        )));
+    }
+    let grant = inspect_grant(deps, invocation, operation).await?;
+    for scope in [
+        READ_SCOPE,
+        WRITE_SCOPE,
+        RESOURCE_READ_SCOPE,
+        RESOURCE_WRITE_SCOPE,
+    ] {
+        require_explicit_grant_item(&grant.allowed_authority_scopes, scope, operation)?;
+    }
+    require_shadow_trial_kind_selectors(&grant, operation)?;
+    if grant.network_policy != "none" {
+        return Err(invalid(format!("{operation} requires networkPolicy none")));
+    }
+    Ok(grant)
+}
+
+pub(super) async fn inspect_shadow_trial_read_grant(
+    deps: &Deps,
+    invocation: &Invocation,
+    operation: &str,
+) -> Result<EngineGrant, CapabilityError> {
+    let grant = inspect_grant(deps, invocation, operation).await?;
+    require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
+    require_explicit_grant_item(
+        &grant.allowed_authority_scopes,
+        RESOURCE_READ_SCOPE,
+        operation,
+    )?;
+    require_shadow_trial_kind_selectors(&grant, operation)?;
+    if grant.network_policy != "none" {
+        return Err(invalid(format!("{operation} requires networkPolicy none")));
+    }
+    Ok(grant)
+}
+
 pub(super) fn require_exact_resource_selector(
     grant: &EngineGrant,
     resource_id: &str,
@@ -99,6 +156,40 @@ fn require_kind_selectors(grant: &EngineGrant, operation: &str) -> Result<(), Ca
         CAPABILITY_BINDING_REQUEST_KIND,
         CAPABILITY_BINDING_DECISION_KIND,
         CAPABILITY_BINDING_POLICY_KIND,
+    ] {
+        require_explicit_grant_item(&grant.allowed_resource_kinds, kind, operation)?;
+        let selector = format!("kind:{kind}");
+        if !grant
+            .resource_selectors
+            .iter()
+            .any(|actual| actual == &selector)
+        {
+            return Err(invalid(format!(
+                "{operation} requires explicit {selector} selector"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn require_shadow_trial_kind_selectors(
+    grant: &EngineGrant,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    if let Some(selector) = grant
+        .resource_selectors
+        .iter()
+        .find(|selector| is_broad_selector(selector))
+    {
+        return Err(invalid(format!(
+            "{operation} rejects broad resource selector {selector}"
+        )));
+    }
+    for kind in [
+        CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+        CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+        CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
     ] {
         require_explicit_grant_item(&grant.allowed_resource_kinds, kind, operation)?;
         let selector = format!("kind:{kind}");

@@ -589,6 +589,17 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("capability_binding_request"));
     assert!(result.contains("capability_binding_decision"));
     assert!(result.contains("capability_binding_policy"));
+    assert!(result.contains("capability_shadow_trial_request_record"));
+    assert!(result.contains("capability_shadow_trial_decision_record"));
+    assert!(result.contains("capability_shadow_trial_run_record"));
+    assert!(result.contains("capability_shadow_trial_evidence_inspect"));
+    assert!(result.contains("capability_shadow_trial_request"));
+    assert!(result.contains("capability_shadow_trial_decision"));
+    assert!(result.contains("capability_shadow_trial_run"));
+    assert!(result.contains("capability_shadow_trial_evidence"));
+    assert!(result.contains("exact `targetOperation: git_status`"));
+    assert!(result.contains("rollback/disable/abort refs"));
+    assert!(result.contains("without candidate execution, runtime routing, dispatch mutation"));
     assert!(result.contains("server-verified current built-in owner"));
     assert!(result.contains("matching `currentBuiltInOwner` and `ownershipClass` assertions"));
     assert!(result.contains("binding mode"));

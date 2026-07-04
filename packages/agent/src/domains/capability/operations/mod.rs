@@ -70,7 +70,9 @@ use capability_binding::{
     capability_binding_decision_record, capability_binding_policy_activate,
     capability_binding_policy_inspect, capability_binding_policy_list,
     capability_binding_request_inspect, capability_binding_request_list,
-    capability_binding_request_record,
+    capability_binding_request_record, capability_shadow_trial_decision_record,
+    capability_shadow_trial_evidence_inspect, capability_shadow_trial_request_record,
+    capability_shadow_trial_run_record,
 };
 use catalog::{catalog_conformance, catalog_inspect, catalog_search};
 use common::{
@@ -508,6 +510,18 @@ async fn execute_operation(
         }
         "capability_binding_policy_inspect" => {
             capability_binding_policy_inspect(invocation, deps).await?
+        }
+        "capability_shadow_trial_request_record" => {
+            capability_shadow_trial_request_record(invocation, deps, operation_at).await?
+        }
+        "capability_shadow_trial_decision_record" => {
+            capability_shadow_trial_decision_record(invocation, deps, operation_at).await?
+        }
+        "capability_shadow_trial_run_record" => {
+            capability_shadow_trial_run_record(invocation, deps, operation_at).await?
+        }
+        "capability_shadow_trial_evidence_inspect" => {
+            capability_shadow_trial_evidence_inspect(invocation, deps).await?
         }
         "module_lifecycle_request" => {
             module_lifecycle_request(invocation, deps, operation_at).await?

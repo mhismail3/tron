@@ -97,7 +97,7 @@ Current living entry points:
   kernel-locked, governance-locked, record-plane, adapter-replaceable,
   module-owned, or deferred so future modular replacement work is measurable.
 - `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 166-row inventory for the capability modularity scorecard.
+  machine-readable 170-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
@@ -1181,7 +1181,7 @@ Capability modularity is tracked in
 machine-readable inventory in
 `packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
 in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 166
+`capability_modularity_scorecard_invariants` test locks the current 170
 operation baseline, registry/dispatch parity, and the ownership classes used for
 future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 `adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
@@ -1204,6 +1204,14 @@ jobs/process, web, subagent, and compaction strategy seams. Those rows name
 required authority, evidence, side-effect, provider-safety,
 replay/idempotency, and rollback/disable prerequisites before any future
 shadow or replacement trial can move past metadata-only policy records.
+The Shadow Replacement Trial adds metadata-only
+`capability_shadow_trial_request`, `capability_shadow_trial_decision`,
+`capability_shadow_trial_run`, and `capability_shadow_trial_evidence` records
+for the selected read-only `git_status` operation. The trial compares bounded
+built-in and deterministic candidate projections, requires exact selectors,
+rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`,
+and still performs no candidate execution, dispatch mutation, hot-swap, module
+activation, package-manager, dependency, or network behavior.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -1355,6 +1363,10 @@ Current primitive operations:
 | `capability_binding_policy_activate` | Capability Binding Policy operation that records one active scoped `capability_binding_policy` resource from an approved decision after exact decision selector authority and expected decision version freshness, carrying rollback/disable refs and active metadata policy evidence only; it does not route execution, mutate dispatch, hot-swap, install, activate, execute, restore dependencies, run package managers, or access networks. |
 | `capability_binding_policy_list` | Capability Binding Policy operation that lists scoped `capability_binding_policy` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with active policy metadata, request/decision linkage, `networkPolicy: none`, and no runtime side effects. |
 | `capability_binding_policy_inspect` | Capability Binding Policy operation that inspects one scoped `capability_binding_policy` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning approved metadata policy evidence, activation proof, rollback/disable refs, and audit history without raw paths, secrets, commands, logs, file contents, raw grant ids, raw authority ids, `agent_state`, or debug payloads. |
+| `capability_shadow_trial_request_record` | Shadow Replacement Trial operation that records one scoped `capability_shadow_trial_request` for the exact `git_status` target, with authoritative built-in owner/class metadata, deterministic metadata-only candidate adapter description, exact selector authority constraints, stale guards, rollback/disable/abort refs, idempotency, `networkPolicy: none`, and no routing or candidate execution. |
+| `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. |
+| `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. |
+| `capability_shadow_trial_evidence_inspect` | Shadow Replacement Trial operation that inspects one scoped `capability_shadow_trial_evidence` through exact `resource:<id>` selector authorization and optional expected evidence version freshness, returning provider-safe comparison, rollback/disable/abort refs, and no-routing proof without raw commands, logs, paths, files, grant ids, authority ids, or `agent_state` inheritance. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -1925,14 +1937,20 @@ raw grant or authority ids, personal-info literals, add public `/engine` APIs,
 or add fixed iOS panels.
 
 The Capability Binding Policy owner registers metadata-only
-`capability_binding_request`, `capability_binding_decision`, and
-`capability_binding_policy` resources with payload schema versions
+`capability_binding_request`, `capability_binding_decision`,
+`capability_binding_policy`, `capability_shadow_trial_request`,
+`capability_shadow_trial_decision`, `capability_shadow_trial_run`, and
+`capability_shadow_trial_evidence` resources with payload schema versions
 `tron.capability_binding_request.v1`, `tron.capability_binding_decision.v1`,
-and `tron.capability_binding_policy.v1`. Binding request, decision, and policy
-operations stay behind the single `capability::execute` primitive and require
-explicit capability-binding/resource authority, non-wildcard kind selectors,
-`networkPolicy: none`, idempotency keys, stale-version guards, and exact
-selectors for inspect plus decision/policy linked writes. The request path
+`tron.capability_binding_policy.v1`,
+`tron.capability_shadow_trial_request.v1`,
+`tron.capability_shadow_trial_decision.v1`,
+`tron.capability_shadow_trial_run.v1`, and
+`tron.capability_shadow_trial_evidence.v1`. Binding request, decision, policy,
+and shadow-trial operations stay behind the single `capability::execute`
+primitive and require explicit capability-binding/resource authority,
+non-wildcard kind selectors, `networkPolicy: none`, idempotency keys,
+stale-version guards, and exact selectors for inspect plus linked writes. The request path
 derives target operation owner/class metadata from the server-owned execute
 registry, rejects unknown target operations, and rejects caller owner/class or
 replacement-target mismatches before checking replacement eligibility. The
@@ -1948,6 +1966,12 @@ activates modules, executes module code, restores dependencies, runs package
 managers, inherits `agent_state`, accesses networks, stores raw local material,
 exposes raw grant or authority ids, adds public `/engine` APIs, or adds fixed
 iOS panels.
+
+The shadow trial path is narrower than general binding policy: it accepts only
+`git_status`, records deterministic candidate metadata and provider-safe
+built-in/candidate projections, requires rollback/disable/abort refs and exact
+metadata selectors, rejects stale evidence inspection, and proves no live
+replacement or candidate execution occurred.
 
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
@@ -2670,7 +2694,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, accepted `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, accepted `capability_binding_request`, `capability_binding_decision`, and `capability_binding_policy` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, accepted `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, accepted `capability_binding_request`, `capability_binding_decision`, `capability_binding_policy`, `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

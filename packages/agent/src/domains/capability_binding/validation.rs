@@ -206,6 +206,7 @@ pub(super) fn operation_name(payload: &Value) -> Result<String, CapabilityError>
 
 pub(super) struct TargetOperationBindingMetadata {
     pub(super) operation_name: String,
+    pub(super) family: String,
     pub(super) current_owner: String,
     pub(super) ownership_class: String,
     pub(super) replacement_target: String,
@@ -233,6 +234,7 @@ pub(super) fn target_operation_binding_metadata(
     }
     Ok(TargetOperationBindingMetadata {
         operation_name,
+        family: metadata.family.to_owned(),
         current_owner: metadata.current_owner.to_owned(),
         ownership_class: metadata.ownership_class.to_owned(),
         replacement_target: metadata.replacement_target.to_owned(),
