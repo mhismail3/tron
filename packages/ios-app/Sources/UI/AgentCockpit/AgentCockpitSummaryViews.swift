@@ -24,7 +24,7 @@ struct EngineCockpitDashboardBand: View {
                     HStack(spacing: 8) {
                         briefingMetric("Capabilities", "\(overview.functions.count)")
                         briefingMetric("Issues", "\(issueCount)")
-                        briefingPhrase(catalogTrustPhrase)
+                        briefingPhrase(verificationPhrase)
                     }
                 }
 
@@ -78,7 +78,7 @@ struct EngineCockpitDashboardBand: View {
             + overview.discovery.catalogDecodeIssueCount
     }
 
-    private var catalogTrustPhrase: String {
+    private var verificationPhrase: String {
         AgentCockpitPresentation.verificationPhrase(for: overview.discovery.latestReport)
     }
 
@@ -127,7 +127,7 @@ struct AgentCockpitMetricStrip: View {
             metric("Workers", value: "\(overview.workers.count)", icon: "cpu")
             metric("Capabilities", value: "\(overview.functions.count)", icon: "curlybraces")
             metric("Issues", value: "\(issueCount)", icon: "exclamationmark.triangle")
-            metric("Verified", value: verificationStatus, icon: "checkmark.shield")
+            metric("Capability check", value: verificationMetricValue, icon: "checkmark.shield")
         }
     }
 
@@ -137,8 +137,8 @@ struct AgentCockpitMetricStrip: View {
             + overview.discovery.catalogDecodeIssueCount
     }
 
-    private var verificationStatus: String {
-        AgentCockpitPresentation.verificationStatus(for: overview.discovery.latestReport)
+    private var verificationMetricValue: String {
+        AgentCockpitPresentation.verificationPhrase(for: overview.discovery.latestReport)
     }
 
     private func metric(_ title: String, value: String, icon: String) -> some View {

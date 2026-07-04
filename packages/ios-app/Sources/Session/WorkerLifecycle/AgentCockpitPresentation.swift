@@ -61,7 +61,7 @@ enum AgentCockpitPresentation {
 
     static func capabilityMapRevision(_ revision: UInt64?) -> String? {
         guard let revision else { return nil }
-        return "Verification version \(revision)"
+        return "Capability map version \(revision)"
     }
 
     static func safeLastChecked(_ report: AgentCockpitDiscoveryReportRow?) -> String? {

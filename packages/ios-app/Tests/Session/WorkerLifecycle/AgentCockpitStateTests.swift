@@ -296,6 +296,7 @@ struct AgentCockpitStateTests {
         #expect(AgentCockpitPresentation.hiddenTopLevelTerms(in: topLevelStrings).isEmpty)
         #expect(topLevelStrings.contains("Capabilities verified"))
         #expect(topLevelStrings.contains("Verified"))
+        #expect(topLevelStrings.contains("Capability map version 2"))
         #expect(topLevelStrings.contains("Runtime"))
     }
 

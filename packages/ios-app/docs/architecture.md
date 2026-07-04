@@ -471,7 +471,7 @@ replacement target, readiness/next-action labels,
 replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 rollback/disable/abort availability, effect/risk, schema-health, worker,
 trigger, tags, request/response schema bodies, and safe verification details.
-Verification version and recent `catalog_discovery_report` resources are rendered
+Capability map version and recent `catalog_discovery_report` resources are rendered
 inside the cockpit as capability-check evidence, not as top-level telemetry.
 Capability modularity rows come from `capability_binding::cockpit_overview`,
 which is a server-owned redacted projection over registry metadata plus scoped
