@@ -31,6 +31,10 @@
 //! file tools must resolve paths only from trusted runtime working-directory
 //! metadata, reject traversal and symlink escapes, bound all reads/searches, and
 //! return resource-backed evidence for mutating previews/commits.
+//! The adapter seam for future module replacement is exact-root authority plus
+//! preview/commit parity: a replacement must preserve provider-safe refs,
+//! replay/idempotency evidence, and rollback/disable metadata before binding
+//! policy may later consider routing.
 
 use std::path::PathBuf;
 

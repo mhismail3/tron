@@ -43,6 +43,11 @@
 //! target fingerprint for exact fetch linkage, records sitemap lines as
 //! metadata only, and must not become search, crawl, browser, or login
 //! behavior.
+//! The adapter seam for future module replacement is exact network authority
+//! plus robots/source parity: a replacement must preserve source and
+//! robots-policy evidence, provider-safe refs, replay/idempotency evidence,
+//! fail-closed side effects, and rollback/disable metadata before binding
+//! policy may later consider routing.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

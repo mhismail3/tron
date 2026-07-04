@@ -30,6 +30,10 @@
 //! `context.cleared` and `compact.boundary` reducers; prior history remains
 //! durable and inspectable but is excluded from future provider context after
 //! those boundaries.
+//! The compaction adapter seam is the summarizer strategy only. Context-control
+//! snapshot/action/epoch records, provider-safe projections, replay refs, and
+//! audit custody stay server-owned; a future summarizer replacement must carry
+//! rollback/disable metadata before binding policy may later consider routing.
 
 use std::sync::Arc;
 

@@ -202,7 +202,7 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "core",
             "domains::capability::operations::process",
             "adapter_replaceable",
-            "future_module_may_shadow_then_replace_after_process_binding_policy",
+            "future_process_adapter_requires_exact_workdir_authority_network_none_bounded_output_replay_idempotency_and_rollback_disable_refs",
         ),
         "replay_manifest" => (
             "core",
@@ -238,19 +238,19 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "filesystem",
             "domains::capability::operations::filesystem + domains::filesystem",
             "adapter_replaceable",
-            "future_module_may_shadow_then_replace_after_exact_filesystem_binding_policy",
+            "future_filesystem_adapter_requires_exact_root_authority_preview_commit_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
         ),
         operation if operation.starts_with("git_") => (
             "git",
             "domains::capability::operations::git + domains::git",
             "adapter_replaceable",
-            "future_module_may_shadow_then_replace_after_exact_git_binding_policy",
+            "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
         ),
         operation if operation.starts_with("job_") => (
             "jobs",
             "domains::capability::operations::jobs + domains::jobs",
             "adapter_replaceable",
-            "future_supervised_module_may_replace_job_runner_after_binding_policy",
+            "future_jobs_adapter_requires_supervised_runtime_authority_lifecycle_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
         ),
         operation if operation.starts_with("goal_") || operation.starts_with("question_") => (
             "goals_questions",
@@ -268,7 +268,7 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "context_control",
             "domains::capability::operations::context_control + domains::context_control",
             "record_plane",
-            "compaction_strategy_may_replace_summarizer_but_context_audit_records_stay_server_owned",
+            "compaction_strategy_requires_summarizer_seam_provider_safe_summary_context_audit_records_replay_idempotency_and_rollback_disable_refs",
         ),
         operation if operation.starts_with("context_control_") => (
             "context_control",
@@ -376,7 +376,7 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "subagents",
             "domains::capability::operations::subagents + domains::subagents",
             "adapter_replaceable",
-            "future_subagent_worker_pack_may_replace_execution_adapter_after_binding_policy",
+            "future_subagent_adapter_requires_task_runtime_authority_merge_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
         ),
         operation if operation.starts_with("module_program_execution_") => (
             "module_program_execution",
@@ -442,7 +442,7 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "web",
             "domains::capability::operations::web + domains::web",
             "adapter_replaceable",
-            "future_module_may_shadow_then_replace_with_identical_robots_and_source_evidence",
+            "future_web_adapter_requires_exact_network_authority_robots_source_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
         ),
         _ => return None,
     };

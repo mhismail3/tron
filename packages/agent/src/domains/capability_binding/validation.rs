@@ -12,7 +12,7 @@ use super::payload_safety::{
 pub(super) const CAPABILITY_BINDING_POLICY_VERSION: &str =
     "tron.capability_binding_policy_plane.v1";
 pub(super) const CAPABILITY_MODULARITY_INVENTORY_VERSION: &str =
-    "capability-modularity-inventory.v2";
+    "capability-modularity-inventory.v3";
 
 pub(super) const LIST_LIMIT_DEFAULT: usize = 25;
 pub(super) const LIST_LIMIT_MAX: usize = 100;
@@ -285,6 +285,7 @@ pub(super) fn ensure_binding_mode_allowed(
     ownership_class: &str,
     binding_mode: &str,
     rollback_ref: &Option<Value>,
+    disable_ref: &Option<Value>,
 ) -> Result<(), CapabilityError> {
     match ownership_class {
         "kernel_locked" | "governance_locked" if binding_mode == "replace" => Err(invalid(
@@ -300,6 +301,10 @@ pub(super) fn ensure_binding_mode_allowed(
             if rollback_ref.is_none() {
                 Err(invalid(
                     "replace binding requests require rollbackRef metadata",
+                ))
+            } else if disable_ref.is_none() {
+                Err(invalid(
+                    "replace binding requests require disableRef metadata",
                 ))
             } else {
                 Ok(())

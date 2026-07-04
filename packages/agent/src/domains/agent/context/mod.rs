@@ -28,6 +28,9 @@
 //! Compaction uses token pressure to decide when to compact context, and only
 //! commits when an older message window can be summarized and the result
 //! reduces the durable context.
+//! The replaceable strategy seam is limited to the summarizer implementation:
+//! context snapshots, compaction actions, epoch records, audit refs, and
+//! provider-safe projections remain server-owned record-plane custody.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;

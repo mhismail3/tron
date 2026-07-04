@@ -1199,6 +1199,11 @@ active binding policy records do not route execution, hot-swap modules, mutate
 dispatch, install or activate modules, restore dependencies, run package
 managers, inherit `agent_state`, access networks, or expose raw paths, secrets,
 commands, logs, grant IDs, authority IDs, or debug payloads.
+Adapter Seam Hardening now source-checks the replaceable filesystem, Git,
+jobs/process, web, subagent, and compaction strategy seams. Those rows name
+required authority, evidence, side-effect, provider-safety,
+replay/idempotency, and rollback/disable prerequisites before any future
+shadow or replacement trial can move past metadata-only policy records.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -1937,7 +1942,7 @@ rationale, contract/evidence refs, authority constraints, rollback/disable
 refs, decision state, and audit history. `kernel_locked` and
 `governance_locked` operations cannot request replacement even when a request
 claims an adapter class; `adapter_replaceable` and `module_owned` replacement
-requests require rollback metadata and remain proposals only. This plane never
+requests require rollback/disable metadata and remain proposals only. This plane never
 changes runtime routing, mutates dispatch, hot-swaps modules, installs or
 activates modules, executes module code, restores dependencies, runs package
 managers, inherits `agent_state`, accesses networks, stores raw local material,
