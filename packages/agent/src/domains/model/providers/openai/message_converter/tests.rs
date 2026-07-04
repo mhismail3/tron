@@ -589,7 +589,8 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("capability_binding_request"));
     assert!(result.contains("capability_binding_decision"));
     assert!(result.contains("capability_binding_policy"));
-    assert!(result.contains("current built-in owner"));
+    assert!(result.contains("server-verified current built-in owner"));
+    assert!(result.contains("matching `currentBuiltInOwner` and `ownershipClass` assertions"));
     assert!(result.contains("binding mode"));
     assert!(result.contains("stale-version guards"));
     assert!(result.contains("without runtime routing, dispatch mutation, hot-swap"));

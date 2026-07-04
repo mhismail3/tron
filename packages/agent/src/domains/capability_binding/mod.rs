@@ -26,7 +26,7 @@
 //! | `records` | Metadata-only payload, idempotency, audit, and side-effect proof builders |
 //! | `resource_store` | Resource inspection, lifecycle stream, kind/schema helpers |
 //! | `service` | Timestamp-injected record/list/inspect/activate behavior |
-//! | `validation` | Text, ref, ownership-class, binding-mode, authority, and stale-guard checks |
+//! | `validation` | Text, ref, registry-derived target metadata, binding-mode, authority, and stale-guard checks |
 //! | `tests` | Schema, authority, replay, stale guard, locked-class, and no-routing regressions |
 //!
 //! # INVARIANT: binding policy is governance metadata only
@@ -36,10 +36,12 @@
 //! restore dependencies, run package managers, mutate manifests, create
 //! physical workspaces, access networks, touch repo-managed
 //! `packages/agent/skills`, expose raw commands/logs/env/code/file contents,
-//! or return raw grant/authority ids. `kernel_locked` and `governance_locked`
-//! operations cannot request `replace`; `adapter_replaceable` and
-//! `module_owned` requests are accepted only as strict metadata proposals with
-//! runtime routing disabled in this slice.
+//! or return raw grant/authority ids. Target operation owner/class metadata is
+//! derived from the server-owned execute registry; caller-supplied owner/class
+//! assertions must match it. `kernel_locked` and `governance_locked` operations
+//! cannot request `replace`; `adapter_replaceable` and `module_owned` requests
+//! are accepted only as strict metadata proposals with runtime routing disabled
+//! in this slice.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

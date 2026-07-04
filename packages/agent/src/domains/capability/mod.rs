@@ -74,11 +74,12 @@
 //! access.
 //! Capability-binding operations are metadata-only governance operations: they
 //! record, list, inspect, decide, and activate `capability_binding_*` resources
-//! for future shadow/extend/replace proposals with exact operation ownership
-//! class, contract/evidence requirements, authority/network constraints,
-//! stale-version guards, rollback/disable refs, and audit refs, while proving
-//! no `capability::execute` dispatch, runtime routing, hot-swap, module
-//! activation, package-manager, dependency, or network behavior occurs.
+//! for future shadow/extend/replace proposals after deriving target operation
+//! ownership metadata from the execute registry, with contract/evidence
+//! requirements, authority/network constraints, stale-version guards,
+//! rollback/disable refs, and audit refs, while proving no `capability::execute`
+//! dispatch, runtime routing, hot-swap, module activation, package-manager,
+//! dependency, or network behavior occurs.
 //! Module-lifecycle operations are metadata-only state operations: they
 //! request/decide/list/inspect enable, disable, quarantine, and rollback
 //! lifecycle records for install-candidate modules without installing,
@@ -166,7 +167,9 @@ mod scheduler_contract;
 
 #[cfg(test)]
 pub(crate) use operations::supported_operation_names;
-pub(crate) use operations::{is_supported_operation, operation_list_text};
+pub(crate) use operations::{
+    is_supported_operation, operation_binding_metadata, operation_list_text,
+};
 mod update_diagnostics_contract;
 mod web_research_contract;
 pub(crate) use operations::execute_value;

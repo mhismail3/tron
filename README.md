@@ -1927,18 +1927,22 @@ and `tron.capability_binding_policy.v1`. Binding request, decision, and policy
 operations stay behind the single `capability::execute` primitive and require
 explicit capability-binding/resource authority, non-wildcard kind selectors,
 `networkPolicy: none`, idempotency keys, stale-version guards, and exact
-selectors for inspect plus decision/policy linked writes. The records model the
-target operation, current built-in owner, requested replacement or extension
-target, ownership class, binding mode, actor scope, rationale, contract/evidence
-refs, authority constraints, rollback/disable refs, decision state, and audit
-history. `kernel_locked` and `governance_locked` operations cannot request
-replacement; `adapter_replaceable` and `module_owned` replacement requests
-require rollback metadata and remain proposals only. This plane never changes
-runtime routing, mutates dispatch, hot-swaps modules, installs or activates
-modules, executes module code, restores dependencies, runs package managers,
-inherits `agent_state`, accesses networks, stores raw local material, exposes
-raw grant or authority ids, adds public `/engine` APIs, or adds fixed iOS
-panels.
+selectors for inspect plus decision/policy linked writes. The request path
+derives target operation owner/class metadata from the server-owned execute
+registry, rejects unknown target operations, and rejects caller owner/class or
+replacement-target mismatches before checking replacement eligibility. The
+records model the target operation, current built-in owner, requested
+replacement or extension target, ownership class, binding mode, actor scope,
+rationale, contract/evidence refs, authority constraints, rollback/disable
+refs, decision state, and audit history. `kernel_locked` and
+`governance_locked` operations cannot request replacement even when a request
+claims an adapter class; `adapter_replaceable` and `module_owned` replacement
+requests require rollback metadata and remain proposals only. This plane never
+changes runtime routing, mutates dispatch, hot-swaps modules, installs or
+activates modules, executes module code, restores dependencies, runs package
+managers, inherits `agent_state`, accesses networks, stores raw local material,
+exposes raw grant or authority ids, adds public `/engine` APIs, or adds fixed
+iOS panels.
 
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
