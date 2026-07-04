@@ -601,6 +601,7 @@
 		DA1DFED679DAD9B90D137714 /* TokenFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF7706C4978B62BD8AEB828 /* TokenFormatterTests.swift */; };
 		DA74BC6B0EA855A0235CFBC4 /* AgentClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AAD458DAEF9AF6DA3D270F7 /* AgentClientTests.swift */; };
 		DBCB80FC89B061390014D6AD /* FileDisplayHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8A27C0E22EABF9293EB16C0 /* FileDisplayHelpers.swift */; };
+		DC161F92A733D9C50E9808F5 /* AgentCockpitPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D974F7F566CAE7C1D04B9B3 /* AgentCockpitPresentation.swift */; };
 		DC423C34FBFA5180E1BAECFB /* TurnLifecycleCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DC2962BAFABB6971E0D5534 /* TurnLifecycleCoordinatorTests.swift */; };
 		DC8010FCFCF9FEDFE22DD397 /* EngineProtocolTypes+Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCA7E75343B4730CF6A1BC4 /* EngineProtocolTypes+Catalog.swift */; };
 		DC9A0AE490D97A2EF462E318 /* CapabilityInvocationProgressModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0963F9AEAEB992C442D6AC67 /* CapabilityInvocationProgressModel.swift */; };
@@ -1007,6 +1008,7 @@
 		5C1335A743455D6DD09C3158 /* StreamingRecoverySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRecoverySnapshot.swift; sourceTree = "<group>"; };
 		5C8DE18E43FFC5A642EEF4F1 /* SystemClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemClientTests.swift; sourceTree = "<group>"; };
 		5D226E5EFAA7C3521C6EB0E3 /* ChatTranscriptionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptionCoordinator.swift; sourceTree = "<group>"; };
+		5D974F7F566CAE7C1D04B9B3 /* AgentCockpitPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCockpitPresentation.swift; sourceTree = "<group>"; };
 		5DAC1D06ECD97480BDD4CEAA /* SessionSwitchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSwitchingTests.swift; sourceTree = "<group>"; };
 		5DEC24B935D9C62FE066A094 /* SessionBriefingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBriefingUITests.swift; sourceTree = "<group>"; };
 		5E04E393B82131869CFD7747 /* ThinkingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingIndicator.swift; sourceTree = "<group>"; };
@@ -2457,6 +2459,7 @@
 			children = (
 				0C7F929DC466F3438E7815DA /* AgentBriefingState.swift */,
 				86CA4F369A729139A934FAC7 /* AgentCockpitDiscoveryState.swift */,
+				5D974F7F566CAE7C1D04B9B3 /* AgentCockpitPresentation.swift */,
 				839BBBB47068ACE251F7725B /* AgentCockpitState.swift */,
 				F74281BF24ABFC1D71F5E932 /* AgentCockpitViewModel.swift */,
 			);
@@ -3694,6 +3697,7 @@
 				6A935C63F9C91FC8906EAEFD /* AgentCockpitDiscoveryState.swift in Sources */,
 				1705A7C7E42FF9CE9CF06EBF /* AgentCockpitDiscoveryViews.swift in Sources */,
 				0E4D40FC6FCC470F056BD25B /* AgentCockpitModuleActivityViews.swift in Sources */,
+				DC161F92A733D9C50E9808F5 /* AgentCockpitPresentation.swift in Sources */,
 				96BE8B5A2F333C2172BBD7CF /* AgentCockpitState.swift in Sources */,
 				B51288C868E6863BFC7430D9 /* AgentCockpitSummaryViews.swift in Sources */,
 				2D6B7580E05D2B97737EB6E4 /* AgentCockpitViewModel.swift in Sources */,

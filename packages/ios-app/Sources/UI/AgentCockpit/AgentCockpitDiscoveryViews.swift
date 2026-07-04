@@ -22,7 +22,7 @@ struct CapabilitiesSummaryCard: View {
                 }
                 Spacer()
                 Button(action: onVerify) {
-                    Label("Verify catalog", systemImage: "checkmark.shield")
+                    Label("Run verification", systemImage: "checkmark.shield")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 10)
@@ -33,17 +33,19 @@ struct CapabilitiesSummaryCard: View {
             }
             HStack(spacing: 8) {
                 capabilityMetric("Areas", overview.groups.count)
-                capabilityMetric("Operations", operationMetricCount)
-                capabilityMetric("Workers", overview.workerCount)
-                capabilityMetric("Triggers", overview.triggerCount)
+                capabilityMetric("Capabilities", operationMetricCount)
+                capabilityMetric("Readiness", overview.workerCount)
+                capabilityMetric("Activity", overview.triggerCount)
             }
-            if currentRevision != nil || overview.latestReport != nil {
+            let snapshotLine = AgentCockpitPresentation.snapshotLine(currentRevision: currentRevision)
+            let verificationLine = AgentCockpitPresentation.latestVerificationLine(overview.latestReport)
+            if snapshotLine != nil || verificationLine != nil {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let currentRevision {
-                        Text("Catalog snapshot revision \(currentRevision)")
+                    if let snapshotLine {
+                        Text(snapshotLine)
                     }
-                    if let latest = overview.latestReport {
-                        Text("Last checked \(safeTimestamp(latest.updatedAt) ?? standardized(latest.lifecycle).lowercased())")
+                    if let verificationLine {
+                        Text(verificationLine)
                     }
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -57,36 +59,15 @@ struct CapabilitiesSummaryCard: View {
     }
 
     private var summaryTitle: String {
-        switch overview.title {
-        case "Verified":
-            return "Capability catalog verified"
-        case "No Catalog":
-            return "No capability catalog"
-        default:
-            return overview.title
-        }
+        AgentCockpitPresentation.discoverySummaryTitle(for: overview)
     }
 
     private var summaryDetail: String {
-        if overview.functionCount == 0, overview.operationCount == 0 {
-            return overview.detail
-        }
-        if let operationList = overview.capabilityVisibility?.operationList, operationList.truncated {
-            return "\(operationList.returnedOperations) of \(operationList.totalOperations) operations are visible. \(operationList.label)."
-        }
-        if let resourceScan = overview.capabilityVisibility?.resourceScan, resourceScan.truncated {
-            return "\(overview.operationCount) operations are visible. \(resourceScan.label)."
-        }
-        if overview.degradedFunctionCount + overview.missingSchemaCount + overview.catalogDecodeIssueCount > 0 {
-            return overview.detail
-        }
-        let visibleOperations = overview.operationCount > 0 ? overview.operationCount : overview.functionCount
-        return "\(visibleOperations) operations are visible across \(overview.groups.count) capability areas."
+        AgentCockpitPresentation.discoverySummaryDetail(for: overview)
     }
 
     private var operationMetricCount: Int {
-        overview.capabilityVisibility?.operationList.totalOperations
-            ?? (overview.operationCount > 0 ? overview.operationCount : overview.functionCount)
+        AgentCockpitPresentation.operationMetricCount(for: overview)
     }
 
     private var statusColor: Color {
@@ -121,7 +102,7 @@ struct WorkerTriggerExplanationCard: View {
     var body: some View {
         if operations > 0, workers == 0, triggers == 0 {
             Label(
-                "Built-in engine operations can be invoked directly. Worker and trigger counts appear when modules publish autonomous runtime owners.",
+                "Built-in capabilities can be used directly. Readiness and activity counts appear when modules publish runtime owners.",
                 systemImage: "info.circle"
             )
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -160,9 +141,9 @@ struct CapabilityGroupCard: View {
                     .countBadge(group.hasIssues ? .tronWarning : .tronInfo)
             }
             HStack(spacing: 8) {
-                compactMetric("Ops", group.operationCount > 0 ? group.operationCount : group.functionCount)
-                compactMetric("Catalog", group.functionCount)
-                compactMetric("Workers", group.workerCount)
+                compactMetric("Capabilities", group.operationCount > 0 ? group.operationCount : group.functionCount)
+                compactMetric("Published", group.functionCount)
+                compactMetric("Readiness", group.workerCount)
             }
             Text(group.ownerSummary)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -201,13 +182,13 @@ struct CatalogVerificationRow: View {
                 .foregroundStyle(isPassed ? .tronSuccess : .tronWarning)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(isPassed ? "Catalog verification passed" : "Catalog verification needs review")
+                Text(isPassed ? "Verification passed" : "Verification needs review")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
                 Text(safeTimestamp(report.updatedAt) ?? "Safe audit proof recorded")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
-                Text("Proof ref available in audit detail")
+                Text("Audit reference available in detail")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
@@ -298,9 +279,9 @@ struct CapabilityGroupDetailSheet: View {
                 .foregroundStyle(.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                detailMetric("Primitive Ops", group.operationCount)
-                detailMetric("Catalog", group.functionCount)
-                detailMetric("Workers", group.workerCount)
+                detailMetric("Operations", group.operationCount)
+                detailMetric("Published", group.functionCount)
+                detailMetric("Readiness", group.workerCount)
                 detailMetric("Issues", group.degradedCount + group.missingSchemaCount)
             }
         }

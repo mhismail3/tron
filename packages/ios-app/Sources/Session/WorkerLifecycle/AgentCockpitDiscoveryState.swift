@@ -36,7 +36,7 @@ struct AgentCockpitCapabilityGroupRow: Equatable, Identifiable, Sendable {
 
     var workerTriggerExplanation: String? {
         guard functionCount > 0, workerCount == 0, triggerCount == 0 else { return nil }
-        return "These are built-in engine operations. Worker and trigger counts appear when a module publishes autonomous runtime owners."
+        return "These are built-in capabilities. Readiness and activity counts appear when a module publishes runtime owners."
     }
 }
 
@@ -280,9 +280,9 @@ extension AgentCockpitProjection {
             ),
             CapabilityGroupDefinition(
                 id: "resources_memory",
-                title: "Resources & Memory",
+                title: "Knowledge & Files",
                 question: "Can Tron preserve inspectable state instead of guessing?",
-                narrative: "Durable resources, blobs, memory refs, filesystem-safe evidence, and replayable artifacts.",
+                narrative: "Memory refs, files, evidence, and replayable artifacts.",
                 namespaces: ["resource", "blob", "memory", "filesystem"],
                 operationFamilies: [
                     "git",
@@ -320,9 +320,9 @@ extension AgentCockpitProjection {
             ),
             CapabilityGroupDefinition(
                 id: "runtime_workers",
-                title: "Runtime & Workers",
+                title: "Runtime Activity",
                 question: "Can Tron supervise real work without hiding runtime risk?",
-                narrative: "Jobs, module runtime envelopes, worker lifecycle, generated surfaces, and bounded output refs.",
+                narrative: "Jobs, module runtime envelopes, lifecycle readiness, generated views, and bounded output refs.",
                 namespaces: ["jobs", "module_runtime", "worker_lifecycle", "ui_surface"],
                 operationFamilies: ["jobs", "module_runtime", "worker_packages", "program_execution", "subagents"]
             ),
@@ -330,7 +330,7 @@ extension AgentCockpitProjection {
                 id: "diagnostics_audit",
                 title: "Diagnostics & Audit",
                 question: "Can Tron prove what changed and why it is safe?",
-                narrative: "Catalog discovery, module activity, approvals, agent briefing, and provider-safe audit evidence.",
+                narrative: "Verification, module activity, approvals, agent briefing, and provider-safe audit evidence.",
                 namespaces: ["catalog_discovery", "module_activity", "approval", "agent_briefing"],
                 operationFamilies: ["trace", "logs", "update_diagnostics", "tool_sources", "web", "web_research"]
             )
@@ -354,7 +354,7 @@ extension AgentCockpitProjection {
             return "\(operations.count) governed operation\(operations.count == 1 ? "" : "s")"
         }
         if !workers.isEmpty {
-            return "\(workers.count) worker owner\(workers.count == 1 ? "" : "s")"
+            return "\(workers.count) readiness owner\(workers.count == 1 ? "" : "s")"
         }
         if functions.isEmpty {
             return "No published operations"

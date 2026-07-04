@@ -81,7 +81,7 @@ extension SourceGuardTests {
         #expect(cockpitViews.contains("struct AgentCockpitSheet"))
         #expect(cockpitSummaryViews.contains("struct EngineCockpitDashboardBand"))
         #expect(cockpitSummaryViews.contains(#"briefingMetric("Capabilities""#))
-        #expect(cockpitSummaryViews.contains("Catalog verified"))
+        #expect(cockpitSummaryViews.contains("dashboardVerificationPhrase"))
         #expect(!cockpitSummaryViews.contains(##""rev \(revision)""##))
         #expect(!cockpitSummaryViews.contains(#"metric("Verified""#))
         #expect(!cockpitSummaryViews.contains("Checked"))

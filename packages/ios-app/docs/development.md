@@ -116,8 +116,9 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-For Engine Cockpit capability visibility or `WorkerLifecycleRepository` protocol
-changes, run the focused cockpit state/view-model set:
+For Engine Cockpit capability visibility, top-level presentation hygiene, or
+`WorkerLifecycleRepository` protocol changes, run the focused cockpit
+state/view-model set:
 
 ```bash
 xcodebuild test -scheme Tron \

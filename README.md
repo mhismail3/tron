@@ -2786,21 +2786,22 @@ packages/ios-app/Sources/
   drill-down evidence rows, and avoids raw paths, commands, logs, grants,
   authority ids, and secrets at top level. The dashboard Engine Cockpit band is
   the core engine summary: connection state, visible capability count, issue
-  count, and plain catalog trust state such as catalog verified, needs review,
-  or unchecked. The cockpit sheet opens on
-  Capabilities, grouping operations into user-facing areas with drill-down
+  count, and plain Verification state such as passed, needs review, or not yet
+  checked. The cockpit sheet opens on
+  Capabilities, grouping capabilities into user-facing areas with drill-down
   operation owner/status, replacement eligibility, binding/shadow-trial
   attempts, rollback/disable/abort availability, and request/response schema
-  bodies from the live catalog where present; catalog snapshot revision and
-  durable `catalog_discovery_report` resources are presented there as
-  contextual verification proof rather than top-level telemetry.
+  bodies from the live catalog where present; snapshot revision and durable
+  `catalog_discovery_report` handles stay out of top-level UI and are presented
+  only as contextual verification proof in detail.
   Replacement-disclosure rows derive from
   `capability_binding::cockpit_overview`, which reshapes server-owned registry,
   binding-policy, and shadow-trial facts without exposing raw operation
   internals, grants, authority ids, or resource handles at top level.
-  Deeper worker/package/surface tabs appear only when server evidence exists.
-  The sheet renders live worker lifecycle catalog rows, capability schema/health gaps,
-  package/resource status,
+  Deeper Readiness, Audit, and Activity Views tabs appear only when server
+  evidence exists.
+  The sheet renders live worker lifecycle readiness rows, capability schema/health gaps,
+  package audit status,
   redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, server-owned `module_activity::overview`
   active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context, and active

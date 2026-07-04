@@ -112,6 +112,75 @@ struct AgentCockpitStateTests {
         #expect(overview.capabilityVisibility?.resourceScan.complete == true)
     }
 
+    @Test("Top-level cockpit presentation hides internal vocabulary")
+    func topLevelCockpitPresentationHidesInternalVocabulary() {
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [
+                sampleResource(
+                    id: "worker_package_proposal:local.echo:1.0.0:invocation-1",
+                    kind: .proposal,
+                    lifecycle: "proposed"
+                )
+            ],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            capabilityVisibility: AgentCockpitViewModelTests.capabilityCockpitOverview(),
+            moduleActivity: sampleModuleActivityOverview(),
+            connectionState: .connected
+        )
+
+        let strings = AgentCockpitPresentation.topLevelVisibleStrings(for: overview)
+        let leaks = strings.flatMap { value in
+            AgentCockpitPresentation.topLevelLeakMatches(in: value).map { "\($0) in '\(value)'" }
+        }
+        let joined = strings.joined(separator: "\n")
+
+        #expect(leaks.isEmpty, "Top-level cockpit strings leaked internal terms: \(leaks)")
+        #expect(AgentCockpitPresentation.primaryTerms.allSatisfy { joined.contains($0) })
+        #expect(joined.contains("Verification passed"))
+        #expect(!joined.contains("local.echo::reply"))
+        #expect(!joined.contains("worker_package_proposal"))
+        #expect(!joined.contains("catalog_discovery_report"))
+        #expect(!joined.contains("module_runtime_state"))
+        #expect(!joined.localizedCaseInsensitiveContains("grant"))
+        #expect(!joined.localizedCaseInsensitiveContains("authority"))
+    }
+
+    @Test("Detail disclosure keeps safe schema and operation evidence below top level")
+    func detailDisclosureKeepsSchemaAndEvidenceBelowTopLevel() {
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            capabilityVisibility: AgentCockpitViewModelTests.capabilityCockpitOverview(),
+            connectionState: .connected
+        )
+
+        let topLevel = AgentCockpitPresentation.topLevelVisibleStrings(for: overview).joined(separator: "\n")
+        let function = overview.functions.first { $0.id == "local.echo::reply" }
+        let functionDetail = function.map { AgentCockpitPresentation.detailDisclosureStrings(for: $0).joined(separator: "\n") } ?? ""
+        let operation = overview.modularityOperations.first { $0.name == "git_status" }
+        let operationDetail = operation.map { AgentCockpitPresentation.detailDisclosureStrings(for: $0).joined(separator: "\n") } ?? ""
+
+        #expect(!topLevel.contains(#""type" : "object""#))
+        #expect(!topLevel.contains("Capability execute registry"))
+        #expect(functionDetail.contains(#""type" : "object""#))
+        #expect(operationDetail.contains("Capability execute registry"))
+        #expect(operationDetail.contains("Inspect decisions"))
+    }
+
     @Test("Projection preserves degraded module activity state")
     func projectionPreservesDegradedModuleActivityState() {
         let overview = AgentCockpitProjection.project(
@@ -214,7 +283,7 @@ struct AgentCockpitStateTests {
         let group = overview.discovery.groups.first
         #expect(group?.title == "Session & Context")
         #expect(group?.ownerSummary == "Built-in engine operations")
-        #expect(group?.workerTriggerExplanation?.contains("built-in engine operations") == true)
+        #expect(group?.workerTriggerExplanation?.contains("built-in capabilities") == true)
     }
 
     @Test("Projection reports malformed catalog entries as degraded")

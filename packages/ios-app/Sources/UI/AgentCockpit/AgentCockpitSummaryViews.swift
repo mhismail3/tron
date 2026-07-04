@@ -24,7 +24,7 @@ struct EngineCockpitDashboardBand: View {
                     HStack(spacing: 8) {
                         briefingMetric("Capabilities", "\(overview.functions.count)")
                         briefingMetric("Issues", "\(issueCount)")
-                        briefingPhrase(catalogTrustPhrase)
+                        briefingPhrase(verificationPhrase)
                     }
                 }
 
@@ -48,61 +48,15 @@ struct EngineCockpitDashboardBand: View {
     }
 
     private var summary: String {
-        if overview.status.kind == .offline {
-            return "No active engine link. Connect a server to inspect core health."
-        }
-        if issueCount > 0 {
-            return "Engine link is up, but the capability catalog has \(issueCount) issue\(issueCount == 1 ? "" : "s")."
-        }
-        switch overview.status.kind {
-        case .connecting:
-            return "Connecting to the engine so core health and capabilities can be checked."
-        case .degraded:
-            return "\(overview.status.title): open the cockpit for safe diagnostics and audit detail."
-        case .awaitingApproval:
-            return "Engine link is up, and one item is waiting for your review."
-        case .running:
-            return "Engine work is active. Open the cockpit for current activity."
-        case .ready:
-            return "Engine link is healthy and the capability catalog is ready."
-        case .idle:
-            return "Engine link is healthy. No engine work is currently active."
-        case .offline:
-            return "No active engine link. Connect a server to inspect core health."
-        }
+        AgentCockpitPresentation.dashboardSummary(for: overview)
     }
 
     private var issueCount: Int {
-        overview.discovery.missingSchemaCount
-            + overview.discovery.degradedFunctionCount
-            + overview.discovery.catalogDecodeIssueCount
+        AgentCockpitPresentation.issueCount(for: overview)
     }
 
-    private var catalogTrustStatus: String {
-        guard let latest = overview.discovery.latestReport else {
-            return "Unchecked"
-        }
-        switch AgentCockpitProjection.normalized(latest.lifecycle) {
-        case "passed":
-            return "Verified"
-        case "failed", "quarantined":
-            return "Review"
-        default:
-            return readableCatalogLifecycle(latest.lifecycle)
-        }
-    }
-
-    private var catalogTrustPhrase: String {
-        switch catalogTrustStatus {
-        case "Verified":
-            return "Catalog verified"
-        case "Review":
-            return "Catalog needs review"
-        case "Unchecked":
-            return "Catalog unchecked"
-        default:
-            return "Catalog \(catalogTrustStatus.lowercased())"
-        }
+    private var verificationPhrase: String {
+        AgentCockpitPresentation.dashboardVerificationPhrase(for: overview.discovery.latestReport)
     }
 
     private var accent: Color {
@@ -147,31 +101,19 @@ struct AgentCockpitMetricStrip: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            metric("Workers", value: "\(overview.workers.count)", icon: "cpu")
+            metric("Readiness", value: "\(overview.workers.count)", icon: "cpu")
             metric("Capabilities", value: "\(overview.functions.count)", icon: "curlybraces")
             metric("Issues", value: "\(issueCount)", icon: "exclamationmark.triangle")
-            metric("Catalog", value: catalogTrustStatus, icon: "checkmark.shield")
+            metric("Verification", value: verificationStatus, icon: "checkmark.shield")
         }
     }
 
     private var issueCount: Int {
-        overview.discovery.missingSchemaCount
-            + overview.discovery.degradedFunctionCount
-            + overview.discovery.catalogDecodeIssueCount
+        AgentCockpitPresentation.issueCount(for: overview)
     }
 
-    private var catalogTrustStatus: String {
-        guard let latest = overview.discovery.latestReport else {
-            return "Unchecked"
-        }
-        switch AgentCockpitProjection.normalized(latest.lifecycle) {
-        case "passed":
-            return "Verified"
-        case "failed", "quarantined":
-            return "Review"
-        default:
-            return readableCatalogLifecycle(latest.lifecycle)
-        }
+    private var verificationStatus: String {
+        AgentCockpitPresentation.verificationStatus(for: overview.discovery.latestReport)
     }
 
     private func metric(_ title: String, value: String, icon: String) -> some View {
@@ -192,15 +134,4 @@ struct AgentCockpitMetricStrip: View {
         .padding(9)
         .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, interactive: false)
     }
-}
-
-private func readableCatalogLifecycle(_ value: String) -> String {
-    let spaced = value.replacingOccurrences(of: "_", with: " ")
-    return spaced
-        .split(separator: " ")
-        .map { part in
-            guard let first = part.first else { return "" }
-            return first.uppercased() + part.dropFirst()
-        }
-        .joined(separator: " ")
 }

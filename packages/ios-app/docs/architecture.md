@@ -18,10 +18,10 @@ sheet presents activity, adaptation, active work, user-needed work, weak
 points/failures, memory/learned-state, and audit sections with drill-down
 evidence and empty/degraded states. The Engine Cockpit opens from the dashboard
 and starts with core engine visibility before progressively exposing module-plane
-diagnostics. It surfaces live worker lifecycle catalog entries, capability discovery families,
-schema/health gaps, durable `catalog_discovery_report` history, redacted
+diagnostics. It surfaces live worker lifecycle readiness, capability discovery families,
+schema/health gaps, durable verification history, redacted
 `capability_binding::cockpit_overview` operation ownership/replacement facts,
-package/resource status, confirmation-backed lifecycle actions, activity, and
+package audit status, confirmation-backed lifecycle actions, activity, and
 active `ui_surface` resources without adding fixed product panels. The Activity
 tab renders the server-owned, invocation-scoped `module_activity::overview`
 projection instead of fabricating catalog/package activity locally, and the
@@ -462,8 +462,8 @@ It must not map fixed feature names into custom sheets.
 
 The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
 and sheet header are the core engine summary: connection state, visible
-capability count, issue count, and plain catalog trust state from server-owned
-facts. The sheet opens on Capabilities, grouping visible operations into
+capability count, issue count, and plain Verification state from server-owned
+facts. The sheet opens on Capabilities, grouping visible capabilities into
 user-facing areas before drilling into server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
 bounded resource-scan state, locked/built-in/module status, redacted
@@ -471,17 +471,18 @@ replacement target, readiness/next-action labels,
 replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 rollback/disable/abort availability, effect/risk, schema-health, worker,
 trigger, tags, request/response schema bodies, and safe verification details.
-Catalog
-snapshot revision and recent `catalog_discovery_report` resources are rendered
-inside the cockpit as catalog verification proof, not as top-level telemetry.
+Snapshot revision and recent `catalog_discovery_report` handles stay out of
+top-level UI and are rendered inside the cockpit only as verification proof.
 Capability modularity rows come from `capability_binding::cockpit_overview`,
 which is a server-owned redacted projection over registry metadata plus scoped
 binding/shadow-trial records. iOS may shape display labels and grouping, but it
 must not infer ownership class, replacement policy, readiness, attempt state,
 or rollback availability locally. `capability_binding` is a projection source,
-not an operation owner. The top-level cockpit must stay high-signal; binding,
-shadow-trial, readiness, scan completeness, and rollback details belong in
-group and operation drill-down.
+not an operation owner. The top-level cockpit must stay high-signal: no raw
+IDs, paths, grants, authority IDs, resource IDs, actor IDs, schemas, commands,
+or code-style metadata. Binding, shadow-trial, readiness, scan completeness,
+schema, source, tags, and rollback details belong in group and operation
+drill-down.
 Dashboard and operation cards use the whole glass container as the disclosure
 target instead of decorative chevron glyphs; drill-down is communicated by the
 surface hierarchy and tap target, while functional navigation and expansion
@@ -489,8 +490,9 @@ controls keep their own directional icons.
 The verify action can request a new
 `catalog_discovery::conformance_report`; that action writes durable
 report/stream evidence only and does not execute discovered functions. Deeper
-worker/package/surface tabs appear only when there is server evidence to inspect. The
-Surfaces tab lists active `ui_surface` resources through the same generic
+Readiness, Audit, and Activity Views tabs appear only when there is server
+evidence to inspect. The
+Activity Views tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
 Its Activity tab renders invocation-scoped `module_activity::overview`

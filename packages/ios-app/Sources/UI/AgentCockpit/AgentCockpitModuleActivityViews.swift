@@ -19,11 +19,9 @@ struct ModuleActivitySummaryCard: View {
                 summaryMetric("Blocked", activity.summary.blocked, .tronError)
                 summaryMetric("Degraded", degradedCount, .tronWarning)
             }
-            if !activity.resources.isEmpty {
-                WrapRow(
-                    items: activity.resources.prefix(4).map { "\($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.total)" },
-                    tint: .tronInfo
-                )
+            let auditChips = AgentCockpitPresentation.moduleActivityAuditChips(activity)
+            if !auditChips.isEmpty {
+                WrapRow(items: auditChips, tint: .tronInfo)
             }
         }
         .padding(13)

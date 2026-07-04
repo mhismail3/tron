@@ -103,7 +103,7 @@ struct AgentCockpitSheet: View {
                 Spacer()
             }
             if viewModel.lastError != nil {
-                Label("Latest refresh could not complete. Low-level diagnostics stay in audit detail.", systemImage: "exclamationmark.triangle")
+                Label("Latest refresh could not complete. Audit details remain below.", systemImage: "exclamationmark.triangle")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronError)
             }
@@ -125,22 +125,7 @@ struct AgentCockpitSheet: View {
     }
 
     private var headerDetail: String {
-        switch viewModel.overview.status.kind {
-        case .connecting:
-            return "Rebuilding the engine link."
-        case .degraded:
-            return "Open the cockpit sections for safe diagnostics and audit detail."
-        case .awaitingApproval:
-            return "A server-owned item is waiting for your review."
-        case .running:
-            return "Engine or module work is currently active."
-        case .ready:
-            return "Core link is healthy and capabilities are available."
-        case .idle:
-            return "No engine or module work is currently active."
-        case .offline:
-            return "Connect a server to inspect core health."
-        }
+        AgentCockpitPresentation.headerDetail(for: viewModel.overview.status.kind)
     }
 
     private var visibleTabs: [AgentCockpitTab] {
@@ -186,7 +171,7 @@ struct AgentCockpitSheet: View {
                     : viewModel.overview.modularityOperations.count
             )
             if viewModel.overview.discovery.groups.isEmpty {
-                CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published a visible capability catalog.")
+                CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published visible capabilities.")
             } else {
                 ForEach(viewModel.overview.discovery.groups) { group in
                     Button {
@@ -201,7 +186,7 @@ struct AgentCockpitSheet: View {
             }
             if !viewModel.overview.discovery.reports.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Verification Proof")
+                    Text("Verification")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextSecondary)
                     ForEach(viewModel.overview.discovery.reports.prefix(4)) { report in
@@ -215,7 +200,7 @@ struct AgentCockpitSheet: View {
     private var workersTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.overview.workers.isEmpty {
-                CockpitEmptyState(symbol: "cpu", title: "No workers", detail: "The connected engine has not published worker entries.")
+                CockpitEmptyState(symbol: "cpu", title: "No readiness records", detail: "The connected engine has not published readiness records.")
             } else {
                 ForEach(viewModel.overview.workers) { worker in
                     WorkerCard(worker: worker, functions: viewModel.overview.functions, triggers: viewModel.overview.triggers)
@@ -227,7 +212,7 @@ struct AgentCockpitSheet: View {
     private var packagesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.overview.packages.isEmpty {
-                CockpitEmptyState(symbol: "shippingbox", title: "No packages", detail: "Worker package lifecycle evidence has not been recorded.")
+                CockpitEmptyState(symbol: "shippingbox", title: "No audit records", detail: "Lifecycle audit evidence has not been recorded.")
             } else {
                 ForEach(viewModel.overview.packages) { package in
                     PackageCard(package: package) { action in
@@ -256,7 +241,7 @@ struct AgentCockpitSheet: View {
     private var surfacesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.overview.runtimeSurfaces.isEmpty {
-                CockpitEmptyState(symbol: "rectangle.3.group", title: "No surfaces", detail: "Worker-authored runtime surfaces will appear here.")
+                CockpitEmptyState(symbol: "rectangle.3.group", title: "No activity views", detail: "Runtime activity views will appear here.")
             } else {
                 ForEach(viewModel.overview.runtimeSurfaces) { runtimeSurface in
                     GeneratedRuntimeSurfaceView(
@@ -306,10 +291,10 @@ private enum AgentCockpitTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .capabilities: return "Capabilities"
-        case .workers: return "Workers"
-        case .packages: return "Packages"
+        case .workers: return "Readiness"
+        case .packages: return "Audit"
         case .activity: return "Activity"
-        case .surfaces: return "Surfaces"
+        case .surfaces: return "Activity Views"
         }
     }
 
@@ -343,10 +328,10 @@ private struct WorkerCard: View {
                 Image(systemName: "cpu")
                     .foregroundStyle(.tronInfo)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(worker.id)
+                    Text(AgentCockpitPresentation.workerTitle(worker))
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
-                    Text("\(worker.kind) · \(worker.lifecycle) · \(worker.visibility)")
+                    Text(AgentCockpitPresentation.workerSubtitle(worker))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                 }
@@ -355,35 +340,10 @@ private struct WorkerCard: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                     .countBadge(.tronInfo)
             }
-            if !worker.namespaceClaims.isEmpty {
-                WrapRow(items: worker.namespaceClaims, tint: .tronInfo)
-            }
-            ownedRows(title: "Functions", values: worker.functionIds)
-            ownedRows(title: "Triggers", values: worker.triggerIds)
-            Text("Grant \(worker.authorityGrant) · Owner \(worker.ownerActor)")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
+            WrapRow(items: AgentCockpitPresentation.workerChips(worker), tint: .tronInfo)
         }
         .padding(13)
         .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
-    }
-
-    @ViewBuilder
-    private func ownedRows(title: String, values: [String]) -> some View {
-        if !values.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(.tronTextSecondary)
-                ForEach(values.prefix(4), id: \.self) { value in
-                    Text(value)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-        }
     }
 }
 
@@ -397,20 +357,19 @@ private struct PackageCard: View {
                 Image(systemName: package.kind == .proposal ? "checkmark.seal" : "shippingbox")
                     .foregroundStyle(package.kind == .proposal ? .tronWarning : .tronInfo)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(package.displayName)
+                    Text(AgentCockpitPresentation.packageTitle(package))
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
-                    Text("\(package.kind.rawValue.replacingOccurrences(of: "_", with: " ")) · \(package.lifecycle)")
+                    Text(AgentCockpitPresentation.packageSubtitle(package))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                 }
                 Spacer()
             }
-            Text(package.resourceId)
-                .font(TronTypography.codeCaption)
+            Text(AgentCockpitPresentation.packageAuditLine(package))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
                 .lineLimit(1)
-                .truncationMode(.middle)
             let actions = AgentCockpitProjection.actions(for: package)
             if !actions.isEmpty {
                 HStack(spacing: 8) {
@@ -457,7 +416,7 @@ private struct ActivityRow: View {
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(2)
-                    Text("\(item.resourceKind.replacingOccurrences(of: "_", with: " ")) · \(item.status)")
+                    Text(AgentCockpitPresentation.activityStatusLine(item))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(statusColor)
                     if let timestamp = item.timestamp {
@@ -468,14 +427,9 @@ private struct ActivityRow: View {
                 }
                 Spacer()
             }
-            if !item.authorityLabels.isEmpty {
-                WrapRow(items: item.authorityLabels, tint: .tronInfo)
-            }
-            if !item.touchedResources.isEmpty {
-                WrapRow(
-                    items: item.touchedResources.map { "\($0.label) \($0.total)\($0.truncated ? "+" : "")" },
-                    tint: .tronCyan
-                )
+            let auditChips = AgentCockpitPresentation.activityAuditChips(item)
+            if !auditChips.isEmpty {
+                WrapRow(items: auditChips, tint: .tronInfo)
             }
             gateRow
         }
