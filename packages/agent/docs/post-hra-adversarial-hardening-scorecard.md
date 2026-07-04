@@ -82,19 +82,21 @@ The Rust integration target
 
 The hard HRA Rust source/test limit remains 900 LOC. AHA-6 adds an explicit
 850 LOC warning band so ownership-critical files cannot quietly cross into the
-hard limit without review.
+hard limit without review. Each warning-band action is the concrete split plan
+for the current file before future behavior grows there.
 
 | Path | Current LOC | Owner | Warning-band action | Status |
 |------|-------------|-------|---------------------|--------|
-| `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs` | 1479 | capability runtime grant owner | Split per-domain grant policy helpers before adding more execute-resource families. | watch |
-| `packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_tests.rs` | 1284 | capability runtime grant test owner | Split resource-family, memory, and delegated subagent fixtures before adding more execute-resource families. | watch |
+| `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs` | 1577 | capability runtime grant owner | Split per-domain grant policy helpers before adding more execute-resource families. | watch |
+| `packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_tests.rs` | 1334 | capability runtime grant test owner | Split resource-family, memory, and delegated subagent fixtures before adding more execute-resource families. | watch |
 | `packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs` | 871 | agent loop orchestrator owner | Split journal projection, trace persistence, or replay formatting helpers before adding more streaming-journal behavior. | watch |
-| `packages/agent/src/domains/capability/contract.rs` | 1086 | capability contract owner | Split execute operation schema guidance, primitive capability catalog definitions, and provider-facing contract helpers before adding more execute-backed domain operations. | watch |
+| `packages/agent/src/domains/capability/contract.rs` | 1107 | capability contract owner | Split execute operation schema guidance, primitive capability catalog definitions, and provider-facing contract helpers before adding more execute-backed domain operations. | watch |
 | `packages/agent/src/domains/capability/operations/module_program_execution_tests.rs` | 1210 | capability execute test owner | Split module-program-execution lifecycle tests from delegated module-pack fixtures before expanding coverage. | watch |
+| `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` | 954 | capability binding cockpit visibility owner | Split operation fact aggregation, action derivation, and DTO row formatting into focused cockpit projection helpers before adding more visibility fields. | watch |
 | `packages/agent/src/domains/capability_binding/shadow_trial.rs` | 1654 | capability binding shadow-trial owner | Split shadow-trial validation, projection, and event-record helpers before adding more replacement-trial semantics. | watch |
 | `packages/agent/src/domains/capability_binding/tests.rs` | 1845 | capability binding test owner | Split binding policy, shadow-trial, and cockpit-visibility regression batches into focused test modules before adding more coverage. | watch |
-| `packages/agent/src/domains/git/service.rs` | 1461 | git domain owner | Split read-only status/diff helpers, staged-index tree evidence, bounded command helpers, and ref command helpers before adding more source-control operations. | watch |
-| `packages/agent/src/domains/git/tests.rs` | 3022 | git test owner | Split read-only Git status/diff tests from mutation, commit evidence, branch-start evidence, resource/schema, provider-static, and replay tests before adding more source-control coverage. | watch |
+| `packages/agent/src/domains/git/service.rs` | 1517 | git domain owner | Split read-only status/diff helpers, staged-index tree evidence, bounded command helpers, and ref command helpers before adding more source-control operations. | watch |
+| `packages/agent/src/domains/git/tests.rs` | 3054 | git test owner | Split read-only Git status/diff tests from mutation, commit evidence, branch-start evidence, resource/schema, provider-static, and replay tests before adding more source-control coverage. | watch |
 | `packages/agent/src/domains/jobs/service.rs` | 1175 | jobs owner | At the hard-limit edge; move new reconciliation, finalization, cleanup, or output-retention behavior into jobs service helper modules before adding behavior here. | watch |
 | `packages/agent/src/domains/jobs/tests.rs` | 996 | jobs test owner | At the hard-limit edge; move new lifecycle, output, timeout, reconciliation, or fail-closed regression batches into focused jobs test modules. | watch |
 | `packages/agent/src/domains/memory/tests.rs` | 1784 | memory test owner | Split retrieval, prompt-inclusion, retention-policy, provider-safe projection, query/decision evidence, and older memory lifecycle fixtures into focused sibling test modules before adding more memory coverage. | watch |
@@ -103,7 +105,7 @@ hard limit without review.
 | `packages/agent/src/domains/procedural/tests.rs` | 1399 | procedural domain test owner | Split procedural definition, activation request/decision, authorization denial, and projection redaction fixtures into focused modules before adding more procedural coverage. | watch |
 | `packages/agent/src/domains/subagents/execution.rs` | 1172 | subagents owner | Split launch planning, follow-up inspection/cancel/result projection, and authority-selector helpers before expanding subagent behavior. | watch |
 | `packages/agent/src/domains/worker_lifecycle/tests/mod.rs` | 973 | worker lifecycle test owner | At the hard-limit edge; keep common fixtures here and move new manifest/package, inspection, or launch/reconciliation regression batches into focused worker lifecycle test modules. | watch |
-| `packages/agent/src/engine/authority/grants/authorization.rs` | 3182 | engine authority owner | Split operation/resource selector extraction and per-domain explicit-grant scanners before adding more execute-resource families. | watch |
+| `packages/agent/src/engine/authority/grants/authorization.rs` | 3767 | engine authority owner | Split operation/resource selector extraction and per-domain explicit-grant scanners before adding more execute-resource families. | watch |
 | `packages/agent/src/domains/model/providers/factory.rs` | 878 | model providers owner | Watch provider selection/auth construction; split provider-specific builders before adding new provider branches. | watch |
 | `packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs` | 973 | OpenAI stream handler test owner | Split stream delta, tool-call, usage, and error cases into focused sibling tests before adding more OpenAI streaming coverage. | watch |
 | `packages/agent/src/engine/catalog/registry/mod.rs` | 895 | engine catalog owner | At the hard-limit edge; new catalog mutation or query behavior must move into `catalog_changes`, `invocation`, or a new registry helper module first. | watch |
