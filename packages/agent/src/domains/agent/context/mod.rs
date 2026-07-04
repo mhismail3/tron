@@ -6,8 +6,8 @@
 //! |--------|---------|
 //! | `context_manager` | Entry point — owns context lifecycle, compaction triggers, and manager dependency projections |
 //! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
-//! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
-//! | `summarizer` | Summarizer trait and recovery implementations |
+//! | `compaction_engine` | Executes compaction over injected context dependencies: summarize older eligible messages, trim context |
+//! | `summarizer` | Replaceable summarization strategy trait and deterministic keyword implementation |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
 //! | `soul` | Static seed instruction for the primitive loop |
 //! | `token_estimator` | Token counting and context budget calculations |
@@ -25,9 +25,10 @@
 //! agent-owned state projection loaded through engine state primitives, and a
 //! provider-safe memory prompt-trace audit that carries only mode/count/ref
 //! evidence.
-//! Compaction uses token pressure to decide when to compact context, and only
-//! commits when an older message window can be summarized and the result
-//! reduces the durable context.
+//! Compaction uses token pressure to decide when to compact context. The loop
+//! handler injects a summarization strategy into the context manager/engine
+//! boundary, and only commits when an older message window can be summarized and
+//! the result reduces the durable context.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;

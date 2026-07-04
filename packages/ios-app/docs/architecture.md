@@ -40,6 +40,8 @@ recent context action audit detail. Its context section renders
 `context_control::ui_*` wrappers; model/provider access remains behind
 `capability::execute`. It does not restore memory retain/edit, skill activation,
 source control, prompt-library controls, or raw logs.
+Timeline compaction pills label token percentages as reduction/savings so they
+are not confused with the Session Briefing context-window usage percentage.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS

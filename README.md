@@ -2488,9 +2488,9 @@ When context crosses the proactive trigger (default
 `triggerTokenThreshold: 0.70` of the model context window), compaction runs
 before the next provider call:
 
-1. **Summarize**: A deterministic keyword summarizer condenses older messages.
-2. **Stage**: A `compact.summary_staging` event durably records the summary before commit.
-3. **Boundary**: A `compact.boundary` event commits the cutoff and carries the summary used by server-side reconstruction.
+1. **Trigger**: The settings-backed token trigger decides whether compaction should run.
+2. **Summarize**: The loop injects a replaceable summarizer strategy; the default primitive strategy is the deterministic keyword summarizer.
+3. **Boundary**: A `compact.boundary` event commits the cutoff and carries the provider-safe summary used by server-side reconstruction.
 4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
 5. **Preserve recent**: The most recent `preserveRecentCount` turns always survive the cut.
 

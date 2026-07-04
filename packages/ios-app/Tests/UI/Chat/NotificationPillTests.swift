@@ -28,8 +28,20 @@ final class NotificationPillTests: XCTestCase {
 
     func testCompactionCompressionPercent() {
         let view = CompactionNotificationView(isInProgress: false, tokensBefore: 100000, tokensAfter: 50000, reason: "manual")
-        // 50% compression
+        // 50% reduction, not context-window usage.
         XCTAssertNotNil(view)
+    }
+
+    func testCompactionPillLabelsPercentAsReduction() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/UI/Chat/Messages/NotificationViews.swift")
+        let source = try String(contentsOf: sourceURL)
+        XCTAssertTrue(source.contains("% reduction)"))
+        XCTAssertFalse(source.contains("Text(\"(\\(compressionPercent)%)\")"))
     }
 
     // MARK: - ModelChangeNotificationView Tests
