@@ -86,6 +86,9 @@ pub(super) fn authorize_with_grant(
     if is_module_dependencies_invocation(invocation) {
         ensure_module_dependencies_grant_is_explicit(grant)?;
     }
+    if is_capability_binding_invocation(invocation) {
+        ensure_capability_binding_grant_is_explicit(grant, invocation)?;
+    }
     if is_web_research_invocation(invocation) {
         ensure_web_research_grant_is_explicit(grant)?;
     }
@@ -256,6 +259,48 @@ fn ensure_module_dependencies_grant_is_explicit(grant: &EngineGrant) -> Result<(
         }
     }
     Ok(())
+}
+
+fn ensure_capability_binding_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "capability binding policy operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "capability binding policy operations")?;
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("capability_binding_request_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityBindingRequestResourceId"],
+            "capability binding request inspect",
+        ),
+        Some("capability_binding_decision_record") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityBindingRequestResourceId"],
+            "capability binding decision record",
+        ),
+        Some("capability_binding_decision_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityBindingDecisionResourceId"],
+            "capability binding decision inspect",
+        ),
+        Some("capability_binding_policy_activate") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityBindingDecisionResourceId"],
+            "capability binding policy activation",
+        ),
+        Some("capability_binding_policy_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityBindingPolicyResourceId"],
+            "capability binding policy inspect",
+        ),
+        _ => Ok(()),
+    }
 }
 
 fn ensure_web_research_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
@@ -661,6 +706,9 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "moduleDependencyRequestResourceId",
         "moduleDependencyDecisionResourceId",
         "moduleDependencyPolicyResourceId",
+        "capabilityBindingRequestResourceId",
+        "capabilityBindingDecisionResourceId",
+        "capabilityBindingPolicyResourceId",
         "webResearchRequestResourceId",
         "webResearchReviewResourceId",
         "webResearchSourceResourceId",
@@ -880,6 +928,27 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         ) => {
             push_unique(&mut scopes, "module_dependencies.read");
             push_unique(&mut scopes, "module_dependencies.write");
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "resource.write");
+        }
+        Some(
+            "capability_binding_request_list"
+            | "capability_binding_request_inspect"
+            | "capability_binding_decision_list"
+            | "capability_binding_decision_inspect"
+            | "capability_binding_policy_list"
+            | "capability_binding_policy_inspect",
+        ) => {
+            push_unique(&mut scopes, "capability_binding.read");
+            push_unique(&mut scopes, "resource.read");
+        }
+        Some(
+            "capability_binding_request_record"
+            | "capability_binding_decision_record"
+            | "capability_binding_policy_activate",
+        ) => {
+            push_unique(&mut scopes, "capability_binding.read");
+            push_unique(&mut scopes, "capability_binding.write");
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
@@ -1145,6 +1214,21 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             "module_dependency_policy",
         ],
         Some(
+            "capability_binding_request_record"
+            | "capability_binding_request_list"
+            | "capability_binding_request_inspect"
+            | "capability_binding_decision_record"
+            | "capability_binding_decision_list"
+            | "capability_binding_decision_inspect"
+            | "capability_binding_policy_activate"
+            | "capability_binding_policy_list"
+            | "capability_binding_policy_inspect",
+        ) => vec![
+            "capability_binding_request",
+            "capability_binding_decision",
+            "capability_binding_policy",
+        ],
+        Some(
             "web_research_request_record"
             | "web_research_request_list"
             | "web_research_request_inspect"
@@ -1298,6 +1382,24 @@ fn is_module_dependencies_invocation(invocation: &Invocation) -> bool {
                     | "module_dependency_policy_activate"
                     | "module_dependency_policy_list"
                     | "module_dependency_policy_inspect"
+            )
+        )
+}
+
+fn is_capability_binding_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some(
+                "capability_binding_request_record"
+                    | "capability_binding_request_list"
+                    | "capability_binding_request_inspect"
+                    | "capability_binding_decision_record"
+                    | "capability_binding_decision_list"
+                    | "capability_binding_decision_inspect"
+                    | "capability_binding_policy_activate"
+                    | "capability_binding_policy_list"
+                    | "capability_binding_policy_inspect"
             )
         )
 }
@@ -1538,6 +1640,15 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         }
         Some("module_dependency_policy_activate") => {
             push_unique(&mut kinds, "module_dependency_policy")
+        }
+        Some("capability_binding_request_record") => {
+            push_unique(&mut kinds, "capability_binding_request")
+        }
+        Some("capability_binding_decision_record") => {
+            push_unique(&mut kinds, "capability_binding_decision")
+        }
+        Some("capability_binding_policy_activate") => {
+            push_unique(&mut kinds, "capability_binding_policy")
         }
         Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
         Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),
@@ -2517,6 +2628,226 @@ mod tests {
                 &test_invocation(json!({"operation": "module_install_request_list"})),
             ) {
                 Ok(()) => panic!("module install {name} wildcard grant must be denied"),
+                Err(error) => error.to_string(),
+            };
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn capability_binding_operations_require_exact_selectors() {
+        let function = test_execute_function();
+        let read_grant = test_grant(
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "resource.read",
+            ],
+            &[
+                "capability_binding_request",
+                "capability_binding_decision",
+                "capability_binding_policy",
+            ],
+            &[
+                "kind:capability_binding_request",
+                "kind:capability_binding_decision",
+                "kind:capability_binding_policy",
+                "resource:capability_binding_request:first",
+            ],
+        );
+        authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "capability_binding_request_inspect",
+                "capabilityBindingRequestResourceId": "capability_binding_request:first"
+            })),
+        )
+        .expect("exact binding request inspect grant accepted");
+
+        let error = authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "capability_binding_request_inspect",
+                "capabilityBindingRequestResourceId": "capability_binding_request:second"
+            })),
+        )
+        .expect_err("binding request inspect requires exact selector")
+        .to_string();
+        assert!(
+            error.contains("requires exact selector for capabilityBindingRequestResourceId resource capability_binding_request:second"),
+            "{error}"
+        );
+
+        let write_grant = test_grant(
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "capability_binding.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &[
+                "capability_binding_request",
+                "capability_binding_decision",
+                "capability_binding_policy",
+            ],
+            &[
+                "kind:capability_binding_request",
+                "kind:capability_binding_decision",
+                "kind:capability_binding_policy",
+                "resource:capability_binding_request:first",
+            ],
+        );
+        authorize_with_grant(
+            &write_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "capability_binding_decision_record",
+                "capabilityBindingRequestResourceId": "capability_binding_request:first"
+            })),
+        )
+        .expect("exact binding decision linked request grant accepted");
+
+        let error = authorize_with_grant(
+            &write_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "capability_binding_decision_record",
+                "capabilityBindingRequestResourceId": "capability_binding_request:second"
+            })),
+        )
+        .expect_err("binding decision record requires exact linked request selector")
+        .to_string();
+        assert!(
+            error.contains("requires exact selector for capabilityBindingRequestResourceId resource capability_binding_request:second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn capability_binding_requires_explicit_authority_kinds_and_selectors() {
+        let function = test_execute_function();
+        let missing_scope = test_grant(
+            &["capability.execute", "resource.read"],
+            &[
+                "capability_binding_request",
+                "capability_binding_decision",
+                "capability_binding_policy",
+            ],
+            &[
+                "kind:capability_binding_request",
+                "kind:capability_binding_decision",
+                "kind:capability_binding_policy",
+            ],
+        );
+        let error = authorize_with_grant(
+            &missing_scope,
+            &function,
+            &test_invocation(json!({"operation": "capability_binding_request_list"})),
+        )
+        .expect_err("missing capability binding read authority denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority capability_binding.read"),
+            "{error}"
+        );
+
+        let wrong_kind = test_grant(
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "resource.read",
+            ],
+            &["capability_binding_request", "capability_binding_decision"],
+            &[
+                "kind:capability_binding_request",
+                "kind:capability_binding_decision",
+                "kind:capability_binding_policy",
+            ],
+        );
+        let error = authorize_with_grant(
+            &wrong_kind,
+            &function,
+            &test_invocation(json!({"operation": "capability_binding_request_list"})),
+        )
+        .expect_err("missing capability binding policy kind denied")
+        .to_string();
+        assert!(
+            error.contains("does not allow resource kind capability_binding_policy"),
+            "{error}"
+        );
+
+        for (name, grant, expected) in [
+            (
+                "authority",
+                test_grant(
+                    &["*", "capability_binding.read", "resource.read"],
+                    &[
+                        "capability_binding_request",
+                        "capability_binding_decision",
+                        "capability_binding_policy",
+                    ],
+                    &[
+                        "kind:capability_binding_request",
+                        "kind:capability_binding_decision",
+                        "kind:capability_binding_policy",
+                    ],
+                ),
+                "wildcard authority scopes",
+            ),
+            (
+                "resource kind",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "capability_binding.read",
+                        "resource.read",
+                    ],
+                    &[
+                        "*",
+                        "capability_binding_request",
+                        "capability_binding_decision",
+                        "capability_binding_policy",
+                    ],
+                    &[
+                        "kind:capability_binding_request",
+                        "kind:capability_binding_decision",
+                        "kind:capability_binding_policy",
+                    ],
+                ),
+                "wildcard resource kinds",
+            ),
+            (
+                "selector",
+                test_grant(
+                    &[
+                        "capability.execute",
+                        "capability_binding.read",
+                        "resource.read",
+                    ],
+                    &[
+                        "capability_binding_request",
+                        "capability_binding_decision",
+                        "capability_binding_policy",
+                    ],
+                    &[
+                        "*",
+                        "kind:capability_binding_request",
+                        "kind:capability_binding_decision",
+                        "kind:capability_binding_policy",
+                    ],
+                ),
+                "wildcard resource selectors",
+            ),
+        ] {
+            let error = match authorize_with_grant(
+                &grant,
+                &function,
+                &test_invocation(json!({"operation": "capability_binding_request_list"})),
+            ) {
+                Ok(()) => panic!("capability binding {name} wildcard grant must be denied"),
                 Err(error) => error.to_string(),
             };
             assert!(error.contains(expected), "{error}");

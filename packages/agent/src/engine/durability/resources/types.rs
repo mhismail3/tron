@@ -197,6 +197,20 @@ pub const MODULE_DEPENDENCY_DECISION_SCHEMA_ID: &str =
 pub const MODULE_DEPENDENCY_POLICY_KIND: &str = "module_dependency_policy";
 /// Built-in metadata-only module dependency policy resource schema id.
 pub const MODULE_DEPENDENCY_POLICY_SCHEMA_ID: &str = "tron.resource.module_dependency_policy.v1";
+/// Built-in metadata-only capability binding request resource kind.
+pub const CAPABILITY_BINDING_REQUEST_KIND: &str = "capability_binding_request";
+/// Built-in metadata-only capability binding request resource schema id.
+pub const CAPABILITY_BINDING_REQUEST_SCHEMA_ID: &str =
+    "tron.resource.capability_binding_request.v1";
+/// Built-in metadata-only capability binding decision resource kind.
+pub const CAPABILITY_BINDING_DECISION_KIND: &str = "capability_binding_decision";
+/// Built-in metadata-only capability binding decision resource schema id.
+pub const CAPABILITY_BINDING_DECISION_SCHEMA_ID: &str =
+    "tron.resource.capability_binding_decision.v1";
+/// Built-in metadata-only capability binding policy resource kind.
+pub const CAPABILITY_BINDING_POLICY_KIND: &str = "capability_binding_policy";
+/// Built-in metadata-only capability binding policy resource schema id.
+pub const CAPABILITY_BINDING_POLICY_SCHEMA_ID: &str = "tron.resource.capability_binding_policy.v1";
 /// Built-in metadata-only module lifecycle state resource kind.
 pub const MODULE_LIFECYCLE_STATE_KIND: &str = "module_lifecycle_state";
 /// Built-in metadata-only module lifecycle state resource schema id.

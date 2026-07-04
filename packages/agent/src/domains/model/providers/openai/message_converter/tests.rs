@@ -577,6 +577,24 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("Cargo.toml/Cargo.lock parity evidence"));
     assert!(result.contains("without package-manager execution"));
     assert!(result.contains("raw dependency artifacts"));
+    assert!(result.contains("capability_binding_request_record"));
+    assert!(result.contains("capability_binding_request_list"));
+    assert!(result.contains("capability_binding_request_inspect"));
+    assert!(result.contains("capability_binding_decision_record"));
+    assert!(result.contains("capability_binding_decision_list"));
+    assert!(result.contains("capability_binding_decision_inspect"));
+    assert!(result.contains("capability_binding_policy_activate"));
+    assert!(result.contains("capability_binding_policy_list"));
+    assert!(result.contains("capability_binding_policy_inspect"));
+    assert!(result.contains("capability_binding_request"));
+    assert!(result.contains("capability_binding_decision"));
+    assert!(result.contains("capability_binding_policy"));
+    assert!(result.contains("current built-in owner"));
+    assert!(result.contains("binding mode"));
+    assert!(result.contains("stale-version guards"));
+    assert!(result.contains("without runtime routing, dispatch mutation, hot-swap"));
+    assert!(result.contains("wildcard selectors"));
+    assert!(result.contains("agent_state inheritance"));
     assert!(result.contains("procedural_state_list"));
     assert!(result.contains("procedural_state_inspect"));
     assert!(result.contains("procedural_definition_record"));
@@ -656,6 +674,8 @@ fn clarification_includes_capability_execution_guidance() {
         "module_execute",
         "module_validation_execute",
         "module_dependency_resolve",
+        "capability_binding_route",
+        "capability_hot_swap",
     ] {
         assert!(
             !result.contains(non_goal),

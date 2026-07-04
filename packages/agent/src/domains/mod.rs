@@ -11,7 +11,8 @@
 //! inspect-only module manifest registry records, inert module proposal
 //! authoring records, inert module validation report records, metadata-only
 //! module install review-gate records, metadata-only module dependency request
-//! and policy records, inspect-only generic module activity cockpit projection,
+//! and policy records, metadata-only capability binding policy records,
+//! inspect-only generic module activity cockpit projection,
 //! read-only agent briefing projection, metadata-only web research
 //! request/review/source custody,
 //! durable non-interactive jobs, read-only Git/worktree observation,
@@ -45,6 +46,7 @@
 //! | `module_validation` | Inert bounded module contract validation reports |
 //! | `module_install` | Metadata-only module review approval and install-candidate gate |
 //! | `module_dependencies` | Metadata-only module dependency request, decision, and policy activation records |
+//! | `capability_binding` | Metadata-only capability binding request, decision, and policy records |
 //! | `module_lifecycle` | Metadata-only module enable/disable/quarantine/rollback state |
 //! | `module_runtime` | Supervised module runtime envelope records for enabled modules |
 //! | `module_activity` | Read-only generic module activity cockpit projection |
@@ -160,7 +162,15 @@
 //! security/license/runtime needs, removal plans, Cargo.toml/Cargo.lock parity
 //! evidence, decisions, and active policy metadata without package-manager
 //! execution, dependency restoration, manifest/lockfile mutation, raw package
-//! artifacts, network access, or runtime execution. Context control is
+//! artifacts, network access, or runtime execution. Capability binding policy
+//! is metadata-only replacement governance: it stores operation owner/class,
+//! requested shadow/extend/replace mode, target refs, contract/evidence
+//! requirements, exact authority/network constraints, stale-version guards,
+//! decisions, rollback/disable refs, audit refs, and active policy metadata
+//! without changing `capability::execute` dispatch, routing runtime calls,
+//! hot-swapping modules, activating packages, running code, restoring
+//! dependencies, accessing networks, or exposing raw paths, commands, logs,
+//! grant ids, or authority ids. Context control is
 //! provider-safe context visibility and boundary custody: it stores bounded
 //! composition snapshots, compact/clear action records, and context epochs
 //! without raw prompt bodies, secrets, local paths, commands, logs, grant ids,
@@ -203,6 +213,7 @@ pub mod approval;
 pub mod auth;
 pub mod blob;
 pub mod capability;
+pub mod capability_binding;
 pub mod catalog_discovery;
 pub mod context_control;
 pub mod device;

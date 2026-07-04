@@ -30,9 +30,9 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, agent_briefing, approval, auth, blob, capability, catalog_discovery, context_control,
-    device, filesystem, git, import_history, import_preview, jobs, logs, media, memory, message,
-    model, module_activity, module_authoring, module_dependencies, module_install,
+    agent, agent_briefing, approval, auth, blob, capability, capability_binding, catalog_discovery,
+    context_control, device, filesystem, git, import_history, import_preview, jobs, logs, media,
+    memory, message, model, module_activity, module_authoring, module_dependencies, module_install,
     module_lifecycle, module_registry, module_runtime, module_validation, notifications,
     program_execution, prompt_artifacts, repository_tree, scheduler, session, settings, subagents,
     system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
@@ -82,6 +82,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         module_validation::worker_module(&deps)?,
         module_install::worker_module(&deps)?,
         module_dependencies::worker_module(&deps)?,
+        capability_binding::worker_module(&deps)?,
         module_lifecycle::worker_module(&deps)?,
         module_runtime::worker_module(&deps)?,
         module_activity::worker_module(&deps)?,
