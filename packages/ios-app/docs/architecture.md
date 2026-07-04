@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-04 (Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-04 (Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -18,18 +18,18 @@ sheet presents activity, adaptation, active work, user-needed work, weak
 points/failures, memory/learned-state, and audit sections with drill-down
 evidence and empty/degraded states. The Engine Cockpit opens from the dashboard
 and starts with core engine visibility before progressively exposing module-plane
-diagnostics. It surfaces live worker lifecycle catalog entries, capability discovery families,
-schema/health gaps, durable `catalog_discovery_report` history, redacted
+diagnostics. It surfaces capabilities grouped into user-facing areas,
+schema/health gaps, durable verification history, redacted
 `capability_binding::cockpit_overview` operation ownership/replacement facts,
-package/resource status, confirmation-backed lifecycle actions, activity, and
+package lifecycle status, confirmation-backed lifecycle actions, activity, and
 active `ui_surface` resources without adding fixed product panels. The Activity
 tab renders the server-owned, invocation-scoped `module_activity::overview`
-projection instead of fabricating catalog/package activity locally, and the
+projection instead of fabricating module activity locally, and the
 Capabilities tab renders operation modularity from server-owned cockpit
 visibility instead of inferring policy in Swift. Cockpit refresh failures render as
-degraded while preserving the last good server facts, and malformed catalog
-entries surface catalog decode degradation instead of
-being silently omitted from counts or verified/no-catalog summaries. The app
+degraded while preserving the last good server facts, and malformed capability
+entries surface review-needed degradation instead of
+being silently omitted from counts or verified/no-capabilities summaries. The app
 does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
@@ -462,7 +462,7 @@ It must not map fixed feature names into custom sheets.
 
 The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
 and sheet header are the core engine summary: connection state, visible
-capability count, issue count, and plain catalog trust state from server-owned
+capability count, issue count, and plain verification state from server-owned
 facts. The sheet opens on Capabilities, grouping visible operations into
 user-facing areas before drilling into server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
@@ -471,9 +471,8 @@ replacement target, readiness/next-action labels,
 replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 rollback/disable/abort availability, effect/risk, schema-health, worker,
 trigger, tags, request/response schema bodies, and safe verification details.
-Catalog
-snapshot revision and recent `catalog_discovery_report` resources are rendered
-inside the cockpit as catalog verification proof, not as top-level telemetry.
+Verification version and recent `catalog_discovery_report` resources are rendered
+inside the cockpit as capability-check evidence, not as top-level telemetry.
 Capability modularity rows come from `capability_binding::cockpit_overview`,
 which is a server-owned redacted projection over registry metadata plus scoped
 binding/shadow-trial records. iOS may shape display labels and grouping, but it

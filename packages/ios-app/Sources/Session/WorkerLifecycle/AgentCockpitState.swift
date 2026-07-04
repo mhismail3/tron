@@ -376,7 +376,7 @@ enum AgentCockpitProjection {
         if !catalogDecodeIssues.isEmpty {
             return .init(
                 kind: .degraded,
-                title: "Catalog Degraded",
+                title: "Capabilities Need Review",
                 detail: catalogDecodeIssueDetail(catalogDecodeIssues.count),
                 systemImage: "exclamationmark.triangle"
             )
@@ -730,6 +730,6 @@ enum AgentCockpitProjection {
 
     static func catalogDecodeIssueDetail(_ count: Int) -> String {
         let noun = count == 1 ? "entry" : "entries"
-        return "\(count) catalog \(noun) could not be decoded"
+        return "\(count) capability \(noun) could not be decoded"
     }
 }

@@ -103,7 +103,7 @@ struct AgentCockpitSheet: View {
                 Spacer()
             }
             if viewModel.lastError != nil {
-                Label("Latest refresh could not complete. Low-level diagnostics stay in audit detail.", systemImage: "exclamationmark.triangle")
+                Label("Latest refresh could not complete. Low-level diagnostics stay in evidence detail.", systemImage: "exclamationmark.triangle")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronError)
             }
@@ -129,7 +129,7 @@ struct AgentCockpitSheet: View {
         case .connecting:
             return "Rebuilding the engine link."
         case .degraded:
-            return "Open the cockpit sections for safe diagnostics and audit detail."
+            return "Open the cockpit sections for safe diagnostics and evidence."
         case .awaitingApproval:
             return "A server-owned item is waiting for your review."
         case .running:
@@ -186,7 +186,7 @@ struct AgentCockpitSheet: View {
                     : viewModel.overview.modularityOperations.count
             )
             if viewModel.overview.discovery.groups.isEmpty {
-                CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published a visible capability catalog.")
+                CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published visible capabilities.")
             } else {
                 ForEach(viewModel.overview.discovery.groups) { group in
                     Button {
@@ -201,7 +201,7 @@ struct AgentCockpitSheet: View {
             }
             if !viewModel.overview.discovery.reports.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Verification Proof")
+                    Text("Verification")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronTextSecondary)
                     ForEach(viewModel.overview.discovery.reports.prefix(4)) { report in
@@ -215,7 +215,7 @@ struct AgentCockpitSheet: View {
     private var workersTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.overview.workers.isEmpty {
-                CockpitEmptyState(symbol: "cpu", title: "No workers", detail: "The connected engine has not published worker entries.")
+                CockpitEmptyState(symbol: "cpu", title: "No workers", detail: "Autonomous module workers will appear here when they publish runtime owners.")
             } else {
                 ForEach(viewModel.overview.workers) { worker in
                     WorkerCard(worker: worker, functions: viewModel.overview.functions, triggers: viewModel.overview.triggers)
@@ -227,7 +227,7 @@ struct AgentCockpitSheet: View {
     private var packagesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.overview.packages.isEmpty {
-                CockpitEmptyState(symbol: "shippingbox", title: "No packages", detail: "Worker package lifecycle evidence has not been recorded.")
+                CockpitEmptyState(symbol: "shippingbox", title: "No packages", detail: "Module package lifecycle evidence has not been recorded.")
             } else {
                 ForEach(viewModel.overview.packages) { package in
                     PackageCard(package: package) { action in
@@ -256,7 +256,7 @@ struct AgentCockpitSheet: View {
     private var surfacesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.overview.runtimeSurfaces.isEmpty {
-                CockpitEmptyState(symbol: "rectangle.3.group", title: "No surfaces", detail: "Worker-authored runtime surfaces will appear here.")
+                CockpitEmptyState(symbol: "rectangle.3.group", title: "No surfaces", detail: "Module-authored runtime surfaces will appear here.")
             } else {
                 ForEach(viewModel.overview.runtimeSurfaces) { runtimeSurface in
                     GeneratedRuntimeSurfaceView(
@@ -356,11 +356,11 @@ private struct WorkerCard: View {
                     .countBadge(.tronInfo)
             }
             if !worker.namespaceClaims.isEmpty {
-                WrapRow(items: worker.namespaceClaims, tint: .tronInfo)
+                WrapRow(items: worker.namespaceClaims.map(AgentCockpitPresentation.displayLabel), tint: .tronInfo)
             }
             ownedRows(title: "Functions", values: worker.functionIds)
             ownedRows(title: "Triggers", values: worker.triggerIds)
-            Text("Grant \(worker.authorityGrant) · Owner \(worker.ownerActor)")
+            Text("Server-governed owner · \(AgentCockpitPresentation.displayLabel(worker.ownerActor))")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
         }
@@ -406,11 +406,9 @@ private struct PackageCard: View {
                 }
                 Spacer()
             }
-            Text(package.resourceId)
-                .font(TronTypography.codeCaption)
+            Text("Lifecycle evidence is retained by the engine.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
-                .lineLimit(1)
-                .truncationMode(.middle)
             let actions = AgentCockpitProjection.actions(for: package)
             if !actions.isEmpty {
                 HStack(spacing: 8) {
@@ -457,7 +455,7 @@ private struct ActivityRow: View {
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(2)
-                    Text("\(item.resourceKind.replacingOccurrences(of: "_", with: " ")) · \(item.status)")
+                    Text(AgentCockpitPresentation.workStateLine(kind: item.resourceKind, status: item.status))
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
                         .foregroundStyle(statusColor)
                     if let timestamp = item.timestamp {

@@ -257,10 +257,46 @@ struct AgentCockpitStateTests {
         )
 
         #expect(overview.status.kind == .degraded)
-        #expect(overview.status.title == "Catalog Degraded")
-        #expect(overview.discovery.title == "Catalog Degraded")
+        #expect(overview.status.title == "Capabilities Need Review")
+        #expect(overview.discovery.title == "Capabilities Need Review")
         #expect(overview.discovery.catalogDecodeIssueCount == 1)
         #expect(overview.discovery.reports.first?.lifecycle == "passed")
+    }
+
+    @Test("Cockpit presentation keeps top-level labels user-facing")
+    func cockpitPresentationKeepsTopLevelLabelsUserFacing() {
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            capabilityVisibility: AgentCockpitViewModelTests.capabilityCockpitOverview(),
+            moduleActivity: sampleModuleActivityOverview(),
+            connectionState: .connected
+        )
+
+        let topLevelStrings = [
+            AgentCockpitPresentation.verificationTitle(for: overview.discovery),
+            AgentCockpitPresentation.verificationDetail(for: overview.discovery),
+            AgentCockpitPresentation.verificationPhrase(for: overview.discovery.latestReport),
+            AgentCockpitPresentation.verificationStatus(for: overview.discovery.latestReport),
+            AgentCockpitPresentation.capabilityMapRevision(overview.currentRevision) ?? "",
+            AgentCockpitPresentation.workKindLabel(overview.moduleActivity?.resources.first?.kind ?? ""),
+            AgentCockpitPresentation.workStateLine(
+                kind: overview.activity.first?.resourceKind ?? "",
+                status: overview.activity.first?.status ?? ""
+            )
+        ]
+
+        #expect(AgentCockpitPresentation.hiddenTopLevelTerms(in: topLevelStrings).isEmpty)
+        #expect(topLevelStrings.contains("Capabilities verified"))
+        #expect(topLevelStrings.contains("Verified"))
+        #expect(topLevelStrings.contains("Runtime"))
     }
 
     @Test("Projection reports offline without calling lifecycle data")

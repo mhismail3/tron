@@ -52,19 +52,19 @@ struct EngineCockpitDashboardBand: View {
             return "No active engine link. Connect a server to inspect core health."
         }
         if issueCount > 0 {
-            return "Engine link is up, but the capability catalog has \(issueCount) issue\(issueCount == 1 ? "" : "s")."
+            return "Engine link is up, but \(issueCount) capability issue\(issueCount == 1 ? "" : "s") need review."
         }
         switch overview.status.kind {
         case .connecting:
             return "Connecting to the engine so core health and capabilities can be checked."
         case .degraded:
-            return "\(overview.status.title): open the cockpit for safe diagnostics and audit detail."
+            return "\(overview.status.title): open the cockpit for safe diagnostics and evidence."
         case .awaitingApproval:
             return "Engine link is up, and one item is waiting for your review."
         case .running:
             return "Engine work is active. Open the cockpit for current activity."
         case .ready:
-            return "Engine link is healthy and the capability catalog is ready."
+            return "Engine link is healthy and capabilities are available."
         case .idle:
             return "Engine link is healthy. No engine work is currently active."
         case .offline:
@@ -78,31 +78,8 @@ struct EngineCockpitDashboardBand: View {
             + overview.discovery.catalogDecodeIssueCount
     }
 
-    private var catalogTrustStatus: String {
-        guard let latest = overview.discovery.latestReport else {
-            return "Unchecked"
-        }
-        switch AgentCockpitProjection.normalized(latest.lifecycle) {
-        case "passed":
-            return "Verified"
-        case "failed", "quarantined":
-            return "Review"
-        default:
-            return readableCatalogLifecycle(latest.lifecycle)
-        }
-    }
-
     private var catalogTrustPhrase: String {
-        switch catalogTrustStatus {
-        case "Verified":
-            return "Catalog verified"
-        case "Review":
-            return "Catalog needs review"
-        case "Unchecked":
-            return "Catalog unchecked"
-        default:
-            return "Catalog \(catalogTrustStatus.lowercased())"
-        }
+        AgentCockpitPresentation.verificationPhrase(for: overview.discovery.latestReport)
     }
 
     private var accent: Color {
@@ -150,7 +127,7 @@ struct AgentCockpitMetricStrip: View {
             metric("Workers", value: "\(overview.workers.count)", icon: "cpu")
             metric("Capabilities", value: "\(overview.functions.count)", icon: "curlybraces")
             metric("Issues", value: "\(issueCount)", icon: "exclamationmark.triangle")
-            metric("Catalog", value: catalogTrustStatus, icon: "checkmark.shield")
+            metric("Verified", value: verificationStatus, icon: "checkmark.shield")
         }
     }
 
@@ -160,18 +137,8 @@ struct AgentCockpitMetricStrip: View {
             + overview.discovery.catalogDecodeIssueCount
     }
 
-    private var catalogTrustStatus: String {
-        guard let latest = overview.discovery.latestReport else {
-            return "Unchecked"
-        }
-        switch AgentCockpitProjection.normalized(latest.lifecycle) {
-        case "passed":
-            return "Verified"
-        case "failed", "quarantined":
-            return "Review"
-        default:
-            return readableCatalogLifecycle(latest.lifecycle)
-        }
+    private var verificationStatus: String {
+        AgentCockpitPresentation.verificationStatus(for: overview.discovery.latestReport)
     }
 
     private func metric(_ title: String, value: String, icon: String) -> some View {
@@ -192,15 +159,4 @@ struct AgentCockpitMetricStrip: View {
         .padding(9)
         .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, interactive: false)
     }
-}
-
-private func readableCatalogLifecycle(_ value: String) -> String {
-    let spaced = value.replacingOccurrences(of: "_", with: " ")
-    return spaced
-        .split(separator: " ")
-        .map { part in
-            guard let first = part.first else { return "" }
-            return first.uppercased() + part.dropFirst()
-        }
-        .joined(separator: " ")
 }

@@ -2786,21 +2786,21 @@ packages/ios-app/Sources/
   drill-down evidence rows, and avoids raw paths, commands, logs, grants,
   authority ids, and secrets at top level. The dashboard Engine Cockpit band is
   the core engine summary: connection state, visible capability count, issue
-  count, and plain catalog trust state such as catalog verified, needs review,
+  count, and plain verification state such as verified, needs review,
   or unchecked. The cockpit sheet opens on
   Capabilities, grouping operations into user-facing areas with drill-down
   operation owner/status, replacement eligibility, binding/shadow-trial
   attempts, rollback/disable/abort availability, and request/response schema
-  bodies from the live catalog where present; catalog snapshot revision and
+  bodies from the live capability map where present; verification version and
   durable `catalog_discovery_report` resources are presented there as
-  contextual verification proof rather than top-level telemetry.
+  contextual capability-check evidence rather than top-level telemetry.
   Replacement-disclosure rows derive from
   `capability_binding::cockpit_overview`, which reshapes server-owned registry,
   binding-policy, and shadow-trial facts without exposing raw operation
   internals, grants, authority ids, or resource handles at top level.
   Deeper worker/package/surface tabs appear only when server evidence exists.
-  The sheet renders live worker lifecycle catalog rows, capability schema/health gaps,
-  package/resource status,
+  The sheet renders live worker lifecycle rows, capability schema/health gaps,
+  package lifecycle status,
   redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, server-owned `module_activity::overview`
   active/waiting/blocked/degraded activity/work facts scoped by trusted invocation context, and active

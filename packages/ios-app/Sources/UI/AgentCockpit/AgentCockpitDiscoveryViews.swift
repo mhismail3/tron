@@ -22,7 +22,7 @@ struct CapabilitiesSummaryCard: View {
                 }
                 Spacer()
                 Button(action: onVerify) {
-                    Label("Verify catalog", systemImage: "checkmark.shield")
+                    Label("Check capabilities", systemImage: "checkmark.shield")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 10)
@@ -39,11 +39,11 @@ struct CapabilitiesSummaryCard: View {
             }
             if currentRevision != nil || overview.latestReport != nil {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let currentRevision {
-                        Text("Catalog snapshot revision \(currentRevision)")
+                    if let version = AgentCockpitPresentation.capabilityMapRevision(currentRevision) {
+                        Text(version)
                     }
-                    if let latest = overview.latestReport {
-                        Text("Last checked \(safeTimestamp(latest.updatedAt) ?? standardized(latest.lifecycle).lowercased())")
+                    if let checked = AgentCockpitPresentation.safeLastChecked(overview.latestReport) {
+                        Text("Last checked \(checked)")
                     }
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -57,31 +57,11 @@ struct CapabilitiesSummaryCard: View {
     }
 
     private var summaryTitle: String {
-        switch overview.title {
-        case "Verified":
-            return "Capability catalog verified"
-        case "No Catalog":
-            return "No capability catalog"
-        default:
-            return overview.title
-        }
+        AgentCockpitPresentation.verificationTitle(for: overview)
     }
 
     private var summaryDetail: String {
-        if overview.functionCount == 0, overview.operationCount == 0 {
-            return overview.detail
-        }
-        if let operationList = overview.capabilityVisibility?.operationList, operationList.truncated {
-            return "\(operationList.returnedOperations) of \(operationList.totalOperations) operations are visible. \(operationList.label)."
-        }
-        if let resourceScan = overview.capabilityVisibility?.resourceScan, resourceScan.truncated {
-            return "\(overview.operationCount) operations are visible. \(resourceScan.label)."
-        }
-        if overview.degradedFunctionCount + overview.missingSchemaCount + overview.catalogDecodeIssueCount > 0 {
-            return overview.detail
-        }
-        let visibleOperations = overview.operationCount > 0 ? overview.operationCount : overview.functionCount
-        return "\(visibleOperations) operations are visible across \(overview.groups.count) capability areas."
+        AgentCockpitPresentation.verificationDetail(for: overview)
     }
 
     private var operationMetricCount: Int {
@@ -93,7 +73,7 @@ struct CapabilitiesSummaryCard: View {
         switch overview.title {
         case "Verified":
             return .tronSuccess
-        case "Catalog Degraded", "Schema Gaps", "Attention", "Report Failed":
+        case "Catalog Degraded", "Capabilities Need Review", "Schema Gaps", "Attention", "Report Failed", "Verification Needs Review":
             return .tronWarning
         default:
             return .tronInfo
@@ -160,9 +140,18 @@ struct CapabilityGroupCard: View {
                     .countBadge(group.hasIssues ? .tronWarning : .tronInfo)
             }
             HStack(spacing: 8) {
-                compactMetric("Ops", group.operationCount > 0 ? group.operationCount : group.functionCount)
-                compactMetric("Catalog", group.functionCount)
-                compactMetric("Workers", group.workerCount)
+                compactMetric(
+                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .operations),
+                    group.operationCount > 0 ? group.operationCount : group.functionCount
+                )
+                compactMetric(
+                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .definitions),
+                    group.functionCount
+                )
+                compactMetric(
+                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .workers),
+                    group.workerCount
+                )
             }
             Text(group.ownerSummary)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
@@ -201,13 +190,13 @@ struct CatalogVerificationRow: View {
                 .foregroundStyle(isPassed ? .tronSuccess : .tronWarning)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(isPassed ? "Catalog verification passed" : "Catalog verification needs review")
+                Text(isPassed ? "Capabilities check passed" : "Capabilities check needs review")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
-                Text(safeTimestamp(report.updatedAt) ?? "Safe audit proof recorded")
+                Text(safeTimestamp(report.updatedAt) ?? "Safe evidence recorded")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
-                Text("Proof ref available in audit detail")
+                Text("Evidence is available in the operation detail.")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
@@ -298,8 +287,8 @@ struct CapabilityGroupDetailSheet: View {
                 .foregroundStyle(.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                detailMetric("Primitive Ops", group.operationCount)
-                detailMetric("Catalog", group.functionCount)
+                detailMetric("Operations", group.operationCount)
+                detailMetric("Contracts", group.functionCount)
                 detailMetric("Workers", group.workerCount)
                 detailMetric("Issues", group.degradedCount + group.missingSchemaCount)
             }
@@ -620,16 +609,16 @@ private struct CapabilityOperationDetailSheet: View {
 
     private var verificationCopy: String {
         guard let latestReport else {
-            return "No catalog verification proof has been published yet."
+            return "No capability verification evidence has been published yet."
         }
         let lifecycle = AgentCockpitProjection.normalized(latestReport.lifecycle)
         if lifecycle == "passed" {
-            return "The latest catalog verification passed at \(safeTimestamp(latestReport.updatedAt) ?? "the recorded audit time")."
+            return "The latest capability check passed at \(safeTimestamp(latestReport.updatedAt) ?? "the recorded evidence time")."
         }
         if lifecycle == "failed" || lifecycle == "quarantined" {
-            return "The latest catalog verification needs review before trusting this operation snapshot."
+            return "The latest capability check needs review before trusting this operation snapshot."
         }
-        return "Catalog verification state: \(standardized(latestReport.lifecycle))."
+        return "Capability check state: \(standardized(latestReport.lifecycle))."
     }
 }
 
@@ -723,7 +712,7 @@ private struct OperationDetailSheet: View {
                 Text("Schema")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
-                Text("Provider-visible contract from the live capability catalog.")
+                Text("Provider-visible contract from the live capability map.")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }
@@ -799,16 +788,16 @@ private struct OperationDetailSheet: View {
 
     private var verificationCopy: String {
         guard let latestReport else {
-            return "No catalog verification proof has been published yet."
+            return "No capability verification evidence has been published yet."
         }
         let lifecycle = AgentCockpitProjection.normalized(latestReport.lifecycle)
         if lifecycle == "passed" {
-            return "The latest catalog verification passed. Safe audit proof is available from the catalog report detail."
+            return "The latest capability check passed. Safe evidence is available from the verification detail."
         }
         if lifecycle == "failed" || lifecycle == "quarantined" {
-            return "The latest catalog verification needs review before trusting this catalog snapshot."
+            return "The latest capability check needs review before trusting this capability snapshot."
         }
-        return "Catalog verification state: \(standardized(latestReport.lifecycle))."
+        return "Capability check state: \(standardized(latestReport.lifecycle))."
     }
 }
 
@@ -841,7 +830,7 @@ private struct SchemaBlock: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .glassEffect(.regular.tint(Color.tronSurface.opacity(0.22)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                Text("No schema body is available in the catalog snapshot.")
+                Text("No schema body is available in the latest capability snapshot.")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }

@@ -21,7 +21,7 @@ struct ModuleActivitySummaryCard: View {
             }
             if !activity.resources.isEmpty {
                 WrapRow(
-                    items: activity.resources.prefix(4).map { "\($0.kind.replacingOccurrences(of: "_", with: " ")) \($0.total)" },
+                    items: activity.resources.prefix(4).map { "\(AgentCockpitPresentation.workKindLabel($0.kind)) \($0.total)" },
                     tint: .tronInfo
                 )
             }

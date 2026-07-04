@@ -68,8 +68,8 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
 
     static let empty = AgentCockpitDiscoveryOverview(
-        title: "No Catalog",
-        detail: "No capability catalog is available",
+        title: "No Capabilities",
+        detail: "No capabilities are available",
         systemImage: "questionmark.folder",
         functionCount: 0,
         operationCount: 0,
@@ -127,7 +127,7 @@ extension AgentCockpitProjection {
         let detail: String
         let image: String
         if !catalogDecodeIssues.isEmpty {
-            title = "Catalog Degraded"
+            title = "Capabilities Need Review"
             detail = catalogDecodeIssueDetail(catalogDecodeIssues.count)
             image = "exclamationmark.triangle"
         } else if missingSchemas > 0 {
@@ -143,12 +143,12 @@ extension AgentCockpitProjection {
             detail = latestReport?.updatedAt ?? "Latest report passed"
             image = "checkmark.shield"
         } else if normalizedLatest == "failed" || normalizedLatest == "quarantined" {
-            title = "Report Failed"
+            title = "Verification Needs Review"
             detail = latestReport?.updatedAt ?? "Latest report needs review"
             image = "exclamationmark.shield"
         } else if functions.isEmpty && workers.isEmpty && modularityOperations.isEmpty {
-            title = "No Catalog"
-            detail = "No capability catalog is available"
+            title = "No Capabilities"
+            detail = "No capabilities are available"
             image = "questionmark.folder"
         } else {
             title = "Unverified"
@@ -330,7 +330,7 @@ extension AgentCockpitProjection {
                 id: "diagnostics_audit",
                 title: "Diagnostics & Audit",
                 question: "Can Tron prove what changed and why it is safe?",
-                narrative: "Catalog discovery, module activity, approvals, agent briefing, and provider-safe audit evidence.",
+                narrative: "Capability verification, module activity, approvals, agent briefing, and provider-safe evidence.",
                 namespaces: ["catalog_discovery", "module_activity", "approval", "agent_briefing"],
                 operationFamilies: ["trace", "logs", "update_diagnostics", "tool_sources", "web", "web_research"]
             )
