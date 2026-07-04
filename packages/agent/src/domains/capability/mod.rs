@@ -72,6 +72,13 @@
 //! owner rationale, review decisions, Cargo parity evidence, and no dependency
 //! restoration, package-manager use, manifest/lockfile mutation, or network
 //! access.
+//! Capability-binding operations are metadata-only governance operations: they
+//! record, list, inspect, decide, and activate `capability_binding_*` resources
+//! for future shadow/extend/replace proposals with exact operation ownership
+//! class, contract/evidence requirements, authority/network constraints,
+//! stale-version guards, rollback/disable refs, and audit refs, while proving
+//! no `capability::execute` dispatch, runtime routing, hot-swap, module
+//! activation, package-manager, dependency, or network behavior occurs.
 //! Module-lifecycle operations are metadata-only state operations: they
 //! request/decide/list/inspect enable, disable, quarantine, and rollback
 //! lifecycle records for install-candidate modules without installing,
@@ -102,6 +109,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
+//! | `capability_binding_contract` | Capability-binding request/decision/policy schema fields |
 //! | `context_control_contract` | Context-control snapshot/action/epoch schema fields |
 //! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
 //! | `web_research_contract` | Web research request/review/source schema fields |
@@ -139,6 +147,7 @@
 //! trace-safe before unsafe payload rejection. None expands the public
 //! `/engine` protocol.
 
+mod capability_binding_contract;
 mod context_control_contract;
 pub(crate) mod contract;
 mod import_history_contract;

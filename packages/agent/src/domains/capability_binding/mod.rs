@@ -1,0 +1,77 @@
+//! Metadata-only capability binding policy custody.
+//!
+//! Capability binding owns durable `capability_binding_request`,
+//! `capability_binding_decision`, and `capability_binding_policy` resources for
+//! future capability replacement governance. It records who asked to shadow,
+//! extend, or replace one `capability::execute` operation, what evidence and
+//! authority constraints are required, what decision was made, and what
+//! metadata-only policy exists for later slices. It does not route execution,
+//! hot-swap modules, activate packages, or change dispatch.
+//!
+//! The provider-visible surface is limited to `capability::execute` operations
+//! `capability_binding_request_record`, `capability_binding_request_list`,
+//! `capability_binding_request_inspect`, `capability_binding_decision_record`,
+//! `capability_binding_decision_list`, `capability_binding_decision_inspect`,
+//! `capability_binding_policy_activate`, `capability_binding_policy_list`, and
+//! `capability_binding_policy_inspect`.
+//!
+//! ## Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | `authority` | Binding/resource grant and exact selector checks |
+//! | `contract` | Worker id, stream topic, scope, and schema constants |
+//! | `payload_safety` | Unsafe-field, path, prompt, command, and token denial |
+//! | `projection` | Bounded provider-safe request, decision, and policy projections |
+//! | `records` | Metadata-only payload, idempotency, audit, and side-effect proof builders |
+//! | `resource_store` | Resource inspection, lifecycle stream, kind/schema helpers |
+//! | `service` | Timestamp-injected record/list/inspect/activate behavior |
+//! | `validation` | Text, ref, ownership-class, binding-mode, authority, and stale-guard checks |
+//! | `tests` | Schema, authority, replay, stale guard, locked-class, and no-routing regressions |
+//!
+//! # INVARIANT: binding policy is governance metadata only
+//!
+//! This domain stores review and policy metadata only. It must not route
+//! `capability::execute`, install or activate modules, execute module code,
+//! restore dependencies, run package managers, mutate manifests, create
+//! physical workspaces, access networks, touch repo-managed
+//! `packages/agent/skills`, expose raw commands/logs/env/code/file contents,
+//! or return raw grant/authority ids. `kernel_locked` and `governance_locked`
+//! operations cannot request `replace`; `adapter_replaceable` and
+//! `module_owned` requests are accepted only as strict metadata proposals with
+//! runtime routing disabled in this slice.
+
+use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
+
+mod authority;
+pub(crate) mod contract;
+mod payload_safety;
+mod projection;
+mod records;
+mod resource_store;
+pub(crate) mod service;
+mod validation;
+
+#[derive(Clone)]
+pub(crate) struct Deps {
+    pub(crate) engine_host: crate::engine::EngineHostHandle,
+}
+
+pub(crate) use crate::engine::{
+    CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
+    CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
+    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
+};
+
+pub(crate) fn worker_module(
+    _deps: &DomainRegistrationContext,
+) -> crate::engine::Result<DomainWorkerModule> {
+    crate::domains::registration::worker::domain_worker_module(
+        contract::WORKER,
+        &[contract::CAPABILITY_BINDING_LIFECYCLE_TOPIC],
+        Vec::new(),
+    )
+}
+
+#[cfg(test)]
+mod tests;

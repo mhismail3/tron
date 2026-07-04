@@ -21,6 +21,7 @@ use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 use tracing::{info, warn};
 
+mod capability_binding;
 mod catalog;
 mod common;
 mod context;
@@ -64,6 +65,13 @@ mod worker_packages;
 #[cfg(test)]
 mod module_program_execution_tests;
 
+use capability_binding::{
+    capability_binding_decision_inspect, capability_binding_decision_list,
+    capability_binding_decision_record, capability_binding_policy_activate,
+    capability_binding_policy_inspect, capability_binding_policy_list,
+    capability_binding_request_inspect, capability_binding_request_list,
+    capability_binding_request_record,
+};
 use catalog::{catalog_conformance, catalog_inspect, catalog_search};
 use common::{
     compact_json, internal, invalid, ok_result, optional_str, optional_u64, required_str,
@@ -471,6 +479,33 @@ async fn execute_operation(
         "module_dependency_policy_list" => module_dependency_policy_list(invocation, deps).await?,
         "module_dependency_policy_inspect" => {
             module_dependency_policy_inspect(invocation, deps).await?
+        }
+        "capability_binding_request_record" => {
+            capability_binding_request_record(invocation, deps, operation_at).await?
+        }
+        "capability_binding_request_list" => {
+            capability_binding_request_list(invocation, deps).await?
+        }
+        "capability_binding_request_inspect" => {
+            capability_binding_request_inspect(invocation, deps).await?
+        }
+        "capability_binding_decision_record" => {
+            capability_binding_decision_record(invocation, deps, operation_at).await?
+        }
+        "capability_binding_decision_list" => {
+            capability_binding_decision_list(invocation, deps).await?
+        }
+        "capability_binding_decision_inspect" => {
+            capability_binding_decision_inspect(invocation, deps).await?
+        }
+        "capability_binding_policy_activate" => {
+            capability_binding_policy_activate(invocation, deps, operation_at).await?
+        }
+        "capability_binding_policy_list" => {
+            capability_binding_policy_list(invocation, deps).await?
+        }
+        "capability_binding_policy_inspect" => {
+            capability_binding_policy_inspect(invocation, deps).await?
         }
         "module_lifecycle_request" => {
             module_lifecycle_request(invocation, deps, operation_at).await?

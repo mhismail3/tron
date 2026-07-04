@@ -1,0 +1,227 @@
+//! Capability binding execute operation adapters.
+
+use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
+
+use super::{Deps, ok_result};
+use crate::engine::Invocation;
+use crate::shared::protocol::model_capabilities::CapabilityResult;
+use crate::shared::server::errors::CapabilityError;
+
+pub(super) async fn capability_binding_request_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::record_capability_binding_request_value_at(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await?;
+    Ok(result(
+        "Capability binding request recorded.",
+        "capability_binding_request_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_request_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::list_capability_binding_request_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    let count = details
+        .get("bindingRequests")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(result(
+        &format!("Listed {count} capability binding request(s)."),
+        "capability_binding_request_list",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_request_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::inspect_capability_binding_request_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    Ok(result(
+        "Inspected capability binding request.",
+        "capability_binding_request_inspect",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_decision_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::record_capability_binding_decision_value_at(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await?;
+    Ok(result(
+        "Capability binding decision recorded.",
+        "capability_binding_decision_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_decision_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::list_capability_binding_decision_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    let count = details
+        .get("bindingDecisions")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(result(
+        &format!("Listed {count} capability binding decision(s)."),
+        "capability_binding_decision_list",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_decision_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::inspect_capability_binding_decision_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    Ok(result(
+        "Inspected capability binding decision.",
+        "capability_binding_decision_inspect",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_policy_activate(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::activate_capability_binding_policy_value_at(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await?;
+    Ok(result(
+        "Capability binding policy activated.",
+        "capability_binding_policy_activate",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_policy_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::list_capability_binding_policy_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    let count = details
+        .get("bindingPolicies")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(result(
+        &format!("Listed {count} capability binding policy record(s)."),
+        "capability_binding_policy_list",
+        details,
+    ))
+}
+
+pub(super) async fn capability_binding_policy_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details =
+        crate::domains::capability_binding::service::inspect_capability_binding_policy_value(
+            &binding_deps,
+            invocation,
+            &invocation.payload,
+        )
+        .await?;
+    Ok(result(
+        "Inspected capability binding policy.",
+        "capability_binding_policy_inspect",
+        details,
+    ))
+}
+
+fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
+    ok_result(
+        text.to_owned(),
+        json!({
+            "primitiveOperation": operation,
+            "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
+            "capabilityBinding": details
+        }),
+    )
+}

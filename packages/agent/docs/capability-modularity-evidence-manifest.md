@@ -1,8 +1,8 @@
 # Capability Modularity Evidence Manifest
 
-Status: active / kernel-boundary-lockdown-complete
+Status: active / capability-binding-policy-complete
 
-This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard is a documentation and invariant slice only; it adds no runtime routing behavior.
+This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard and binding policy slices add documentation, invariants, and metadata-only governance records; they add no runtime routing behavior.
 
 ## Reviewed Source Files
 
@@ -10,7 +10,12 @@ This manifest records the evidence reviewed for the capability modularity scorec
 |---|---|
 | Operation registry | `packages/agent/src/domains/capability/operations/registry.rs` |
 | Operation dispatch | `packages/agent/src/domains/capability/operations/mod.rs` |
+| Capability binding operations | `packages/agent/src/domains/capability/operations/capability_binding.rs` |
 | Capability contract | `packages/agent/src/domains/capability/contract.rs` |
+| Capability binding schema fields | `packages/agent/src/domains/capability/capability_binding_contract.rs` |
+| Capability binding docs/service | `packages/agent/src/domains/capability_binding/mod.rs` |
+| Capability binding resource definitions | `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
+| Grant authorization policy | `packages/agent/src/engine/authority/grants/authorization.rs` |
 | Engine fabric docs | `packages/agent/src/engine/mod.rs` |
 | Authority/grants docs | `packages/agent/src/engine/authority/mod.rs` |
 | Engine durability docs | `packages/agent/src/engine/durability/mod.rs` |
@@ -41,13 +46,14 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 | Fact | Evidence |
 |---|---|
-| Registry count | 157 entries in `SUPPORTED_OPERATION_NAMES`. |
-| Dispatch parity | 157 static dispatch arms in `execute_operation`; no missing or extra names. |
+| Registry count | 166 entries in `SUPPORTED_OPERATION_NAMES`. |
+| Dispatch parity | 166 static dispatch arms in `execute_operation`; no missing or extra names. |
 | Provider surface | One model-facing tool, `capability::execute`. |
 | Machine inventory | `packages/agent/docs/capability-modularity-inventory.tsv` lists every operation exactly once. |
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |
 | Kernel boundary lockdown | Static invariants require source anchors for authority/grants, event/session log, resource store, redaction/provider-safety, trace/audit/replay/catalog, transport boundary, and module governance pipeline before locked rows can change ownership class. |
-| Runtime behavior | No runtime routing or execution behavior changed in this slice. |
+| Capability binding policy | `capability_binding_request`, `capability_binding_decision`, and `capability_binding_policy` resources record metadata-only replacement governance with exact selectors, idempotency, stale-version guards, rollback/disable refs, and provider-safe projections. |
+| Runtime behavior | No runtime routing, dispatch mutation, module hot-swap, install, activation, execution, package-manager, dependency-restore, or network behavior changed in this slice. |
 
 ## Kernel Boundary Lockdown Evidence
 
@@ -59,12 +65,23 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | redaction/provider-safety | `packages/agent/src/shared/foundation/redaction.rs`, `packages/agent/src/domains/session/event_store/redaction.rs`, `packages/agent/src/domains/capability/mod.rs` | Locked and governance-visible rows retain provider-safe projections and shared redaction anchors. |
 | trace/audit/replay/catalog | `packages/agent/src/domains/capability/operations/mod.rs`, `packages/agent/src/engine/durability/replay.rs`, `packages/agent/src/domains/catalog_discovery/mod.rs` | `trace_*`, `replay_manifest`, and `catalog_*` stay `kernel_locked`; catalog discovery is not invocation. |
 | transport boundary | `packages/agent/src/transport/mod.rs`, `packages/agent/src/transport/engine/mod.rs`, `packages/agent/src/transport/http/auth.rs` | Transport remains authenticated framing over canonical engine requests and owns no domain behavior. |
-| module governance pipeline | `packages/agent/src/domains/module_registry/mod.rs`, `packages/agent/src/domains/module_authoring/mod.rs`, `packages/agent/src/domains/module_validation/mod.rs`, `packages/agent/src/domains/module_install/mod.rs`, `packages/agent/src/domains/module_dependencies/mod.rs`, `packages/agent/src/domains/module_lifecycle/mod.rs`, `packages/agent/src/domains/module_runtime/mod.rs`, `packages/agent/src/domains/tool_sources/mod.rs`, `packages/agent/src/domains/worker_lifecycle/mod.rs` | Module registry, authoring, validation, install, dependency, lifecycle, runtime, procedural, tool-source, worker-package, device-token, and notification-delivery gates stay `governance_locked`. |
+| module governance pipeline | `packages/agent/src/domains/module_registry/mod.rs`, `packages/agent/src/domains/module_authoring/mod.rs`, `packages/agent/src/domains/module_validation/mod.rs`, `packages/agent/src/domains/module_install/mod.rs`, `packages/agent/src/domains/module_dependencies/mod.rs`, `packages/agent/src/domains/capability_binding/mod.rs`, `packages/agent/src/domains/module_lifecycle/mod.rs`, `packages/agent/src/domains/module_runtime/mod.rs`, `packages/agent/src/domains/tool_sources/mod.rs`, `packages/agent/src/domains/worker_lifecycle/mod.rs` | Module registry, authoring, validation, install, dependency, capability binding, lifecycle, runtime, procedural, tool-source, worker-package, device-token, and notification-delivery gates stay `governance_locked`. |
+
+## Binding Policy Evidence
+
+| Evidence | Source |
+|---|---|
+| Request records model operation name, current built-in owner, requested target, ownership class, binding mode, actor scope, rationale, contract/evidence refs, authority/network constraints, stale-version guard, rollback/disable refs, audit refs, and idempotency fingerprint. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/domains/capability_binding/service.rs` |
+| Locked ownership classes cannot request replacement; adapter/module replacement proposals require rollback metadata and remain metadata only. | `packages/agent/src/domains/capability_binding/validation.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
+| Provider-visible operations require exact selectors for inspect/linked writes, explicit non-wildcard grants, `networkPolicy: none`, and bounded provider-safe projections with no `agent_state` inheritance. | `packages/agent/src/engine/authority/grants/authorization.rs`, `packages/agent/src/domains/capability_binding/authority.rs`, `packages/agent/src/domains/capability_binding/projection.rs` |
+| Decision/policy records revalidate expected request/decision versions and preserve audit history through resource versions/events. | `packages/agent/src/domains/capability_binding/service.rs`, `packages/agent/src/domains/capability_binding/resource_store.rs` |
+| Side-effect proof explicitly records no runtime routing, dispatch mutation, hot-swap, module activation/execution, dependency restore, package-manager, network, raw path/command/log/file/grant/authority exposure, or repo-managed skill touch. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
 
 ## Validation Commands
 
 ```bash
 cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_binding --lib
 git diff --check
 git diff --cached --check
 ```
@@ -79,8 +96,8 @@ cargo check --manifest-path packages/agent/Cargo.toml
 ## Evidence Notes
 
 - `kernel_locked` and `governance_locked` rows intentionally have binding and rollback scores of `0`; that is a lock, not a missing implementation.
-- Kernel Boundary Lockdown is an evidence gate only. It adds no binding policy, runtime capability routing, module replacement, package installation, worker activation, network behavior, or provider-visible operations.
-- `adapter_replaceable` rows name the future replacement target and currently retain follow-up actions for adapter seams or binding policy.
+- Capability Binding Policy is a metadata-only governance plane. It adds provider-visible request/decision/policy custody operations, but no runtime capability routing, module replacement, package installation, worker enablement, dependency restore, package-manager behavior, or network behavior.
+- `adapter_replaceable` rows name the later replacement target and currently retain follow-up actions for adapter seams or binding policy.
 - `record_plane` rows allow module producers or workflow extension while preserving server-owned custody records and provider-safe projections.
-- `module_program_execution_*` is the first module-owned execution pack and is used as the baseline template for future governed replacement.
+- `module_program_execution_*` is the first module-owned execution pack and is used as the baseline template for later governed replacement.
 - Future operations must update the TSV, this scorecard, and this manifest before the invariant test will pass.

@@ -13,12 +13,14 @@
 //! `definitions` registers built-in resource kinds, `validation` enforces the
 //! generic resource contract, `versions` owns payload hashing/current-version
 //! helpers, domain definition modules own contract resource schemas including
-//! module manifests and split module-pack manifest seeds, module validation reports, procedural
-//! skill/rule/hook/procedure custody and activation-review records, module
-//! dependency policy metadata records, and media artifacts,
+//! module manifests and split module-pack manifest seeds, module validation
+//! reports, procedural skill/rule/hook/procedure custody and activation-review
+//! records, module dependency policy metadata records, metadata-only capability
+//! binding policy records, and media artifacts,
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
 //! the in-memory and SQLite persistence implementations.
 
+mod capability_binding_definitions;
 mod context_control_definitions;
 mod definitions;
 mod git_definitions;
@@ -57,6 +59,11 @@ mod versions;
 mod web_definitions;
 mod web_research_definitions;
 
+pub(crate) use capability_binding_definitions::{
+    CAPABILITY_BINDING_DECISION_PAYLOAD_SCHEMA_VERSION,
+    CAPABILITY_BINDING_POLICY_PAYLOAD_SCHEMA_VERSION,
+    CAPABILITY_BINDING_REQUEST_PAYLOAD_SCHEMA_VERSION,
+};
 pub(crate) use context_control_definitions::{
     CONTEXT_CONTROL_ACTION_PAYLOAD_SCHEMA_VERSION, CONTEXT_CONTROL_EPOCH_PAYLOAD_SCHEMA_VERSION,
     CONTEXT_CONTROL_SNAPSHOT_PAYLOAD_SCHEMA_VERSION,

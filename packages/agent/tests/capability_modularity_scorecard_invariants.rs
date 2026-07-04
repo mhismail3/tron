@@ -14,7 +14,7 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-
 const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/mod.rs";
 const README_PATH: &str = "README.md";
-const EXPECTED_OPERATION_COUNT: usize = 157;
+const EXPECTED_OPERATION_COUNT: usize = 166;
 
 const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";
 
@@ -254,6 +254,9 @@ fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
         operation if operation.starts_with("module_dependency_") => {
             ("module_dependencies", "governance_locked")
         }
+        operation if operation.starts_with("capability_binding_") => {
+            ("capability_binding", "governance_locked")
+        }
         operation if operation.starts_with("module_lifecycle_") => {
             ("module_lifecycle", "governance_locked")
         }
@@ -435,6 +438,14 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
                     markers: &["policy activation", "metadata only", "downloads"],
                 },
                 SourceRequirement {
+                    path: "packages/agent/src/domains/capability_binding/mod.rs",
+                    markers: &[
+                        "Metadata-only capability binding policy custody",
+                        "must not route",
+                        "kernel_locked",
+                    ],
+                },
+                SourceRequirement {
                     path: "packages/agent/src/domains/module_lifecycle/mod.rs",
                     markers: &["lifecycle", "metadata state", "execute module code"],
                 },
@@ -452,6 +463,7 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
                 },
             ],
             locked_families: &[
+                "capability_binding",
                 "module_authoring",
                 "module_dependencies",
                 "module_install",
@@ -483,6 +495,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "CMS-0 registry/dispatch baseline",
         "CMS-8 docs and static gates",
         "Kernel Boundary Lockdown Evidence",
+        "Binding Policy Evidence",
         "Follow-on Slices",
     ] {
         assert!(
@@ -502,7 +515,8 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Dispatch parity",
         "Machine inventory",
         "Kernel boundary lockdown",
-        "No runtime routing or execution behavior changed",
+        "Capability binding policy",
+        "No runtime routing, dispatch mutation",
         "Future operations must update the TSV, this scorecard, and this manifest",
     ] {
         assert!(
@@ -521,6 +535,8 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "kernel_locked",
         "governance_locked",
         "Kernel Boundary Lockdown",
+        "Capability Binding Policy",
+        "capability_binding",
         "adapter_replaceable",
         "module_owned",
         "capability_modularity_scorecard_invariants",
