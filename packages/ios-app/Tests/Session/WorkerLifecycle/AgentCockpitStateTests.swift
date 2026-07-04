@@ -65,6 +65,46 @@ struct AgentCockpitStateTests {
         #expect(overview.moduleActivity?.projection.rawPayloadsReturned == false)
     }
 
+    @Test("Projection renders capability cockpit operation ownership and attempts without raw owner text")
+    func projectionRendersCapabilityCockpitVisibility() {
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            capabilityVisibility: AgentCockpitViewModelTests.capabilityCockpitOverview(),
+            connectionState: .connected
+        )
+
+        #expect(overview.discovery.operationCount == 2)
+        #expect(overview.modularityOperations.count == 2)
+        let git = overview.modularityOperations.first { $0.name == "git_status" }
+        #expect(git?.ownerLabel == "Built-in Git adapter")
+        #expect(git?.backendOwnerLabel == "Capability binding domain")
+        #expect(git?.statusKind == "built_in_adapter")
+        #expect(git?.canReplace == true)
+        #expect(git?.failedReplacementAttempts == 1)
+        #expect(git?.shadowRuns == 1)
+        #expect(git?.rollbackAvailable == true)
+        #expect(git?.ownerLabel.contains("domains::") == false)
+        #expect(git?.backendOwnerLabel.contains("capability_binding") == false)
+
+        let observe = overview.modularityOperations.first { $0.name == "observe" }
+        #expect(observe?.isLocked == true)
+        #expect(observe?.canReplace == false)
+        #expect(observe?.rollbackAvailable == false)
+
+        let resourcesGroup = overview.discovery.groups.first { $0.id == "resources_memory" }
+        #expect(resourcesGroup?.operations.contains { $0.name == "git_status" } == true)
+        #expect(overview.capabilityVisibility?.projection.rawResourceIdsReturned == false)
+        #expect(overview.capabilityVisibility?.projection.rawAuthorityIdsReturned == false)
+    }
+
     @Test("Projection preserves degraded module activity state")
     func projectionPreservesDegradedModuleActivityState() {
         let overview = AgentCockpitProjection.project(

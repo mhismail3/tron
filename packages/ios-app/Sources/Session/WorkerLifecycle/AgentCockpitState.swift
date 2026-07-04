@@ -48,6 +48,57 @@ struct AgentCockpitFunctionRow: Equatable, Identifiable, Sendable {
     }
 }
 
+struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
+    var id: String { name }
+    var name: String
+    var family: String
+    var familyLabel: String
+    var ownerLabel: String
+    var ownerDetail: String
+    var backendOwnerLabel: String
+    var statusKind: String
+    var statusLabel: String
+    var statusDetail: String
+    var isBuiltIn: Bool
+    var isModuleOwned: Bool
+    var isLocked: Bool
+    var replacementLabel: String
+    var replacementDetail: String
+    var canShadow: Bool
+    var canReplace: Bool
+    var canExtend: Bool
+    var governanceBoundary: String
+    var bindingRequested: Int
+    var bindingApproved: Int
+    var bindingRejected: Int
+    var activePolicies: Int
+    var failedReplacementAttempts: Int
+    var bindingLatestState: String?
+    var bindingLastUpdatedAt: String?
+    var bindingDetail: String
+    var shadowRequested: Int
+    var shadowApproved: Int
+    var shadowRejected: Int
+    var shadowRuns: Int
+    var shadowPassed: Int
+    var shadowFailed: Int
+    var shadowAborted: Int
+    var shadowDisabled: Int
+    var shadowLatestState: String?
+    var shadowLastUpdatedAt: String?
+    var shadowAvailable: Bool
+    var shadowDetail: String
+    var rollbackAvailable: Bool
+    var disableAvailable: Bool
+    var abortAvailable: Bool
+    var rollbackBoundary: String
+    var rollbackDetail: String
+
+    var activityCount: Int {
+        bindingRequested + bindingApproved + bindingRejected + activePolicies + shadowRequested + shadowRuns
+    }
+}
+
 struct AgentCockpitTriggerRow: Equatable, Identifiable, Sendable {
     var id: String
     var ownerWorker: String
@@ -132,12 +183,14 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var status: AgentCockpitStatusSummary
     var workers: [AgentCockpitWorkerRow]
     var functions: [AgentCockpitFunctionRow]
+    var modularityOperations: [AgentCockpitOperationRow]
     var triggers: [AgentCockpitTriggerRow]
     var triggerTypes: [TriggerTypeCatalogDefinitionDTO]
     var catalogDecodeIssues: [CatalogDefinitionDecodeIssue]
     var packages: [AgentCockpitPackageRow]
     var runtimeSurfaces: [AgentCockpitRuntimeSurface]
     var discovery: AgentCockpitDiscoveryOverview
+    var capabilityVisibility: CapabilityCockpitOverviewDTO?
     var moduleActivity: ModuleActivityOverviewDTO?
     var activity: [AgentCockpitActivityItem]
     var currentRevision: UInt64?
@@ -154,12 +207,14 @@ struct AgentCockpitOverview: Equatable, Sendable {
             ),
             workers: [],
             functions: [],
+            modularityOperations: [],
             triggers: [],
             triggerTypes: [],
             catalogDecodeIssues: [],
             packages: [],
             runtimeSurfaces: [],
             discovery: .empty,
+            capabilityVisibility: nil,
             moduleActivity: nil,
             activity: [],
             currentRevision: nil,
@@ -174,6 +229,7 @@ enum AgentCockpitProjection {
         resources: [EngineResourceDTO],
         runtimeSurfaces: [AgentCockpitRuntimeSurface] = [],
         discoveryReports: [EngineResourceDTO] = [],
+        capabilityVisibility: CapabilityCockpitOverviewDTO? = nil,
         moduleActivity: ModuleActivityOverviewDTO? = nil,
         connectionState: ConnectionState
     ) -> AgentCockpitOverview {
@@ -192,6 +248,12 @@ enum AgentCockpitProjection {
             + triggerTypeResult.issues
         let functions = functionResult.definitions.map(functionRow)
             .sorted { $0.id < $1.id }
+        let modularityOperations = capabilityVisibility?.operations
+            .map(operationRow)
+            .sorted { lhs, rhs in
+                if lhs.family == rhs.family { return lhs.name < rhs.name }
+                return lhs.family < rhs.family
+            } ?? []
         let triggers = triggerResult.definitions.map(triggerRow)
             .sorted { $0.id < $1.id }
         let triggerTypes = triggerTypeResult.definitions
@@ -214,7 +276,9 @@ enum AgentCockpitProjection {
             triggers: triggers,
             triggerTypes: triggerTypes,
             catalogDecodeIssues: catalogDecodeIssues,
-            reports: discoveryReports
+            reports: discoveryReports,
+            modularityOperations: modularityOperations,
+            capabilityVisibility: capabilityVisibility
         )
         return AgentCockpitOverview(
             status: status(
@@ -226,12 +290,14 @@ enum AgentCockpitProjection {
             ),
             workers: workers,
             functions: functions,
+            modularityOperations: modularityOperations,
             triggers: triggers,
             triggerTypes: triggerTypes,
             catalogDecodeIssues: catalogDecodeIssues,
             packages: packages,
             runtimeSurfaces: runtimeSurfaces.sorted { $0.surface.title < $1.surface.title },
             discovery: discovery,
+            capabilityVisibility: capabilityVisibility,
             moduleActivity: moduleActivity,
             activity: activity,
             currentRevision: snapshot.currentRevision,
@@ -503,6 +569,73 @@ enum AgentCockpitProjection {
             requestSchemaJSON: formattedJSON(function.requestSchema),
             responseSchemaJSON: formattedJSON(function.responseSchema)
         )
+    }
+
+    private static func operationRow(_ operation: CapabilityCockpitOperationDTO) -> AgentCockpitOperationRow {
+        AgentCockpitOperationRow(
+            name: operation.name,
+            family: operation.family,
+            familyLabel: operation.familyLabel,
+            ownerLabel: operation.owner.label,
+            ownerDetail: operation.owner.detail,
+            backendOwnerLabel: backendOwnerLabel(operation.owner.backendOwner),
+            statusKind: operation.status.kind,
+            statusLabel: operation.status.label,
+            statusDetail: operation.status.detail,
+            isBuiltIn: operation.status.builtIn,
+            isModuleOwned: operation.status.moduleOwned,
+            isLocked: operation.status.locked,
+            replacementLabel: operation.replacement.label,
+            replacementDetail: operation.replacement.detail,
+            canShadow: operation.replacement.canShadow,
+            canReplace: operation.replacement.canReplace,
+            canExtend: operation.replacement.canExtend,
+            governanceBoundary: displayLabel(operation.replacement.governanceBoundary),
+            bindingRequested: operation.binding.requested,
+            bindingApproved: operation.binding.approved,
+            bindingRejected: operation.binding.rejected,
+            activePolicies: operation.binding.activePolicies,
+            failedReplacementAttempts: operation.binding.failedReplacementAttempts,
+            bindingLatestState: operation.binding.latestState,
+            bindingLastUpdatedAt: operation.binding.lastUpdatedAt,
+            bindingDetail: operation.binding.detail,
+            shadowRequested: operation.shadowTrial.requested,
+            shadowApproved: operation.shadowTrial.approved,
+            shadowRejected: operation.shadowTrial.rejected,
+            shadowRuns: operation.shadowTrial.runs,
+            shadowPassed: operation.shadowTrial.passed,
+            shadowFailed: operation.shadowTrial.failed,
+            shadowAborted: operation.shadowTrial.aborted,
+            shadowDisabled: operation.shadowTrial.disabled,
+            shadowLatestState: operation.shadowTrial.latestState,
+            shadowLastUpdatedAt: operation.shadowTrial.lastUpdatedAt,
+            shadowAvailable: operation.shadowTrial.availableForThisOperation,
+            shadowDetail: operation.shadowTrial.detail,
+            rollbackAvailable: operation.rollback.available,
+            disableAvailable: operation.rollback.disableAvailable,
+            abortAvailable: operation.rollback.abortAvailable,
+            rollbackBoundary: displayLabel(operation.rollback.boundary),
+            rollbackDetail: operation.rollback.detail
+        )
+    }
+
+    private static func backendOwnerLabel(_ owner: String) -> String {
+        switch owner {
+        case "capability_binding":
+            return "Capability binding domain"
+        default:
+            return displayLabel(owner)
+        }
+    }
+
+    private static func displayLabel(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { word in
+                word.prefix(1).uppercased() + word.dropFirst().lowercased()
+            }
+            .joined(separator: " ")
     }
 
     private static func formattedJSON(_ value: AnyCodable?) -> String? {

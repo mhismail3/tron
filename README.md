@@ -1212,6 +1212,13 @@ built-in and deterministic candidate projections, requires exact selectors,
 rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`,
 and still performs no candidate execution, dispatch mutation, hot-swap, module
 activation, package-manager, dependency, or network behavior.
+Cockpit Visibility adds the system-visible pure-read
+`capability_binding::cockpit_overview` projection for Engine Cockpit clients.
+It joins registry ownership metadata with scoped binding-policy and shadow-trial
+records so iOS can show owner, built-in/module/locked status, replaceability,
+binding/shadow attempts, verification context, and rollback/disable/abort
+availability without exposing raw resource IDs, paths, commands, logs, grants,
+authority IDs, or token-like material and without changing runtime routing.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -1367,6 +1374,7 @@ Current primitive operations:
 | `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. |
 | `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. |
 | `capability_shadow_trial_evidence_inspect` | Shadow Replacement Trial operation that inspects one scoped `capability_shadow_trial_evidence` through exact `resource:<id>` selector authorization and optional expected evidence version freshness, returning provider-safe comparison, rollback/disable/abort refs, and no-routing proof without raw commands, logs, paths, files, grant ids, authority ids, or `agent_state` inheritance. |
+| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 170 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display owner, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch mutation, runtime routing, activation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -2777,15 +2785,15 @@ packages/ios-app/Sources/
   count, and plain catalog trust state such as catalog verified, needs review,
   or unchecked. The cockpit sheet opens on
   Capabilities, grouping operations into user-facing areas with drill-down
-  operation/owner/effect/risk/tag detail and request/response schema bodies from
-  the live catalog; catalog snapshot revision and
+  operation owner/status, replacement eligibility, binding/shadow-trial
+  attempts, rollback/disable/abort availability, and request/response schema
+  bodies from the live catalog where present; catalog snapshot revision and
   durable `catalog_discovery_report` resources are presented there as
   contextual verification proof rather than top-level telemetry.
-  Future replacement-disclosure rows should derive implementation owner,
-  built-in/module status, verification state, failed replacement attempts, and
-  rollback availability from the capability modularity scorecard/binding
-  evidence instead of exposing raw operation ids, grants, authority ids, or
-  internal resource handles at top level.
+  Replacement-disclosure rows derive from
+  `capability_binding::cockpit_overview`, which reshapes server-owned registry,
+  binding-policy, and shadow-trial facts without exposing raw operation
+  internals, grants, authority ids, or resource handles at top level.
   Deeper worker/package/surface tabs appear only when server evidence exists.
   The sheet renders live worker lifecycle catalog rows, capability schema/health gaps,
   package/resource status,
@@ -2863,7 +2871,7 @@ Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity server facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
+Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
 The camera child sheet mounts before AVFoundation warm-up and uses the viewport

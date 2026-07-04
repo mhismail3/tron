@@ -171,7 +171,6 @@ use web_research::{
 };
 use worker_packages::{worker_package_inspect, worker_package_list};
 
-#[cfg(test)]
 pub(crate) use registry::supported_operation_names;
 pub(crate) use registry::{
     is_supported_operation, operation_binding_metadata, operation_list_text,

@@ -181,7 +181,9 @@ struct AgentCockpitSheet: View {
             WorkerTriggerExplanationCard(
                 workers: viewModel.overview.workers.count,
                 triggers: viewModel.overview.triggers.count,
-                operations: viewModel.overview.functions.count
+                operations: viewModel.overview.modularityOperations.isEmpty
+                    ? viewModel.overview.functions.count
+                    : viewModel.overview.modularityOperations.count
             )
             if viewModel.overview.discovery.groups.isEmpty {
                 CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published a visible capability catalog.")

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-02 (chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-04 (Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -19,12 +19,14 @@ points/failures, memory/learned-state, and audit sections with drill-down
 evidence and empty/degraded states. The Engine Cockpit opens from the dashboard
 and starts with core engine visibility before progressively exposing module-plane
 diagnostics. It surfaces live worker lifecycle catalog entries, capability discovery families,
-schema/health gaps, durable `catalog_discovery_report` history,
+schema/health gaps, durable `catalog_discovery_report` history, redacted
+`capability_binding::cockpit_overview` operation ownership/replacement facts,
 package/resource status, confirmation-backed lifecycle actions, activity, and
 active `ui_surface` resources without adding fixed product panels. The Activity
 tab renders the server-owned, invocation-scoped `module_activity::overview`
-projection instead of fabricating catalog/package activity locally. Cockpit
-refresh failures render as
+projection instead of fabricating catalog/package activity locally, and the
+Capabilities tab renders operation modularity from server-owned cockpit
+visibility instead of inferring policy in Swift. Cockpit refresh failures render as
 degraded while preserving the last good server facts, and malformed catalog
 entries surface catalog decode degradation instead of
 being silently omitted from counts or verified/no-catalog summaries. The app
@@ -88,8 +90,9 @@ and matching database/event/settings/dependency work.
   refs, and durable context action audit refs.
 - Dashboard Engine Cockpit band and sheet for core engine link/catalog health,
   catalog discovery, worker lifecycle catalog/resource state, package actions,
-  server-owned module activity, and dynamic runtime surfaces. The primary chat
-  conversation shell does not mount passive worker-runtime diagnostics.
+  server-owned module activity, capability binding cockpit visibility, and
+  dynamic runtime surfaces. The primary chat conversation shell does not mount
+  passive worker-runtime diagnostics.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
@@ -149,7 +152,7 @@ Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> Chat
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Context: ContextStatusPill/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
 Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity server facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
+Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
 `AgentCockpitProjection` is also the boundary that turns partial or failed
@@ -344,10 +347,11 @@ for mounted chat sessions, `AppConnectionRepository` for connection state,
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
 `WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
-resource, catalog-discovery report, module-activity overview, and worker
-lifecycle calls.
+resource, catalog-discovery report, module-activity overview,
+capability-binding cockpit overview, and worker lifecycle calls.
 `AgentCockpitProjection` remains a pure mapper from server-owned facts to UI
-rows; it does not own worker truth, module-activity truth, or redaction policy.
+rows; it does not own worker truth, module-activity truth, capability binding
+truth, or redaction policy.
 `Support/Composition` is the production composition root allowed to wire those
 protocols to engine-owned clients.
 
@@ -373,9 +377,10 @@ UI delays use cancellation-aware Swift concurrency tasks.
 `Engine/Protocol` groups DTOs by server domain instead of one broad DTO bucket.
 The retained runtime cockpit DTOs are accepted only where a server-owned module
 or resource surface exists: worker lifecycle catalog/resources,
-`module_activity::overview`, and generic `ui_surface` schemas. Unknown fields
-may be ignored for wire compatibility, but iOS must not preserve product-shaped
-fallback fields as client-owned truth.
+`module_activity::overview`, `capability_binding::cockpit_overview`, and
+generic `ui_surface` schemas. Unknown fields may be ignored for wire
+compatibility, but iOS must not preserve product-shaped fallback fields as
+client-owned truth.
 Dynamic `AnyCodable` payload accessors preserve both JSON-decoded arrays and
 directly wrapped typed Swift collections so generic UI/resource projections do
 not lose schema rows, option lists, or nested evidence during reconstruction.
@@ -459,11 +464,19 @@ The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
 and sheet header are the core engine summary: connection state, visible
 capability count, issue count, and plain catalog trust state from server-owned
 facts. The sheet opens on Capabilities, grouping visible operations into
-user-facing areas before drilling into operation owner, effect/risk,
-schema-health, worker, trigger, tags, request/response schema bodies, and safe
-verification details. Catalog
+user-facing areas before drilling into operation owner, backend owner label,
+locked/built-in/module status, replacement/shadow/extension eligibility,
+binding and shadow-trial attempts, rollback/disable/abort availability,
+effect/risk, schema-health, worker, trigger, tags, request/response schema
+bodies, and safe verification details. Catalog
 snapshot revision and recent `catalog_discovery_report` resources are rendered
 inside the cockpit as catalog verification proof, not as top-level telemetry.
+Capability modularity rows come from `capability_binding::cockpit_overview`,
+which is a server-owned redacted projection over registry metadata plus scoped
+binding/shadow-trial records. iOS may shape display labels and grouping, but it
+must not infer ownership class, replacement policy, attempt state, or rollback
+availability locally. The top-level cockpit must stay high-signal; binding,
+shadow-trial, and rollback details belong in group and operation drill-down.
 Dashboard and operation cards use the whole glass container as the disclosure
 target instead of decorative chevron glyphs; drill-down is communicated by the
 surface hierarchy and tap target, while functional navigation and expansion
@@ -559,6 +572,10 @@ For shell-affecting changes:
   deleted, or renamed.
 - Run `SourceGuardTests`, which compiles the full app/test target and enforces
   deleted product roots.
+- For cockpit capability visibility changes, run the focused
+  `AgentCockpitStateTests` and `AgentCockpitViewModelTests` on the iPhone
+  simulator so server-owned DTO decoding, display shaping, and degraded states
+  stay covered.
 - Keep chat tests under the same owner names as production chat code:
   `Coordinators`, `Messaging`, `Navigation`, `State`, and `ViewModel`.
 - Capture iPhone and iPad simulator screenshots when UI behavior changes.

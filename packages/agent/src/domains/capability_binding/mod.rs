@@ -18,13 +18,17 @@
 //! `capability_shadow_trial_request_record`,
 //! `capability_shadow_trial_decision_record`,
 //! `capability_shadow_trial_run_record`, and
-//! `capability_shadow_trial_evidence_inspect`.
+//! `capability_shadow_trial_evidence_inspect`. Native cockpit clients also get
+//! one read-only `capability_binding::cockpit_overview` projection that
+//! summarizes operation ownership and scoped binding/shadow-trial state without
+//! exposing raw resource ids or changing routing.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `authority` | Binding/resource grant and exact selector checks |
+//! | `cockpit_visibility` | Redacted Engine Cockpit projection over registry metadata and binding records |
 //! | `contract` | Worker id, stream topic, scope, and schema constants |
 //! | `payload_safety` | Unsafe-field, path, prompt, command, and token denial |
 //! | `projection` | Bounded provider-safe request, decision, and policy projections |
@@ -56,6 +60,7 @@
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
 mod authority;
+mod cockpit_visibility;
 pub(crate) mod contract;
 mod payload_safety;
 mod projection;
@@ -70,6 +75,14 @@ pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
 }
 
+impl Deps {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+        Self {
+            engine_host: deps.engine_host.clone(),
+        }
+    }
+}
+
 pub(crate) use crate::engine::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
@@ -81,12 +94,12 @@ pub(crate) use crate::engine::{
 };
 
 pub(crate) fn worker_module(
-    _deps: &DomainRegistrationContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     crate::domains::registration::worker::domain_worker_module(
         contract::WORKER,
         &[contract::CAPABILITY_BINDING_LIFECYCLE_TOPIC],
-        Vec::new(),
+        service::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
     )
 }
 

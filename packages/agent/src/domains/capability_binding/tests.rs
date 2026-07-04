@@ -3,10 +3,11 @@ use serde_json::{Value, json};
 
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::service::{
-    activate_capability_binding_policy_value_at, inspect_capability_binding_policy_value,
-    inspect_capability_binding_request_value, list_capability_binding_decision_value,
-    list_capability_binding_policy_value, list_capability_binding_request_value,
-    record_capability_binding_decision_value_at, record_capability_binding_request_value_at,
+    activate_capability_binding_policy_value_at, cockpit_overview_value,
+    inspect_capability_binding_policy_value, inspect_capability_binding_request_value,
+    list_capability_binding_decision_value, list_capability_binding_policy_value,
+    list_capability_binding_request_value, record_capability_binding_decision_value_at,
+    record_capability_binding_request_value_at,
 };
 use super::shadow_trial::{
     inspect_capability_shadow_trial_evidence_value,
@@ -1023,6 +1024,126 @@ async fn shadow_trial_records_abort_and_disable_semantics_without_live_replaceme
 }
 
 #[tokio::test]
+async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollback_without_raw_leakage()
+ {
+    let fixture = Fixture::new("capability-cockpit").await;
+    let binding_request = fixture.binding_request("cockpit-binding").await;
+    let rejected = fixture
+        .binding_decision("cockpit-binding-rejected", &binding_request, "rejected")
+        .await;
+    assert_eq!(rejected["status"], json!("rejected"));
+
+    let shadow_kinds = shadow_trial_kinds();
+    let shadow_selectors = shadow_trial_kind_selectors();
+    let shadow_selector_refs = shadow_selectors
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let shadow_fixture = ShadowFixture {
+        deps: fixture.deps.clone(),
+        session_id: fixture.session_id.clone(),
+        write_grant_id: derive_grant(
+            &fixture.deps,
+            "capability-cockpit-shadow-write",
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &shadow_kinds,
+            &shadow_selector_refs,
+            "none",
+        )
+        .await,
+        read_grant_id: derive_grant(
+            &fixture.deps,
+            "capability-cockpit-shadow-read",
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &shadow_kinds,
+            &shadow_selector_refs,
+            "none",
+        )
+        .await,
+    };
+    let shadow_request = shadow_fixture.shadow_request("cockpit-shadow").await;
+    let shadow_decision = shadow_fixture
+        .shadow_decision("cockpit-shadow-decision", &shadow_request, "approved")
+        .await;
+    let shadow_run = shadow_fixture
+        .shadow_run("cockpit-shadow-run", &shadow_decision, "completed")
+        .await;
+    assert_eq!(shadow_run["status"], json!("passed"));
+
+    let overview = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation("cockpit-overview", json!({"limit": 200})),
+    )
+    .await
+    .expect("cockpit overview");
+
+    assert_eq!(
+        overview["schemaVersion"],
+        json!(super::contract::COCKPIT_VISIBILITY_SCHEMA_VERSION)
+    );
+    assert_eq!(overview["summary"]["totalOperations"], json!(170));
+    assert_eq!(overview["summary"]["bindingRequests"], json!(1));
+    assert_eq!(overview["summary"]["bindingRejected"], json!(1));
+    assert_eq!(overview["summary"]["shadowRequests"], json!(1));
+    assert_eq!(overview["summary"]["shadowRuns"], json!(1));
+    assert!(super::cockpit_visibility::test_serialized_has_no_raw_cockpit_material(&overview));
+    let names = super::cockpit_visibility::test_operation_names(&overview);
+    assert!(names.contains("git_status"));
+    assert!(names.contains("observe"));
+
+    let git_status = operation_projection(&overview, "git_status");
+    assert_eq!(git_status["owner"]["label"], json!("Built-in Git adapter"));
+    assert_eq!(git_status["status"]["kind"], json!("built_in_adapter"));
+    assert_eq!(git_status["replacement"]["canReplace"], json!(true));
+    assert_eq!(git_status["binding"]["requested"], json!(1));
+    assert_eq!(git_status["binding"]["rejected"], json!(1));
+    assert_eq!(git_status["binding"]["failedReplacementAttempts"], json!(1));
+    assert_eq!(git_status["shadowTrial"]["requested"], json!(1));
+    assert_eq!(git_status["shadowTrial"]["approved"], json!(1));
+    assert_eq!(git_status["shadowTrial"]["runs"], json!(1));
+    assert_eq!(git_status["shadowTrial"]["passed"], json!(1));
+    assert_eq!(
+        git_status["shadowTrial"]["availableForThisOperation"],
+        json!(true)
+    );
+    assert_eq!(git_status["rollback"]["available"], json!(true));
+    assert_eq!(git_status["rollback"]["disableAvailable"], json!(true));
+    assert_eq!(git_status["rollback"]["abortAvailable"], json!(true));
+
+    let observe = operation_projection(&overview, "observe");
+    assert_eq!(observe["owner"]["label"], json!("Engine kernel"));
+    assert_eq!(observe["status"]["kind"], json!("kernel_locked"));
+    assert_eq!(observe["replacement"]["canReplace"], json!(false));
+    assert_eq!(observe["rollback"]["available"], json!(false));
+
+    let goal_create = operation_projection(&overview, "goal_create");
+    assert_eq!(goal_create["status"]["kind"], json!("record_plane"));
+    assert_eq!(goal_create["replacement"]["canExtend"], json!(true));
+    assert_eq!(goal_create["replacement"]["canReplace"], json!(false));
+
+    let other_scope = cockpit_overview_value(
+        &fixture.deps,
+        &invocation(
+            "cockpit-other-scope",
+            json!({"limit": 200}),
+            fixture.read_grant_id.clone(),
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            "other-session",
+        ),
+    )
+    .await
+    .expect("other scope cockpit overview");
+    let other_git_status = operation_projection(&other_scope, "git_status");
+    assert_eq!(other_git_status["binding"]["requested"], json!(0));
+    assert_eq!(other_git_status["shadowTrial"]["requested"], json!(0));
+}
+
+#[tokio::test]
 async fn authoritative_target_metadata_rejects_spoofed_locked_replacement() {
     let fixture = Fixture::new("capability-binding-locked-spoof").await;
 
@@ -1679,6 +1800,15 @@ fn shadow_trial_kind_selectors() -> Vec<String> {
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect()
+}
+
+fn operation_projection<'a>(overview: &'a Value, operation_name: &str) -> &'a Value {
+    overview["operations"]
+        .as_array()
+        .expect("operations array")
+        .iter()
+        .find(|operation| operation["name"] == json!(operation_name))
+        .unwrap_or_else(|| panic!("missing operation projection for {operation_name}"))
 }
 
 fn invocation(

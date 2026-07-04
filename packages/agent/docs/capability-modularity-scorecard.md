@@ -1,14 +1,14 @@
 # Capability Modularity Scorecard
 
-Status: active / shadow-replacement-trial-complete
+Status: active / cockpit-visibility-complete
 
-Current score: inventory coverage 170/170; kernel boundary lockdown, binding-policy evidence, adapter seam requirements, and the first metadata-only shadow replacement trial are source-backed; replacement readiness is measurable without runtime routing.
+Current score: inventory coverage 170/170; kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, and Engine Cockpit visibility are source-backed; replacement readiness is measurable without runtime routing.
 
 Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
 
 Provider-visible surface: one tool, `capability::execute`
 
-This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, and a metadata-only `git_status` shadow trial; they do not add runtime binding or routing behavior.
+This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, a metadata-only `git_status` shadow trial, and a redacted cockpit projection for operator visibility; they do not add runtime binding or routing behavior.
 
 ## Artifacts
 
@@ -101,7 +101,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 | CMS-4 adapter replacement targets | 12 | Passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; binding policy can record proposals but cannot route execution in this slice. |
 | CMS-5 record-plane custody | 10 | Passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
 | CMS-6 module-owned template | 8 | Passed | `module_program_execution_*` is classified as the first governed module-owned execution template. |
-| CMS-7 cockpit visibility contract | 8 | Planned | README future-work notes point cockpit disclosure at owner, replacement, verification, and rollback state. |
+| CMS-7 cockpit visibility contract | 8 | Passed | `capability_binding::cockpit_overview` projects operation owner/status, replacement eligibility, scoped binding/shadow attempts, rollback/disable/abort availability, and redaction/no-routing policy for cockpit clients. |
 | CMS-8 docs and static gates | 10 | Passed | README links, evidence manifest, and invariant tests lock the inventory baseline, Kernel Boundary Lockdown evidence, and binding-policy non-routing semantics. |
 
 ## Kernel Boundary Lockdown Evidence
@@ -145,6 +145,18 @@ The Shadow Replacement Trial slice proves one low-risk metadata-only replacement
 
 Provider-visible shadow-trial operations are limited to request/decision/run record and evidence inspect through `capability::execute`. They require explicit `capability_binding.read` / `capability_binding.write` plus resource authority, non-wildcard kind selectors, exact linked-resource selectors, exact metadata selectors in the request, `networkPolicy: none`, no `agent_state` inheritance, no raw commands/logs/paths/files/grant IDs/authority IDs, idempotency, stale-version guards, and rollback/disable/abort refs. They do not execute candidate modules, re-run built-in Git behavior, mutate dispatch, route execution, hot-swap modules, install or activate packages, restore dependencies, run package managers, or access networks.
 
+## Cockpit Visibility Evidence
+
+The Cockpit Visibility slice makes the scorecard inspectable from Engine Cockpit without exposing internal material or adding autonomy behavior.
+
+| Projection | Evidence |
+|---|---|
+| `capability_binding::cockpit_overview` | System-visible pure-read function registered by the `capability_binding` domain with `capability_binding.read`, low risk, and no write capability. |
+| Operation ownership | Joins `SUPPORTED_OPERATION_NAMES` and authoritative `operation_binding_metadata` with scoped binding/shadow-trial resources, so each operation reports owner label, ownership status, built-in/module/locked flags, replacement/shadow/extension eligibility, and governance boundary from server truth. |
+| Scoped activity | Counts current-session/workspace binding requests, approvals, rejections, active policies, failed replacement attempts, shadow requests/approvals/rejections/runs/results, and rollback/disable/abort controls without returning raw resource IDs. |
+| Redaction and side effects | Response policy declares projection-only, metadata-only, server-owned truth with no runtime routing, dispatch mutation, hot swap, module activation/execution, package-manager, dependency, network, raw local material, grants, authority IDs, trace IDs, invocation IDs, token-like material, or hidden chain-of-thought. |
+| iOS rendering | Engine Cockpit keeps top-level summary compact and shows owner/status, replacement, attempts, rollback, and verification details only inside capability group and operation detail drill-down. |
+
 ## Adapter Seam Hardening Evidence
 
 The Adapter Seam Hardening slice records source-backed replacement prerequisites for adapter-replaceable families and the compaction-like strategy seam. These contracts are documentation and metadata gates only; they do not add runtime routing.
@@ -165,6 +177,7 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 - `governance_locked` operations must not be routed through module replacement; they are the trust pipeline for future replacement.
 - Binding-policy records are governance-owned metadata only; an active policy is not a runtime route.
 - Shadow-trial records are governance-owned metadata only; an accepted trial result is not a runtime route or replacement.
+- Cockpit visibility is read-only projection over registry and scoped policy records; it must not become a routing, activation, or raw inspection surface.
 - `adapter_replaceable` operations must name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable constraints before any binding policy can route them.
 - `record_plane` operations may gain module producers, but records, resource refs, trace refs, redaction, and replay custody stay server-owned.
 - `module_owned` operations must keep lifecycle/runtime prerequisites, inspectability, rollback, and provider-safe projections.
@@ -176,4 +189,4 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 2. Capability Binding Policy: complete. Metadata-only binding request, decision, policy, and history records now make future replacement proposals measurable without routing.
 3. Adapter Seam Hardening: complete. Source-backed invariants now lock seam prerequisites for filesystem, Git, jobs/process, web, subagent, and compaction-like strategies.
 4. Shadow Replacement Trial: complete. `git_status` now has governed request/decision/run/evidence records comparing built-in and deterministic candidate provider-safe projections with rollback/disable/abort controls and no runtime routing.
-5. Cockpit Visibility: show operation owner, built-in/module status, last verification, failed replacement attempts, and rollback availability through progressive disclosure.
+5. Cockpit Visibility: complete. Engine Cockpit now reads `capability_binding::cockpit_overview` and progressively discloses operation owner, built-in/module/locked status, replacement/shadow/extension eligibility, verification context, failed replacement attempts, shadow runs, and rollback/disable/abort availability without exposing raw internals.

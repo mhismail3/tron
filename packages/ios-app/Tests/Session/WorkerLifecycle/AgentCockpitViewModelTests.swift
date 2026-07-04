@@ -24,6 +24,7 @@ struct AgentCockpitViewModelTests {
         repository.resourcesByKind[.catalogDiscoveryReport] = [
             Self.resource(id: "catalog_discovery_report:7:invocation-1", kind: .catalogDiscoveryReport, lifecycle: "passed")
         ]
+        repository.capabilityVisibility = Self.capabilityCockpitOverview()
         repository.moduleActivity = Self.moduleActivityOverview()
         repository.inspections["ui_surface:surface-1"] = Self.surfaceInspection()
         let viewModel = AgentCockpitViewModel()
@@ -47,6 +48,11 @@ struct AgentCockpitViewModelTests {
         #expect(repository.moduleActivityOverviewCallCount == 1)
         #expect(repository.lastModuleActivitySessionId == "test-session")
         #expect(repository.lastModuleActivityWorkspaceId == "test-workspace")
+        #expect(repository.capabilityCockpitOverviewCallCount == 1)
+        #expect(repository.lastCapabilityCockpitSessionId == "test-session")
+        #expect(repository.lastCapabilityCockpitWorkspaceId == "test-workspace")
+        #expect(viewModel.overview.modularityOperations.contains { $0.name == "git_status" })
+        #expect(viewModel.overview.discovery.operationCount == 2)
         #expect(viewModel.overview.moduleActivity?.summary.active == 1)
         #expect(viewModel.overview.activity.first?.title == "Active module runtime")
         #expect(viewModel.overview.activity.first?.status == "active")
@@ -287,7 +293,7 @@ struct AgentCockpitViewModelTests {
         )
     }
 
-    static func moduleActivityOverview() -> ModuleActivityOverviewDTO {
+    nonisolated static func moduleActivityOverview() -> ModuleActivityOverviewDTO {
         ModuleActivityOverviewDTO(
             schemaVersion: "tron.module_activity.overview.v1",
             operation: "module_activity_overview",
@@ -344,7 +350,209 @@ struct AgentCockpitViewModelTests {
         )
     }
 
-    static func agentBriefingOverview() -> AgentBriefingOverviewDTO {
+    nonisolated static func capabilityCockpitOverview() -> CapabilityCockpitOverviewDTO {
+        CapabilityCockpitOverviewDTO(
+            schemaVersion: "tron.capability_binding.cockpit_overview.v1",
+            operation: "capability_binding_cockpit_overview",
+            summary: CapabilityCockpitSummaryDTO(
+                totalOperations: 2,
+                kernelLocked: 1,
+                governanceLocked: 0,
+                recordPlane: 0,
+                adapterReplaceable: 1,
+                moduleOwned: 0,
+                deferred: 0,
+                bindingRequests: 1,
+                bindingApproved: 0,
+                bindingRejected: 1,
+                activePolicies: 0,
+                shadowRequests: 1,
+                shadowRuns: 1,
+                rollbackAvailable: 1,
+                title: "Capability ownership visible",
+                detail: "2 operations, 1 binding request, 1 shadow request in this scope."
+            ),
+            families: [
+                CapabilityCockpitFamilyDTO(
+                    family: "git",
+                    label: "Git",
+                    operations: 1,
+                    kernelLocked: 0,
+                    governanceLocked: 0,
+                    recordPlane: 0,
+                    adapterReplaceable: 1,
+                    moduleOwned: 0,
+                    bindingActivity: 2,
+                    shadowActivity: 2
+                ),
+                CapabilityCockpitFamilyDTO(
+                    family: "core",
+                    label: "Core",
+                    operations: 1,
+                    kernelLocked: 1,
+                    governanceLocked: 0,
+                    recordPlane: 0,
+                    adapterReplaceable: 0,
+                    moduleOwned: 0,
+                    bindingActivity: 0,
+                    shadowActivity: 0
+                )
+            ],
+            operations: [
+                CapabilityCockpitOperationDTO(
+                    name: "git_status",
+                    family: "git",
+                    familyLabel: "Git",
+                    owner: CapabilityCockpitOwnerDTO(
+                        label: "Built-in Git adapter",
+                        detail: "A built-in adapter owns execution today and can be proposed for governed replacement later.",
+                        backendOwner: "capability_binding",
+                        source: "capability execute registry plus capability binding resources"
+                    ),
+                    status: CapabilityCockpitStatusDTO(
+                        kind: "built_in_adapter",
+                        label: "Built-in adapter",
+                        detail: "Built-in execution can be shadowed or replaced only after governed evidence. Family: Git.",
+                        builtIn: true,
+                        moduleOwned: false,
+                        locked: false
+                    ),
+                    replacement: CapabilityCockpitReplacementDTO(
+                        canShadow: true,
+                        canReplace: true,
+                        canExtend: true,
+                        label: "Shadow or replace after review",
+                        detail: "Future modules can request shadow or replacement with exact authority, parity evidence, and rollback/disable metadata. Area: Git.",
+                        governanceBoundary: "capability binding policy"
+                    ),
+                    binding: CapabilityCockpitBindingDTO(
+                        requested: 1,
+                        approved: 0,
+                        rejected: 1,
+                        activePolicies: 0,
+                        failedReplacementAttempts: 1,
+                        latestState: "rejected",
+                        lastUpdatedAt: "2026-06-27T12:00:00Z",
+                        detail: "1 binding decision rejected; no runtime routing changed."
+                    ),
+                    shadowTrial: CapabilityCockpitShadowTrialDTO(
+                        requested: 1,
+                        approved: 1,
+                        rejected: 0,
+                        runs: 1,
+                        passed: 1,
+                        failed: 0,
+                        aborted: 0,
+                        disabled: 0,
+                        latestState: "passed",
+                        lastUpdatedAt: "2026-06-27T12:00:00Z",
+                        availableForThisOperation: true,
+                        detail: "1 metadata-only shadow run recorded; candidate execution and routing stayed disabled."
+                    ),
+                    rollback: CapabilityCockpitRollbackDTO(
+                        available: true,
+                        disableAvailable: true,
+                        abortAvailable: true,
+                        boundary: "capability binding governance",
+                        detail: "Rollback metadata is available for the recorded policy or shadow trial; live routing still has not changed."
+                    )
+                ),
+                CapabilityCockpitOperationDTO(
+                    name: "observe",
+                    family: "core",
+                    familyLabel: "Core",
+                    owner: CapabilityCockpitOwnerDTO(
+                        label: "Engine kernel",
+                        detail: "The engine kernel owns this operation and modules cannot take it over.",
+                        backendOwner: "capability_binding",
+                        source: "capability execute registry plus capability binding resources"
+                    ),
+                    status: CapabilityCockpitStatusDTO(
+                        kind: "kernel_locked",
+                        label: "Kernel locked",
+                        detail: "Engine substrate; replacement is not available. Family: Core.",
+                        builtIn: true,
+                        moduleOwned: false,
+                        locked: true
+                    ),
+                    replacement: CapabilityCockpitReplacementDTO(
+                        canShadow: false,
+                        canReplace: false,
+                        canExtend: false,
+                        label: "No replacement",
+                        detail: "A future module may read safe projections, but it cannot replace this kernel responsibility. Area: Core.",
+                        governanceBoundary: "capability binding policy"
+                    ),
+                    binding: CapabilityCockpitBindingDTO(
+                        requested: 0,
+                        approved: 0,
+                        rejected: 0,
+                        activePolicies: 0,
+                        failedReplacementAttempts: 0,
+                        latestState: nil,
+                        lastUpdatedAt: nil,
+                        detail: "No binding requests have been recorded in this scope."
+                    ),
+                    shadowTrial: CapabilityCockpitShadowTrialDTO(
+                        requested: 0,
+                        approved: 0,
+                        rejected: 0,
+                        runs: 0,
+                        passed: 0,
+                        failed: 0,
+                        aborted: 0,
+                        disabled: 0,
+                        latestState: nil,
+                        lastUpdatedAt: nil,
+                        availableForThisOperation: false,
+                        detail: "No shadow trial is available for this operation in the current slice."
+                    ),
+                    rollback: CapabilityCockpitRollbackDTO(
+                        available: false,
+                        disableAvailable: false,
+                        abortAvailable: false,
+                        boundary: "capability binding governance",
+                        detail: "Rollback is not applicable because replacement is not allowed for this locked operation."
+                    )
+                )
+            ],
+            scope: CapabilityCockpitScopeDTO(
+                sessionScoped: true,
+                workspaceScoped: true,
+                exactScopeRequired: true,
+                source: "trusted invocation causal context"
+            ),
+            projection: CapabilityCockpitProjectionPolicyDTO(
+                allowlist: "capability_binding_cockpit_visibility_redacted_v1",
+                serverOwnedTruth: true,
+                projectionOnly: true,
+                metadataOnly: true,
+                autonomyBehaviorCreated: false,
+                runtimeRoutingChanged: false,
+                dispatchTableMutated: false,
+                hotSwapPerformed: false,
+                moduleActivated: false,
+                moduleExecuted: false,
+                rawResourceIdsReturned: false,
+                rawLocalPathsReturned: false,
+                rawEnvValuesReturned: false,
+                rawSecretsReturned: false,
+                rawCommandsReturned: false,
+                rawLogsReturned: false,
+                rawCodeReturned: false,
+                rawFileContentsReturned: false,
+                rawGrantIdsReturned: false,
+                rawAuthorityIdsReturned: false,
+                traceIdsReturned: false,
+                invocationIdsReturned: false,
+                tokenLikeMaterialReturned: false,
+                hiddenChainOfThoughtReturned: false,
+                boundedItems: true
+            )
+        )
+    }
+
+    nonisolated static func agentBriefingOverview() -> AgentBriefingOverviewDTO {
         AgentBriefingOverviewDTO(
             schemaVersion: "tron.agent_briefing.overview.v1",
             operation: "agent_briefing_overview",
@@ -424,12 +632,16 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
     var listErrorsByKind: [WorkerLifecycleResourceKind: Error] = [:]
     var inspections: [String: ResourceInspectResultDTO] = [:]
     var moduleActivity = AgentCockpitViewModelTests.moduleActivityOverview()
+    var capabilityVisibility = AgentCockpitViewModelTests.capabilityCockpitOverview()
     var agentBriefing = AgentCockpitViewModelTests.agentBriefingOverview()
 
     var overviewCallCount = 0
     var moduleActivityOverviewCallCount = 0
     var lastModuleActivitySessionId: String?
     var lastModuleActivityWorkspaceId: String?
+    var capabilityCockpitOverviewCallCount = 0
+    var lastCapabilityCockpitSessionId: String?
+    var lastCapabilityCockpitWorkspaceId: String?
     var agentBriefingOverviewCallCount = 0
     var lastAgentBriefingSessionId: String?
     var lastAgentBriefingWorkspaceId: String?
@@ -473,6 +685,17 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         lastModuleActivitySessionId = sessionId
         lastModuleActivityWorkspaceId = workspaceId
         return moduleActivity
+    }
+
+    func capabilityCockpitOverview(
+        limit: UInt64,
+        sessionId: String?,
+        workspaceId: String?
+    ) async throws -> CapabilityCockpitOverviewDTO {
+        capabilityCockpitOverviewCallCount += 1
+        lastCapabilityCockpitSessionId = sessionId
+        lastCapabilityCockpitWorkspaceId = workspaceId
+        return capabilityVisibility
     }
 
     func agentBriefingOverview(

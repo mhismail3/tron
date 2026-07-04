@@ -64,6 +64,20 @@ final class WorkerLifecycleClient: EngineDomainClient {
         )
     }
 
+    func capabilityCockpitOverview(
+        limit: UInt64 = 200,
+        sessionId: String? = nil,
+        workspaceId: String? = nil
+    ) async throws -> CapabilityCockpitOverviewDTO {
+        _ = try requireTransport().requireConnection()
+
+        return try await invokeRead(
+            "capability_binding::cockpit_overview",
+            CapabilityCockpitOverviewRequestDTO(limit: limit),
+            context: invocationContext(sessionId: sessionId, workspaceId: workspaceId)
+        )
+    }
+
     func agentBriefingOverview(
         limit: UInt64 = 12,
         sessionId: String? = nil,

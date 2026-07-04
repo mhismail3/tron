@@ -1,5 +1,11 @@
 //! Capability binding domain contract constants.
 
+use serde_json::json;
+
+use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::contract::CapabilityContract;
+use crate::engine::{EffectClass, Result as EngineResult, RiskLevel};
+
 pub(crate) const WORKER: &str = "capability_binding";
 pub(crate) const CAPABILITY_BINDING_LIFECYCLE_TOPIC: &str = "capability_binding.lifecycle";
 pub(crate) const READ_SCOPE: &str = "capability_binding.read";
@@ -20,3 +26,53 @@ pub(crate) const CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_VERSION: &str =
     crate::engine::CAPABILITY_SHADOW_TRIAL_RUN_PAYLOAD_SCHEMA_VERSION;
 pub(crate) const CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_VERSION: &str =
     crate::engine::CAPABILITY_SHADOW_TRIAL_EVIDENCE_PAYLOAD_SCHEMA_VERSION;
+pub(crate) const COCKPIT_VISIBILITY_SCHEMA_VERSION: &str =
+    "tron.capability_binding.cockpit_overview.v1";
+
+pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+    Ok(vec![
+        CapabilityContract::new(
+            "capability_binding::cockpit_overview",
+            WORKER,
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some(READ_SCOPE),
+        )
+        .description(
+            "Read-only redacted capability modularity projection for Engine Cockpit clients",
+        )
+        .tags(vec![
+            "capability",
+            "binding",
+            "cockpit",
+            "modularity",
+            "read_only",
+        ])
+        .request_schema(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 200
+                }
+            }
+        }))
+        .response_schema(json!({
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["schemaVersion", "operation", "summary", "families", "operations", "scope", "projection"],
+            "properties": {
+                "schemaVersion": {"type": "string"},
+                "operation": {"const": "capability_binding_cockpit_overview"},
+                "summary": {"type": "object"},
+                "families": {"type": "array"},
+                "operations": {"type": "array"},
+                "scope": {"type": "object"},
+                "projection": {"type": "object"}
+            }
+        }))
+        .build()?,
+    ])
+}

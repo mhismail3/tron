@@ -1,12 +1,14 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::{CreateResource, EngineResourceLocation, Invocation, ListResources};
 use crate::shared::server::errors::CapabilityError;
 
 use super::authority::{
     ensure_write_authority, inspect_read_grant, require_exact_resource_selector,
 };
+use super::cockpit_visibility;
 use super::contract::{
     CAPABILITY_BINDING_DECISION_SCHEMA_VERSION, CAPABILITY_BINDING_POLICY_SCHEMA_VERSION,
     CAPABILITY_BINDING_REQUEST_SCHEMA_VERSION,
@@ -38,6 +40,23 @@ use super::{
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
     CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID, Deps,
 };
+
+operation_bindings! {
+    deps = Deps;
+    hidden = [];
+    bindings = [
+        "cockpit_overview" => |invocation, deps| {
+            cockpit_overview_value(deps, invocation).await
+        },
+    ];
+}
+
+pub(crate) async fn cockpit_overview_value(
+    deps: &Deps,
+    invocation: &Invocation,
+) -> Result<Value, CapabilityError> {
+    cockpit_visibility::cockpit_overview_value(deps, invocation).await
+}
 
 pub(crate) async fn record_capability_binding_request_value_at(
     deps: &Deps,

@@ -178,6 +178,86 @@ struct WorkerLifecycleClientTests {
         _ = try await client.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
     }
 
+    @Test("Capability cockpit overview invokes capability binding read with context")
+    func capabilityCockpitOverviewInvokesCapabilityBindingReadWithContext() async throws {
+        let transport = connectedTransport()
+        let client = WorkerLifecycleClient(transport: transport)
+
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "capability_binding::cockpit_overview")
+            #expect(options.context?.sessionId == "session-1")
+            #expect(options.context?.workspaceId == "workspace-1")
+            let request = try #require(payload as? CapabilityCockpitOverviewRequestDTO)
+            #expect(request.limit == 17)
+            return CapabilityCockpitOverviewDTO(
+                schemaVersion: "tron.capability_binding.cockpit_overview.v1",
+                operation: "capability_binding_cockpit_overview",
+                summary: CapabilityCockpitSummaryDTO(
+                    totalOperations: 0,
+                    kernelLocked: 0,
+                    governanceLocked: 0,
+                    recordPlane: 0,
+                    adapterReplaceable: 0,
+                    moduleOwned: 0,
+                    deferred: 0,
+                    bindingRequests: 0,
+                    bindingApproved: 0,
+                    bindingRejected: 0,
+                    activePolicies: 0,
+                    shadowRequests: 0,
+                    shadowRuns: 0,
+                    rollbackAvailable: 0,
+                    title: "Capability ownership visible",
+                    detail: "No operations"
+                ),
+                families: [],
+                operations: [],
+                scope: CapabilityCockpitScopeDTO(
+                    sessionScoped: true,
+                    workspaceScoped: true,
+                    exactScopeRequired: true,
+                    source: "trusted invocation causal context"
+                ),
+                projection: CapabilityCockpitProjectionPolicyDTO(
+                    allowlist: "capability_binding_cockpit_visibility_redacted_v1",
+                    serverOwnedTruth: true,
+                    projectionOnly: true,
+                    metadataOnly: true,
+                    autonomyBehaviorCreated: false,
+                    runtimeRoutingChanged: false,
+                    dispatchTableMutated: false,
+                    hotSwapPerformed: false,
+                    moduleActivated: false,
+                    moduleExecuted: false,
+                    rawResourceIdsReturned: false,
+                    rawLocalPathsReturned: false,
+                    rawEnvValuesReturned: false,
+                    rawSecretsReturned: false,
+                    rawCommandsReturned: false,
+                    rawLogsReturned: false,
+                    rawCodeReturned: false,
+                    rawFileContentsReturned: false,
+                    rawGrantIdsReturned: false,
+                    rawAuthorityIdsReturned: false,
+                    traceIdsReturned: false,
+                    invocationIdsReturned: false,
+                    tokenLikeMaterialReturned: false,
+                    hiddenChainOfThoughtReturned: false,
+                    boundedItems: true
+                )
+            )
+        }
+
+        let result = try await client.capabilityCockpitOverview(
+            limit: 17,
+            sessionId: "session-1",
+            workspaceId: "workspace-1"
+        )
+
+        #expect(result.operation == "capability_binding_cockpit_overview")
+        #expect(result.projection.rawResourceIdsReturned == false)
+    }
+
     @Test("Catalog discovery report write uses catalog discovery function")
     func catalogDiscoveryReportWriteUsesCatalogDiscoveryFunction() async throws {
         let transport = connectedTransport()

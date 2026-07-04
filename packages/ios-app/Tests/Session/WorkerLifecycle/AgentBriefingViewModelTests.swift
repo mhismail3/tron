@@ -100,6 +100,10 @@ private final class MockAgentBriefingRepository: WorkerLifecycleRepository {
         AgentCockpitViewModelTests.moduleActivityOverview()
     }
 
+    func capabilityCockpitOverview(limit: UInt64, sessionId: String?, workspaceId: String?) async throws -> CapabilityCockpitOverviewDTO {
+        AgentCockpitViewModelTests.capabilityCockpitOverview()
+    }
+
     func agentBriefingOverview(limit: UInt64, sessionId: String?, workspaceId: String?) async throws -> AgentBriefingOverviewDTO {
         agentBriefingOverviewCallCount += 1
         lastAgentBriefingSessionId = sessionId

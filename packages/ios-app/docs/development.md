@@ -116,6 +116,16 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+For Engine Cockpit capability visibility or `WorkerLifecycleRepository` protocol
+changes, run the focused cockpit state/view-model set:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/AgentCockpitStateTests \
+  -only-testing:TronMobileTests/AgentCockpitViewModelTests
+```
+
 For the IOSTC thin-client closeout, the focused iOS 26.5 simulator set is:
 
 ```bash
