@@ -194,6 +194,11 @@ struct WorkerLifecycleClientTests {
                 operation: "capability_binding_cockpit_overview",
                 summary: CapabilityCockpitSummaryDTO(
                     totalOperations: 0,
+                    returnedOperations: 0,
+                    operationListComplete: true,
+                    operationListTruncated: false,
+                    resourceScanComplete: true,
+                    resourceScanTruncated: false,
                     kernelLocked: 0,
                     governanceLocked: 0,
                     recordPlane: 0,
@@ -209,6 +214,28 @@ struct WorkerLifecycleClientTests {
                     rollbackAvailable: 0,
                     title: "Capability ownership visible",
                     detail: "No operations"
+                ),
+                operationList: CapabilityCockpitOperationListDTO(
+                    totalOperations: 0,
+                    returnedOperations: 0,
+                    requestedLimit: 17,
+                    complete: true,
+                    truncated: false,
+                    state: "complete",
+                    label: "Operation list complete",
+                    detail: "0 of 0 operations are returned."
+                ),
+                resourceScan: CapabilityCockpitResourceScanDTO(
+                    queries: 0,
+                    scannedResources: 0,
+                    appliedResources: 0,
+                    limitPerKindScope: 100,
+                    complete: true,
+                    truncated: false,
+                    truncatedQueries: 0,
+                    state: "complete",
+                    label: "Resource scan complete",
+                    detail: "No resources scanned."
                 ),
                 families: [],
                 operations: [],

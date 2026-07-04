@@ -6,7 +6,9 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::domains::capability::{operation_binding_metadata, supported_operation_names};
+use crate::domains::capability::{
+    OperationBindingMetadata, operation_binding_metadata, supported_operation_names,
+};
 use crate::engine::{
     EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
     Invocation, ListResources,
@@ -82,6 +84,8 @@ struct CockpitProjection {
     schema_version: &'static str,
     operation: &'static str,
     summary: CockpitSummary,
+    operation_list: OperationListProjection,
+    resource_scan: ResourceScanProjection,
     families: Vec<FamilySummary>,
     operations: Vec<OperationVisibility>,
     scope: ScopeProjection,
@@ -92,6 +96,11 @@ struct CockpitProjection {
 #[serde(rename_all = "camelCase")]
 struct CockpitSummary {
     total_operations: usize,
+    returned_operations: usize,
+    operation_list_complete: bool,
+    operation_list_truncated: bool,
+    resource_scan_complete: bool,
+    resource_scan_truncated: bool,
     kernel_locked: usize,
     governance_locked: usize,
     record_plane: usize,
@@ -106,6 +115,34 @@ struct CockpitSummary {
     shadow_runs: usize,
     rollback_available: usize,
     title: String,
+    detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationListProjection {
+    total_operations: usize,
+    returned_operations: usize,
+    requested_limit: usize,
+    complete: bool,
+    truncated: bool,
+    state: &'static str,
+    label: String,
+    detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceScanProjection {
+    queries: usize,
+    scanned_resources: usize,
+    applied_resources: usize,
+    limit_per_kind_scope: usize,
+    complete: bool,
+    truncated: bool,
+    truncated_queries: usize,
+    state: &'static str,
+    label: String,
     detail: String,
 }
 
@@ -133,6 +170,7 @@ struct OperationVisibility {
     owner: OwnerProjection,
     status: StatusProjection,
     replacement: ReplacementProjection,
+    readiness: ReadinessProjection,
     binding: BindingProjection,
     shadow_trial: ShadowTrialProjection,
     rollback: RollbackProjection,
@@ -143,8 +181,9 @@ struct OperationVisibility {
 struct OwnerProjection {
     label: String,
     detail: String,
-    backend_owner: &'static str,
     source: &'static str,
+    metadata_source_label: &'static str,
+    projection_source_label: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -166,7 +205,25 @@ struct ReplacementProjection {
     can_extend: bool,
     label: String,
     detail: String,
+    target: ReplacementTargetProjection,
     governance_boundary: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplacementTargetProjection {
+    label: String,
+    detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadinessProjection {
+    state: String,
+    label: String,
+    detail: String,
+    next_action_label: String,
+    next_action_detail: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -248,6 +305,33 @@ struct ProjectionPolicy {
     bounded_items: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+struct FactCollection {
+    facts: BTreeMap<String, OperationFacts>,
+    scan: ResourceScanFacts,
+}
+
+#[derive(Clone, Debug)]
+struct ResourceScanFacts {
+    queries: usize,
+    scanned_resources: usize,
+    applied_resources: usize,
+    truncated_queries: usize,
+    limit_per_kind_scope: usize,
+}
+
+impl Default for ResourceScanFacts {
+    fn default() -> Self {
+        Self {
+            queries: 0,
+            scanned_resources: 0,
+            applied_resources: 0,
+            truncated_queries: 0,
+            limit_per_kind_scope: MAX_RESOURCES_PER_KIND_SCOPE,
+        }
+    }
+}
+
 pub(crate) async fn cockpit_overview_value(
     deps: &Deps,
     invocation: &Invocation,
@@ -266,31 +350,43 @@ pub(crate) async fn cockpit_overview_value(
         .unwrap_or(DEFAULT_LIMIT)
         .clamp(1, MAX_LIMIT);
     let facts = collect_facts(deps, &scopes).await?;
-    let mut operations = supported_operation_names()
+    let mut all_operations = supported_operation_names()
         .iter()
         .filter_map(|operation| {
             operation_binding_metadata(operation).map(|metadata| {
-                let facts = facts.get::<str>(*operation).cloned().unwrap_or_default();
-                operation_visibility(
-                    metadata.operation,
-                    metadata.family,
-                    metadata.ownership_class,
-                    facts,
-                )
+                let operation_facts = facts
+                    .facts
+                    .get::<str>(*operation)
+                    .cloned()
+                    .unwrap_or_default();
+                operation_visibility(metadata, operation_facts)
             })
         })
-        .take(limit)
         .collect::<Vec<_>>();
-    operations.sort_by(|left, right| {
+    all_operations.sort_by(|left, right| {
         left.family
             .cmp(&right.family)
             .then_with(|| left.name.cmp(&right.name))
     });
+    let operation_list = operation_list_projection(all_operations.len(), limit);
+    let resource_scan = resource_scan_projection(facts.scan);
+    let operations = all_operations
+        .iter()
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
     let projection = CockpitProjection {
         schema_version: contract::COCKPIT_VISIBILITY_SCHEMA_VERSION,
         operation: "capability_binding_cockpit_overview",
-        summary: summary(&operations),
-        families: family_summaries(&operations),
+        summary: summary(
+            &all_operations,
+            operations.len(),
+            &operation_list,
+            &resource_scan,
+        ),
+        operation_list,
+        resource_scan,
+        families: family_summaries(&all_operations),
         operations,
         scope: ScopeProjection {
             session_scoped: invocation.causal_context.session_id.is_some(),
@@ -334,22 +430,22 @@ pub(crate) async fn cockpit_overview_value(
 async fn collect_facts(
     deps: &Deps,
     scopes: &[EngineResourceScope],
-) -> Result<BTreeMap<String, OperationFacts>, CapabilityError> {
-    let mut facts = BTreeMap::<String, OperationFacts>::new();
+) -> Result<FactCollection, CapabilityError> {
+    let mut collection = FactCollection::default();
     for kind in BINDING_KINDS {
-        collect_kind_facts(deps, scopes, kind, &mut facts, apply_binding_resource).await?;
+        collect_kind_facts(deps, scopes, kind, &mut collection, apply_binding_resource).await?;
     }
     for kind in SHADOW_TRIAL_KINDS {
-        collect_kind_facts(deps, scopes, kind, &mut facts, apply_shadow_resource).await?;
+        collect_kind_facts(deps, scopes, kind, &mut collection, apply_shadow_resource).await?;
     }
-    Ok(facts)
+    Ok(collection)
 }
 
 async fn collect_kind_facts(
     deps: &Deps,
     scopes: &[EngineResourceScope],
     kind: &str,
-    facts: &mut BTreeMap<String, OperationFacts>,
+    collection: &mut FactCollection,
     apply: fn(&EngineResource, &EngineResourceVersion, &Value, &mut OperationFacts),
 ) -> Result<(), CapabilityError> {
     for scope in scopes {
@@ -359,16 +455,22 @@ async fn collect_kind_facts(
                 kind: Some(kind.to_owned()),
                 scope: Some(scope.clone()),
                 lifecycle: None,
-                limit: MAX_RESOURCES_PER_KIND_SCOPE,
+                limit: MAX_RESOURCES_PER_KIND_SCOPE + 1,
             })
             .await
             .map_err(engine_error)?;
-        for resource in resources {
+        collection.scan.queries += 1;
+        if resources.len() > MAX_RESOURCES_PER_KIND_SCOPE {
+            collection.scan.truncated_queries += 1;
+        }
+        for resource in resources.into_iter().take(MAX_RESOURCES_PER_KIND_SCOPE) {
+            collection.scan.scanned_resources += 1;
             if let Some((inspection, version, payload)) =
                 inspect_current_payload(deps, &resource).await?
                 && let Some(operation) = operation_name(&payload)
             {
-                let entry = facts.entry(operation).or_default();
+                collection.scan.applied_resources += 1;
+                let entry = collection.facts.entry(operation).or_default();
                 apply(&inspection.resource, &version, &payload, entry);
             }
         }
@@ -496,29 +598,37 @@ fn apply_shadow_resource(
 }
 
 fn operation_visibility(
-    operation: &str,
-    family: &str,
-    ownership_class: &str,
+    metadata: OperationBindingMetadata,
     facts: OperationFacts,
 ) -> OperationVisibility {
-    let replacement = replacement_projection(family, ownership_class);
-    let rollback = rollback_projection(ownership_class, &facts);
+    let replacement = replacement_projection(
+        metadata.family,
+        metadata.ownership_class,
+        metadata.replacement_target,
+    );
+    let rollback = rollback_projection(metadata.ownership_class, &facts);
+    let readiness = readiness_projection(metadata.ownership_class, &facts, &replacement);
     OperationVisibility {
-        name: operation.to_owned(),
-        family: family.to_owned(),
-        family_label: family_label(family),
-        owner: owner_projection(family, ownership_class),
-        status: status_projection(family, ownership_class),
+        name: metadata.operation.to_owned(),
+        family: metadata.family.to_owned(),
+        family_label: family_label(metadata.family),
+        owner: owner_projection(
+            metadata.family,
+            metadata.current_owner,
+            metadata.ownership_class,
+        ),
+        status: status_projection(metadata.family, metadata.ownership_class),
         replacement,
+        readiness,
         binding: binding_projection(&facts.binding),
-        shadow_trial: shadow_projection(operation, &facts.shadow),
+        shadow_trial: shadow_projection(metadata.operation, &facts.shadow),
         rollback,
     }
 }
 
-fn owner_projection(family: &str, ownership_class: &str) -> OwnerProjection {
+fn owner_projection(family: &str, current_owner: &str, ownership_class: &str) -> OwnerProjection {
     OwnerProjection {
-        label: owner_label(family, ownership_class),
+        label: owner_label(family, current_owner, ownership_class),
         detail: match ownership_class {
             "kernel_locked" => "The engine kernel owns this operation and modules cannot take it over.",
             "governance_locked" => "The governance pipeline owns this operation because it controls module trust.",
@@ -528,8 +638,9 @@ fn owner_projection(family: &str, ownership_class: &str) -> OwnerProjection {
             _ => "Ownership has not been resolved for module binding.",
         }
         .to_owned(),
-        backend_owner: contract::WORKER,
-        source: "capability execute registry plus capability binding resources",
+        source: "capability execute registry redacted ownership metadata plus scoped capability binding resources",
+        metadata_source_label: "Capability execute registry",
+        projection_source_label: "Capability binding cockpit projection",
     }
 }
 
@@ -592,7 +703,11 @@ fn status_projection(family: &str, ownership_class: &str) -> StatusProjection {
     }
 }
 
-fn replacement_projection(family: &str, ownership_class: &str) -> ReplacementProjection {
+fn replacement_projection(
+    family: &str,
+    ownership_class: &str,
+    replacement_target: &str,
+) -> ReplacementProjection {
     let can_replace = matches!(ownership_class, "adapter_replaceable" | "module_owned");
     let can_shadow = can_replace;
     let can_extend = matches!(
@@ -631,7 +746,129 @@ fn replacement_projection(family: &str, ownership_class: &str) -> ReplacementPro
         can_extend,
         label: label.to_owned(),
         detail: format!("{detail} Area: {}.", family_label(family)),
+        target: replacement_target_projection(family, ownership_class, replacement_target),
         governance_boundary: "capability binding policy",
+    }
+}
+
+fn replacement_target_projection(
+    family: &str,
+    ownership_class: &str,
+    replacement_target: &str,
+) -> ReplacementTargetProjection {
+    let family_label = family_label(family);
+    let label = match ownership_class {
+        "kernel_locked" => "Engine-owned kernel responsibility".to_owned(),
+        "governance_locked" => format!("{family_label} governance responsibility"),
+        "record_plane" => format!("{family_label} extension producer"),
+        "adapter_replaceable" => format!("Governed {family_label} adapter"),
+        "module_owned" => format!("Governed {family_label} module pack"),
+        _ => "Unresolved target".to_owned(),
+    };
+    let detail = if replacement_target.contains("requires_exact")
+        || replacement_target.contains("requires_supervised")
+    {
+        "Any future target must satisfy exact authority, parity evidence, bounded provider-safe refs, replay/idempotency proof, and rollback/disable metadata."
+    } else if replacement_target.contains("stays_engine_owned") {
+        "The target remains engine-owned; cockpit clients must treat this as observe-only metadata."
+    } else if replacement_target.contains("modules_may_extend") {
+        "Future modules may add governed producers or workflows without bypassing server-owned custody."
+    } else if replacement_target.contains("governance_pipeline") {
+        "The target is part of the module governance pipeline and is not a runtime replacement route."
+    } else if replacement_target.contains("already_module_owned") {
+        "The target is already module-owned and remains behind lifecycle, runtime, rollback, and disable governance."
+    } else {
+        "The replacement target is intentionally summarized; raw registry target strings are not returned."
+    };
+    ReplacementTargetProjection {
+        label,
+        detail: detail.to_owned(),
+    }
+}
+
+fn readiness_projection(
+    ownership_class: &str,
+    facts: &OperationFacts,
+    replacement: &ReplacementProjection,
+) -> ReadinessProjection {
+    let (state, label, detail, next_action_label, next_action_detail) = if facts
+        .binding
+        .active_policies
+        > 0
+    {
+        (
+            "metadata_policy_active",
+            "Policy metadata active",
+            "A capability binding policy record is active, but this projection confirms runtime routing still has not changed.",
+            "Review before routing",
+            "Treat this as governance metadata only until a later runtime slice supplies routing proof.",
+        )
+    } else if facts.binding.failed_replacement_attempts > 0
+        || facts.binding.rejected > 0
+        || facts.shadow.failed > 0
+    {
+        (
+            "needs_governance_review",
+            "Review needed",
+            "At least one binding or shadow outcome in this scope needs governance review before any replacement conclusion is safe.",
+            "Inspect decisions",
+            "Use the recorded governance evidence; do not infer readiness from the operation class alone.",
+        )
+    } else if facts.shadow.runs > 0 {
+        (
+            "shadow_evidence_recorded",
+            "Shadow evidence recorded",
+            "A metadata-only shadow trial exists for this scope; candidate execution and live routing remain disabled.",
+            "Review evidence",
+            "Review the shadow evidence before considering any future replacement path.",
+        )
+    } else if facts.binding.requested > 0 || facts.shadow.requested > 0 {
+        (
+            "awaiting_governance",
+            "Awaiting governance",
+            "A request exists in this scope, but no server-owned decision makes it ready for replacement.",
+            "Wait for decision",
+            "Display the recorded request as pending metadata only.",
+        )
+    } else if matches!(ownership_class, "kernel_locked" | "governance_locked") {
+        (
+            "locked",
+            "Engine-owned",
+            "The server registry marks this operation as locked; replacement readiness is not available.",
+            "Observe only",
+            "Show current ownership and do not offer replacement affordances.",
+        )
+    } else if replacement.can_replace {
+        (
+            "proposal_possible",
+            "Governed proposal possible",
+            "The server registry allows a future shadow or replacement proposal, but no current-scope request makes it ready.",
+            "Record governed proposal",
+            "Any proposal must come through capability binding metadata with exact authority and rollback evidence.",
+        )
+    } else if replacement.can_extend {
+        (
+            "extension_possible",
+            "Extension possible",
+            "The server registry allows future governed extension without bypassing server-owned records.",
+            "Record extension proposal",
+            "Treat this as an extension path only, not as replacement readiness.",
+        )
+    } else {
+        (
+            "unknown",
+            "Readiness unknown",
+            "The server cannot truthfully derive replacement readiness for this operation yet.",
+            "Do not infer",
+            "Display the degraded state until ownership metadata becomes more precise.",
+        )
+    };
+    ReadinessProjection {
+        state: state.to_owned(),
+        label: label.to_owned(),
+        detail: detail.to_owned(),
+        next_action_label: next_action_label.to_owned(),
+        next_action_detail: next_action_detail.to_owned(),
     }
 }
 
@@ -743,13 +980,95 @@ fn rollback_projection(ownership_class: &str, facts: &OperationFacts) -> Rollbac
     }
 }
 
-fn summary(operations: &[OperationVisibility]) -> CockpitSummary {
+fn operation_list_projection(
+    total_operations: usize,
+    requested_limit: usize,
+) -> OperationListProjection {
+    let returned_operations = total_operations.min(requested_limit);
+    let truncated = returned_operations < total_operations;
+    let label = if truncated {
+        "Operation list truncated"
+    } else {
+        "Operation list complete"
+    };
+    let detail = if truncated {
+        format!(
+            "{returned_operations} of {total_operations} operations are returned because the client requested limit {requested_limit}."
+        )
+    } else {
+        format!("{returned_operations} of {total_operations} operations are returned.")
+    };
+    OperationListProjection {
+        total_operations,
+        returned_operations,
+        requested_limit,
+        complete: !truncated,
+        truncated,
+        state: if truncated { "truncated" } else { "complete" },
+        label: label.to_owned(),
+        detail,
+    }
+}
+
+fn resource_scan_projection(scan: ResourceScanFacts) -> ResourceScanProjection {
+    let truncated = scan.truncated_queries > 0;
+    let label = if truncated {
+        "Resource scan bounded"
+    } else {
+        "Resource scan complete"
+    };
+    let detail = if truncated {
+        format!(
+            "{} of {} kind/scope scan{} reached the per-scan limit of {}; binding and shadow counts are lower-bound facts.",
+            scan.truncated_queries,
+            scan.queries,
+            plural(scan.queries),
+            scan.limit_per_kind_scope
+        )
+    } else {
+        format!(
+            "{} resources scanned across {} kind/scope scan{}; all bounded scans completed.",
+            scan.scanned_resources,
+            scan.queries,
+            plural(scan.queries)
+        )
+    };
+    ResourceScanProjection {
+        queries: scan.queries,
+        scanned_resources: scan.scanned_resources,
+        applied_resources: scan.applied_resources,
+        limit_per_kind_scope: scan.limit_per_kind_scope,
+        complete: !truncated,
+        truncated,
+        truncated_queries: scan.truncated_queries,
+        state: if truncated {
+            "bounded_degraded"
+        } else {
+            "complete"
+        },
+        label: label.to_owned(),
+        detail,
+    }
+}
+
+fn summary(
+    operations: &[OperationVisibility],
+    returned_operations: usize,
+    operation_list: &OperationListProjection,
+    resource_scan: &ResourceScanProjection,
+) -> CockpitSummary {
     let mut summary = CockpitSummary {
         total_operations: operations.len(),
+        returned_operations,
+        operation_list_complete: operation_list.complete,
+        operation_list_truncated: operation_list.truncated,
+        resource_scan_complete: resource_scan.complete,
+        resource_scan_truncated: resource_scan.truncated,
         title: "Capability ownership visible".to_owned(),
         detail: format!(
-            "{} capability::execute operations have server-owned modularity metadata.",
-            operations.len()
+            "{} capability::execute operations have server-owned modularity metadata; {} are returned.",
+            operations.len(),
+            returned_operations
         ),
         ..CockpitSummary::default()
     };
@@ -772,9 +1091,21 @@ fn summary(operations: &[OperationVisibility]) -> CockpitSummary {
             summary.rollback_available += 1;
         }
     }
-    if summary.binding_requests > 0 || summary.shadow_requests > 0 {
+    if operation_list.truncated || resource_scan.truncated {
         summary.detail = format!(
-            "{} operations, {} binding request{}, {} shadow request{} in this scope.",
+            "{} of {} operations returned; {}",
+            returned_operations,
+            summary.total_operations,
+            if resource_scan.truncated {
+                "resource counts are bounded lower-bound facts"
+            } else {
+                "resource scan is complete"
+            }
+        );
+    } else if summary.binding_requests > 0 || summary.shadow_requests > 0 {
+        summary.detail = format!(
+            "{} operations returned from {} total, {} binding request{}, {} shadow request{} in this scope.",
+            summary.returned_operations,
             summary.total_operations,
             summary.binding_requests,
             plural(summary.binding_requests),
@@ -885,13 +1216,17 @@ fn bool_at(payload: &Value, pointer: &str) -> bool {
     payload.pointer(pointer).and_then(Value::as_bool) == Some(true)
 }
 
-fn owner_label(family: &str, ownership_class: &str) -> String {
+fn owner_label(family: &str, current_owner: &str, ownership_class: &str) -> String {
+    let family_label = family_label(family);
     match ownership_class {
         "kernel_locked" => "Engine kernel".to_owned(),
-        "governance_locked" => format!("{} governance", family_label(family)),
-        "record_plane" => format!("{} record plane", family_label(family)),
-        "adapter_replaceable" => format!("Built-in {} adapter", family_label(family)),
-        "module_owned" => format!("{} module pack", family_label(family)),
+        "governance_locked" => format!("{family_label} governance"),
+        "record_plane" => format!("{family_label} record plane"),
+        "adapter_replaceable" if current_owner.contains(" + ") => {
+            format!("Built-in {family_label} adapter")
+        }
+        "adapter_replaceable" => format!("Built-in {family_label} adapter"),
+        "module_owned" => format!("{family_label} module pack"),
         _ => "Deferred owner".to_owned(),
     }
 }
@@ -939,6 +1274,10 @@ pub(crate) fn test_serialized_has_no_raw_cockpit_material(value: &Value) -> bool
         "/tmp/",
         "Authorization:",
         "Bearer ",
+        "backendOwner",
+        "currentBuiltInOwner",
+        "future_git_adapter_requires",
+        "resource:git_status_shadow_projection",
     ];
     forbidden.iter().all(|needle| !serialized.contains(needle))
 }

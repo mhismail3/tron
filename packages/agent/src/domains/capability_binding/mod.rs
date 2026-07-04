@@ -20,8 +20,11 @@
 //! `capability_shadow_trial_run_record`, and
 //! `capability_shadow_trial_evidence_inspect`. Native cockpit clients also get
 //! one read-only `capability_binding::cockpit_overview` projection that
-//! summarizes operation ownership and scoped binding/shadow-trial state without
-//! exposing raw resource ids or changing routing.
+//! summarizes total/returned operations, list and bounded resource-scan
+//! completeness, redacted operation ownership, replacement target, readiness,
+//! and scoped binding/shadow-trial state without exposing raw resource ids or
+//! changing routing. The `capability_binding` domain owns the projection, not
+//! the operations being described.
 //!
 //! ## Submodules
 //!
@@ -55,7 +58,10 @@
 //! Shadow trials are narrower: this slice accepts only the read-only
 //! `git_status` target and stores deterministic candidate-adapter descriptions
 //! and provider-safe projections for comparison. It never executes candidate
-//! module code or changes live operation routing.
+//! module code or changes live operation routing. Cockpit visibility follows
+//! the same fail-closed rule: if operation-list limits or bounded resource
+//! scans make the projection partial, it reports truncation/degraded scan state
+//! instead of presenting lower-bound facts as complete.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

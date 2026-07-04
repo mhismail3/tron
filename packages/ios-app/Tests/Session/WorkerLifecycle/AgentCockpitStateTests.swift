@@ -85,24 +85,31 @@ struct AgentCockpitStateTests {
         #expect(overview.modularityOperations.count == 2)
         let git = overview.modularityOperations.first { $0.name == "git_status" }
         #expect(git?.ownerLabel == "Built-in Git adapter")
-        #expect(git?.backendOwnerLabel == "Capability binding domain")
+        #expect(git?.metadataSourceLabel == "Capability execute registry")
+        #expect(git?.projectionSourceLabel == "Capability binding cockpit projection")
         #expect(git?.statusKind == "built_in_adapter")
         #expect(git?.canReplace == true)
+        #expect(git?.replacementTargetLabel == "Governed Git adapter")
+        #expect(git?.readinessState == "needs_governance_review")
+        #expect(git?.readinessNextActionLabel == "Inspect decisions")
         #expect(git?.failedReplacementAttempts == 1)
         #expect(git?.shadowRuns == 1)
         #expect(git?.rollbackAvailable == true)
         #expect(git?.ownerLabel.contains("domains::") == false)
-        #expect(git?.backendOwnerLabel.contains("capability_binding") == false)
+        #expect(git?.metadataSourceLabel.contains("domains::") == false)
 
         let observe = overview.modularityOperations.first { $0.name == "observe" }
         #expect(observe?.isLocked == true)
         #expect(observe?.canReplace == false)
+        #expect(observe?.readinessNextActionLabel == "Observe only")
         #expect(observe?.rollbackAvailable == false)
 
         let resourcesGroup = overview.discovery.groups.first { $0.id == "resources_memory" }
         #expect(resourcesGroup?.operations.contains { $0.name == "git_status" } == true)
         #expect(overview.capabilityVisibility?.projection.rawResourceIdsReturned == false)
         #expect(overview.capabilityVisibility?.projection.rawAuthorityIdsReturned == false)
+        #expect(overview.capabilityVisibility?.operationList.complete == true)
+        #expect(overview.capabilityVisibility?.resourceScan.complete == true)
     }
 
     @Test("Projection preserves degraded module activity state")

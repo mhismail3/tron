@@ -55,7 +55,8 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var familyLabel: String
     var ownerLabel: String
     var ownerDetail: String
-    var backendOwnerLabel: String
+    var metadataSourceLabel: String
+    var projectionSourceLabel: String
     var statusKind: String
     var statusLabel: String
     var statusDetail: String
@@ -64,10 +65,17 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var isLocked: Bool
     var replacementLabel: String
     var replacementDetail: String
+    var replacementTargetLabel: String
+    var replacementTargetDetail: String
     var canShadow: Bool
     var canReplace: Bool
     var canExtend: Bool
     var governanceBoundary: String
+    var readinessState: String
+    var readinessLabel: String
+    var readinessDetail: String
+    var readinessNextActionLabel: String
+    var readinessNextActionDetail: String
     var bindingRequested: Int
     var bindingApproved: Int
     var bindingRejected: Int
@@ -578,7 +586,8 @@ enum AgentCockpitProjection {
             familyLabel: operation.familyLabel,
             ownerLabel: operation.owner.label,
             ownerDetail: operation.owner.detail,
-            backendOwnerLabel: backendOwnerLabel(operation.owner.backendOwner),
+            metadataSourceLabel: operation.owner.metadataSourceLabel,
+            projectionSourceLabel: operation.owner.projectionSourceLabel,
             statusKind: operation.status.kind,
             statusLabel: operation.status.label,
             statusDetail: operation.status.detail,
@@ -587,10 +596,17 @@ enum AgentCockpitProjection {
             isLocked: operation.status.locked,
             replacementLabel: operation.replacement.label,
             replacementDetail: operation.replacement.detail,
+            replacementTargetLabel: operation.replacement.target.label,
+            replacementTargetDetail: operation.replacement.target.detail,
             canShadow: operation.replacement.canShadow,
             canReplace: operation.replacement.canReplace,
             canExtend: operation.replacement.canExtend,
             governanceBoundary: displayLabel(operation.replacement.governanceBoundary),
+            readinessState: operation.readiness.state,
+            readinessLabel: operation.readiness.label,
+            readinessDetail: operation.readiness.detail,
+            readinessNextActionLabel: operation.readiness.nextActionLabel,
+            readinessNextActionDetail: operation.readiness.nextActionDetail,
             bindingRequested: operation.binding.requested,
             bindingApproved: operation.binding.approved,
             bindingRejected: operation.binding.rejected,
@@ -617,15 +633,6 @@ enum AgentCockpitProjection {
             rollbackBoundary: displayLabel(operation.rollback.boundary),
             rollbackDetail: operation.rollback.detail
         )
-    }
-
-    private static func backendOwnerLabel(_ owner: String) -> String {
-        switch owner {
-        case "capability_binding":
-            return "Capability binding domain"
-        default:
-            return displayLabel(owner)
-        }
     }
 
     private static func displayLabel(_ value: String) -> String {

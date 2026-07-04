@@ -356,6 +356,11 @@ struct AgentCockpitViewModelTests {
             operation: "capability_binding_cockpit_overview",
             summary: CapabilityCockpitSummaryDTO(
                 totalOperations: 2,
+                returnedOperations: 2,
+                operationListComplete: true,
+                operationListTruncated: false,
+                resourceScanComplete: true,
+                resourceScanTruncated: false,
                 kernelLocked: 1,
                 governanceLocked: 0,
                 recordPlane: 0,
@@ -371,6 +376,28 @@ struct AgentCockpitViewModelTests {
                 rollbackAvailable: 1,
                 title: "Capability ownership visible",
                 detail: "2 operations, 1 binding request, 1 shadow request in this scope."
+            ),
+            operationList: CapabilityCockpitOperationListDTO(
+                totalOperations: 2,
+                returnedOperations: 2,
+                requestedLimit: 170,
+                complete: true,
+                truncated: false,
+                state: "complete",
+                label: "Operation list complete",
+                detail: "2 of 2 operations are returned."
+            ),
+            resourceScan: CapabilityCockpitResourceScanDTO(
+                queries: 14,
+                scannedResources: 3,
+                appliedResources: 3,
+                limitPerKindScope: 100,
+                complete: true,
+                truncated: false,
+                truncatedQueries: 0,
+                state: "complete",
+                label: "Resource scan complete",
+                detail: "3 resources scanned across 14 kind/scope scans; all bounded scans completed."
             ),
             families: [
                 CapabilityCockpitFamilyDTO(
@@ -406,8 +433,9 @@ struct AgentCockpitViewModelTests {
                     owner: CapabilityCockpitOwnerDTO(
                         label: "Built-in Git adapter",
                         detail: "A built-in adapter owns execution today and can be proposed for governed replacement later.",
-                        backendOwner: "capability_binding",
-                        source: "capability execute registry plus capability binding resources"
+                        source: "capability execute registry redacted ownership metadata plus scoped capability binding resources",
+                        metadataSourceLabel: "Capability execute registry",
+                        projectionSourceLabel: "Capability binding cockpit projection"
                     ),
                     status: CapabilityCockpitStatusDTO(
                         kind: "built_in_adapter",
@@ -423,7 +451,18 @@ struct AgentCockpitViewModelTests {
                         canExtend: true,
                         label: "Shadow or replace after review",
                         detail: "Future modules can request shadow or replacement with exact authority, parity evidence, and rollback/disable metadata. Area: Git.",
+                        target: CapabilityCockpitReplacementTargetDTO(
+                            label: "Governed Git adapter",
+                            detail: "Any future target must satisfy exact authority, parity evidence, bounded provider-safe refs, replay/idempotency proof, and rollback/disable metadata."
+                        ),
                         governanceBoundary: "capability binding policy"
+                    ),
+                    readiness: CapabilityCockpitReadinessDTO(
+                        state: "needs_governance_review",
+                        label: "Review needed",
+                        detail: "At least one binding or shadow outcome in this scope needs governance review before any replacement conclusion is safe.",
+                        nextActionLabel: "Inspect decisions",
+                        nextActionDetail: "Use the recorded governance evidence; do not infer readiness from the operation class alone."
                     ),
                     binding: CapabilityCockpitBindingDTO(
                         requested: 1,
@@ -464,8 +503,9 @@ struct AgentCockpitViewModelTests {
                     owner: CapabilityCockpitOwnerDTO(
                         label: "Engine kernel",
                         detail: "The engine kernel owns this operation and modules cannot take it over.",
-                        backendOwner: "capability_binding",
-                        source: "capability execute registry plus capability binding resources"
+                        source: "capability execute registry redacted ownership metadata plus scoped capability binding resources",
+                        metadataSourceLabel: "Capability execute registry",
+                        projectionSourceLabel: "Capability binding cockpit projection"
                     ),
                     status: CapabilityCockpitStatusDTO(
                         kind: "kernel_locked",
@@ -481,7 +521,18 @@ struct AgentCockpitViewModelTests {
                         canExtend: false,
                         label: "No replacement",
                         detail: "A future module may read safe projections, but it cannot replace this kernel responsibility. Area: Core.",
+                        target: CapabilityCockpitReplacementTargetDTO(
+                            label: "Engine-owned kernel responsibility",
+                            detail: "The target remains engine-owned; cockpit clients must treat this as observe-only metadata."
+                        ),
                         governanceBoundary: "capability binding policy"
+                    ),
+                    readiness: CapabilityCockpitReadinessDTO(
+                        state: "locked",
+                        label: "Engine-owned",
+                        detail: "The server registry marks this operation as locked; replacement readiness is not available.",
+                        nextActionLabel: "Observe only",
+                        nextActionDetail: "Show current ownership and do not offer replacement affordances."
                     ),
                     binding: CapabilityCockpitBindingDTO(
                         requested: 0,
