@@ -42,7 +42,6 @@ final class SettingsParityTests: XCTestCase {
     /// NOT user-editable settings. Adding a waiver requires a reason.
     private let WAIVER: [String: String] = [
         "availableModels": "cached model list from models.list engine protocol — not a setting",
-        "defaultProvider": "legacy server field retained for settings decode/parity; runtime provider is inferred from defaultModel, so iOS exposes model selection only",
         "isLoaded": "UI loading flag — not persisted",
         "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",
@@ -87,9 +86,8 @@ final class SettingsParityTests: XCTestCase {
         )
     }
 
-    /// Detect waivers that were added but then the field got renamed
-    /// or removed — stale waivers silently reduce coverage.
-    func testNoStaleWaiversForRemovedFields() {
+    /// Detect waiver entries that no longer match SettingsState fields.
+    func testNoStaleWaiversForUnknownFields() {
         let state = SettingsState()
         let actualFields = Set(
             Mirror(reflecting: state).children.compactMap { $0.label.flatMap(normalize) }
@@ -102,13 +100,12 @@ final class SettingsParityTests: XCTestCase {
 
         XCTAssertTrue(
             stale.isEmpty,
-            "Waiver entries for fields that no longer exist: \(stale). Remove from WAIVER."
+            "Waiver entries for fields that no longer exist: \(stale). Update WAIVER."
         )
     }
 
-    /// Same check on the KNOWN_UI_FIELDS list — a registered field
-    /// that's been removed from SettingsState becomes a lie.
-    func testNoStaleUIRegistrationsForRemovedFields() {
+    /// Same check on the KNOWN_UI_FIELDS list.
+    func testNoStaleUIRegistrationsForUnknownFields() {
         let state = SettingsState()
         let actualFields = Set(
             Mirror(reflecting: state).children.compactMap { $0.label.flatMap(normalize) }

@@ -217,7 +217,6 @@ final class TokenTypesTests: XCTestCase {
         XCTAssertEqual(usage.formattedTotal, "15.9k")
     }
 
-    // testAgentStateTokenUsage removed — AgentStateTokenUsage deleted in Phase 5
 }
 
 // MARK: - Event Types Tests

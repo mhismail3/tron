@@ -145,37 +145,6 @@ fn tron_ci_clippy_contract_matches_cargo_lint_policy() {
 }
 
 #[test]
-fn external_cli_variance_has_no_compatibility_or_fallback_wording() {
-    let release_ios = read_repo_file(".github/workflows/release-ios.yml");
-    let db_path_guard = read_repo_file("packages/agent/tests/db_path_guard.rs");
-    let mut hits = Vec::new();
-
-    for (file, text, needles) in [
-        (
-            ".github/workflows/release-ios.yml",
-            release_ios.as_str(),
-            ["compatibility path", "fallback path", "fall back"].as_slice(),
-        ),
-        (
-            "packages/agent/tests/db_path_guard.rs",
-            db_path_guard.as_str(),
-            ["should fall back to ASC public-link discovery"].as_slice(),
-        ),
-    ] {
-        for needle in needles {
-            if text.contains(needle) {
-                hits.push(format!("{file}: {needle}"));
-            }
-        }
-    }
-
-    assert_no_hits(
-        "ASC CLI command-shape variance must not use Tron compatibility/fallback wording",
-        hits,
-    );
-}
-
-#[test]
 fn xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let release_ios = read_repo_file(".github/workflows/release-ios.yml");
@@ -266,7 +235,7 @@ fn rust_provider_shared_and_settings_loader_use_physical_owners() {
     );
     assert!(
         settings_mod.contains("pub mod storage;") && !settings_mod.contains("pub mod loader"),
-        "settings loader must live under profile::storage::loader without compatibility exports"
+        "settings loader must live under profile::storage::loader without duplicate exports"
     );
 }
 

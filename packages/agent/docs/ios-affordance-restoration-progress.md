@@ -550,10 +550,8 @@ User-facing state:
   connected.
 - The Logs sheet text now says local entries and server sync, avoiding a false
   implication that the sheet browses canonical server logs.
-- Agent settings now surfaces `server.defaultProvider` beside default model and
-  workspace. Known provider ids render friendly labels; unknown server-returned
-  provider ids stay visible as server ids instead of being replaced with fake
-  assumptions.
+- Engine settings now surfaces the server defaults that users can act on from
+  iOS: model and workspace. Provider routing follows the selected model.
 - Onboarding preparation copy is shorter and action-oriented. Server
   Settings-launched repair for an already paired server closes after a
   successful token refresh when the host and port still match; edited origins
@@ -899,7 +897,7 @@ Closeout cleanup expectations:
 - No temporary chat timeline loading spinner/text row remains. Empty and
   loading chat content stay visually blank unless current server/local state
   supplies a real user-facing event.
-- No custom fallback session list row press implementation remains. Session rows
+- No custom session list row press implementation remains. Session rows
   use native SwiftUI liquid-glass interactive containers.
 - Historical IARM rows remain as evidence and classification records; they are
   not a live queue to implement legacy surfaces by default.
@@ -1036,7 +1034,7 @@ Closeout cleanup expectations:
 - No temporary chat timeline loading spinner/text row remains. Empty and
   loading chat content stay visually blank unless current server/local state
   supplies a real user-facing event.
-- No custom fallback session list row press implementation remains. Session rows
+- No custom session list row press implementation remains. Session rows
   use native SwiftUI liquid-glass interactive containers.
 - Historical IARM rows remain as evidence and classification records; they are
   not a live queue to implement legacy surfaces by default.

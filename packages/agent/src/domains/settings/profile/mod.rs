@@ -6,8 +6,8 @@
 //! 1. **Active profile settings** — `[settings]` in the resolved profile chain
 //! 2. **User overlay** — `~/.tron/profiles/user/profile.toml` `[settings]`
 //! 3. **Environment variables** — explicit settings overrides only:
-//!    `TRON_DEFAULT_MODEL`, `TRON_DEFAULT_PROVIDER`,
-//!    `TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID`
+//!    `TRON_DEFAULT_MODEL`, `TRON_HEARTBEAT_INTERVAL`, and
+//!    `ANTHROPIC_CLIENT_ID`
 //!
 //! Settings are server-authoritative: `~/.tron/profiles/user/profile.toml` stores
 //! sparse user overrides. iOS reads/writes the effective server settings via
@@ -277,7 +277,6 @@ authProfile = "default"
         assert_eq!(settings.version, "0.1.0");
         assert_eq!(settings.name, "tron");
         assert_eq!(settings.server.heartbeat_interval_ms, 30_000);
-        assert_eq!(settings.server.default_provider, "anthropic");
         assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(settings.retry.max_retries, 3);
         assert_eq!(settings.agent.max_turns, 250);

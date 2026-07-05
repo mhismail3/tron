@@ -47,7 +47,6 @@ pub fn init_subscriber(level: &str) {
         .with_writer(std::io::stderr)
         .compact();
 
-    // set_global_default is a no-op if already set
     let _ = subscriber.try_init();
 }
 
@@ -136,7 +135,6 @@ mod tests {
 
     #[test]
     fn init_subscriber_does_not_panic() {
-        // Multiple calls should be safe (no-op after first)
         init_subscriber("warn");
         init_subscriber("debug");
     }

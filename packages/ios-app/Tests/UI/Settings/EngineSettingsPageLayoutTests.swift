@@ -188,18 +188,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.observabilityLogLevel(newValue))"))
-        XCTAssertFalse(
-            engine.contains("label: \"Provider\""),
-            "Default provider should not be user-editable because runtime provider routing is inferred from the selected model"
-        )
-        XCTAssertFalse(
-            engine.contains("updateServerSetting(.defaultProvider"),
-            "Engine settings should not expose a no-op default-provider mutation"
-        )
-        XCTAssertFalse(
-            settingsMain.contains("defaultProvider"),
-            "Default provider should not appear as a Settings main-section affordance"
-        )
+        XCTAssertTrue(settingsMain.contains("settingsOwnershipSection("))
+        XCTAssertTrue(settingsMain.contains("title: \"Server-Owned\""))
     }
 
     func testSettingsMainRowsUseSeparateCardsWithoutChevrons() throws {

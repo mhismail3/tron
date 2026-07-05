@@ -69,7 +69,7 @@ fn retained_event_payload_surface_is_loop_owned() {
 fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
     assert_repo_path_absent(
         "packages/agent/src/shared/logging/store.rs",
-        "unused generic log query abstraction",
+        "unneeded generic log query abstraction",
     );
 
     let logging_mod = read_repo_file("packages/agent/src/shared/observability/mod.rs");
@@ -141,6 +141,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         ),
         read_repo_file("packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift"),
         read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+        read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift"),
     ]
     .join("\n");
     assert_absent(
@@ -155,7 +156,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         "retained iOS diagnostics settings surface",
     );
     assert!(
-        ios_surface.contains("runtimeEvidenceSection"),
+        ios_surface.contains("evidencePolicySection"),
         "iOS settings should render the one retained evidence section directly"
     );
 }

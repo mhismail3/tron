@@ -295,7 +295,7 @@ The chat timeline owns only truthful local/session presentation state:
   detent does not retry the same failed cursor. Once reconstruction has produced
   real messages, row visibility fails open if the view-local initial-load flag
   becomes stale; no animation state is allowed to hide the entire transcript.
-- Thinking fallback is a single app-owned `NeuralSparkIndicator`.
+- Thinking placeholder rendering is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.
   Provider-authored reasoning summaries are rendered as reasoning summaries, not
@@ -337,7 +337,7 @@ Engine child errors are normalized at the transport boundary. Canonical
 `details.failure` payloads stay authoritative; older or setup-time child errors
 that only carry `kind`, `message`, and `details` are preserved as
 `EngineProtocolError` values so UI surfaces show the real server failure instead
-of a generic invalid-response fallback.
+of a generic invalid-response state.
 
 SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
 `EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
@@ -379,7 +379,7 @@ The retained runtime cockpit DTOs are accepted only where a server-owned module
 or resource surface exists: worker lifecycle catalog/resources,
 `module_activity::overview`, `capability_binding::cockpit_overview`, and
 generic `ui_surface` schemas. Unknown fields may be ignored for wire
-compatibility, but iOS must not preserve product-shaped fallback fields as
+forward evolution, but iOS must not preserve product-shaped optional fields as
 client-owned truth.
 Dynamic `AnyCodable` payload accessors preserve both JSON-decoded arrays and
 directly wrapped typed Swift collections so generic UI/resource projections do
@@ -521,8 +521,7 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 Settings main groups controls by ownership rather than by old product modules.
 Engine owns actionable server-mirrored defaults, context compaction,
 transcription, log level, and storage retention policy; provider routing follows
-the selected model rather than a separate default-provider control. Accounts
-owns provider credential setup.
+the selected model. Accounts owns provider credential setup.
 Servers owns local pairing/connection and redacted local logs. App owns local
 appearance and device behavior. Settings main does not grow a server-health
 dashboard; core engine visibility lives on the dashboard Engine Cockpit.

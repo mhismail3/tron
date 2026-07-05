@@ -29,9 +29,9 @@ struct WorkerLifecycleDTOTests {
                 "revision": 3,
                 "kind": "External",
                 "lifecycle": "Ready",
-                "owner_actor": "system",
-                "authority_grant": "engine-transport",
-                "namespace_claims": ["alpha"],
+                "ownerActor": "system",
+                "authorityGrant": "engine-transport",
+                "namespaceClaims": ["alpha"],
                 "visibility": "System",
                 "provenance": {"origin": "test"}
               }
@@ -40,16 +40,16 @@ struct WorkerLifecycleDTOTests {
               {
                 "id": "alpha::run",
                 "revision": 4,
-                "owner_worker": "worker-alpha",
+                "ownerWorker": "worker-alpha",
                 "description": "Run alpha",
                 "tags": ["alpha", "run"],
                 "visibility": "Agent",
-                "effect_class": "ExternalSideEffect",
-                "risk_level": "High",
+                "effectClass": "ExternalSideEffect",
+                "riskLevel": "High",
                 "health": "Healthy",
-                "required_authority": {"scopes": ["alpha.run"]},
-                "request_schema": {"type": "object"},
-                "response_schema": {"type": "object"},
+                "requiredAuthority": {"scopes": ["alpha.run"]},
+                "requestSchema": {"type": "object"},
+                "responseSchema": {"type": "object"},
                 "metadata": {"ui": "generated"}
               }
             ],
@@ -57,11 +57,11 @@ struct WorkerLifecycleDTOTests {
               {
                 "id": "alpha-trigger",
                 "revision": 5,
-                "owner_worker": "worker-alpha",
-                "trigger_type": "cron",
-                "target_function": "alpha::run",
-                "delivery_mode": "Async",
-                "authority_grant": "engine-transport",
+                "ownerWorker": "worker-alpha",
+                "triggerType": "cron",
+                "targetFunction": "alpha::run",
+                "deliveryMode": "Async",
+                "authorityGrant": "engine-transport",
                 "visibility": "System",
                 "config": {"schedule": "* * * * *"}
               }
@@ -69,11 +69,11 @@ struct WorkerLifecycleDTOTests {
             "triggerTypes": [
               {
                 "id": "cron",
-                "owner_worker": "worker-alpha",
+                "ownerWorker": "worker-alpha",
                 "description": "Cron schedule",
-                "allowed_delivery_modes": ["Async"],
+                "allowedDeliveryModes": ["Async"],
                 "visibility": "System",
-                "config_schema": {"type": "object"}
+                "configSchema": {"type": "object"}
               }
             ]
           },
@@ -110,13 +110,13 @@ struct WorkerLifecycleDTOTests {
             "functions": [
               {
                 "id": "alpha::run",
-                "owner_worker": "worker-alpha",
-                "request_schema": {"type": "object"},
-                "response_schema": {"type": "object"}
+                "ownerWorker": "worker-alpha",
+                "requestSchema": {"type": "object"},
+                "responseSchema": {"type": "object"}
               },
               {
-                "owner_worker": "worker-broken",
-                "request_schema": {"type": "object"}
+                "ownerWorker": "worker-broken",
+                "requestSchema": {"type": "object"}
               }
             ]
           }

@@ -595,7 +595,7 @@ fn execute_model_request_schema() -> serde_json::Value {
     insert_nullable_string(
         &mut properties,
         "expectedWebRobotsPolicyVersionId",
-        "Expected current web_robots_policy version id paired with webRobotsPolicyResourceId for web_fetch freshness and compatibility.",
+        "Expected current web_robots_policy version id paired with webRobotsPolicyResourceId for web_fetch freshness.",
     );
     insert_string(
         &mut properties,

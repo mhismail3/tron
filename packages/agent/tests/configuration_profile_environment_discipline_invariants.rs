@@ -181,10 +181,6 @@ fn source_backed_key_configuration_catalog() -> BTreeMap<String, String> {
             defaults.server.heartbeat_interval_ms.to_string(),
         ),
         (
-            "server.defaultProvider".to_owned(),
-            defaults.server.default_provider,
-        ),
-        (
             "server.defaultModel".to_owned(),
             defaults.server.default_model,
         ),
@@ -562,7 +558,6 @@ fn environment_override_surface_is_explicit_and_owned() {
     let loader = read_repo_file("packages/agent/src/domains/settings/profile/storage/loader.rs");
     for required in [
         "TRON_DEFAULT_MODEL",
-        "TRON_DEFAULT_PROVIDER",
         "TRON_HEARTBEAT_INTERVAL",
         "ANTHROPIC_CLIENT_ID",
         "parse_u64_range",
@@ -605,7 +600,7 @@ fn ios_settings_decode_is_server_authoritative_and_ui_wired() {
     ] {
         assert!(
             !dto.contains(forbidden),
-            "iOS settings decoder must not mask server state with fallback {forbidden}"
+            "iOS settings decoder must not mask server state with local default {forbidden}"
         );
     }
 
@@ -652,14 +647,6 @@ fn ios_user_editable_settings_have_decode_update_state_and_ui_coverage() {
     }
 
     let editable_settings = [
-        EditableSetting {
-            rust_path: "server.defaultProvider",
-            dto_marker: "let defaultProvider: String",
-            update_marker: "case .defaultProvider(let provider)",
-            state_marker: "var defaultProvider: String",
-            ui_marker: "updateServerSetting(.defaultProvider(newValue))",
-            parity_marker: "\"defaultProvider\"",
-        },
         EditableSetting {
             rust_path: "server.defaultModel",
             dto_marker: "let defaultModel: String",
@@ -744,14 +731,9 @@ fn ios_user_editable_settings_have_decode_update_state_and_ui_coverage() {
         "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/EngineAccessRepositories.swift",
     );
     let state = read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift");
-    let ui = read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift")
-        + &read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ContextSettingsPage.swift")
-        + &read_repo_file(
-            "packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift",
-        );
+    let ui = read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift");
     let parity =
         read_repo_file("packages/ios-app/Tests/Session/Chat/State/SettingsParityTests.swift");
-
     for setting in editable_settings {
         assert!(
             readme_catalog.contains_key(setting.rust_path),

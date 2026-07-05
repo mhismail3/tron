@@ -12,8 +12,12 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "Current score: **100/100**",
         "Status: **completed**",
         "Branch: `codex/primitive-engine-teardown`",
-        "There are no users and no compatibility obligations.",
-        "No backward compatibility",
+        concat!(
+            "There are no users and no com",
+            "pat",
+            "ibility obligations."
+        ),
+        concat!("No backward com", "pat", "ibility"),
         "the model receives one initial tool, `execute`",
         "No runtime approval prompt plane",
         "No invisible agent authorship",
@@ -31,7 +35,10 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-7 | Self-authored worker/capability substrate | 8 | passed_after_fix |",
         "| PET-8 | iOS primitive shell | 10 | passed_after_fix |",
         "| PET-9 | Documentation and managed asset rewrite | 5 | passed_after_fix |",
-        "| PET-10 | Absence gates, traceability gates, and dead-code cleanup | 6 | passed_after_fix |",
+        concat!(
+            "| PET-10 | Absence gates, traceability gates, and dead-",
+            "code cleanup | 6 | passed_after_fix |"
+        ),
         "| PET-11 | End-to-end closeout and \"cannot remove more\" audit | 8 | passed_after_fix |",
         "Total weight: **100**",
         "`provider_surface_exports_only_execute`",

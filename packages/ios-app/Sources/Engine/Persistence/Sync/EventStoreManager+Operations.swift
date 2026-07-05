@@ -305,7 +305,7 @@ extension EventStoreManager {
 
     /// Build the local cache row for a server-created session.
     /// Untitled sessions intentionally keep `title` nil so the list uses its
-    /// `New Session` fallback until the server supplies a generated title.
+    /// `New Session` placeholder until the server supplies a generated title.
     static func makeLocalNewSessionCache(
         sessionId: String,
         workspaceId: String,

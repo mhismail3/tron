@@ -136,8 +136,7 @@
 //! discovery, unsupported-operation diagnostics, and stream/UI operation
 //! identity. Do not duplicate freehand operation lists elsewhere.
 //! File access through this tool must use the hardened `filesystem_*` operation
-//! package; retired `file_read`/`file_write` operation names are not a supported
-//! model-facing surface.
+//! package registered in the operations registry.
 //! Agent-launched executions persist trace provider ownership and canonical
 //! working directory from trusted `CausalContext` runtime metadata, not from
 //! model-id string parsing, shell aliases, caller-supplied public context, or

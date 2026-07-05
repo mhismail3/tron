@@ -20,7 +20,7 @@ struct ContextControlSheet: View {
     @State private var selectedModelId = ""
     @State private var isLoadingContext = true
     @State private var isLoadingModels = false
-    @State private var activeMutation: AgentControlMutation?
+    @State private var activeMutation: SessionBriefingMutation?
     @State private var errorMessage: String?
     @State private var showClearConfirmation = false
     @State private var showModelPicker = false
@@ -101,7 +101,7 @@ struct ContextControlSheet: View {
                     SheetTitle(title: "Session Briefing", color: .tronEmerald)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    AgentControlToolbarButton(
+                    SessionBriefingToolbarButton(
                         icon: "arrow.triangle.2.circlepath",
                         color: .tronEmerald,
                         isBusy: activeMutation == .compact,
@@ -111,7 +111,7 @@ struct ContextControlSheet: View {
                         Task { await compactNow() }
                     }
 
-                    AgentControlToolbarButton(
+                    SessionBriefingToolbarButton(
                         icon: "xmark.circle",
                         color: .tronError,
                         isEnabled: !isMutating,
@@ -120,7 +120,7 @@ struct ContextControlSheet: View {
                         showClearConfirmation = true
                     }
 
-                    AgentControlToolbarButton(
+                    SessionBriefingToolbarButton(
                         icon: "arrow.clockwise",
                         color: .tronEmerald,
                         isBusy: isLoadingContext && !isMutating,
@@ -169,8 +169,8 @@ struct ContextControlSheet: View {
     }
 
     private var sessionBriefingSection: some View {
-        AgentControlSection(title: "Briefing", icon: "person.text.rectangle", tint: .tronEmerald) {
-            AgentControlGlassCard(color: .tronEmerald) {
+        SessionBriefingSection(title: "Briefing", icon: "person.text.rectangle", tint: .tronEmerald) {
+            SessionBriefingGlassCard(color: .tronEmerald) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(sessionBriefingTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -179,9 +179,9 @@ struct ContextControlSheet: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextSecondary)
                     HStack(spacing: 10) {
-                        AgentControlMiniMetric(label: "Context used", value: "\(usagePercentRounded)%")
-                        AgentControlMiniMetric(label: "Remaining", value: TokenFormatter.format(tokensRemaining))
-                        AgentControlMiniMetric(label: "Actions", value: "\(actions.count)")
+                        SessionBriefingMiniMetric(label: "Context used", value: "\(usagePercentRounded)%")
+                        SessionBriefingMiniMetric(label: "Remaining", value: TokenFormatter.format(tokensRemaining))
+                        SessionBriefingMiniMetric(label: "Actions", value: "\(actions.count)")
                     }
                 }
             }
@@ -190,7 +190,7 @@ struct ContextControlSheet: View {
     }
 
     private var modelSection: some View {
-        AgentControlSection(title: "Context and Model Controls", icon: "cpu", tint: .tronPurple) {
+        SessionBriefingSection(title: "Context and Model Controls", icon: "cpu", tint: .tronPurple) {
             NewSessionSetupCard(
                 icon: "cpu",
                 title: "Model",
@@ -206,12 +206,12 @@ struct ContextControlSheet: View {
     }
 
     private var contextBreakdownSection: some View {
-        AgentControlSection(
+        SessionBriefingSection(
             title: "Context Breakdown",
             icon: "gauge.with.dots.needle.bottom.50percent",
             tint: .tronEmerald
         ) {
-            AgentControlGlassCard(color: .tronEmerald) {
+            SessionBriefingGlassCard(color: .tronEmerald) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -237,15 +237,15 @@ struct ContextControlSheet: View {
                         .tint(.tronEmerald)
 
                     HStack(spacing: 10) {
-                        AgentControlMiniMetric(label: "Window", value: TokenFormatter.format(contextWindowTokens))
-                        AgentControlMiniMetric(label: "Epoch", value: snapshot?.currentEpoch ?? "epoch-0")
+                        SessionBriefingMiniMetric(label: "Window", value: TokenFormatter.format(contextWindowTokens))
+                        SessionBriefingMiniMetric(label: "Epoch", value: snapshot?.currentEpoch ?? "epoch-0")
                     }
 
-                    AgentControlKeyValueRow(
+                    SessionBriefingKeyValueRow(
                         label: "Last action",
                         value: actions.first?.summaryLine ?? "None recorded"
                     )
-                    AgentControlKeyValueRow(
+                    SessionBriefingKeyValueRow(
                         label: "Freshness",
                         value: isLoadingContext ? "Refreshing" : (snapshot?.createdAt ?? "Snapshot unavailable")
                     )
@@ -253,12 +253,12 @@ struct ContextControlSheet: View {
             }
             .accessibilityIdentifier("session-briefing-context-summary")
 
-            AgentControlGlassCard(color: .tronEmerald, subtle: true) {
+            SessionBriefingGlassCard(color: .tronEmerald, subtle: true) {
                 VStack(alignment: .leading, spacing: 10) {
                     if let snapshot, !snapshot.promptBlocks.isEmpty {
                         ForEach(snapshot.promptBlocks) { block in
                             VStack(alignment: .leading, spacing: 3) {
-                                AgentControlKeyValueRow(
+                                SessionBriefingKeyValueRow(
                                     label: block.label,
                                     value: "\(TokenFormatter.format(block.estimatedTokens)) tokens"
                                 )
@@ -267,11 +267,11 @@ struct ContextControlSheet: View {
                                     .foregroundStyle(.tronTextMuted)
                             }
                         }
-                        AgentControlKeyValueRow(label: "Resource refs", value: "\(snapshot.resourceRefCount)")
-                        AgentControlKeyValueRow(label: "Execution refs", value: "\(snapshot.executionRefCount)")
-                        AgentControlKeyValueRow(label: "Redaction", value: snapshot.proofLine)
+                        SessionBriefingKeyValueRow(label: "Resource refs", value: "\(snapshot.resourceRefCount)")
+                        SessionBriefingKeyValueRow(label: "Execution refs", value: "\(snapshot.executionRefCount)")
+                        SessionBriefingKeyValueRow(label: "Redaction", value: snapshot.proofLine)
                     } else {
-                        AgentControlEmptyLine("No composition snapshot available")
+                        SessionBriefingEmptyLine("No composition snapshot available")
                     }
                 }
             }
@@ -280,25 +280,25 @@ struct ContextControlSheet: View {
     }
 
     private var memorySection: some View {
-        AgentControlSection(title: "Memory", icon: "brain.head.profile", tint: .tronEmerald) {
-            AgentControlGlassCard(color: .tronEmerald, subtle: true) {
+        SessionBriefingSection(title: "Memory", icon: "brain.head.profile", tint: .tronEmerald) {
+            SessionBriefingGlassCard(color: .tronEmerald, subtle: true) {
                 let memory = snapshot?.memory
                 VStack(alignment: .leading, spacing: 10) {
-                    AgentControlKeyValueRow(label: "Mode", value: memory?.status ?? "read_only")
-                    AgentControlKeyValueRow(label: "Policy", value: memory?.policy ?? "Memory refs only")
-                    AgentControlKeyValueRow(label: "Prompt trace refs", value: "\(memory?.promptTraceRefCount ?? 0)")
-                    AgentControlKeyValueRow(label: "Redacted memory refs", value: "\(memory?.redactedMemoryRefCount ?? 0)")
-                    AgentControlKeyValueRow(label: "Edit controls", value: "Not in this slice")
+                    SessionBriefingKeyValueRow(label: "Mode", value: memory?.status ?? "read_only")
+                    SessionBriefingKeyValueRow(label: "Policy", value: memory?.policy ?? "Memory refs only")
+                    SessionBriefingKeyValueRow(label: "Prompt trace refs", value: "\(memory?.promptTraceRefCount ?? 0)")
+                    SessionBriefingKeyValueRow(label: "Redacted memory refs", value: "\(memory?.redactedMemoryRefCount ?? 0)")
+                    SessionBriefingKeyValueRow(label: "Edit controls", value: "Not in this slice")
                 }
             }
         }
     }
 
     private var recentActionsSection: some View {
-        AgentControlSection(title: "Recent Context Actions", icon: "clock.arrow.circlepath", tint: .tronEmerald) {
-            AgentControlGlassCard(color: .tronEmerald, subtle: true) {
+        SessionBriefingSection(title: "Recent Context Actions", icon: "clock.arrow.circlepath", tint: .tronEmerald) {
+            SessionBriefingGlassCard(color: .tronEmerald, subtle: true) {
                 if actions.isEmpty {
-                    AgentControlEmptyLine("No recent context actions")
+                    SessionBriefingEmptyLine("No recent context actions")
                 } else {
                     VStack(spacing: 12) {
                         ForEach(actions) { action in
@@ -338,16 +338,16 @@ struct ContextControlSheet: View {
     }
 
     private func actionDetailSection(_ detail: ContextControlActionDetailDisplay) -> some View {
-        AgentControlSection(title: "Action Detail", icon: detail.summary.icon, tint: detail.summary.tint) {
-            AgentControlGlassCard(color: detail.summary.tint, subtle: true) {
+        SessionBriefingSection(title: "Action Detail", icon: detail.summary.icon, tint: detail.summary.tint) {
+            SessionBriefingGlassCard(color: detail.summary.tint, subtle: true) {
                 VStack(alignment: .leading, spacing: 10) {
-                    AgentControlKeyValueRow(label: "Action", value: detail.summary.title)
-                    AgentControlKeyValueRow(label: "Result", value: detail.resultStatus)
-                    AgentControlKeyValueRow(label: "Actor", value: detail.actorKind)
-                    AgentControlKeyValueRow(label: "Expected effect", value: detail.expectedEffect)
-                    AgentControlKeyValueRow(label: "Timeline event", value: detail.timelineEvent)
-                    AgentControlKeyValueRow(label: "Audit refs", value: "\(detail.auditRefCount)")
-                    AgentControlKeyValueRow(label: "Provider safety", value: detail.proofLine)
+                    SessionBriefingKeyValueRow(label: "Action", value: detail.summary.title)
+                    SessionBriefingKeyValueRow(label: "Result", value: detail.resultStatus)
+                    SessionBriefingKeyValueRow(label: "Actor", value: detail.actorKind)
+                    SessionBriefingKeyValueRow(label: "Expected effect", value: detail.expectedEffect)
+                    SessionBriefingKeyValueRow(label: "Timeline event", value: detail.timelineEvent)
+                    SessionBriefingKeyValueRow(label: "Audit refs", value: "\(detail.auditRefCount)")
+                    SessionBriefingKeyValueRow(label: "Provider safety", value: detail.proofLine)
                     Text(detail.summary.resourceId)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
@@ -385,7 +385,7 @@ struct ContextControlSheet: View {
             failures.append(agentControlErrorMessage(error))
         }
 
-        errorMessage = failures.isEmpty ? nil : failures.removingDuplicates().joined(separator: "\n")
+        errorMessage = failures.isEmpty ? nil : SessionBriefingSupport.removingDuplicates(failures).joined(separator: "\n")
     }
 
     private func loadModels(force: Bool) async {
@@ -478,131 +478,5 @@ struct ContextControlSheet: View {
             return "Context is getting full. Compact keeps durable history and audit refs while reducing provider context."
         }
         return "Current model, context usage, memory refs, and context actions are shown from session-scoped server truth."
-    }
-}
-
-private enum AgentControlMutation {
-    case compact
-    case clear
-}
-
-private struct AgentControlSection<Content: View>: View {
-    let title: String
-    let icon: String
-    let tint: Color
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(tint)
-                .labelStyle(.titleAndIcon)
-
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct AgentControlGlassCard<Content: View>: View {
-    let color: Color
-    var subtle = false
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .glassEffect(
-                .regular.tint(color.opacity(subtle ? 0.09 : 0.14)).interactive(),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-    }
-}
-
-private struct AgentControlToolbarButton: View {
-    let icon: String
-    let color: Color
-    var isBusy = false
-    var isEnabled = true
-    let accessibilityLabel: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            if isBusy {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .tint(color)
-            } else {
-                Image(systemName: icon)
-                    .font(TronTypography.buttonSM)
-                    .foregroundStyle(isEnabled ? color : .tronTextDisabled)
-            }
-        }
-        .disabled(!isEnabled || isBusy)
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-private struct AgentControlMiniMetric: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextMuted)
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct AgentControlKeyValueRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextMuted)
-            Spacer(minLength: 8)
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(3)
-                .minimumScaleFactor(0.82)
-        }
-    }
-}
-
-private struct AgentControlEmptyLine: View {
-    let message: String
-
-    init(_ message: String) {
-        self.message = message
-    }
-
-    var body: some View {
-        Text(message)
-            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-            .foregroundStyle(.tronTextMuted)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private extension Array where Element == String {
-    func removingDuplicates() -> [String] {
-        var seen = Set<String>()
-        return filter { seen.insert($0).inserted }
     }
 }

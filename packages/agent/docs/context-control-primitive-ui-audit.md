@@ -4,7 +4,7 @@ Status: `implementation_candidate`
 
 This audit records the restored Session Briefing surface, its Context Control
 primitive section, and the old pre-primitive UI families that must be evaluated
-before any further native surface returns. The retired Agent Control panel is
+before any further native surface returns. The retired broad chat control panel is
 historical context only: a surface is not restored because it existed before. It
 must name the owning primitive/module, current backend substrate, user and agent
 workflow, provider-visible boundary, mobile shape, risks, rejection criteria,
@@ -12,7 +12,7 @@ and test burden.
 
 ## Implemented Candidate: Session Briefing / Context Control
 
-- Old surface history: the retired Agent Control chat model/percentage pill
+- Old surface history: the retired chat model/percentage pill control
   opened a broad legacy control panel with context and miscellaneous controls.
 - User value: switch the active model from the same catalog used by new-session
   setup, inspect what is in provider context, compact now, clear into a new

@@ -367,8 +367,6 @@ final class EngineClient: EngineTransport {
         recordAndAck(delivery)
     }
 
-    // extractEventType removed — type is now pre-extracted by EngineConnection.handleMessage
-
     // MARK: - State Accessors
 
     var isConnected: Bool {

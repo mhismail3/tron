@@ -280,11 +280,11 @@ fn number(value: &Value, key: &str) -> usize {
     value.get(key).and_then(Value::as_u64).unwrap_or(0) as usize
 }
 
-fn safe_field(value: &Value, key: &str, fallback: &str, max_bytes: usize) -> String {
+fn safe_field(value: &Value, key: &str, default_value: &str, max_bytes: usize) -> String {
     let raw = value
         .get(key)
         .and_then(Value::as_str)
-        .unwrap_or(fallback)
+        .unwrap_or(default_value)
         .to_owned();
     bounded(redact(raw), max_bytes)
 }

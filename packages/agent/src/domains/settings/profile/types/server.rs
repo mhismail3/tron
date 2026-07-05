@@ -17,8 +17,6 @@ pub struct ServerSettings {
     pub heartbeat_interval_ms: u64,
     /// Default LLM model identifier.
     pub default_model: String,
-    /// Default LLM provider.
-    pub default_provider: String,
     /// Default workspace path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_workspace: Option<String>,
@@ -36,7 +34,6 @@ impl Default for ServerSettings {
         Self {
             heartbeat_interval_ms: 30_000,
             default_model: "claude-sonnet-4-6".to_string(),
-            default_provider: "anthropic".to_string(),
             default_workspace: None,
             tailscale_ip: None,
             transcription: TranscriptionSettings::default(),
@@ -224,7 +221,6 @@ mod tests {
     fn server_defaults() {
         let s = ServerSettings::default();
         assert_eq!(s.heartbeat_interval_ms, 30_000);
-        assert_eq!(s.default_provider, "anthropic");
         assert_eq!(s.default_model, "claude-sonnet-4-6");
         assert!(s.default_workspace.is_none());
         // tailscaleIp defaults absent (populated by installer scripts).
@@ -287,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn removed_auth_setting_is_rejected() {
+    fn unknown_auth_setting_is_rejected() {
         let json = serde_json::json!({
             "auth": { "enforced": true }
         });

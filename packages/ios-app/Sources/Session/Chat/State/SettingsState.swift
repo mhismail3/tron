@@ -11,7 +11,6 @@ final class SettingsState {
 
     // MARK: - Server-Authoritative Settings
 
-    var defaultProvider: String = ""
     var defaultModel: String = ""
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
@@ -128,11 +127,10 @@ final class SettingsState {
     ///
     /// Every field is overwritten from the active server's effective settings.
     /// That keeps the iOS UI honest when switching between Macs: a value that
-    /// was present on server A cannot linger after server B reports its own
-    /// default or a missing optional field.
+        /// was present on server A cannot linger after server B reports its own
+        /// default or a missing optional field.
     func applyServerSettings(_ settings: ServerSettingsSnapshot) {
         lastLoadedSettings = settings
-        defaultProvider = settings.defaultProvider
         defaultModel = settings.defaultModel
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold

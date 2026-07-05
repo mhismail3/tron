@@ -278,7 +278,7 @@ mod tests {
         ] {
             assert!(
                 retired.parse::<EventType>().is_err(),
-                "retired product event type must stay outside the persisted session enum: {retired}"
+                "unsupported product event type must stay outside the persisted session enum: {retired}"
             );
         }
     }

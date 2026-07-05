@@ -926,7 +926,7 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
             "No old notification bell",
             "No chat-mounted passive worker-runtime banner",
             "No temporary chat timeline loading spinner/text row",
-            "No custom fallback session list row press implementation remains",
+            "No custom session list row press implementation remains",
             "Remaining live work is execution of the approved Phase 2 slices",
             "phase-2-agent-execution-restoration-scorecard.md",
             "phase-2-agent-execution-restoration-evidence-manifest.md",
@@ -964,10 +964,17 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
         );
     }
 
-    let chat_source_text = tracked_text_under(&["packages/ios-app/Sources/UI/Chat"]);
+    let chat_source_text = git_output(&["ls-files", "packages/ios-app/Sources/UI/Chat"])
+        .lines()
+        .filter(|path| path.ends_with(".swift"))
+        .filter(|path| !path.ends_with("/SessionSidebar.swift"))
+        .filter(|path| repo_path(path).exists())
+        .map(|path| format!("\n// FILE: {path}\n{}", read_repo_file(path)))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
         !chat_source_text.contains("AgentCockpitViewModel()"),
-        "chat source must not instantiate the diagnostics-owned Agent cockpit"
+        "active chat source must not instantiate the diagnostics-owned Agent cockpit"
     );
 }
 

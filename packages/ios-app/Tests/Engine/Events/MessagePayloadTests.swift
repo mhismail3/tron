@@ -92,8 +92,7 @@ final class AssistantMessagePayloadTests: XCTestCase {
     }
 
     func testMissingTurnFailsDecode() {
-        // `turn` is non-optional on the Rust payload. Regression guard
-        // against the removed "default to 1" back-compat behavior.
+        // `turn` is non-optional on the Rust payload.
         let payload: [String: AnyCodable] = [
             "content": AnyCodable([[String: Any]]()),
             "model": AnyCodable("claude-sonnet-4"),

@@ -495,7 +495,7 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
         finalizeThinkingMessageIfNeededCalled = true
     }
 
-    // MARK: - Logging (no-op for tests)
+    // MARK: - Logging
     func logVerbose(_ message: String) {}
     func logDebug(_ message: String) {}
     func logInfo(_ message: String) {}

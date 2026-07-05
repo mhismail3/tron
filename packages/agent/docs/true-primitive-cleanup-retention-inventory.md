@@ -41,61 +41,64 @@ The TSV covers tracked and newly introduced files under:
 
 | Classification | Count |
 |----------------|------:|
-| primitive | 112 |
-| implementation | 849 |
+| primitive | 113 |
+| implementation | 878 |
 | support | 385 |
-| test | 587 |
-| docs | 136 |
+| test | 600 |
+| docs | 141 |
 | delete | 0 |
 
 ## Owner Summary
 
 | Owner | Count |
 |-------|------:|
-| `approval` | 8 |
+| `agent_domain` | 17 |
 | `agent_runtime` | 77 |
 | `app_bootstrap` | 11 |
+| `approval` | 8 |
 | `auth` | 19 |
 | `capability` | 4 |
 | `capability_execute` | 54 |
 | `catalog_discovery` | 8 |
 | `context_control` | 9 |
-| `docs/static gates` | 128 |
 | `device` | 6 |
+| `docs` | 5 |
+| `docs/static gates` | 128 |
 | `domain_worker` | 7 |
-| `engine` | 109 |
+| `engine` | 110 |
 | `filesystem` | 7 |
 | `git` | 9 |
 | `goals` | 5 |
 | `import_history` | 6 |
 | `import_preview` | 6 |
-| `jobs` | 8 |
 | `ios` | 98 |
-| `ios_chat_ui` | 3 |
+| `ios_app` | 11 |
+| `ios_chat_ui` | 4 |
 | `ios_engine` | 139 |
 | `ios_events` | 8 |
-| `ios_session` | 75 |
-| `ios_ui` | 141 |
+| `ios_session` | 76 |
+| `ios_ui` | 140 |
+| `jobs` | 8 |
 | `mac` | 76 |
 | `media` | 6 |
 | `memory` | 12 |
 | `model_provider` | 78 |
-| `module_authoring` | 6 |
 | `module_activity` | 4 |
+| `module_authoring` | 6 |
 | `module_dependencies` | 9 |
-| `module_registry` | 4 |
 | `module_install` | 11 |
 | `module_lifecycle` | 11 |
+| `module_registry` | 4 |
 | `module_runtime` | 8 |
 | `module_validation` | 6 |
 | `notifications` | 7 |
 | `platform` | 2 |
 | `pmc_docs` | 4 |
-| `protocol` | 1 |
-| `registration` | 5 |
 | `procedural` | 3 |
 | `program_execution` | 6 |
 | `prompt_artifacts` | 6 |
+| `protocol` | 1 |
+| `registration` | 5 |
 | `repository_tree` | 6 |
 | `resource_kernel` | 25 |
 | `rust_crate` | 2 |
@@ -109,7 +112,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 585 |
+| `test_harness` | 598 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

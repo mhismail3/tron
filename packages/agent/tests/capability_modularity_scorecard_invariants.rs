@@ -12,7 +12,7 @@ const SCORECARD_PATH: &str = "packages/agent/docs/capability-modularity-scorecar
 const INVENTORY_PATH: &str = "packages/agent/docs/capability-modularity-inventory.tsv";
 const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-manifest.md";
 const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
-const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/mod.rs";
+const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const README_PATH: &str = "README.md";
 const EXPECTED_OPERATION_COUNT: usize = 170;
 
@@ -709,8 +709,8 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Current score:",
         "Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`",
         "Provider-visible surface: one tool, `capability::execute`",
-        "CMS-0 registry/dispatch baseline",
-        "CMS-8 docs and static gates",
+        "| CMS-0 | Registry/dispatch baseline |",
+        "| CMS-8 | Docs and static gates |",
         "Kernel Boundary Lockdown Evidence",
         "Binding Policy Evidence",
         "Adapter Seam Hardening Evidence",

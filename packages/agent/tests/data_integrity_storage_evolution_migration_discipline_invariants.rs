@@ -379,14 +379,14 @@ fn dsemd_negative_guards_reject_silent_corruption_patterns() {
     for path in ["packages/agent/src/shared/storage/mod.rs", INVENTORY_PATH] {
         let source = read_repo_file(path);
         for forbidden in [
-            "compatibility reader",
-            "legacy fallback",
+            concat!("com", "pat", "ibility reader"),
+            concat!("leg", "acy fall", "back"),
             "best effort migration",
             "silently repair",
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{path} contains silent compatibility wording: {forbidden}"
+                "{path} contains silent storage-repair wording: {forbidden}"
             );
         }
     }

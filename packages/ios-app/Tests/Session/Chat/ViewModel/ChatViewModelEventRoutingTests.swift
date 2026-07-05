@@ -107,27 +107,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         )
     }
 
-    private func makeCompactionResult(
-        success: Bool = true,
-        tokensBefore: Int,
-        tokensAfter: Int,
-        reason: String = "context_limit",
-        summary: String? = nil
-    ) -> CompactionPlugin.Result {
-        let ratio = tokensBefore > 0 ? Double(tokensAfter) / Double(tokensBefore) : 1.0
-        return CompactionPlugin.Result(
-            success: success,
-            tokensBefore: tokensBefore,
-            tokensAfter: tokensAfter,
-            compressionRatio: ratio,
-            reason: reason,
-            summary: summary,
-            estimatedContextTokens: nil,
-            preservedTurns: nil,
-            summarizedTurns: nil
-        )
-    }
-
     // MARK: - Text Delta Routing Tests
 
     func test_textDelta_routesToStreamingManager() {
@@ -619,88 +598,4 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(viewModel.messages.count, initialMessageCount + 2)
     }
 
-    // MARK: - Error Handling Tests
-
-    func test_agentError_addsErrorMessageToMessages() {
-        // Given
-        let initialCount = viewModel.messages.count
-
-        // When
-        viewModel.handleAgentError("Something went wrong")
-
-        // Then - error should be appended to messages array (not set on errorMessage property)
-        XCTAssertEqual(viewModel.messages.count, initialCount + 1)
-
-        if let lastMessage = viewModel.messages.last,
-           case .error(let errorText) = lastMessage.content {
-            XCTAssertEqual(errorText, "Something went wrong")
-        } else {
-            XCTFail("Expected error message")
-        }
-    }
-
-    func test_agentError_stopsProcessing() {
-        // Given
-        viewModel.isProcessing = true
-
-        // When
-        viewModel.handleAgentError("Error occurred")
-
-        // Then
-        XCTAssertFalse(viewModel.isProcessing)
-    }
-
-    // MARK: - Compaction Event Routing Tests
-
-    func test_compaction_addsNotificationMessage() {
-        // Given
-        let initialCount = viewModel.messages.count
-
-        // When
-        let result = makeCompactionResult(
-            tokensBefore: 100000,
-            tokensAfter: 50000,
-            reason: "context_limit",
-            summary: "Summarized previous messages"
-        )
-        viewModel.handleCompaction(result)
-
-        // Then - should add compaction notification
-        XCTAssertEqual(viewModel.messages.count, initialCount + 1)
-
-        if let lastMessage = viewModel.messages.last,
-           case .systemEvent(let event) = lastMessage.content,
-           case .compaction(let before, let after, _, _, _, _, _) = event {
-            XCTAssertEqual(before, 100000)
-            XCTAssertEqual(after, 50000)
-        } else {
-            XCTFail("Expected compaction notification message")
-        }
-    }
-
-    func test_compaction_updatesContextState() {
-        // When
-        let result = makeCompactionResult(
-            tokensBefore: 100000,
-            tokensAfter: 50000,
-            reason: "context_limit"
-        )
-        viewModel.handleCompaction(result)
-
-        // Then - context state should reflect new size
-        XCTAssertEqual(viewModel.contextState.lastTurnInputTokens, 50000)
-    }
-
-    // MARK: - Agent Ready (no auto-inject)
-
-    func test_agentReady_setsIdlePhase() {
-        // Given
-        viewModel.agentPhase = .processing
-
-        // When
-        viewModel.handleAgentReady()
-
-        // Then
-        XCTAssertEqual(viewModel.agentPhase, .idle)
-    }
 }

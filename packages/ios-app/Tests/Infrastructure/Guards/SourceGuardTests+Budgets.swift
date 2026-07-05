@@ -87,7 +87,7 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Tests/Session/Chat",
                 minimumFileCount: 36,
-                maximumFileCount: 45,
+                maximumFileCount: 49,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: [
                     "Coordinators",
@@ -121,12 +121,13 @@ extension SourceGuardTests {
             ),
             HierarchyBudget(
                 relativePath: "Tests/Session/Chat/ViewModel",
-                minimumFileCount: 1,
-                maximumFileCount: 1,
+                minimumFileCount: 2,
+                maximumFileCount: 2,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: [],
                 requiredFiles: [
                     "Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift",
+                    "Tests/Session/Chat/ViewModel/ChatViewModelTerminalEventRoutingTests.swift",
                 ]
             ),
         ]

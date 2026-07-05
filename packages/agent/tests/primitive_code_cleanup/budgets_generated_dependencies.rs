@@ -274,7 +274,7 @@ fn rust_dead_dependency_artifacts_stay_removed() {
     ] {
         assert!(
             !direct_dependency_declared(&cargo_toml, banned),
-            "Cargo.toml must not retain unused direct dependency `{banned}`"
+            "Cargo.toml must not retain unneeded direct dependency `{banned}`"
         );
     }
 

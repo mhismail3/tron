@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn operation_registry_names_have_dispatch_arms() {
-        let dispatch_source = include_str!("mod.rs");
+        let dispatch_source = include_str!("dispatch.rs");
         for operation in SUPPORTED_OPERATION_NAMES {
             let arm = format!("\"{operation}\" =>");
             assert!(

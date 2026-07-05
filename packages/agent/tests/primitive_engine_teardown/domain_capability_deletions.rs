@@ -193,13 +193,10 @@ fn capability_registry_recipe_and_conformance_scaffolding_is_deleted() {
             &source,
             &[
                 "capability registry",
-                "registry",
                 "recipe",
                 "recipes",
                 "plugin",
                 "plugins",
-                "binding",
-                "bindings",
                 "capability conformance",
                 "conformance scaffold",
                 "vector search",

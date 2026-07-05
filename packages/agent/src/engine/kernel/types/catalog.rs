@@ -167,25 +167,25 @@ pub enum CatalogChangeKind {
     WorkerRegistered,
     /// Worker metadata changed.
     WorkerUpdated,
-    /// Worker was removed.
+    /// Worker unregistered.
     WorkerUnregistered,
     /// Function was registered.
     FunctionRegistered,
     /// Function contract or metadata changed.
     FunctionUpdated,
-    /// Function was removed.
+    /// Function unregistered.
     FunctionUnregistered,
     /// Trigger type was registered.
     TriggerTypeRegistered,
     /// Trigger type contract or metadata changed.
     TriggerTypeUpdated,
-    /// Trigger type was removed.
+    /// Trigger type unregistered.
     TriggerTypeUnregistered,
     /// Trigger was registered.
     TriggerRegistered,
     /// Trigger config or metadata changed.
     TriggerUpdated,
-    /// Trigger was removed.
+    /// Trigger unregistered.
     TriggerUnregistered,
     /// Catalog entry visibility changed.
     VisibilityChanged,

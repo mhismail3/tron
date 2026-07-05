@@ -97,7 +97,7 @@ extension ChatView {
         }
 
         if !(await waitForInitialScrollProxy()) {
-            logger.warning("[INIT] scrollProxy did not become ready before reveal; continuing with fallback", category: .ui)
+            logger.warning("[INIT] scrollProxy did not become ready before reveal; continuing with bounded reveal", category: .ui)
         }
         guard isCurrent(ticket), !Task.isCancelled else { return }
 
@@ -157,7 +157,7 @@ extension ChatView {
             distanceFromBottom: initDistanceFromBottom
         )
         if !bottomSettled {
-            logger.warning("[INIT] revealing after bounded bottom-settle fallback; distance=\(initDistanceFromBottom) height=\(initContentHeight)", category: .ui)
+            logger.warning("[INIT] revealing after bounded bottom-settle attempts; distance=\(initDistanceFromBottom) height=\(initContentHeight)", category: .ui)
         }
 
         // Fade in all messages from the correct scroll position

@@ -136,7 +136,7 @@ final class NewSessionFlowTests: XCTestCase {
         ] {
             XCTAssertFalse(
                 combined.contains(fragment),
-                "workspace selector restored a broad legacy filesystem surface: \(fragment)"
+                "workspace selector exposed a broad filesystem surface: \(fragment)"
             )
         }
     }

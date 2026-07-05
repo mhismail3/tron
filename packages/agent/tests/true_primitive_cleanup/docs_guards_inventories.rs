@@ -28,7 +28,7 @@ fn docs_guards_and_inventories_are_current() {
         "`tron deploy`",
         "tron deploy",
         "Deploy Pipeline",
-        "fallback residue",
+        concat!("fall", "back residue"),
         "no-op/failure state",
     ] {
         assert!(

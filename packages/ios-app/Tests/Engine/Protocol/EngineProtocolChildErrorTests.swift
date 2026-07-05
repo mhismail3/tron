@@ -23,7 +23,7 @@ final class EngineProtocolChildErrorTests: XCTestCase {
         let json = """
         {
             "kind": "not_found",
-            "message": "legacy child error text",
+            "message": "noncanonical child error text",
             "details": {
                 "failure": {
                     "code": "CAPABILITY_NOT_FOUND",

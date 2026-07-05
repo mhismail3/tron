@@ -287,7 +287,7 @@ server settings shape and iOS controls together.
 | `SettingsState.swift` | retain | Keep only fields matching retained server settings. |
 | `EngineProtocolTypes+Settings.swift` | retain | Decode/update only retained server settings. |
 | `ConnectionSettingsPage.swift` | retain | Keep server pairing/provider/bootstrap controls. |
-| `AgentSettingsPage.swift` | retain | Retain only quick-session defaults. Autonomy, guardrails, hooks, prompt library, protected branches, queued-message controls, and plugin-source policy are deleted. |
+| `EngineSettingsPage.swift` | retain | Retain only effective server-owned defaults and engine policy controls. |
 | `SettingsView` and shared setting components | retain | Keep shell navigation/components after product pages are removed. |
 
 ## Deletion Checkpoint Order

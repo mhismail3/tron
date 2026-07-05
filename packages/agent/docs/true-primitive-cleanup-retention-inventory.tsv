@@ -882,6 +882,7 @@ packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift	im
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Pagination.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+RuntimeCallbacks.swift	implementation	ios_session	TPC-8	runtime callback wiring split from the chat view-model root
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Observation.swift	implementation	ios_session	TPC-8	observation binding lifecycle split from the chat view-model root to keep the root under hard budget
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+TurnLifecycleContext.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Parsing/CapabilityArgumentParser.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
@@ -1032,10 +1033,8 @@ packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.
 packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	implementation	ios_ui	TPC-7	generic runtime surface root kept under the TPC hard budget
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet+Sections.swift	implementation	ios_ui	TPC-8	model-picker provider, family, model, and reasoning sections split from the sheet root
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Settings/Pages/ContextSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/GoogleCloudRows.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ModelProviderSection.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1200,6 +1199,7 @@ packages/ios-app/Tests/Session/Chat/TextStreamConvergenceTests.swift	test	test_h
 packages/ios-app/Tests/Session/Chat/TurnLifecycleCoordinatorTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Chat/UIUpdateQueueTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelTerminalEventRoutingTests.swift	test	test_harness	TPC-10	terminal error compaction and agent-ready routing tests split from the chat event-routing owner
 packages/ios-app/Tests/Session/Parsing/CapabilityArgumentParserTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Timeline/Activity/SessionActivityStreamTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Timeline/Activity/ThinkingStateTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -1272,8 +1272,6 @@ packages/ios-app/Tests/UI/Onboarding/BindingPasteAwareTests.swift	test	test_harn
 packages/ios-app/Tests/UI/Onboarding/OnboardingFlowLayoutTests.swift	test	test_harness	SACB-POST-2	tracked onboarding layout guard classified during inventory repair
 packages/ios-app/Tests/UI/Onboarding/OnboardingStateTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/RuntimeSurfaces/GeneratedUIRendererTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
-packages/ios-app/Tests/UI/Settings/AgentContextSettingsPageTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
-packages/ios-app/Tests/UI/Settings/AgentSettingsPageLayoutTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Settings/ProviderAssetIconsTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Settings/ProvidersSettingsPageTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Settings/ProvidersStatusHelpersTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -1652,6 +1650,7 @@ packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	s
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	implementation	ios_ui	TPC-10/P3MSA-S23H	Accepted Phase 3 Slice 23H module activity cockpit views retained under UI ownership as a thin renderer of the server-owned projection.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	implementation	ios_ui	Phase2-Slice1	Agent cockpit discovery card and report views retained under UI ownership.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift	implementation	ios_ui	TPC-hardening	capability operation drill-down sheets split from the cockpit discovery summary owner
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
@@ -1668,6 +1667,7 @@ packages/ios-app/Tests/Session/Timeline/Messages/CapabilityEvidencePresentationT
 packages/ios-app/Tests/Session/Timeline/Messages/LocalChatNotificationTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTestFixtures.swift	test	test_harness	TPC-hardening	cockpit repository doubles and DTO builders split from the view-model spec owner
 packages/ios-app/Tests/UI/Chat/AttachmentMenuTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/UI/Chat/ChatAffordanceVisualRenderTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/UI/Chat/RecentInputHistoryTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
@@ -1916,7 +1916,6 @@ packages/agent/src/domains/prompt_artifacts/service.rs	implementation	prompt_art
 packages/agent/src/domains/prompt_artifacts/tests.rs	test	test_harness	TPC-10/P2AER-S16A	focused Slice 16A prompt-artifact bounds redaction retention resource authority scope lifecycle selector and idempotency coverage
 packages/agent/src/domains/prompt_artifacts/validation.rs	implementation	prompt_artifacts	TPC-10/P2AER-S16A	prompt-artifact raw-prompt provider-payload path secret idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/prompt_artifact_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S16A	built-in prompt_artifact resource schema
-packages/agent/src/domains/capability/operations/module_registry.rs	implementation	capability_execute	TPC-10/P3MSA-S23A	provider execute adapter for provider-safe module_manifest list and inspect operations
 packages/agent/src/domains/module_registry/manifest.rs	implementation	module_registry	TPC-10/P3MSA-S23A	module manifest schema bounds provider-safety and stored payload validation owner
 packages/agent/src/domains/module_registry/mod.rs	implementation	module_registry	TPC-10/P3MSA-S23A	module-registry domain docs and registration boundary for inspect-only manifest foundation
 packages/agent/src/domains/module_registry/projection.rs	implementation	module_registry	TPC-10/P3MSA-S23A	bounded provider-safe module manifest summary and detail projection owner
@@ -2058,6 +2057,7 @@ packages/agent/tests/documentation_evidence_scorecard_integrity/branch_handoff.r
 packages/agent/src/engine/durability/resources/context_control_definitions.rs	implementation	resource_kernel	TPC-10/context-control	built-in context-control snapshot action and epoch resource schemas for metadata-only context custody
 packages/ios-app/Sources/Engine/Transport/Clients/ContextControlClient.swift	implementation	ios_chat_ui	TPC-10/context-control	first-party context-control transport client for snapshot compact clear action list and inspect calls
 packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheet.swift	implementation	ios_chat_ui	TPC-10/context-control	context-control mobile sheet surface with compact clear composition memory and audit drill-in
+packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheetSupport.swift	implementation	ios_chat_ui	TPC-hardening	session briefing section card row and toolbar primitives split from the context-control sheet workflow owner
 packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheetModels.swift	implementation	ios_chat_ui	TPC-10/context-control	bounded context-control DTO display models and proof-line parsing for the mobile sheet
 packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationArgumentsDeltaPlugin.swift	implementation	ios_events	TPC-10/event-surface	capability invocation argument-delta event plugin retained as normalized chat-state adapter
 packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationBatchPlugin.swift	implementation	ios_events	TPC-10/event-surface	capability invocation batch event plugin retained as normalized chat-state adapter
@@ -2068,3 +2068,51 @@ packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionForkedPlugin.swift
 packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingEndPlugin.swift	implementation	ios_events	TPC-10/event-surface	thinking end event plugin retained as normalized timeline adapter
 packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingStartPlugin.swift	implementation	ios_events	TPC-10/event-surface	thinking start event plugin retained as normalized timeline adapter
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+EventSurface.swift	test	test_harness	TPC-10/event-surface	iOS event surface source guard retained for primitive-owned event plugin drift coverage
+packages/agent/docs/agent-briefing-autonomy-cockpit-evidence-manifest.md	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
+packages/agent/docs/agent-briefing-autonomy-cockpit-scorecard.md	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
+packages/agent/docs/capability-modularity-evidence-manifest.md	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
+packages/agent/docs/capability-modularity-inventory.tsv	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
+packages/agent/docs/capability-modularity-scorecard.md	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
+packages/agent/src/domains/agent_briefing/contract.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/agent_briefing/mod.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/agent_briefing/projection.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/agent_briefing/service.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/agent_briefing/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/domains/capability/capability_binding_contract.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability/operations/capability_binding.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability/operations/dispatch.rs	implementation	capability_execute	TPC-hardening	capability execute dispatcher split from operations module to preserve registry and dispatch parity ownership
+packages/agent/src/domains/capability_binding/authority.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/cockpit_visibility.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/contract.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/mod.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/payload_safety.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/projection.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/records.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/resource_store.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/service.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/shadow_trial.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/domains/capability_binding/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/domains/capability_binding/validation.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
+packages/agent/src/engine/durability/resources/capability_binding_definitions.rs	primitive	engine	TPC-2	engine/shared primitive substrate retained under primitive ownership
+packages/agent/tests/capability_modularity_scorecard_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+AgentBriefing.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Session/Chat/Navigation/ChatMessageVisibilityPolicy.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Session/Chat/Navigation/ChatTranscriptRevealPolicy.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Session/Chat/Navigation/ChatViewTaskCoordinator.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Session/Chat/Navigation/ScrollViewportAnchor.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentBriefingState.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitPresentation.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/UI/AgentBriefing/AgentBriefingViews.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
+packages/ios-app/Tests/Session/Chat/ChatViewModelObservationTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/ChatViewModelPaginationTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/Navigation/ChatMessageVisibilityPolicyTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/Navigation/ChatTranscriptRevealPolicyTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/Navigation/ChatViewTaskCoordinatorTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/Navigation/ScrollHistoryAutoloadTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/Navigation/ScrollViewportAnchorTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentBriefingViewModelTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/UI/Settings/EngineSettingsOwnershipTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/UI/Settings/EngineSettingsPageLayoutTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage

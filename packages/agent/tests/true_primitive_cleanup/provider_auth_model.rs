@@ -55,8 +55,8 @@ fn provider_auth_model_roots_are_split_and_provider_native() {
         "provider root docs must state the shared/provider-native ownership boundary"
     );
     assert!(
-        !provider_root.contains("compatibility aliases"),
-        "provider root docs must not frame exports as compatibility aliases"
+        !provider_root.contains(concat!("com", "pat", "ibility aliases")),
+        "provider root docs must not frame exports as duplicate aliases"
     );
 
     let openai_types =

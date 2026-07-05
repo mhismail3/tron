@@ -1,9 +1,8 @@
 //! Domain worker registration.
 //!
-//! This module registers the retained in-process workers for the primitive
-//! engine branch. Startup intentionally excludes unapproved retired product
-//! domains; restored Phase 2 surfaces must enter through source-backed domain
-//! contracts and inventory lineage rather than old product modules.
+//! This module registers the in-process workers for the primitive engine.
+//! Product surfaces enter startup through source-backed domain contracts and
+//! inventory lineage.
 //!
 //! `capability` owns the only model-facing tool, `capability::execute`, and
 //! that tool performs direct primitive operations rather than catalog routing.

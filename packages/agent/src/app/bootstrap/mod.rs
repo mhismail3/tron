@@ -326,7 +326,6 @@ async fn init_model_responder_factory(
         .is_ok();
     if startup_auth_ok {
         tracing::info!(
-            provider = settings.server.default_provider.as_str(),
             model = settings.server.default_model.as_str(),
             "auth available for default model"
         );

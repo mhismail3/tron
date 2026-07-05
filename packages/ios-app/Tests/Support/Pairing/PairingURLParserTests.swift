@@ -40,7 +40,7 @@ struct PairingURLParserTests {
         }
     }
 
-    @Test("Unrecognized query parameters are dropped (forward-compat)")
+    @Test("Unrecognized query parameters are dropped")
     func ignoresUnknownParams() {
         let url = "tron://pair?host=h&port=9&token=t&futureFlag=enabled"
         #expect((try? PairingURLParser.parse(url).get()) != nil)

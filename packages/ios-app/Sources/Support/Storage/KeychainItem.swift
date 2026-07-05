@@ -28,7 +28,7 @@ struct KeychainItem {
 
     let service: String
     let account: String
-    /// Optional Keychain access group. Currently unused (see type doc).
+    /// Optional Keychain access group supplied by callers that need a non-default access group.
     let accessGroup: String?
 
     init(service: String, account: String, accessGroup: String? = nil) {

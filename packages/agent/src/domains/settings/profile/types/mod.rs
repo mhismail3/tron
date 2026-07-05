@@ -193,7 +193,6 @@ mod tests {
         assert!(json.get("version").is_some());
         assert!(json.get("api").is_some());
 
-        // Dead "models" key removed
         assert!(json.get("models").is_none());
 
         // Nested fields are camelCase
@@ -201,7 +200,6 @@ mod tests {
         assert!(server.get("heartbeatIntervalMs").is_some());
         assert!(server.get("defaultModel").is_some());
 
-        // Removed fields no longer present
         assert!(server.get("wsPort").is_none());
         assert!(server.get("healthPort").is_none());
         assert!(server.get("host").is_none());
@@ -209,8 +207,8 @@ mod tests {
         assert!(server.get("tailscaleIp").is_none());
         assert!(server.get("anthropicAccount").is_none());
 
-        let removed_policy_key = ["guard", "rails"].concat();
-        assert!(json.get(&removed_policy_key).is_none());
+        let unsupported_policy_key = ["guard", "rails"].concat();
+        assert!(json.get(&unsupported_policy_key).is_none());
     }
 
     #[test]
@@ -280,10 +278,10 @@ mod tests {
     }
 
     #[test]
-    fn settings_reject_removed_policy_section() {
-        let removed_policy_key = ["guard", "rails"].concat();
+    fn settings_reject_unknown_policy_section() {
+        let unsupported_policy_key = ["guard", "rails"].concat();
         let json = serde_json::json!({
-            removed_policy_key.clone(): {
+            unsupported_policy_key.clone(): {
                 "audit": {
                     "enabled": true,
                     "maxEntries": 200
@@ -292,7 +290,7 @@ mod tests {
         });
         let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
 
-        assert!(err.to_string().contains(&removed_policy_key));
+        assert!(err.to_string().contains(&unsupported_policy_key));
     }
 
     // ── validate ───────────────────────────────────────────────────
@@ -334,14 +332,14 @@ mod tests {
     }
 
     #[test]
-    fn settings_reject_removed_prompt_store_section() {
-        let removed_prompt_key = ["prompt", "Library"].concat();
+    fn settings_reject_unknown_prompt_store_section() {
+        let unsupported_prompt_key = ["prompt", "Library"].concat();
         let json = serde_json::json!({
-            removed_prompt_key.clone(): { "historyEnabled": false }
+            unsupported_prompt_key.clone(): { "historyEnabled": false }
         });
         let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
 
-        assert!(err.to_string().contains(&removed_prompt_key));
+        assert!(err.to_string().contains(&unsupported_prompt_key));
     }
 
     #[test]

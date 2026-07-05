@@ -325,9 +325,13 @@ fn cockpit_decodes_live_catalog_resources_and_runtime_surfaces() {
             "static func refreshFailedOverview(",
             "static func actions(for package: AgentCockpitPackageRow)",
             "static func confirmation(for action: AgentCockpitAction)",
-            "Catalog Degraded",
+            "kind: .degraded",
             "guard kind != .uiSurface else { return nil }",
         ],
+    );
+    assert_contains_all(
+        "packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitPresentation.swift",
+        &["Catalog Degraded", "Capabilities Need Review"],
     );
 
     assert_contains_all(

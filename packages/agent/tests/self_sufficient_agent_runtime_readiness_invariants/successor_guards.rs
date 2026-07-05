@@ -434,10 +434,17 @@ fn evidence_manifest_records_required_commands_without_placeholders() {
 
 #[test]
 fn successor_terms_are_classified_and_do_not_claim_implementation() {
+    let inventory_classified_paths: BTreeSet<String> = parse_inventory_rows()
+        .into_iter()
+        .map(|row| row[1].clone())
+        .collect();
     let mut unclassified = Vec::new();
     for path in active_text_files() {
         let source = read_repo_file(&path);
-        if has_successor_term(&source) && !classified_successor_term_path(&path, &source) {
+        if has_successor_term(&source)
+            && !classified_successor_term_path(&path, &source)
+            && !inventory_classified_paths.contains(&path)
+        {
             unclassified.push(path.clone());
         }
         if matches!(

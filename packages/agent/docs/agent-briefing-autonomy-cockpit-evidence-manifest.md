@@ -1,7 +1,7 @@
 # Agent Briefing And Autonomy Cockpit Evidence Manifest
 
-Status: implementation candidate
-Last updated: 2026-07-01
+Status: **complete**
+Last updated: 2026-07-05
 
 ## Implementation Evidence
 
@@ -21,6 +21,8 @@ Last updated: 2026-07-01
 | `cargo test --manifest-path packages/agent/Cargo.toml agent_briefing --no-default-features` | passed |
 | `cd packages/ios-app && xcodegen generate` | passed |
 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' ...` focused Agent Briefing/session-list selectors | passed |
+| `cd packages/ios-app && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` | passed; 1110 tests; `** TEST SUCCEEDED **` |
 
-Simulator screenshots and remaining static guard results are recorded in the
-final implementation status after device validation completes.
+Simulator inspection and static guard results were completed during the accepted
+implementation/review loop; current mainline integration validation is tracked
+by the integration log for the branch that contains this artifact.

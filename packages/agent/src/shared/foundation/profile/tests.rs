@@ -37,7 +37,6 @@ fn bundled_default_profile_parses_as_primitive_profile() {
     assert!(spec.managed);
     assert_eq!(spec.auth_profile, DEFAULT_AUTH_PROFILE);
     assert_eq!(spec.settings.server.default_model, "claude-sonnet-4-6");
-    assert_eq!(spec.settings.server.default_provider, "anthropic");
 }
 
 #[test]
@@ -100,13 +99,13 @@ authProfile = "default"
 inherits = []
 
 [settings.server]
-defaultProvider = "openai"
+defaultModel = "gpt-5.5"
 "#,
     );
 
     let resolved = resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
 
-    assert_eq!(resolved.spec.settings.server.default_provider, "openai");
+    assert_eq!(resolved.spec.settings.server.default_model, "gpt-5.5");
 }
 
 #[test]
@@ -126,7 +125,7 @@ authProfile = "default"
 inherits = []
 
 [settings.server]
-defaultProvider = "openai"
+defaultModel = "gpt-5.5"
 
 [primitiveSurfacePolicies.bad]
 allowedPrimitives = ["execute"]
@@ -135,7 +134,7 @@ allowedPrimitives = ["execute"]
 
     let resolved = resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
 
-    assert_eq!(resolved.spec.settings.server.default_provider, "openai");
+    assert_eq!(resolved.spec.settings.server.default_model, "gpt-5.5");
 }
 
 #[test]
@@ -193,8 +192,8 @@ chars = ["*"]
         vec!["*".to_string()]
     );
     assert_eq!(
-        resolved.spec.settings.server.default_provider, "anthropic",
-        "sibling settings should survive child overlays"
+        resolved.spec.settings.server.default_model,
+        "claude-sonnet-4-6"
     );
 }
 

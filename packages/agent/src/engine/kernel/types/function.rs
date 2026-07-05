@@ -105,7 +105,7 @@ pub enum IdempotencyKeySource {
 pub enum ReplayBehavior {
     /// Return the previous result.
     ReturnPrevious,
-    /// Treat as no-op.
+    /// Accept the duplicate without changing state.
     NoOp,
     /// Reject duplicate.
     Reject,

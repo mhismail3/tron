@@ -1,7 +1,8 @@
 # Agent Briefing And Autonomy Cockpit Scorecard
 
-Status: implementation candidate
-Last updated: 2026-07-01
+Status: **complete**
+Current score: **100/100**
+Last updated: 2026-07-05
 
 ## Scope
 
@@ -27,14 +28,15 @@ policy and make future non-iOS clients invent their own narrative semantics.
 
 ## Acceptance Checks
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| Project-grouped sessions preserved | passed | `SessionSidebar` still renders `SessionListWorkspaceGroup.groups(from:)` before session rows. |
-| Main dashboard stays thin | passed | Dashboard consumes `AgentBriefingViewModel`/`AgentBriefingDashboardBand`, not Runtime Cockpit tabs or lifecycle action controls. |
-| Server truth is scoped | passed | `agent_briefing::overview` calls `module_activity::overview`, which fails closed without trusted session/workspace causal context. |
-| No autonomy behavior | passed | Rust projection has no resource creation, compact/clear, schedule, install, launch, or mutation path; tests assert policy flags. |
-| Session Briefing keeps controls | passed | `ContextControlSheet` now leads with a session briefing card and retains model picker plus compact/clear/context audit sections. |
-| Runtime Cockpit remains diagnostics | passed | Existing `AgentCockpitSheet` remains mounted from Servers -> Diagnostics only. |
+| ID | Check | Weight | Status | Evidence |
+| --- | --- | ---: | --- | --- |
+| ABAC-0 | Project-grouped dashboard backbone | 10 | passed | `SessionSidebar` still renders `SessionListWorkspaceGroup.groups(from:)` before session rows. |
+| ABAC-1 | Read-only server projection boundary | 15 | passed | `agent_briefing::overview` calls `module_activity::overview`, fails closed without trusted scope, and does not create durable state. |
+| ABAC-2 | Main dashboard progressive disclosure | 15 | passed | Dashboard consumes `AgentBriefingViewModel`/`AgentBriefingDashboardBand`, not Runtime Cockpit tabs or lifecycle action controls. |
+| ABAC-3 | Session Briefing controls retained | 15 | passed | `ContextControlSheet` leads with a session briefing card and keeps model picker, compact/clear, context audit, and memory sections. |
+| ABAC-4 | Evidence, redaction, and degraded states | 15 | passed | Briefing DTOs carry provider-safe evidence summaries; UI renders empty/degraded states without raw logs, commands, paths, grants, or secrets. |
+| ABAC-5 | Focused tests and static guard coverage | 20 | passed | Rust `agent_briefing` tests, Swift briefing/session-list tests, CSD/CPE/DESI static gates, and simulator inspection cover the implemented slice. |
+| ABAC-6 | Deferred scope remains explicit | 10 | passed | Autonomous controls, memory editing, approval queues, runtime execution control, and package promotion remain outside this slice. |
 
 ## Deferred Scope
 

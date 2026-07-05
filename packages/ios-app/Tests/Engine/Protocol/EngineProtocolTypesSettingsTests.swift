@@ -10,7 +10,6 @@ struct ServerSettingsTests {
         let json = """
         {
             "server": {
-                "defaultProvider": "google",
                 "defaultModel": "claude-opus-4-6",
                 "defaultWorkspace": "/projects",
                 "tailscaleIp": "100.64.0.7",
@@ -31,7 +30,6 @@ struct ServerSettingsTests {
         """
 
         let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
-        #expect(settings.defaultProvider == "google")
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.tailscaleIp == "100.64.0.7")
@@ -47,7 +45,6 @@ struct ServerSettingsTests {
     @Test("decode fixture server payload uses primitive defaults")
     func fixtureServerPayloadDefaults() throws {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
-        #expect(settings.defaultProvider == "anthropic")
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.tailscaleIp == nil)
@@ -64,7 +61,6 @@ struct ServerSettingsTests {
     func partialNesting() throws {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
-        #expect(settings.defaultProvider == "anthropic")
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.transcriptionEnabled == false)
     }
@@ -124,7 +120,7 @@ struct ServerSettingsTests {
     @Test("ServerSettingsUpdate encodes primitive structure")
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
-        update.server = .init(defaultProvider: "google", defaultModel: "claude-opus-4-6")
+        update.server = .init(defaultModel: "claude-opus-4-6")
         update.observability = .init(logLevel: "debug")
         update.storage = .init(retentionEnabled: false)
         update.server?.transcription = .init(enabled: true)
@@ -133,7 +129,6 @@ struct ServerSettingsTests {
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
 
         let server = json["server"] as? [String: Any]
-        #expect(server?["defaultProvider"] as? String == "google")
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")
         let transcription = server?["transcription"] as? [String: Any]
         #expect(transcription?["enabled"] as? Bool == true)

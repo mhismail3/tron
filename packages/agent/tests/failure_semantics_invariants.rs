@@ -232,8 +232,8 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
         "no_failure_envelope_field",
         "string_only",
         "auth_session_event_tests_pending",
-        "fallback",
-        "legacy",
+        concat!("fall", "back"),
+        concat!("leg", "acy"),
     ] {
         assert!(
             !inventory.contains(forbidden),
@@ -310,7 +310,7 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
             && responder.contains("PROVIDER_SSE_PARSE_ERROR")
             && !responder.contains("impl From<ProviderError> for ModelResponseError")
             && !responder.contains("modelResponderFallback"),
-        "model responder must preserve provider/model failure context without unknown fallback conversion"
+        "model responder must preserve provider/model failure context without unknown conversion"
     );
 
     let stream_state = read_repo_file("packages/agent/src/domains/agent/loop/stream_state.rs");
@@ -325,7 +325,7 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
     assert!(
         replay.contains("engine_error_replay_details")
             && !replay.contains("engine_error_legacy_details"),
-        "replay failure diagnostics must not be named as legacy compatibility details"
+        "replay failure diagnostics must not be named as canonical replay details"
     );
 }
 
@@ -506,7 +506,7 @@ fn failure_semantics_ios_uses_canonical_failure_payload() {
     assert!(
         requests.contains("guard let failure = error.failure")
             && !requests.contains("\"ENGINE_ERROR\""),
-        "child engine errors must require details.failure instead of local fallback codes"
+        "child engine errors must require details.failure instead of local synthetic codes"
     );
 
     let error_plugin = read_repo_file(

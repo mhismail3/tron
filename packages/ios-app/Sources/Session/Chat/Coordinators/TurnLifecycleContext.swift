@@ -9,9 +9,6 @@ import Foundation
 /// - StreamingManaging: Streaming state management
 /// - CapabilityInvocationStateTracking: Capability invocation state (currentCapabilityInvocationMessages, currentTurnCapabilityInvocations, etc.)
 ///
-/// Note: SessionIdentifiable was removed as sessionId is not used by TurnLifecycleCoordinator.
-/// Note: streamingText removed - passed as parameter to handleComplete instead.
-/// Note: updateTotalTokenUsage removed - not called by coordinator.
 @MainActor
 protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingManaging, CapabilityInvocationStateTracking, MessageMutating {
 

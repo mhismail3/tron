@@ -474,7 +474,7 @@ extension SourceGuardTests {
             )
             #expect(
                 chipStyleStrokeMatches.isEmpty,
-                "\(url.lastPathComponent) routes removed chipStyle strokeOpacity compatibility through the glass-only API"
+                "\(url.lastPathComponent) routes old chipStyle strokeOpacity through the glass-only API"
             )
         }
     }

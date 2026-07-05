@@ -18,11 +18,11 @@ extension SourceGuardTests {
             "Tests/Engine/Protocol/EngineProtocolTypesTests.swift",
         ]
         let forbiddenNeedles: [(String, String)] = [
-            ("Image" + "Attachment", "legacy image-only prompt DTO"),
-            ("last" + "Images", "legacy image-only mock state"),
-            ("last" + "Send" + "Prompt" + "Images", "legacy image-only repository mock state"),
-            ("images:", "legacy image-only prompt argument"),
-            (#""images""#, "legacy image-only encoded prompt field"),
+            ("Image" + "Attachment", "image-only prompt DTO"),
+            ("last" + "Images", "image-only mock state"),
+            ("last" + "Send" + "Prompt" + "Images", "image-only repository mock state"),
+            ("images:", "image-only prompt argument"),
+            (#""images""#, "image-only encoded prompt field"),
         ]
 
         for relativePath in checkedFiles {
@@ -126,7 +126,7 @@ extension SourceGuardTests {
         }
     }
 
-    @Test("Runtime cockpit has no fixed legacy product panels")
+    @Test("Runtime cockpit has no fixed product panels")
     func testRuntimeCockpitHasNoFixedLegacyProductPanels() throws {
         let iosRoot = iosAppRoot()
         let sourceRoots = [
@@ -185,7 +185,7 @@ extension SourceGuardTests {
             ("Product" + "Surface" + "DTO", "broad product surface DTO"),
             ("Product" + "Table", "product-owned table model"),
             ("Product" + "Event", "product event catalog expansion"),
-            ("Legacy" + "Product", "legacy product compatibility shim"),
+            ("Legacy" + "Product", "old product shim"),
             ("Runtime" + "Product", "runtime product DTO bucket"),
             ("Broad" + "Product", "broad product DTO bucket"),
             ("product" + "_dto", "product DTO table or payload name"),

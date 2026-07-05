@@ -515,7 +515,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var hasActiveStreaming: Bool = false
     var currentModel: String = "claude-3-sonnet"
     var agentPhase: AgentPhase = .idle
-    // catchingUpMessageId removed — replaced by sequence-based reconstruction
     var sessionId: String = "test-session"
 
     // Context state tracking

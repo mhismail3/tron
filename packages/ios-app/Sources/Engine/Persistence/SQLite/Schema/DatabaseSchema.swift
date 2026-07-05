@@ -143,8 +143,6 @@ enum DatabaseSchema {
         try addColumnIfNotExists(db: db, table: "sessions", column: "server_origin", definition: "TEXT")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(server_origin)")
 
-        // Migration (v11): Drop is_chat column. It was always written as 0,
-        // always read and discarded — dead column, removed with schema v11.
         if try columnExists(table: "sessions", column: "is_chat", db: db) {
             try execute(db: db, "ALTER TABLE sessions DROP COLUMN is_chat")
         }

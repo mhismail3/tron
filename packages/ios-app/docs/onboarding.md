@@ -166,9 +166,7 @@ host and port.
   Saved service keys use the same right-aligned masked preview layout as
   optional model providers.
 - **Default model** reuses `ModelPickerSheet`, then writes
-  `server.defaultModel`. The retained `server.defaultProvider` field is decoded
-  for settings parity, but iOS does not expose it as a control because provider
-  routing is inferred from the selected model.
+  `server.defaultModel`. Provider routing is inferred from the selected model.
 
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
@@ -264,13 +262,9 @@ authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
 The Engine settings sheet follows the same top summary-card pattern and divides
 server settings by ownership. Engine owns the retained quick-session defaults
-that still exist as actionable iOS controls: model and workspace. The retained
-`server.defaultProvider` field stays in the server schema, but iOS does not
-surface it because runtime provider selection follows the selected model.
-Context controls retain context-management behavior: compaction only. Deleted
-plugin-source, hook, rules, memory-retain, prompt-history, and prompt-library
-controls must not reappear as separate Settings destinations or destructive
-actions.
+that exist as actionable iOS controls: model and workspace.
+Context management remains session-scoped through the chat pill and Context
+Control surfaces instead of Settings.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a

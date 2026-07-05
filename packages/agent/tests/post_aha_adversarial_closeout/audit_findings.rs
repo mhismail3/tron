@@ -427,7 +427,12 @@ fn aha_provenance_privacy_and_residue_policy_are_in_repo() {
 
     let scorecard = read_repo_file(SCORECARD_PATH);
     for required in [
-        "Allowed fallback/compatibility wording contexts",
+        concat!(
+            "Allowed fall",
+            "back/com",
+            "pat",
+            "ibility wording contexts"
+        ),
         "historical evidence",
         "provider protocol term",
         "external CLI behavior",

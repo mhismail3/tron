@@ -40,9 +40,8 @@ struct PairedServer: Codable, Identifiable, Equatable, Hashable {
 
 /// iOS-local source of truth for paired servers and active selection.
 ///
-/// There is intentionally no migration from the removed server-side pairing
-/// model. A fresh store starts empty, which prevents the app from silently
-/// dialing localhost when no server has been paired on this device.
+/// A fresh store starts empty, which prevents the app from silently dialing
+/// localhost when no server has been paired on this device.
 @Observable
 @MainActor
 final class PairedServerStore {

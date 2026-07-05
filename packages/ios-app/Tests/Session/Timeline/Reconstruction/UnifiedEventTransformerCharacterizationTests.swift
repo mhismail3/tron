@@ -87,13 +87,13 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
         }
     }
 
-    func testLegacyOpenAIThinkingBlocksRenderAsReasoningSummary() {
+    func testKindlessOpenAIThinkingBlocksRenderAsReasoningSummary() {
         let events: [RawEvent] = [
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     [
                         "type": "thinking",
-                        "thinking": "Provider-authored summary from a legacy event without a kind field."
+                        "thinking": "Provider-authored summary from an event without a kind field."
                     ],
                     ["type": "text", "text": "Done"]
                 ]),
@@ -107,11 +107,11 @@ final class UnifiedEventTransformerCharacterizationTests: UnifiedEventTransforme
 
         XCTAssertEqual(messages.count, 2)
         if case .thinking(let visible, _, let isStreaming, let kind) = messages[0].content {
-            XCTAssertEqual(visible, "Provider-authored summary from a legacy event without a kind field.")
+            XCTAssertEqual(visible, "Provider-authored summary from an event without a kind field.")
             XCTAssertFalse(isStreaming)
             XCTAssertEqual(kind, .reasoningSummary)
         } else {
-            XCTFail("Expected legacy OpenAI reasoning summary content")
+            XCTFail("Expected OpenAI reasoning summary content")
         }
     }
 

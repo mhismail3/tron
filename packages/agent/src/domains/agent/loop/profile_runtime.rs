@@ -253,7 +253,7 @@ mod tests {
         let current = runtime.current();
 
         assert_eq!(current.profile_name(), NORMAL_PROFILE);
-        assert_eq!(current.settings.server.default_provider, "anthropic");
+        assert_eq!(current.settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(current.execution_spec().auth_profile, "default");
         assert!(current.execution_spec().auth_registry.is_some());
     }

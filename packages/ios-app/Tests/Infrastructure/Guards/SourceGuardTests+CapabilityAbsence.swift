@@ -3,7 +3,7 @@ import Foundation
 
 extension SourceGuardTests {
 
-    @Test("Capability-native UI has no legacy active tool models")
+    @Test("Capability-native UI has no old active tool models")
     func testCapabilityNativeUIHasNoLegacyActiveToolModels() throws {
         let forbidden: [(String, String)] = [
             ("Tool" + "Descriptor" + "Catalog", "retired descriptor catalog"),
@@ -12,9 +12,9 @@ extension SourceGuardTests {
             ("Tool" + "Result" + "Data", "retired active result model"),
             ("Command" + "Tool" + "Chip", "retired command-tool chip"),
             ("Command" + "Tool" + "Status", "retired command-tool status"),
-            ("Legacy" + "Tool", "legacy tool compatibility naming"),
-            ("Tool" + "Fallback", "tool fallback compatibility naming"),
-            ("Compatibility" + "Tool", "tool compatibility naming"),
+            ("Legacy" + "Tool", "old tool naming"),
+            ("Tool" + "Fallback", "old tool naming"),
+            ("Compatibility" + "Tool", "old tool naming"),
             ("tool" + "." + "call", "retired tool event type"),
             ("tool" + "." + "result", "retired tool event type"),
             ("tool" + "." + "progress", "retired tool event type"),

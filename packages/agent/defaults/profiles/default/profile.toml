@@ -57,7 +57,6 @@ maxDatabaseMb = 512
 [settings.server]
 heartbeatIntervalMs = 30000
 defaultModel = "claude-sonnet-4-6"
-defaultProvider = "anthropic"
 
 [settings.server.transcription]
 enabled = false

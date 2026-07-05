@@ -19,8 +19,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Low,
             Some(READ_SCOPE),
         )
-        .description("Read-only bounded agent briefing projection for native dashboard clients")
-        .tags(vec!["agent", "briefing", "dashboard", "read_only"])
+        .description("Read-only bounded agent briefing projection for native app clients")
+        .tags(vec!["agent", "briefing", "app_briefing", "read_only"])
         .request_schema(json!({
             "type": "object",
             "additionalProperties": false,

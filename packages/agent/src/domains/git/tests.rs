@@ -1045,7 +1045,7 @@ fn git_branch_start_symbolic_head_failure_rolls_back_created_branch_ref() {
 
     let error = create_branch_and_move_head_with_runner(
         &runner,
-        Path::new("/unused"),
+        Path::new("/test-cwd"),
         previous_branch_ref,
         branch_ref,
         expected_head,
@@ -1090,7 +1090,7 @@ fn git_branch_start_symbolic_head_failure_reports_guarded_rollback_failure() {
 
     let error = create_branch_and_move_head_with_runner(
         &runner,
-        Path::new("/unused"),
+        Path::new("/test-cwd"),
         previous_branch_ref,
         branch_ref,
         expected_head,

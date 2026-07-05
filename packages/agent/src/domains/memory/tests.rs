@@ -1039,10 +1039,10 @@ async fn query_and_decision_evidence_reject_wrong_scope_kind_stale_and_raw_mater
 }
 
 #[tokio::test]
-async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
+async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
     let ctx = make_test_context();
-    let query_resource_id = "memory_query:legacy-authority-evidence-query";
-    let decision_resource_id = "memory_decision:legacy-authority-evidence-decision";
+    let query_resource_id = "memory_query:private-authority-evidence-query";
+    let decision_resource_id = "memory_decision:private-authority-evidence-decision";
     create_legacy_memory_evidence_resource(
         &ctx,
         query_resource_id,
@@ -1054,16 +1054,16 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
             "intent": {
                 "kind": "candidate_refs_only",
                 "proof": "safe-query-proof",
-                "rawGrantId": "raw-query-legacy-grant",
+                "rawGrantId": "raw-query-private-grant",
                 "authorityGrantId": "raw-query-grant",
                 "nested": {
                     "allowedAuthorityScopes": ["raw-query-scope"],
-                    "sourceGrantId": "source-query-legacy-grant"
+                    "sourceGrantId": "source-query-private-grant"
                 }
             },
             "filters": {
                 "scope": "current_session",
-                "actorGrantId": "actor-query-legacy-grant",
+                "actorGrantId": "actor-query-private-grant",
                 "rawAuthorityId": "raw-query-authority"
             },
             "engineId": "resource-backed-memory",
@@ -1096,24 +1096,24 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
             "sourceRefs": [{
                 "kind": "trace",
                 "id": "safe-decision-source",
-                "sourceGrantId": "source-decision-legacy-grant",
+                "sourceGrantId": "source-decision-private-grant",
                 "authorityGrantId": "raw-decision-source-grant"
             }],
             "promptInclusion": {
                 "appliedToPrompt": false,
                 "boundedPreviewSnippetsOnly": true,
-                "rawGrantId": "raw-decision-legacy-grant",
+                "rawGrantId": "raw-decision-private-grant",
                 "allowedAuthorityScopes": ["raw-decision-scope"]
             },
             "retentionEvidence": {
                 "automaticRetentionPerformed": false,
                 "proof": "safe-retention-proof",
-                "actorGrantId": "actor-decision-legacy-grant",
+                "actorGrantId": "actor-decision-private-grant",
                 "rawAuthorityId": "raw-decision-authority"
             },
             "policyEvidence": {
                 "mode": "active",
-                "sourceGrantId": "source-policy-legacy-grant",
+                "sourceGrantId": "source-policy-private-grant",
                 "authorityGrantId": "raw-decision-policy-grant"
             },
             "redaction": {"metadataOnly": true, "memoryBodyStored": false},
@@ -1128,7 +1128,7 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
 
     let execute_grant = derive_execute_grant(
         &ctx,
-        "legacy-authority-evidence-grant",
+        "private-authority-evidence-grant",
         query_resource_id,
         decision_resource_id,
     )
@@ -1137,7 +1137,7 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
         &ctx,
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
         json!({"operation": "memory_query_list"}),
-        agent_context("memory-legacy-authority-query-list", execute_grant.clone())
+        agent_context("memory-private-authority-query-list", execute_grant.clone())
             .with_scope("capability.execute")
             .with_scope(super::READ_SCOPE),
     )
@@ -1151,7 +1151,7 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
             "queryResourceId": query_resource_id
         }),
         agent_context(
-            "memory-legacy-authority-query-inspect",
+            "memory-private-authority-query-inspect",
             execute_grant.clone(),
         )
         .with_scope("capability.execute")
@@ -1164,7 +1164,7 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
         json!({"operation": "memory_decision_list"}),
         agent_context(
-            "memory-legacy-authority-decision-list",
+            "memory-private-authority-decision-list",
             execute_grant.clone(),
         )
         .with_scope("capability.execute")
@@ -1179,7 +1179,7 @@ async fn query_and_decision_list_inspect_scrub_legacy_authority_evidence() {
             "operation": "memory_decision_inspect",
             "decisionResourceId": decision_resource_id
         }),
-        agent_context("memory-legacy-authority-decision-inspect", execute_grant)
+        agent_context("memory-private-authority-decision-inspect", execute_grant)
             .with_scope("capability.execute")
             .with_scope(super::READ_SCOPE),
     )
@@ -1455,18 +1455,18 @@ fn assert_authority_evidence_scrubbed(label: &str, value: &Value) {
         "sourceGrantId",
         "actorGrantId",
         "raw-query-grant",
-        "raw-query-legacy-grant",
-        "source-query-legacy-grant",
-        "actor-query-legacy-grant",
+        "raw-query-private-grant",
+        "source-query-private-grant",
+        "actor-query-private-grant",
         "raw-query-scope",
         "raw-query-authority",
         "raw-policy-grant",
         "raw-trace-grant",
         "raw-decision-source-grant",
-        "source-decision-legacy-grant",
-        "raw-decision-legacy-grant",
-        "actor-decision-legacy-grant",
-        "source-policy-legacy-grant",
+        "source-decision-private-grant",
+        "raw-decision-private-grant",
+        "actor-decision-private-grant",
+        "source-policy-private-grant",
         "raw-decision-scope",
         "raw-decision-authority",
         "raw-decision-policy-grant",
@@ -1538,7 +1538,7 @@ async fn create_legacy_memory_evidence_resource(
             invocation_id: None,
         })
         .await
-        .expect("create legacy memory evidence resource");
+        .expect("create private memory evidence resource");
 }
 
 async fn configure_active(ctx: &ServerRuntimeContext, key: &str) -> Value {

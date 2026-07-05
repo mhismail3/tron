@@ -59,8 +59,8 @@
 //! - model-facing agents act through the capability-domain `execute` primitive;
 //!   retained registration policy checks infrastructure contracts such as
 //!   idempotency, schema shape, resource leases, and compensation;
-//! - registered domain functions are loop infrastructure only; retired product
-//!   domains are not part of startup registration on this branch;
+//! - registered domain functions are loop infrastructure only; product surfaces
+//!   enter startup through source-backed domain contracts and inventory lineage;
 //! - stream, state, queue, catalog, grant, worker, trace records, generated UI,
 //!   and the generic `resource` kernel are retained only where covered by the
 //!   primitive loop and the completed cleanup/ownership scorecards;

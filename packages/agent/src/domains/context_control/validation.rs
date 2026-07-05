@@ -21,13 +21,13 @@ pub(super) fn idempotency_key(
 
 pub(super) fn reason(
     payload: &Value,
-    fallback: &str,
+    default_reason: &str,
     max_reason_bytes: usize,
 ) -> Result<String, CapabilityError> {
     optional_str(payload, "reason")?
         .map(|value| bounded_text("reason", value, max_reason_bytes))
         .transpose()
-        .map(|value| value.unwrap_or_else(|| fallback.to_owned()))
+        .map(|value| value.unwrap_or_else(|| default_reason.to_owned()))
 }
 
 pub(super) fn actor_kind(invocation: &Invocation) -> &'static str {

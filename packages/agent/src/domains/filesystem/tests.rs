@@ -496,19 +496,19 @@ async fn execute_filesystem_write_requires_idempotency_at_provider_boundary() {
 }
 
 #[tokio::test]
-async fn execute_rejects_legacy_file_write_operation() {
+async fn execute_rejects_unsupported_file_write_operation() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");
-    let target = root.path().join("legacy.txt");
+    let target = root.path().join("unsupported.txt");
     let error = invoke_error(
         &ctx,
         "capability::execute",
         json!({
             "operation": "file_write",
-            "path": "legacy.txt",
+            "path": "unsupported.txt",
             "content": "bypass"
         }),
-        execute_context(&ctx, root.path(), "legacy-file-write-rejected", true).await,
+        execute_context(&ctx, root.path(), "unsupported-file-write-rejected", true).await,
     )
     .await;
     assert!(error.contains("Unsupported primitive execute operation 'file_write'"));

@@ -20,11 +20,8 @@ struct WorkerCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiable 
         case kind
         case lifecycle
         case ownerActor
-        case ownerActorSnake = "owner_actor"
         case authorityGrant
-        case authorityGrantSnake = "authority_grant"
         case namespaceClaims
-        case namespaceClaimsSnake = "namespace_claims"
         case visibility
         case provenance
     }
@@ -59,9 +56,9 @@ struct WorkerCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiable 
         revision = try container.decodeFlexibleUInt64IfPresent(forKey: .revision)
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
         lifecycle = try container.decodeIfPresent(String.self, forKey: .lifecycle)
-        ownerActor = try container.decodeStringIfPresent(first: .ownerActor, fallback: .ownerActorSnake)
-        authorityGrant = try container.decodeStringIfPresent(first: .authorityGrant, fallback: .authorityGrantSnake)
-        namespaceClaims = try container.decodeArrayIfPresent(first: .namespaceClaims, fallback: .namespaceClaimsSnake)
+        ownerActor = try container.decodeIfPresent(String.self, forKey: .ownerActor)
+        authorityGrant = try container.decodeIfPresent(String.self, forKey: .authorityGrant)
+        namespaceClaims = try container.decodeIfPresent([String].self, forKey: .namespaceClaims)
         visibility = try container.decodeIfPresent(String.self, forKey: .visibility)
         provenance = try container.decodeIfPresent([String: AnyCodable].self, forKey: .provenance)
         raw = try? [String: AnyCodable](from: decoder)
@@ -89,23 +86,16 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
         case id
         case revision
         case ownerWorker
-        case ownerWorkerSnake = "owner_worker"
         case description
         case tags
         case visibility
         case effectClass
-        case effectClassSnake = "effect_class"
         case riskLevel
-        case riskLevelSnake = "risk_level"
         case health
         case opaqueResponse
-        case opaqueResponseSnake = "opaque_response"
         case requiredAuthority
-        case requiredAuthoritySnake = "required_authority"
         case requestSchema
-        case requestSchemaSnake = "request_schema"
         case responseSchema
-        case responseSchemaSnake = "response_schema"
         case metadata
     }
 
@@ -147,17 +137,17 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         revision = try container.decodeFlexibleUInt64IfPresent(forKey: .revision)
-        ownerWorker = try container.decodeStringIfPresent(first: .ownerWorker, fallback: .ownerWorkerSnake)
+        ownerWorker = try container.decodeIfPresent(String.self, forKey: .ownerWorker)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         tags = try container.decodeIfPresent([String].self, forKey: .tags)
         visibility = try container.decodeIfPresent(String.self, forKey: .visibility)
-        effectClass = try container.decodeStringIfPresent(first: .effectClass, fallback: .effectClassSnake)
-        riskLevel = try container.decodeStringIfPresent(first: .riskLevel, fallback: .riskLevelSnake)
+        effectClass = try container.decodeIfPresent(String.self, forKey: .effectClass)
+        riskLevel = try container.decodeIfPresent(String.self, forKey: .riskLevel)
         health = try container.decodeIfPresent(String.self, forKey: .health)
-        opaqueResponse = try container.decodeBoolIfPresent(first: .opaqueResponse, fallback: .opaqueResponseSnake)
-        requiredAuthority = try container.decodeDictionaryIfPresent(first: .requiredAuthority, fallback: .requiredAuthoritySnake)
-        requestSchema = try container.decodeAnyCodableIfPresent(first: .requestSchema, fallback: .requestSchemaSnake)
-        responseSchema = try container.decodeAnyCodableIfPresent(first: .responseSchema, fallback: .responseSchemaSnake)
+        opaqueResponse = try container.decodeIfPresent(Bool.self, forKey: .opaqueResponse)
+        requiredAuthority = try container.decodeIfPresent([String: AnyCodable].self, forKey: .requiredAuthority)
+        requestSchema = try container.decodeIfPresent(AnyCodable.self, forKey: .requestSchema)
+        responseSchema = try container.decodeIfPresent(AnyCodable.self, forKey: .responseSchema)
         metadata = try container.decodeIfPresent([String: AnyCodable].self, forKey: .metadata)
         raw = try? [String: AnyCodable](from: decoder)
     }
@@ -179,15 +169,10 @@ struct TriggerCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiable
         case id
         case revision
         case ownerWorker
-        case ownerWorkerSnake = "owner_worker"
         case triggerType
-        case triggerTypeSnake = "trigger_type"
         case targetFunction
-        case targetFunctionSnake = "target_function"
         case deliveryMode
-        case deliveryModeSnake = "delivery_mode"
         case authorityGrant
-        case authorityGrantSnake = "authority_grant"
         case visibility
         case config
     }
@@ -220,11 +205,11 @@ struct TriggerCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiable
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         revision = try container.decodeFlexibleUInt64IfPresent(forKey: .revision)
-        ownerWorker = try container.decodeStringIfPresent(first: .ownerWorker, fallback: .ownerWorkerSnake)
-        triggerType = try container.decodeStringIfPresent(first: .triggerType, fallback: .triggerTypeSnake)
-        targetFunction = try container.decodeStringIfPresent(first: .targetFunction, fallback: .targetFunctionSnake)
-        deliveryMode = try container.decodeStringIfPresent(first: .deliveryMode, fallback: .deliveryModeSnake)
-        authorityGrant = try container.decodeStringIfPresent(first: .authorityGrant, fallback: .authorityGrantSnake)
+        ownerWorker = try container.decodeIfPresent(String.self, forKey: .ownerWorker)
+        triggerType = try container.decodeIfPresent(String.self, forKey: .triggerType)
+        targetFunction = try container.decodeIfPresent(String.self, forKey: .targetFunction)
+        deliveryMode = try container.decodeIfPresent(String.self, forKey: .deliveryMode)
+        authorityGrant = try container.decodeIfPresent(String.self, forKey: .authorityGrant)
         visibility = try container.decodeIfPresent(String.self, forKey: .visibility)
         config = try container.decodeIfPresent(AnyCodable.self, forKey: .config)
         raw = try? [String: AnyCodable](from: decoder)
@@ -243,13 +228,10 @@ struct TriggerTypeCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifi
     private enum CodingKeys: String, CodingKey {
         case id
         case ownerWorker
-        case ownerWorkerSnake = "owner_worker"
         case description
         case allowedDeliveryModes
-        case allowedDeliveryModesSnake = "allowed_delivery_modes"
         case visibility
         case configSchema
-        case configSchemaSnake = "config_schema"
     }
 
     init(
@@ -273,11 +255,11 @@ struct TriggerTypeCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifi
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        ownerWorker = try container.decodeStringIfPresent(first: .ownerWorker, fallback: .ownerWorkerSnake)
+        ownerWorker = try container.decodeIfPresent(String.self, forKey: .ownerWorker)
         description = try container.decodeIfPresent(String.self, forKey: .description)
-        allowedDeliveryModes = try container.decodeArrayIfPresent(first: .allowedDeliveryModes, fallback: .allowedDeliveryModesSnake)
+        allowedDeliveryModes = try container.decodeIfPresent([String].self, forKey: .allowedDeliveryModes)
         visibility = try container.decodeIfPresent(String.self, forKey: .visibility)
-        configSchema = try container.decodeAnyCodableIfPresent(first: .configSchema, fallback: .configSchemaSnake)
+        configSchema = try container.decodeIfPresent(AnyCodable.self, forKey: .configSchema)
         raw = try? [String: AnyCodable](from: decoder)
     }
 }
@@ -493,38 +475,4 @@ private extension KeyedDecodingContainer {
         return nil
     }
 
-    func decodeStringIfPresent(first: Key, fallback: Key) throws -> String? {
-        if let value = try decodeIfPresent(String.self, forKey: first) {
-            return value
-        }
-        return try decodeIfPresent(String.self, forKey: fallback)
-    }
-
-    func decodeArrayIfPresent(first: Key, fallback: Key) throws -> [String]? {
-        if let value = try decodeIfPresent([String].self, forKey: first) {
-            return value
-        }
-        return try decodeIfPresent([String].self, forKey: fallback)
-    }
-
-    func decodeBoolIfPresent(first: Key, fallback: Key) throws -> Bool? {
-        if let value = try decodeIfPresent(Bool.self, forKey: first) {
-            return value
-        }
-        return try decodeIfPresent(Bool.self, forKey: fallback)
-    }
-
-    func decodeDictionaryIfPresent(first: Key, fallback: Key) throws -> [String: AnyCodable]? {
-        if let value = try decodeIfPresent([String: AnyCodable].self, forKey: first) {
-            return value
-        }
-        return try decodeIfPresent([String: AnyCodable].self, forKey: fallback)
-    }
-
-    func decodeAnyCodableIfPresent(first: Key, fallback: Key) throws -> AnyCodable? {
-        if let value = try decodeIfPresent(AnyCodable.self, forKey: first) {
-            return value
-        }
-        return try decodeIfPresent(AnyCodable.self, forKey: fallback)
-    }
 }

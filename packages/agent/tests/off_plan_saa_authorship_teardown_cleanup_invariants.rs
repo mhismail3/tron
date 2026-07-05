@@ -404,16 +404,29 @@ fn provider_visible_execute_surface_is_renarrowed() {
     let openai = read_repo_file(
         "packages/agent/src/domains/model/providers/openai/message_converter/mod.rs",
     );
-    let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let operations_root = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let operations_dispatch =
+        read_repo_file("packages/agent/src/domains/capability/operations/dispatch.rs");
+    let operations_registry =
+        read_repo_file("packages/agent/src/domains/capability/operations/registry.rs");
+
+    assert!(
+        contract.contains("operation_list_text()"),
+        "execute schema must derive provider-visible operations from the registry-backed operation list"
+    );
+    assert!(
+        openai.contains("operation_list = operation_list_text()"),
+        "OpenAI guidance must derive provider-visible operations from the registry-backed operation list"
+    );
 
     for retained in RETAINED_EXECUTE_OPS {
         assert!(
-            contract.contains(retained),
-            "execute schema missing retained operation {retained}"
+            operations_registry.contains(&format!("\"{retained}\"")),
+            "execute registry missing retained operation {retained}"
         );
         assert!(
-            openai.contains(retained),
-            "OpenAI clarification missing retained operation {retained}"
+            operations_dispatch.contains(&format!("\"{retained}\"")),
+            "execute dispatcher missing retained operation {retained}"
         );
     }
 
@@ -427,7 +440,11 @@ fn provider_visible_execute_surface_is_renarrowed() {
             "OpenAI clarification still exposes {forbidden}"
         );
         assert!(
-            !operations.contains(&format!("\"{forbidden}\"")),
+            !operations_registry.contains(&format!("\"{forbidden}\"")),
+            "execute registry still exposes {forbidden}"
+        );
+        assert!(
+            !operations_dispatch.contains(&format!("\"{forbidden}\"")),
             "execute dispatcher still branches on {forbidden}"
         );
     }
@@ -443,7 +460,7 @@ fn provider_visible_execute_surface_is_renarrowed() {
             "provider schema still exposes SAA resource field {forbidden_field}"
         );
     }
-    assert!(!operations.contains("mod resource;"));
+    assert!(!operations_root.contains("mod resource;"));
 }
 
 #[test]

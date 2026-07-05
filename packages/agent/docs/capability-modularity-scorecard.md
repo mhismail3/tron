@@ -1,8 +1,10 @@
 # Capability Modularity Scorecard
 
-Status: active / cockpit-visibility-complete
+Status: **complete**
 
-Current score: inventory coverage 170/170; kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, and Engine Cockpit visibility are source-backed; replacement readiness is measurable without runtime routing.
+Current score: **100/100**
+
+The current no-routing modularity measurement slice is complete: inventory coverage is 170/170, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, and Engine Cockpit visibility are source-backed. Runtime replacement routing remains intentionally deferred.
 
 Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
 
@@ -92,17 +94,17 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 ## Scorecard
 
-| Item | Weight | Status | Evidence |
-|---|---:|---|---|
-| CMS-0 registry/dispatch baseline | 10 | Passed | 170 registry names and 170 dispatch arms are statically compared. |
-| CMS-1 ownership taxonomy | 10 | Passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
-| CMS-2 per-operation inventory | 20 | Passed | `capability-modularity-inventory.tsv` lists all 170 operations exactly once. |
-| CMS-3 kernel/governance lock | 12 | Passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
-| CMS-4 adapter replacement targets | 12 | Passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; binding policy can record proposals but cannot route execution in this slice. |
-| CMS-5 record-plane custody | 10 | Passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
-| CMS-6 module-owned template | 8 | Passed | `module_program_execution_*` is classified as the first governed module-owned execution template. |
-| CMS-7 cockpit visibility contract | 8 | Passed | `capability_binding::cockpit_overview` projects truthful total/returned operation counts, operation-list/resource-scan completeness, redacted operation owner and replacement-target summaries, server-derived readiness/next-action labels, scoped binding/shadow attempts, rollback/disable/abort availability, and redaction/no-routing policy for cockpit clients. |
-| CMS-8 docs and static gates | 10 | Passed | README links, evidence manifest, and invariant tests lock the inventory baseline, Kernel Boundary Lockdown evidence, and binding-policy non-routing semantics. |
+| ID | Check | Weight | Status | Evidence |
+|---|---|---:|---|---|
+| CMS-0 | Registry/dispatch baseline | 10 | passed | 170 registry names and 170 dispatch arms are statically compared. |
+| CMS-1 | Ownership taxonomy | 10 | passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
+| CMS-2 | Per-operation inventory | 20 | passed | `capability-modularity-inventory.tsv` lists all 170 operations exactly once. |
+| CMS-3 | Kernel/governance lock | 12 | passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
+| CMS-4 | Adapter replacement targets | 12 | passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; binding policy can record proposals but cannot route execution in this slice. |
+| CMS-5 | Record-plane custody | 10 | passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
+| CMS-6 | Module-owned template | 8 | passed | `module_program_execution_*` is classified as the first governed module-owned execution template. |
+| CMS-7 | Cockpit visibility contract | 8 | passed | `capability_binding::cockpit_overview` projects truthful total/returned operation counts, operation-list/resource-scan completeness, redacted operation owner and replacement-target summaries, server-derived readiness/next-action labels, scoped binding/shadow attempts, rollback/disable/abort availability, and redaction/no-routing policy for cockpit clients. |
+| CMS-8 | Docs and static gates | 10 | passed | README links, evidence manifest, and invariant tests lock the inventory baseline, Kernel Boundary Lockdown evidence, and binding-policy non-routing semantics. |
 
 ## Kernel Boundary Lockdown Evidence
 

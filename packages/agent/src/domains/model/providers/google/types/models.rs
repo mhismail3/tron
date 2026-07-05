@@ -54,8 +54,6 @@ pub struct GeminiModelInfo {
 }
 
 /// Model registry mapping model IDs to their metadata.
-// HashMap::insert returns the previous value, intentionally unused during
-// one-time static registry construction.
 #[allow(unused_results)]
 pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
@@ -251,8 +249,6 @@ pub fn all_gemini_model_ids() -> Vec<&'static str> {
 
 impl GeminiModelInfo {
     /// Serialize this model to JSON for the `model.list` API response.
-    // HashMap::insert returns the previous value, intentionally unused during
-    // one-time JSON object construction.
     #[allow(unused_results)]
     pub fn to_api_json(&self, id: &str) -> serde_json::Value {
         let mut obj = serde_json::json!({

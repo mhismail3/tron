@@ -1,6 +1,6 @@
 # Capability Modularity Evidence Manifest
 
-Status: active / cockpit-visibility-complete
+Status: **complete**
 
 This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard, binding policy, adapter seam hardening, shadow replacement trial, and cockpit visibility slices add documentation, invariants, source-backed seam contracts, metadata-only governance records, and redacted operator projections; they add no runtime routing behavior.
 
@@ -9,7 +9,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Area | File |
 |---|---|
 | Operation registry | `packages/agent/src/domains/capability/operations/registry.rs` |
-| Operation dispatch | `packages/agent/src/domains/capability/operations/mod.rs` |
+| Operation dispatch | `packages/agent/src/domains/capability/operations/dispatch.rs` |
 | Process adapter seam | `packages/agent/src/domains/capability/operations/process.rs` |
 | Capability binding operations | `packages/agent/src/domains/capability/operations/capability_binding.rs` |
 | Capability contract | `packages/agent/src/domains/capability/contract.rs` |
@@ -51,7 +51,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Worker lifecycle governance docs | `packages/agent/src/domains/worker_lifecycle/mod.rs` |
 | Context control docs | `packages/agent/src/domains/context_control/mod.rs` |
 | Engine cockpit iOS docs | `packages/ios-app/docs/architecture.md` |
-| Engine cockpit iOS protocol/state/UI | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift` |
+| Engine cockpit iOS protocol/state/UI | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
 | Canonical README | `README.md` |
 
 ## Baseline Facts
@@ -110,7 +110,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Operation owner/status/replacement/readiness fields are derived from `SUPPORTED_OPERATION_NAMES` and authoritative binding metadata, not from iOS inference. Owner labels and replacement target summaries are redacted; `capability_binding` is exposed as projection source rather than operation owner. | `packages/agent/src/domains/capability/operations/registry.rs`, `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
 | Scoped binding and shadow-trial summaries count current-session/workspace records only and omit raw resource ids, local paths, commands, logs, code, file contents, grant ids, authority ids, trace ids, invocation ids, token-like strings, and hidden chain-of-thought. The projection reports total versus returned operation count plus operation-list and bounded resource-scan truncation states so partial results remain visibly degraded. | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
 | Projection policy states server-owned truth, projection-only and metadata-only behavior, plus no autonomy creation, dispatch mutation, hot swap, module activation/execution, dependency restore, package-manager, network, or runtime-routing side effects. | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
-| iOS DTOs decode the server projection, view models pass trusted session/workspace context, state maps display labels, and views render details through capability group and operation drill-down instead of top-level telemetry. | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift` |
+| iOS DTOs decode the server projection, view models pass trusted session/workspace context, state maps display labels, and views render details through capability group and operation drill-down instead of top-level telemetry. | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
 
 ## Adapter Seam Hardening Evidence
 
@@ -125,6 +125,33 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | `context_control_compact` | `packages/agent/src/domains/context_control/mod.rs` and `packages/agent/src/domains/agent/context/mod.rs` record the summarizer strategy seam, provider-safe summary, context audit records, replay/idempotency evidence, and rollback/disable metadata while keeping context-control records server-owned. |
 
 ## Validation Commands
+
+Latest local result:
+
+```bash
+CARGO_TARGET_DIR=/tmp/tron-agent-target-mainline-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
+# exit 0; 9 passed, 0 failed
+```
+
+```bash
+CARGO_TARGET_DIR=/tmp/tron-agent-target-mainline-check cargo check --manifest-path packages/agent/Cargo.toml
+# exit 0
+```
+
+```bash
+CARGO_TARGET_DIR=/tmp/tron-agent-target-mainline-check cargo test --manifest-path packages/agent/Cargo.toml --all-targets
+# exit 0
+```
+
+```bash
+CARGO_TARGET_DIR=/tmp/tron-agent-target-mainline-check cargo clippy --manifest-path packages/agent/Cargo.toml --all-targets -- -D warnings
+# exit 0
+```
+
+```bash
+cd packages/ios-app && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+# exit 0; 1110 tests passed; ** TEST SUCCEEDED **
+```
 
 ```bash
 cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture

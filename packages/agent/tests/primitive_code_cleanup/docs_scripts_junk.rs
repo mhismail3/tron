@@ -191,7 +191,7 @@ fn final_retired_product_residue_stays_deleted_from_runtime_surfaces() {
         for term in *banned_terms {
             assert!(
                 !text.contains(term),
-                "retired product residue `{term}` must stay out of {path}"
+                "unsupported product surface `{term}` must stay out of {path}"
             );
         }
     }

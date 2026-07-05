@@ -175,9 +175,6 @@ pub fn apply_env_overrides(settings: &mut TronSettings) {
     if let Some(v) = read_env_string("TRON_DEFAULT_MODEL") {
         settings.server.default_model = v;
     }
-    if let Some(v) = read_env_string("TRON_DEFAULT_PROVIDER") {
-        settings.server.default_provider = v;
-    }
     if let Some(v) = read_env_u64("TRON_HEARTBEAT_INTERVAL", 1000, 600_000) {
         settings.server.heartbeat_interval_ms = v;
     }
@@ -477,17 +474,11 @@ heartbeatIntervalMs = 45000
 "#,
         )
         .unwrap();
-        write_sparse_settings(
-            &settings_path,
-            r#"[settings.server]
-defaultProvider = "openai"
-"#,
-        );
+        write_sparse_settings(&settings_path, r#"[settings.server]"#);
 
         let settings = load_settings_from_path(&settings_path).unwrap();
 
         assert_eq!(settings.server.default_model, "managed-default");
-        assert_eq!(settings.server.default_provider, "openai");
         assert_eq!(settings.server.heartbeat_interval_ms, 45_000);
     }
 
@@ -600,7 +591,7 @@ heartbeatIntervalMs = 0
     }
 
     #[test]
-    fn load_rejects_removed_policy_settings() {
+    fn load_rejects_unknown_policy_settings() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         let section = ["guard", "rails"].concat();

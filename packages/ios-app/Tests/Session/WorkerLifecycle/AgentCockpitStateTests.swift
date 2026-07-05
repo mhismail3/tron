@@ -41,7 +41,7 @@ struct AgentCockpitStateTests {
         #expect(overview.activity.isEmpty)
     }
 
-    @Test("Projection renders server-owned module activity without catalog fallback")
+    @Test("Projection renders server-owned module activity from resource facts")
     func projectionRendersServerOwnedModuleActivity() {
         let overview = AgentCockpitProjection.project(
             snapshot: sampleCatalogSnapshot(),
@@ -147,11 +147,11 @@ struct AgentCockpitStateTests {
                 functions: [
                     AnyCodable([
                         "id": "local.echo::reply",
-                        "owner_worker": "local.echo",
+                        "ownerWorker": "local.echo",
                         "description": "Reply from local echo",
                         "visibility": "Agent",
-                        "effect_class": "PureRead",
-                        "risk_level": "Low",
+                        "effectClass": "PureRead",
+                        "riskLevel": "Low",
                         "health": "Healthy",
                         "tags": ["echo"]
                     ])
@@ -186,14 +186,14 @@ struct AgentCockpitStateTests {
                 functions: [
                     AnyCodable([
                         "id": "context_control::snapshot",
-                        "owner_worker": "context_control",
+                        "ownerWorker": "context_control",
                         "description": "Read a provider-safe context snapshot",
                         "visibility": "System",
-                        "effect_class": "PureRead",
-                        "risk_level": "Low",
+                        "effectClass": "PureRead",
+                        "riskLevel": "Low",
                         "health": "Healthy",
-                        "request_schema": ["type": "object"],
-                        "response_schema": ["type": "object"]
+                        "requestSchema": ["type": "object"],
+                        "responseSchema": ["type": "object"]
                     ])
                 ],
                 workers: [],
@@ -225,13 +225,13 @@ struct AgentCockpitStateTests {
                 functions: [
                     AnyCodable([
                         "id": "local.echo::reply",
-                        "owner_worker": "local.echo",
-                        "request_schema": ["type": "object"],
-                        "response_schema": ["type": "object"]
+                        "ownerWorker": "local.echo",
+                        "requestSchema": ["type": "object"],
+                        "responseSchema": ["type": "object"]
                     ]),
                     AnyCodable([
-                        "owner_worker": "local.echo",
-                        "request_schema": ["type": "object"]
+                        "ownerWorker": "local.echo",
+                        "requestSchema": ["type": "object"]
                     ])
                 ],
                 workers: [],
@@ -350,15 +350,15 @@ struct AgentCockpitStateTests {
                 functions: [
                     AnyCodable([
                         "id": "local.echo::reply",
-                        "owner_worker": "local.echo",
+                        "ownerWorker": "local.echo",
                         "description": "Reply from local echo",
                         "visibility": "Agent",
-                        "effect_class": "PureRead",
-                        "risk_level": "Low",
+                        "effectClass": "PureRead",
+                        "riskLevel": "Low",
                         "health": functionHealth,
                         "tags": ["echo"],
-                        "request_schema": ["type": "object"],
-                        "response_schema": ["type": "object"]
+                        "requestSchema": ["type": "object"],
+                        "responseSchema": ["type": "object"]
                     ])
                 ],
                 workers: [
@@ -366,28 +366,28 @@ struct AgentCockpitStateTests {
                         "id": "local.echo",
                         "kind": "External",
                         "lifecycle": "Ready",
-                        "owner_actor": "system",
-                        "authority_grant": "engine-transport",
-                        "namespace_claims": ["local.echo"],
+                        "ownerActor": "system",
+                        "authorityGrant": "engine-transport",
+                        "namespaceClaims": ["local.echo"],
                         "visibility": "System"
                     ])
                 ],
                 triggers: [
                     AnyCodable([
                         "id": "local.echo.tick",
-                        "owner_worker": "local.echo",
-                        "trigger_type": "cron",
-                        "target_function": "local.echo::reply",
-                        "delivery_mode": "Async",
+                        "ownerWorker": "local.echo",
+                        "triggerType": "cron",
+                        "targetFunction": "local.echo::reply",
+                        "deliveryMode": "Async",
                         "visibility": "System"
                     ])
                 ],
                 triggerTypes: [
                     AnyCodable([
                         "id": "cron",
-                        "owner_worker": "local.echo",
+                        "ownerWorker": "local.echo",
                         "description": "Cron trigger",
-                        "allowed_delivery_modes": ["Async"],
+                        "allowed_deliveryModes": ["Async"],
                         "visibility": "System"
                     ])
                 ]

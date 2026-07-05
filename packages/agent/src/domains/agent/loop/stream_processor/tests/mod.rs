@@ -6,15 +6,6 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use super::super::stream_state::{build_message, finalize_capability_invocation};
-use crate::domains::model::providers::google::stream_handler as google_stream_handler;
-use crate::domains::model::providers::google::types::{
-    FunctionCallData, GeminiCandidate, GeminiCandidateContent, GeminiPart, GeminiStreamChunk,
-};
-use crate::domains::model::providers::openai::stream_handler as openai_stream_handler;
-use crate::domains::model::providers::openai::types::{
-    OutputContent, OutputItemType, ResponsesOutputItem, ResponsesResponse, ResponsesSseEvent,
-    ResponsesUsage, SseEventType,
-};
 use crate::domains::model::responder::{ModelResponseError, ModelResponseStream};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
@@ -132,49 +123,66 @@ fn capability_invocation_stream() -> ModelResponseStream {
 }
 
 #[tokio::test]
-async fn openai_final_only_text_function_text_uses_provider_done_order() {
-    let mut provider_state = openai_stream_handler::create_stream_state();
-    let provider_events = openai_stream_handler::process_stream_event(
-        &ResponsesSseEvent {
-            event_type: SseEventType::Completed,
-            response: Some(ResponsesResponse {
-                id: Some("resp-final-only".into()),
-                output: vec![
-                    ResponsesOutputItem {
-                        item_type: OutputItemType::Message,
-                        content: Some(vec![OutputContent {
-                            content_type: "output_text".into(),
-                            text: Some("before".into()),
-                        }]),
-                        ..Default::default()
+async fn normalized_final_only_text_call_text_uses_stream_order() {
+    let provider_events = vec![
+        StreamEvent::Start,
+        StreamEvent::TextStart,
+        StreamEvent::TextDelta {
+            delta: "before".into(),
+        },
+        StreamEvent::TextEnd {
+            text: "before".into(),
+            signature: None,
+        },
+        StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "call_mid".into(),
+            name: "execute".into(),
+        },
+        StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "call_mid".into(),
+            arguments_delta: r#"{"operation":"inspect"}"#.into(),
+        },
+        StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("call_mid", "execute", {
+                let mut args = serde_json::Map::new();
+                let _ = args.insert("operation".into(), serde_json::json!("inspect"));
+                args
+            }),
+        },
+        StreamEvent::TextStart,
+        StreamEvent::TextDelta {
+            delta: "after".into(),
+        },
+        StreamEvent::TextEnd {
+            text: "after".into(),
+            signature: None,
+        },
+        StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![
+                    AssistantContent::text("before"),
+                    AssistantContent::CapabilityInvocation {
+                        id: "call_mid".into(),
+                        name: "execute".into(),
+                        arguments: {
+                            let mut args = serde_json::Map::new();
+                            let _ = args.insert("operation".into(), serde_json::json!("inspect"));
+                            args
+                        },
+                        thought_signature: None,
                     },
-                    ResponsesOutputItem {
-                        item_type: OutputItemType::FunctionCall,
-                        call_id: Some("call_mid".into()),
-                        name: Some("execute".into()),
-                        arguments: Some(r#"{"operation":"inspect"}"#.into()),
-                        ..Default::default()
-                    },
-                    ResponsesOutputItem {
-                        item_type: OutputItemType::Message,
-                        content: Some(vec![OutputContent {
-                            content_type: "output_text".into(),
-                            text: Some("after".into()),
-                        }]),
-                        ..Default::default()
-                    },
+                    AssistantContent::text("after"),
                 ],
-                usage: Some(ResponsesUsage {
+                token_usage: Some(TokenUsage {
                     input_tokens: 12,
                     output_tokens: 8,
-                    total_tokens: 20,
+                    total_tokens: Some(20),
                     ..Default::default()
                 }),
-            }),
-            ..Default::default()
+            },
+            stop_reason: "capability_invocation".into(),
         },
-        &mut provider_state,
-    );
+    ];
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
@@ -209,40 +217,57 @@ async fn openai_final_only_text_function_text_uses_provider_done_order() {
 }
 
 #[tokio::test]
-async fn google_streamed_text_function_text_keeps_block_boundaries() {
-    let mut provider_state = google_stream_handler::create_stream_state();
-    let provider_events = google_stream_handler::process_stream_chunk(
-        &GeminiStreamChunk {
-            candidates: Some(vec![GeminiCandidate {
-                content: Some(GeminiCandidateContent {
-                    parts: vec![
-                        GeminiPart::Text {
-                            text: "before".into(),
-                            thought: None,
-                            thought_signature: None,
-                        },
-                        GeminiPart::FunctionCall {
-                            function_call: FunctionCallData {
-                                name: "execute".into(),
-                                args: serde_json::json!({"operation": "inspect"}),
-                            },
-                            thought_signature: None,
-                        },
-                        GeminiPart::Text {
-                            text: "after".into(),
-                            thought: None,
-                            thought_signature: None,
-                        },
-                    ],
-                    role: None,
-                }),
-                finish_reason: Some("TOOL_USE".into()),
-                safety_ratings: None,
-            }]),
-            ..Default::default()
+async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
+    let provider_events = vec![
+        StreamEvent::Start,
+        StreamEvent::TextStart,
+        StreamEvent::TextDelta {
+            delta: "before".into(),
         },
-        &mut provider_state,
-    );
+        StreamEvent::TextEnd {
+            text: "before".into(),
+            signature: None,
+        },
+        StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "execute".into(),
+            name: "execute".into(),
+        },
+        StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new("execute", "execute", {
+                let mut args = serde_json::Map::new();
+                let _ = args.insert("operation".into(), serde_json::json!("inspect"));
+                args
+            }),
+        },
+        StreamEvent::TextStart,
+        StreamEvent::TextDelta {
+            delta: "after".into(),
+        },
+        StreamEvent::TextEnd {
+            text: "after".into(),
+            signature: None,
+        },
+        StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![
+                    AssistantContent::text("before"),
+                    AssistantContent::CapabilityInvocation {
+                        id: "execute".into(),
+                        name: "execute".into(),
+                        arguments: {
+                            let mut args = serde_json::Map::new();
+                            let _ = args.insert("operation".into(), serde_json::json!("inspect"));
+                            args
+                        },
+                        thought_signature: None,
+                    },
+                    AssistantContent::text("after"),
+                ],
+                token_usage: None,
+            },
+            stop_reason: "capability_invocation".into(),
+        },
+    ];
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();

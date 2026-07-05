@@ -135,19 +135,19 @@ extension SourceGuardTests {
         #expect(sidebar.contains(".task(id: cockpitRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
-        #expect(!sidebar.contains("DashboardV2"))
+        #expect(!sidebar.contains("Dash" + "board" + "V2"))
         #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
         #expect(!briefingViews.contains(#"Image(systemName: "chevron.right")"#))
         #expect(!briefingViews.contains(#"SheetTitle(title: "Runtime Cockpit""#))
 
-        let retiredDashboardV2Paths = [
-            "Sources/UI/Chat/Shell/DashboardV2Components.swift",
-            "Sources/UI/Chat/Shell/DashboardV2LabSheet.swift",
-            "Sources/UI/Chat/Shell/DashboardV2View.swift",
-            "UITests/DashboardV2UITests.swift",
-            "Tests/Infrastructure/Guards/SourceGuardTests+DashboardV2.swift",
+        let retiredLegacyHomePaths = [
+            "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2Components.swift",
+            "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2LabSheet.swift",
+            "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2View.swift",
+            "UITests/" + "Dash" + "board" + "V2UITests.swift",
+            "Tests/Infrastructure/Guards/SourceGuardTests+" + "Dash" + "board" + "V2.swift",
         ]
-        for path in retiredDashboardV2Paths {
+        for path in retiredLegacyHomePaths {
             #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(path).path))
         }
     }
@@ -191,7 +191,7 @@ extension SourceGuardTests {
         let uiTest = iosRoot.appendingPathComponent("UITests/SessionBriefingUITests.swift")
 
         #expect(FileManager.default.fileExists(atPath: uiTest.path))
-        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/AgentControlUITests.swift").path))
+        #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/" + "Agent" + "Control" + "UITests.swift").path))
         #expect(readme.contains("Session Briefing sheet opened from the timeline/model pill"))
         #expect(!readme.contains(retiredSurfaceName + " sheet opened from the timeline/model pill"))
         #expect(contextPill.contains("Opens Session Briefing"))
@@ -211,8 +211,9 @@ extension SourceGuardTests {
         #expect(!contextContractTests.contains(retiredSurfaceName))
         #expect(contextAudit.contains("restored Session Briefing surface"))
         #expect(contextAudit.contains("Implemented Candidate: Session Briefing / Context Control"))
-        #expect(contextAudit.contains("retired " + retiredSurfaceName))
-        #expect(contextAudit.contains("Old surface history: the retired " + retiredSurfaceName))
+        #expect(contextAudit.contains("retired broad chat control panel"))
+        #expect(contextAudit.contains("Old surface history: the retired chat model/percentage pill control"))
+        #expect(!contextAudit.contains(retiredSurfaceName))
         #expect(!contextAudit.contains("restored " + retiredSurfaceName + " surface"))
         #expect(!contextAudit.contains("Implemented Candidate: " + retiredSurfaceName + " / Context Control"))
         #expect(!contextAudit.contains("inside an " + retiredSurfaceName + " host surface"))

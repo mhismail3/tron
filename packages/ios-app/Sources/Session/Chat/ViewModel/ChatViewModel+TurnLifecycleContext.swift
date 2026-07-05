@@ -15,7 +15,6 @@ extension ChatViewModel: TurnLifecycleContext {
     // - turnStartMessageIndex: Int?
     // - firstTextMessageIdForTurn: UUID?
     // - isProcessing: Bool
-    // (catchingUpMessageId removed — replaced by sequence-based reconstruction)
 
     /// ID of the currently streaming message (TurnLifecycleContext)
     var streamingMessageId: UUID? {
