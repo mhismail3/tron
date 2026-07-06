@@ -103,7 +103,7 @@ Current living entry points:
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
 - `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
   scorecard for governed candidate, route, activation, event, rollback, and
-  deferred module-adapter replacement milestones.
+  supervised module-runtime replacement-route milestones.
 - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
   clean-break primitive engine teardown scorecard for stripping hard-coded
   capabilities, policies, skills, rules, helper launch products, and fixed iOS product
@@ -1222,10 +1222,12 @@ Dynamic Replacement adds governed route records for the first read-only target,
 scoped route explicit, versioned, auditable, disableable, and rollbackable.
 Candidate and binding records revalidate the exact current accepted
 `capability_shadow_trial_evidence` resource/version before a route can activate.
-The current dispatcher seam resolves an active scoped `git_status` route and
-annotates the built-in provider-safe projection with route evidence; it does
-not yet invoke a live module-owned adapter projection because the supervised
-module runtime still lacks that synchronous projection call.
+The dispatcher seam resolves an active scoped `git_status` route, verifies
+accepted shadow evidence plus lifecycle/runtime refs, projects supervised
+module-runtime provider-safe output, and emits route events. If the replacement
+runtime envelope, lifecycle authorization, version refs, scope, network policy,
+or projection shape are unsafe, routing fails closed and does not return a
+built-in success projection as a fallback.
 Cockpit Visibility adds the system-visible pure-read
 `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
 It joins registry ownership metadata with scoped binding-policy and shadow-trial
@@ -1399,11 +1401,11 @@ Current primitive operations:
 | `capability_route_binding_record` | Dynamic Replacement operation that records one scoped `capability_route_binding` after exact candidate and shadow-evidence selector authority plus expected candidate/shadow-evidence version freshness, linking a validated `git_status` candidate to a route version with activation gates, rollback/disable requirements, idempotency, `networkPolicy: none`, and no dispatch-table mutation. |
 | `capability_route_binding_list` | Dynamic Replacement operation that lists scoped route bindings as bounded provider-safe summaries with ready/disabled state, route version, target operation, truncation metadata, and no package-manager, network, deploy, or module execution side effects. |
 | `capability_route_binding_inspect` | Dynamic Replacement operation that inspects one scoped route binding through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded activation-gate and route-version evidence without raw local material or authority internals. |
-| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, and `networkPolicy: none`, recording activation and route-event resources while leaving live module-adapter projection execution deferred. |
+| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, lifecycle/runtime refs, and `networkPolicy: none`, recording activation and route-event resources so invocation can route through the supervised module-runtime provider-safe projection boundary. |
 | `capability_route_disable` | Dynamic Replacement operation that records a terminal disable event for one active scoped route after exact binding and activation selector authority plus expected current versions, restoring built-in ownership for future route lookups without mutating dispatch tables. |
 | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
 | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
-| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence and deferred module-adapter state. |
+| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence, supervised adapter projection state, routed invocation results, fail-closed status, and rollback/disable history. |
 | `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 181 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
@@ -2005,13 +2007,12 @@ refs, decision state, and audit history. `kernel_locked` and
 claims an adapter class; `adapter_replaceable` and `module_owned` replacement
 requests require rollback/disable metadata and remain proposals only. Route
 activation is currently limited to scoped `git_status`: it records activation,
-route-event, disable, and rollback evidence and annotates the built-in
-provider-safe projection while live module-adapter projection execution remains
-deferred. This plane never mutates dispatch tables, hot-swaps modules, installs
-or activates modules, executes module code, restores dependencies, runs package
-managers, inherits `agent_state`, accesses networks, stores raw local material,
-exposes raw grant or authority ids, adds public `/engine` APIs, or adds fixed
-iOS panels.
+route-event, disable, and rollback evidence, verifies lifecycle/runtime refs,
+and routes through the supervised module-runtime provider-safe projection
+boundary. This plane never mutates dispatch tables, hot-swaps modules, installs
+or activates modules, restores dependencies, runs package managers, inherits
+`agent_state`, accesses networks, stores raw local material, exposes raw grant
+or authority ids, adds public `/engine` APIs, or adds fixed iOS panels.
 
 The shadow trial path is narrower than general binding policy: it accepts only
 `git_status`, records deterministic candidate metadata and provider-safe

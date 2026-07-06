@@ -1,9 +1,10 @@
 //! Static invariants for governed dynamic capability replacement.
 //!
 //! These tests intentionally verify documentation and source contracts rather
-//! than executing a live module replacement. The first route slice is scoped to
-//! `git_status` and must not overclaim module-adapter invocation until the
-//! supervised runtime exposes a provider-safe adapter projection call.
+//! than executing arbitrary module code. The first route slice is scoped to
+//! `git_status` and proves the governed dispatcher can route to a supervised
+//! module-runtime provider-safe adapter projection while failing closed when
+//! the projection boundary is unsafe.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -119,10 +120,10 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     for required in [
-        "Current score: **64/100**",
+        "Current foundation score: **92/100**",
         "Provider-visible surface remains one tool: `capability::execute`",
-        "live module-owned adapter projection",
-        "deferred_supervised_runtime_adapter",
+        "supervised module-runtime provider-safe adapter projection",
+        "active_route_module_adapter_projection",
         "packages/agent/docs/capability-dynamic-replacement-inventory.tsv",
         "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md",
     ] {
@@ -179,7 +180,7 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
     let route = read_repo_file(ROUTE_PATH);
     let validation = read_repo_file(VALIDATION_PATH);
 
-    for required in ["active_route_for_git_status", "annotate_routed_git_status"] {
+    for required in ["active_route_for_git_status", "execute_routed_git_status"] {
         assert!(
             git.contains(required),
             "git_status operation must call route seam marker {required}"
@@ -188,10 +189,11 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
 
     for required in [
         "const TARGET_OPERATION: &str = \"git_status\"",
-        "moduleAdapterInvoked\": false",
-        "deferred_supervised_runtime_adapter",
+        "moduleAdapterInvoked\": true",
+        "supervised_runtime_projection",
         "builtInProjectionUsed",
-        "runtimeRoutingChanged",
+        "active_route_module_adapter_projection",
+        "active_route_failed_closed",
         "rollbackAvailable",
         "route_has_terminal_event",
         "ensure_capability_shadow_trial_evidence",
@@ -219,6 +221,21 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
         assert!(
             validation.contains(required),
             "binding validation missing route-safety marker {required}"
+        );
+    }
+
+    let module_runtime = read_repo_file("packages/agent/src/domains/module_runtime/service.rs");
+    for required in [
+        "project_provider_safe_adapter_output",
+        "module runtime adapter projection rejected stale lifecycle ref",
+        "module runtime adapter projection rejected stale runtime ref",
+        "module runtime adapter projection rejected mismatched lifecycle authorization",
+        "supervisorEnvelopeOnly",
+        "networkPolicy",
+    ] {
+        assert!(
+            module_runtime.contains(required),
+            "module runtime adapter projection missing safety marker {required}"
         );
     }
 }

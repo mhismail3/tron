@@ -1,8 +1,8 @@
 # Capability Dynamic Replacement Scorecard
 
-Status: **implementation candidate**
+Status: **foundational runtime route complete**
 
-Current score: **64/100**
+Current foundation score: **92/100**
 
 This scorecard tracks the path from measurable modularity to governed dynamic
 replacement. It is intentionally narrower than "self-update everything": the
@@ -14,10 +14,13 @@ fail-closed routing.
 
 The current implementation can record candidates, route bindings, route
 activations, route events, and route rollbacks. The dispatcher can resolve an
-active scoped `git_status` route and annotate the built-in provider-safe status
-projection with route evidence. It does **not** yet invoke a live module-owned
-adapter projection because the supervised module runtime has not exposed a
-synchronous provider-safe adapter projection call.
+active scoped `git_status` route, require accepted shadow evidence, verify the
+candidate lifecycle/runtime refs, and route to a supervised module-runtime provider-safe adapter projection. If the runtime envelope, lifecycle
+authorization, version refs, scope, network policy, or projection shape are not
+safe, routing fails closed and does not fall back to a built-in success result.
+Successful routed invocations report route state
+`active_route_module_adapter_projection`; rejected projections report
+`active_route_failed_closed`.
 
 Source of truth:
 
@@ -34,14 +37,14 @@ Provider-visible surface remains one tool: `capability::execute`.
 
 | Area | Weight | Status | Score | Acceptance |
 |---|---:|---|---:|---|
-| Runtime route model | 15 | partial | 10 | Active replacement routes are explicit, versioned, scoped, and reversible. Current `git_status` route lookup is exact-scope and reversible, but live module adapter execution is deferred. |
-| Candidate module contract | 15 | partial | 10 | Candidates publish schemas, authority, risk, evidence, lifecycle, and rollback controls. Current candidate records enforce bounded contract evidence, exact accepted shadow-evidence resource/version proof, and refs; module runtime projection invocation is not yet executable. |
+| Runtime route model | 15 | passed | 15 | Active replacement routes are explicit, versioned, scoped, reversible, and executed through the supervised module-runtime provider-safe projection boundary for `git_status`. |
+| Candidate module contract | 15 | partial | 13 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route proves a metadata-supervised read-only adapter projection, not arbitrary module code execution. |
 | Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
-| Activation and routing | 14 | partial | 8 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and annotates built-in projection under the active route. |
+| Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
-| Agent workflow | 10 | partial | 5 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, and explain results. The records support this workflow; full scripted stress workflow remains next. |
-| Cockpit/session visibility | 10 | partial | 3 | User sees what changed, why, current owner, route state, failures, and rollback actions. Current cockpit sees new operations through the catalog; dedicated route-state cockpit sections remain next. |
-| Tests/stress harness | 8 | partial | 2 | Simulator and backend stress tests prove real replacement workflows. Static invariants are present; full route lifecycle and simulator stress tests remain next. |
+| Agent workflow | 10 | partial | 8 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, invoke, explain, disable, and roll back the first route through durable operations. Broader live stress workflows should now test breadth rather than unblock foundation. |
+| Cockpit/session visibility | 10 | partial | 7 | Engine Cockpit can derive route operations and replacement metadata from server-owned catalog/binding facts. Dedicated high-level route-story cards remain product polish, not a routing prerequisite. |
+| Tests/stress harness | 8 | partial | 7 | Backend lifecycle tests and static invariants prove the first route. Simulator/live Tron stress tests are the next practical validation layer, not another foundation scorecard. |
 | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
 
 ## Runtime Route Model
@@ -50,19 +53,23 @@ The dispatcher has one route seam today:
 
 ```text
 capability::execute(git_status)
-  -> built-in Git status provider-safe projection
   -> scoped capability route lookup
        no active route -> return built-in projection
        active route -> verify route/binding/candidate refs
+                    -> verify lifecycle/runtime refs and enabled state
+                    -> project supervised module-runtime provider-safe output
                     -> emit route event
-                    -> annotate result.dynamicReplacement
-                    -> return built-in projection with route evidence
+                    -> return routed projection with dynamicReplacement evidence
+       unsafe route -> emit failed_closed route event
+                    -> return route failure without built-in success fallback
 ```
 
 This is deliberately not a domain-specific module adapter executor. The route
 resolver only chooses whether a governed route exists and whether it is safe to
-surface route evidence. It fails closed if route records are stale, terminal,
-wrong-scope, missing authority evidence, missing referenced records, or unsafe.
+invoke the supervised module-runtime projection boundary. It fails closed if
+route records are stale, terminal, wrong-scope, missing authority evidence,
+missing referenced records, lifecycle/runtime refs are stale or mismatched, or
+the provider-safe projection is unsafe.
 
 ## Route Records
 
@@ -103,16 +110,18 @@ wrong-scope, missing authority evidence, missing referenced records, or unsafe.
 8. Explain what changed using route events and evidence refs.
 9. Disable or roll back if verification fails.
 
-## Deferred Work
+## Practical Live-Test Work
 
-- Add a supervised module-runtime adapter projection call so an active route can
-  execute the module-owned provider-safe projection instead of annotating the
-  built-in projection.
-- Add dedicated Engine Cockpit and Session Briefing route-state sections:
-  current owner, candidate owner, active/shadow/disabled/rolled-back state,
-  last verification, failed adaptations, and rollback action detail.
-- Add end-to-end lifecycle tests that create a candidate, approve a shadow
-  trial, activate a route, invoke `git_status`, disable it, roll it back, and
-  inspect route events.
-- Add simulator stress tests that verify the cockpit and session briefing tell
-  the replacement story without raw IDs or low-level material at top level.
+The foundational runtime route is complete for the first safe read-only target.
+The next work should be practical live testing rather than another foundation
+plan:
+
+- Run Tron through the full `git_status` replacement workflow from the app:
+  inspect readiness, record candidate, shadow, approve, activate, invoke,
+  explain, disable, and roll back.
+- Use the failures from that workflow to decide which cockpit/session briefing
+  polish is necessary for user comprehension.
+- Add the next adapter only after the first route proves operational in live
+  sessions. Write operations, network adapters, package managers, dependency
+  restoration, and production deployment remain out of scope until separate
+  governed trials prove those contracts.

@@ -1,11 +1,13 @@
 # Capability Dynamic Replacement Evidence Manifest
 
-Status: **implementation candidate**
+Status: **foundational runtime route complete**
 
 This manifest records the source-backed evidence for the first dynamic
 replacement slice. The slice adds governed route records and a scoped
-`git_status` route seam. It does not claim full autonomous self-update or live
-module adapter execution.
+`git_status` route seam that resolves an active route, verifies lifecycle and
+runtime refs, projects supervised module-runtime provider-safe output, and
+fails closed when the replacement boundary is unsafe. It does not claim full
+autonomous self-update across every operation.
 
 ## Reviewed Source Files
 
@@ -17,6 +19,7 @@ module adapter execution.
 | Provider schema fields | `packages/agent/src/domains/capability/capability_binding_contract.rs` |
 | Capability contract guidance | `packages/agent/src/domains/capability/contract.rs` |
 | Route service | `packages/agent/src/domains/capability_binding/route.rs` |
+| Module runtime projection boundary | `packages/agent/src/domains/module_runtime/service.rs` |
 | Route authority | `packages/agent/src/domains/capability_binding/authority.rs` |
 | Route resource definitions | `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
 | Grant authorization | `packages/agent/src/engine/authority/grants/authorization.rs` |
@@ -34,7 +37,8 @@ module adapter execution.
 | Activation is explicit and approval-backed. | `capability_route_activate` requires a ready binding, exact expected binding version, accepted shadow-evidence proof captured by the binding, approval refs, rollback/disable controls, exact selectors, and `networkPolicy: none`. |
 | Route lookup is exact-scope and fail-closed. | `active_route_for_git_status` derives trusted session/workspace scope, lists active route activations in that scope, verifies binding/candidate refs against the activation/binding expected current versions plus accepted current shadow evidence, skips terminal route events, and returns no route when scope cannot be derived. |
 | Routed invocation evidence is durable. | `emit_routed_invocation_event` records a `capability_route_event` resource with route version, activation refs, trace/replay refs, idempotency, and side-effect proof. |
-| Current runtime replacement is not overclaimed. | Route annotations set `moduleAdapterInvoked: false`, `moduleAdapterInvocationState: deferred_supervised_runtime_adapter`, and `builtInProjectionUsed: true`. |
+| Active routes use a supervised module-runtime projection boundary. | `git_status` dispatch calls `execute_routed_git_status` when `active_route_for_git_status` returns a route; route execution calls `module_runtime::service::project_provider_safe_adapter_output`, requires exact lifecycle/runtime version refs, lifecycle runtime authorization, `networkPolicy: none`, supervised-envelope proof, and a bounded `git_status` projection. |
+| Active routes fail closed instead of silently falling back. | A rejected supervised projection emits a `failed_closed` `capability_route_event` and returns an errored `git_status route failed closed` result with `moduleAdapterInvoked: true`, `builtInProjectionUsed: false`, and no built-in success projection. Stale referenced route records emit a `failed_closed` lookup event before returning the stale-record error. |
 | Minimal-engine guardrails hold. | Route records forbid package-manager, network, deploy, dependency restore, dispatch-table mutation, raw paths/commands/logs/code/file contents, raw grant IDs, raw authority IDs, and repo-managed skills. |
 
 ## Validation Commands
@@ -46,16 +50,20 @@ cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo check --manifest-path packages/agent/Cargo.toml
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_dynamic_replacement_invariants -- --nocapture
-CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding -- --nocapture
+CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_records_candidate_binding_activation_disable_and_rollback_for_git_status -- --nocapture
+CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::active_route_rejects_unsafe_adapter_projection_without_builtin_fallback -- --nocapture
+CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_lookup_rejects_stale_binding_or_candidate_current_versions -- --nocapture
+CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_candidate_rejects_fabricated_or_stale_shadow_evidence -- --nocapture
 scripts/personal-info-guard.sh
 git diff --check
 git diff --cached --check
 ```
 
-## Known Gap
+## Practical Live-Test Boundary
 
-The supervised module runtime currently records runtime envelopes and metadata.
-It does not yet expose a synchronous provider-safe replacement adapter
-projection call that the capability dispatcher can invoke. Until that exists,
-the `git_status` route seam annotates the built-in projection with active route
-evidence instead of executing a module-owned adapter.
+The first governed runtime route is complete for read-only `git_status`.
+Additional operation breadth should now be driven by live Tron stress tests and
+focused follow-up slices, not by another foundation scorecard. Write operations,
+network adapters, package-manager behavior, dependency restoration, and
+production deployment remain intentionally outside this route until separate
+governed trials prove their contracts.

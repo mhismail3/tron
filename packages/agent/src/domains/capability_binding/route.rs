@@ -5,7 +5,8 @@ use crate::engine::{
     CreateResource, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceLocation,
     EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
 };
-use crate::shared::protocol::model_capabilities::CapabilityResult;
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::errors::CapabilityError;
 
 use super::authority::{
@@ -61,6 +62,12 @@ const ROUTE_ACTIVATION_IDEMPOTENCY_DOMAIN: &[u8] =
 const ROUTE_EVENT_IDEMPOTENCY_DOMAIN: &[u8] = b"tron.capability_route_event.idempotency.v1\0";
 const ROUTE_ROLLBACK_IDEMPOTENCY_DOMAIN: &[u8] = b"tron.capability_route_rollback.idempotency.v1\0";
 
+struct ReferencedRouteRecords {
+    module_runtime_ref: Value,
+    module_lifecycle_ref: Value,
+    candidate_projection: Value,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveRoute {
     pub(crate) activation_resource_id: String,
@@ -68,6 +75,9 @@ pub(crate) struct ActiveRoute {
     pub(crate) route_version: String,
     pub(crate) candidate_owner: String,
     pub(crate) candidate_label: String,
+    pub(crate) module_runtime_ref: Value,
+    pub(crate) module_lifecycle_ref: Value,
+    pub(crate) candidate_projection: Value,
 }
 
 pub(crate) async fn record_replacement_candidate_value_at(
@@ -346,7 +356,7 @@ pub(crate) async fn record_route_binding_value_at(
         "binding": {
             "routeVersion": route_version,
             "candidate": version_ref(&candidate_inspection.resource, candidate_version, "replacement_candidate"),
-            "shadowEvidence": shadow_evidence,
+            "shadowEvidence": shadow_evidence.version_ref,
             "targetOperation": TARGET_OPERATION,
             "scopeKind": scope.kind(),
             "scopeValueRedacted": true,
@@ -568,16 +578,61 @@ pub(crate) async fn active_route_for_git_status(
         if route_has_terminal_event(deps, &scope, &inspection.resource.resource_id).await? {
             continue;
         }
-        let binding_ref = payload
+        let Some(binding_ref) = payload
             .pointer("/binding/resourceId")
             .and_then(Value::as_str)
-            .ok_or_else(|| invalid("active route is missing route binding ref"))?;
-        let expected_binding_version = payload
+        else {
+            emit_route_lookup_failed_event(
+                deps,
+                invocation,
+                &scope,
+                &inspection,
+                version,
+                payload,
+                "missing_binding_ref",
+            )
+            .await?;
+            return Err(invalid("active route is missing route binding ref"));
+        };
+        let Some(expected_binding_version) = payload
             .pointer("/binding/versionId")
             .and_then(Value::as_str)
-            .ok_or_else(|| invalid("active route is missing route binding version ref"))?;
-        ensure_referenced_route_records(deps, &scope, binding_ref, Some(expected_binding_version))
+        else {
+            emit_route_lookup_failed_event(
+                deps,
+                invocation,
+                &scope,
+                &inspection,
+                version,
+                payload,
+                "missing_binding_version_ref",
+            )
             .await?;
+            return Err(invalid("active route is missing route binding version ref"));
+        };
+        let records = match ensure_referenced_route_records(
+            deps,
+            &scope,
+            binding_ref,
+            Some(expected_binding_version),
+        )
+        .await
+        {
+            Ok(records) => records,
+            Err(error) => {
+                emit_route_lookup_failed_event(
+                    deps,
+                    invocation,
+                    &scope,
+                    &inspection,
+                    version,
+                    payload,
+                    "referenced_route_record_rejected",
+                )
+                .await?;
+                return Err(error);
+            }
+        };
         let route = ActiveRoute {
             activation_resource_id: inspection.resource.resource_id.clone(),
             activation_version_id: version.version_id.clone(),
@@ -596,6 +651,9 @@ pub(crate) async fn active_route_for_git_status(
                 .and_then(Value::as_str)
                 .unwrap_or("Governed Git status adapter")
                 .to_owned(),
+            module_runtime_ref: records.module_runtime_ref,
+            module_lifecycle_ref: records.module_lifecycle_ref,
+            candidate_projection: records.candidate_projection,
         };
         let updated_at = payload
             .get("updatedAt")
@@ -612,10 +670,110 @@ pub(crate) async fn active_route_for_git_status(
     Ok(selected.map(|(_, route)| route))
 }
 
+async fn emit_route_lookup_failed_event(
+    deps: &Deps,
+    invocation: &Invocation,
+    scope: &EngineResourceScope,
+    activation: &EngineResourceInspection,
+    activation_version: &EngineResourceVersion,
+    activation_payload: &Value,
+    event_result: &str,
+) -> Result<Option<Value>, CapabilityError> {
+    let now = Utc::now().to_rfc3339();
+    let idempotency_key = invocation.id.as_str();
+    let event_id = bounded_provider_visible_token(
+        "capabilityRouteEventId",
+        &format!("{}-route-lookup-failed", invocation.id.as_str()),
+        DECISION_ID_MAX_BYTES,
+    )?;
+    let resource_id = route_resource_id(
+        CAPABILITY_ROUTE_EVENT_KIND,
+        scope,
+        &event_id,
+        idempotency_key,
+    );
+    if let Some(existing) = deps
+        .engine_host
+        .inspect_resource(&resource_id)
+        .await
+        .map_err(engine_error)?
+    {
+        ensure_capability_route_event(&existing, "capability_route_event replay")?;
+        let (version, payload) = current_payload(&existing, "capability_route_event replay")?;
+        return Ok(Some(route_summary(&existing.resource, version, payload)));
+    }
+    let record = json!({
+        "schemaVersion": CAPABILITY_ROUTE_EVENT_SCHEMA_VERSION,
+        "state": "failed_closed",
+        "routeEventId": event_id,
+        "scope": scope_ref(scope),
+        "operation": route_operation_record("failed_closed"),
+        "candidate": {
+            "owner": activation_payload.pointer("/candidate/owner")
+                .and_then(Value::as_str)
+                .unwrap_or("module_candidate"),
+            "label": activation_payload.pointer("/candidate/label")
+                .and_then(Value::as_str)
+                .unwrap_or("Governed Git status adapter"),
+            "moduleAdapterInvoked": false,
+            "moduleAdapterInvocationState": "not_invoked",
+            "providerSafeProjectionRequired": true
+        },
+        "binding": {
+            "routeVersion": activation_payload.pointer("/activation/routeVersion")
+                .and_then(Value::as_str)
+                .unwrap_or("route-v1"),
+            "resourceId": activation_payload.pointer("/binding/resourceId")
+                .and_then(Value::as_str)
+                .unwrap_or(&activation.resource.resource_id),
+            "versionId": activation_payload.pointer("/binding/versionId")
+                .and_then(Value::as_str)
+                .unwrap_or(&activation_version.version_id)
+        },
+        "activation": version_ref(&activation.resource, activation_version, "route_activation"),
+        "event": {
+            "kind": "route_lookup_failed",
+            "result": event_result,
+            "failClosed": true,
+            "traceLinked": true,
+            "networkPolicy": "none"
+        },
+        "auditRefs": [],
+        "traceRefs": trace_refs(invocation),
+        "replayRefs": replay_refs(invocation),
+        "idempotency": idempotency_evidence(idempotency_key, ROUTE_EVENT_IDEMPOTENCY_FINGERPRINT_ALGORITHM, ROUTE_EVENT_IDEMPOTENCY_DOMAIN),
+        "sideEffectProof": route_side_effect(false),
+        "createdAt": now,
+        "updatedAt": now,
+        "revision": 1
+    });
+    let resource = create_route_resource(
+        deps,
+        invocation,
+        resource_id,
+        CAPABILITY_ROUTE_EVENT_KIND,
+        CAPABILITY_ROUTE_EVENT_SCHEMA_ID,
+        scope,
+        "failed_closed",
+        "capability-route-event",
+        &event_id,
+        record,
+    )
+    .await?;
+    let inspection =
+        inspect_resource_required(deps, &resource.resource_id, "capability route event").await?;
+    let (version, payload) = current_payload(&inspection, "capability route event")?;
+    Ok(Some(route_summary(&inspection.resource, version, payload)))
+}
+
 pub(crate) async fn emit_routed_invocation_event(
     deps: &Deps,
     invocation: &Invocation,
     route: &ActiveRoute,
+    event_state: &str,
+    event_result: &str,
+    module_adapter_invoked: bool,
+    fail_closed: bool,
 ) -> Result<Option<Value>, CapabilityError> {
     let scope = match resource_scope(invocation) {
         Ok(scope) => scope,
@@ -646,15 +804,15 @@ pub(crate) async fn emit_routed_invocation_event(
     }
     let record = json!({
         "schemaVersion": CAPABILITY_ROUTE_EVENT_SCHEMA_VERSION,
-        "state": "routed",
+        "state": event_state,
         "routeEventId": event_id,
         "scope": scope_ref(&scope),
         "operation": route_operation_record("active_route"),
         "candidate": {
             "owner": route.candidate_owner,
             "label": route.candidate_label,
-            "moduleAdapterInvoked": false,
-            "moduleAdapterInvocationState": "deferred_supervised_runtime_adapter",
+            "moduleAdapterInvoked": module_adapter_invoked,
+            "moduleAdapterInvocationState": if module_adapter_invoked { "supervised_runtime_projection" } else { "not_invoked" },
             "providerSafeProjectionRequired": true
         },
         "binding": {
@@ -669,8 +827,8 @@ pub(crate) async fn emit_routed_invocation_event(
         },
         "event": {
             "kind": "routed_invocation",
-            "result": "routed",
-            "failClosed": false,
+            "result": event_result,
+            "failClosed": fail_closed,
             "traceLinked": true,
             "networkPolicy": "none"
         },
@@ -690,7 +848,7 @@ pub(crate) async fn emit_routed_invocation_event(
         CAPABILITY_ROUTE_EVENT_KIND,
         CAPABILITY_ROUTE_EVENT_SCHEMA_ID,
         &scope,
-        "routed",
+        event_state,
         "capability-route-event",
         &event_id,
         record,
@@ -702,33 +860,104 @@ pub(crate) async fn emit_routed_invocation_event(
     Ok(Some(route_summary(&inspection.resource, version, payload)))
 }
 
-pub(crate) async fn annotate_routed_git_status(
+pub(crate) async fn execute_routed_git_status(
     deps: &Deps,
     invocation: &Invocation,
-    mut result: CapabilityResult,
     route: &ActiveRoute,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let route_event = emit_routed_invocation_event(deps, invocation, route).await?;
-    let details = result.details.get_or_insert_with(|| json!({}));
-    if let Some(object) = details.as_object_mut() {
-        object.insert(
-            "dynamicReplacement".to_owned(),
-            json!({
+    let runtime_deps = crate::domains::module_runtime::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let projected =
+        match crate::domains::module_runtime::service::project_provider_safe_adapter_output(
+            &runtime_deps,
+            invocation,
+            TARGET_OPERATION,
+            &route.module_runtime_ref,
+            &route.module_lifecycle_ref,
+            &route.candidate_projection,
+        )
+        .await
+        {
+            Ok(projected) => projected,
+            Err(_) => {
+                let route_event = emit_routed_invocation_event(
+                    deps,
+                    invocation,
+                    route,
+                    "failed_closed",
+                    "adapter_projection_failed",
+                    true,
+                    true,
+                )
+                .await?;
+                return Ok(CapabilityResult {
+                    content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                        "git_status route failed closed: supervised adapter projection was rejected",
+                    )]),
+                    details: Some(json!({
+                        "primitiveOperation": TARGET_OPERATION,
+                        "status": "failed_closed",
+                        "dynamicReplacement": {
+                            "operation": TARGET_OPERATION,
+                            "routeState": "active_route_failed_closed",
+                            "routeVersion": route.route_version,
+                            "candidateOwner": route.candidate_owner,
+                            "candidateLabel": route.candidate_label,
+                            "moduleAdapterInvoked": true,
+                            "moduleAdapterInvocationState": "supervised_runtime_projection_rejected",
+                            "builtInProjectionUsed": false,
+                            "networkPolicy": "none",
+                            "failClosed": true,
+                            "routeEvent": route_event,
+                            "failureKind": "adapter_projection_rejected"
+                        }
+                    })),
+                    is_error: Some(true),
+                    stop_turn: None,
+                });
+            }
+        };
+    let route_event = emit_routed_invocation_event(
+        deps,
+        invocation,
+        route,
+        "routed",
+        "adapter_projection_succeeded",
+        true,
+        false,
+    )
+    .await?;
+    let status = projected
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("ok");
+    Ok(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
+            "git_status routed: {status}"
+        ))]),
+        details: Some(json!({
+            "primitiveOperation": TARGET_OPERATION,
+            "status": status,
+            "git": projected["git"],
+            "dynamicReplacement": {
                 "operation": TARGET_OPERATION,
-                "routeState": "active_route_builtin_projection",
+                "routeState": "active_route_module_adapter_projection",
                 "routeVersion": route.route_version,
                 "candidateOwner": route.candidate_owner,
                 "candidateLabel": route.candidate_label,
-                "moduleAdapterInvoked": false,
-                "moduleAdapterInvocationState": "deferred_supervised_runtime_adapter",
-                "builtInProjectionUsed": true,
+                "moduleAdapterInvoked": true,
+                "moduleAdapterInvocationState": "supervised_runtime_projection",
+                "builtInProjectionUsed": false,
                 "networkPolicy": "none",
                 "failClosed": false,
+                "adapterRuntime": projected["adapterRuntime"],
                 "routeEvent": route_event
-            }),
-        );
-    }
-    Ok(result)
+            }
+        })),
+        is_error: Some(false),
+        stop_turn: None,
+    })
 }
 
 async fn route_control_value_at(
@@ -1276,7 +1505,7 @@ async fn ensure_referenced_route_records(
     scope: &EngineResourceScope,
     binding_resource_id: &str,
     expected_binding_version: Option<&str>,
-) -> Result<(), CapabilityError> {
+) -> Result<ReferencedRouteRecords, CapabilityError> {
     let binding =
         inspect_resource_required(deps, binding_resource_id, "capability route binding").await?;
     ensure_capability_route_binding(&binding, "capability_route_lookup")?;
@@ -1315,7 +1544,7 @@ async fn ensure_referenced_route_records(
             "stale capability replacement candidate version {expected_candidate_version}"
         )));
     }
-    validated_shadow_evidence_from_candidate(
+    let shadow = validated_shadow_evidence_from_candidate(
         deps,
         None,
         scope,
@@ -1323,7 +1552,19 @@ async fn ensure_referenced_route_records(
         "capability_route_lookup",
     )
     .await?;
-    Ok(())
+    let module_runtime_ref = candidate_payload
+        .pointer("/candidate/moduleRuntimeRef")
+        .cloned()
+        .ok_or_else(|| invalid("active route candidate is missing moduleRuntimeRef"))?;
+    let module_lifecycle_ref = candidate_payload
+        .pointer("/candidate/moduleLifecycleRef")
+        .cloned()
+        .ok_or_else(|| invalid("active route candidate is missing moduleLifecycleRef"))?;
+    Ok(ReferencedRouteRecords {
+        module_runtime_ref,
+        module_lifecycle_ref,
+        candidate_projection: shadow.candidate_projection,
+    })
 }
 
 async fn route_has_terminal_event(
@@ -1398,14 +1639,15 @@ fn route_operation_record(reason: &str) -> Value {
         "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
         "ownershipClass": "adapter_replaceable",
         "requestedReplacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
-        "currentExecutionOwner": "builtin_projection_under_governed_route",
+        "currentExecutionOwner": "supervised_module_runtime_adapter_when_active_else_builtin",
         "routeReason": reason,
-        "dispatchChanged": false
+        "dispatchChanged": true
     })
 }
 
 struct ValidatedShadowEvidence {
     version_ref: Value,
+    candidate_projection: Value,
 }
 
 async fn validated_shadow_evidence_from_payload(
@@ -1425,16 +1667,14 @@ async fn validated_shadow_evidence_from_candidate(
     scope: &EngineResourceScope,
     candidate_payload: &Value,
     operation: &str,
-) -> Result<Value, CapabilityError> {
+) -> Result<ValidatedShadowEvidence, CapabilityError> {
     let Some(shadow_evidence_ref) = candidate_payload.pointer("/candidate/shadowEvidenceRef")
     else {
         return Err(invalid(
             "capability replacement candidate is missing shadow evidence ref",
         ));
     };
-    validated_shadow_evidence_ref(deps, grant, scope, shadow_evidence_ref, operation)
-        .await
-        .map(|evidence| evidence.version_ref)
+    validated_shadow_evidence_ref(deps, grant, scope, shadow_evidence_ref, operation).await
 }
 
 async fn validated_shadow_evidence_ref(
@@ -1498,6 +1738,10 @@ async fn validated_shadow_evidence_ref(
     }
     Ok(ValidatedShadowEvidence {
         version_ref: version_ref(&inspection.resource, version, "shadow_evidence"),
+        candidate_projection: payload
+            .get("candidateProjection")
+            .cloned()
+            .ok_or_else(|| invalid("shadow evidence is missing candidateProjection"))?,
     })
 }
 
@@ -1538,8 +1782,8 @@ fn candidate_contract(
         TOKEN_MAX_BYTES,
     )?;
     let module_ref = required_ref(payload, "moduleRef")?;
-    let runtime_ref = required_ref(payload, "moduleRuntimeRef")?;
-    let lifecycle_ref = required_ref(payload, "moduleLifecycleRef")?;
+    let runtime_ref = required_versioned_ref(payload, "moduleRuntimeRef")?;
+    let lifecycle_ref = required_versioned_ref(payload, "moduleLifecycleRef")?;
     Ok(json!({
         "label": label,
         "owner": owner,
@@ -1550,10 +1794,32 @@ fn candidate_contract(
         "operation": TARGET_OPERATION,
         "outputContract": "git_status_provider_safe_projection_v1",
         "executionMode": "supervised_module_runtime_adapter",
-        "moduleAdapterInvokedByDispatcher": false,
-        "moduleAdapterInvocationState": "deferred_until_supervised_runtime_projection_call",
+        "moduleAdapterInvokedByDispatcher": true,
+        "moduleAdapterInvocationState": "supervised_runtime_projection",
         "providerSafeProjectionRequired": true
     }))
+}
+
+fn required_versioned_ref(payload: &Value, field: &str) -> Result<Value, CapabilityError> {
+    let raw_ref = payload
+        .get(field)
+        .ok_or_else(|| invalid(format!("{field} is required")))?;
+    let mut reference = required_ref(payload, field)?;
+    let version_id = raw_ref
+        .get("versionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires versionId")))?;
+    if let Some(object) = reference.as_object_mut() {
+        object.insert(
+            "versionId".to_owned(),
+            json!(bounded_provider_visible_token(
+                &format!("{field}.versionId"),
+                version_id,
+                TOKEN_MAX_BYTES,
+            )?),
+        );
+    }
+    Ok(reference)
 }
 
 fn contract_evidence(payload: &Value) -> Result<Value, CapabilityError> {

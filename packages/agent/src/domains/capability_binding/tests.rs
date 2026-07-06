@@ -4,10 +4,10 @@ use serde_json::{Value, json};
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::resource_store::current_payload;
 use super::route::{
-    activate_route_value_at, active_route_for_git_status, disable_route_value_at,
-    inspect_replacement_candidate_value, inspect_route_binding_value, inspect_route_event_value,
-    list_route_event_value, record_replacement_candidate_value_at, record_route_binding_value_at,
-    rollback_route_value_at,
+    ActiveRoute, activate_route_value_at, active_route_for_git_status, disable_route_value_at,
+    execute_routed_git_status, inspect_replacement_candidate_value, inspect_route_binding_value,
+    inspect_route_event_value, list_route_event_value, record_replacement_candidate_value_at,
+    record_route_binding_value_at, rollback_route_value_at,
 };
 use super::service::{
     activate_capability_binding_policy_value_at, cockpit_overview_value,
@@ -39,9 +39,11 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
 };
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
-    EngineResourceScope, EngineResourceVersioningMode, FunctionId, Invocation, InvocationId,
-    ListResources, RiskLevel, TraceId, UpdateResource, builtin_resource_type_definitions,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeliveryMode, DeriveGrant,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersioningMode, FunctionId,
+    Invocation, InvocationId, ListResources, MODULE_LIFECYCLE_STATE_KIND,
+    MODULE_LIFECYCLE_STATE_SCHEMA_ID, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID,
+    RiskLevel, TraceId, UpdateResource, WorkerId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -566,15 +568,29 @@ impl RouteFixture {
         let shadow_evidence_version_id = shadow_evidence["capabilityShadowTrialEvidenceVersionId"]
             .as_str()
             .expect("shadow evidence version id");
+        let (module_lifecycle_ref, module_runtime_ref) =
+            self.runtime_refs(&format!("{key}-runtime")).await;
+        let lifecycle_id = module_lifecycle_ref["resourceId"]
+            .as_str()
+            .expect("lifecycle ref resource id");
+        let runtime_id = module_runtime_ref["resourceId"]
+            .as_str()
+            .expect("runtime ref resource id");
         let grant_id = self
             .exact_write_grant(
                 &format!("{key}-shadow-evidence-exact"),
-                &[shadow_evidence_id],
+                &[shadow_evidence_id, lifecycle_id, runtime_id],
             )
             .await;
         invocation(
             key,
-            route_candidate_payload(key, shadow_evidence_id, shadow_evidence_version_id),
+            route_candidate_payload(
+                key,
+                shadow_evidence_id,
+                shadow_evidence_version_id,
+                &module_lifecycle_ref,
+                &module_runtime_ref,
+            ),
             grant_id,
             &[
                 READ_SCOPE,
@@ -583,6 +599,86 @@ impl RouteFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
+        )
+    }
+
+    async fn runtime_refs(&self, key: &str) -> (Value, Value) {
+        let scope = EngineResourceScope::Session(self.session_id.clone());
+        let lifecycle_id = format!("module_lifecycle_state:{key}");
+        let lifecycle = self
+            .deps
+            .engine_host
+            .create_resource(CreateResource {
+                resource_id: Some(lifecycle_id.clone()),
+                kind: MODULE_LIFECYCLE_STATE_KIND.to_owned(),
+                schema_id: Some(MODULE_LIFECYCLE_STATE_SCHEMA_ID.to_owned()),
+                scope: scope.clone(),
+                owner_worker_id: WorkerId::new("module_lifecycle").expect("worker id"),
+                owner_actor_id: ActorId::new(format!("agent:{}", self.session_id))
+                    .expect("actor id"),
+                lifecycle: Some("enabled".to_owned()),
+                policy: json!({"metadataOnly": true, "networkPolicy": "none"}),
+                initial_payload: Some(route_lifecycle_payload(&scope, &lifecycle_id)),
+                locations: vec![EngineResourceLocation {
+                    kind: "module_lifecycle_state".to_owned(),
+                    uri: format!("module-lifecycle-state:{key}"),
+                    mime_type: Some("application/json".to_owned()),
+                    size_bytes: None,
+                }],
+                trace_id: TraceId::new(format!("trace-route-lifecycle-{key}")).expect("trace id"),
+                invocation_id: None,
+            })
+            .await
+            .expect("create route lifecycle");
+        let lifecycle_version_id = lifecycle
+            .current_version_id
+            .clone()
+            .expect("lifecycle version");
+        let runtime_id = format!("module_runtime_state:{key}");
+        let runtime = self
+            .deps
+            .engine_host
+            .create_resource(CreateResource {
+                resource_id: Some(runtime_id.clone()),
+                kind: MODULE_RUNTIME_STATE_KIND.to_owned(),
+                schema_id: Some(MODULE_RUNTIME_STATE_SCHEMA_ID.to_owned()),
+                scope: scope.clone(),
+                owner_worker_id: WorkerId::new("module_runtime").expect("worker id"),
+                owner_actor_id: ActorId::new(format!("agent:{}", self.session_id))
+                    .expect("actor id"),
+                lifecycle: Some("running".to_owned()),
+                policy: json!({"metadataOnly": true, "networkPolicy": "none"}),
+                initial_payload: Some(route_runtime_payload(
+                    &scope,
+                    &lifecycle_id,
+                    &lifecycle_version_id,
+                    key,
+                )),
+                locations: vec![EngineResourceLocation {
+                    kind: "module_runtime_state".to_owned(),
+                    uri: format!("module-runtime-state:{key}"),
+                    mime_type: Some("application/json".to_owned()),
+                    size_bytes: None,
+                }],
+                trace_id: TraceId::new(format!("trace-route-runtime-{key}")).expect("trace id"),
+                invocation_id: None,
+            })
+            .await
+            .expect("create route runtime");
+        let runtime_version_id = runtime.current_version_id.clone().expect("runtime version");
+        (
+            json!({
+                "kind": MODULE_LIFECYCLE_STATE_KIND,
+                "resourceId": lifecycle_id,
+                "versionId": lifecycle_version_id,
+                "role": "lifecycle"
+            }),
+            json!({
+                "kind": MODULE_RUNTIME_STATE_KIND,
+                "resourceId": runtime_id,
+                "versionId": runtime_version_id,
+                "role": "runtime"
+            }),
         )
     }
 
@@ -983,6 +1079,39 @@ impl RouteFixture {
             .expect("append route resource version");
     }
 
+    async fn set_resource_lifecycle(&self, key: &str, resource_id: &str, lifecycle: &str) {
+        let inspection = self
+            .deps
+            .engine_host
+            .inspect_resource(resource_id)
+            .await
+            .expect("inspect route resource")
+            .expect("route resource exists");
+        let (current_version, current_payload) =
+            current_payload(&inspection, "route fixture lifecycle update")
+                .expect("current payload");
+        let mut payload = current_payload.clone();
+        payload["state"] = json!(lifecycle);
+        payload["revision"] =
+            json!(payload.get("revision").and_then(Value::as_u64).unwrap_or(1) + 1);
+        payload["updatedAt"] = json!("2026-06-27T12:01:00Z");
+        let update_invocation = self.write_invocation(key, json!({}));
+        self.deps
+            .engine_host
+            .update_resource(UpdateResource {
+                resource_id: resource_id.to_owned(),
+                expected_current_version_id: Some(current_version.version_id.clone()),
+                lifecycle: Some(lifecycle.to_owned()),
+                payload,
+                state: None,
+                locations: Vec::new(),
+                trace_id: update_invocation.causal_context.trace_id,
+                invocation_id: Some(update_invocation.id),
+            })
+            .await
+            .expect("set route fixture resource lifecycle");
+    }
+
     fn write_invocation(&self, key: &str, payload: Value) -> Invocation {
         invocation(
             key,
@@ -1342,7 +1471,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
     assert_eq!(
         candidate["replacementCandidate"]["candidate"]["moduleAdapterInvokedByDispatcher"],
-        json!(false)
+        json!(true)
     );
     let replay = record_replacement_candidate_value_at(
         &fixture.deps,
@@ -1443,6 +1572,55 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     .expect("active route");
     assert_eq!(active.route_version, "git-status-route-v1");
     assert_eq!(active.candidate_owner, "module:git-status-shadow");
+    let routed = execute_routed_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-execute", json!({})),
+        &active,
+    )
+    .await
+    .expect("execute routed git_status");
+    assert_eq!(routed.is_error, Some(false));
+    let routed_details = routed.details.expect("routed details");
+    assert_eq!(
+        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
+        json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["builtInProjectionUsed"],
+        json!(false)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeState"],
+        json!("active_route_module_adapter_projection")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
+        json!(true)
+    );
+    assert!(
+        !contains_json_key(&routed_details, "moduleRuntimeResourceId"),
+        "routed provider details must not expose raw runtime resource IDs"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "resourceId"),
+        "routed provider details must not expose raw resource IDs"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "versionId"),
+        "routed provider details must not expose raw version IDs"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "idempotencyFingerprint"),
+        "routed provider details must not expose idempotency fingerprints"
+    );
+    assert!(
+        routed_details["git"].get("evidenceRef").is_none(),
+        "routed git projection must summarize evidence instead of exposing raw refs"
+    );
+    assert_eq!(
+        routed_details["git"]["evidence"]["resourceIdRedacted"],
+        json!(true)
+    );
 
     let events = list_route_event_value(
         &fixture.deps,
@@ -1549,6 +1727,100 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
 }
 
+#[tokio::test]
+async fn active_route_rejects_unsafe_adapter_projection_without_builtin_fallback() {
+    let fixture = RouteFixture::new("capability-route-fail-closed").await;
+
+    let candidate_invocation = fixture.candidate_invocation("candidate").await;
+    let candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record candidate");
+    let binding = fixture.binding("binding", &candidate).await;
+    fixture.activation("activation", &binding).await;
+
+    let mut active = active_route_for_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-after-activation", json!({})),
+    )
+    .await
+    .expect("route lookup after activation")
+    .expect("active route");
+    active.candidate_projection = json!({
+        "operation": "git_status",
+        "status": "clean",
+        "headState": "clean"
+    });
+
+    assert_route_execution_failed_closed(&fixture, &active, "route-execute-rejected").await;
+}
+
+#[tokio::test]
+async fn active_route_rejects_stale_runtime_ref_without_builtin_fallback() {
+    let (fixture, active) = activated_route_fixture("capability-route-stale-runtime").await;
+    let runtime_id = active.module_runtime_ref["resourceId"]
+        .as_str()
+        .expect("runtime resource id");
+    let runtime_version_id = active.module_runtime_ref["versionId"]
+        .as_str()
+        .expect("runtime version id");
+
+    fixture
+        .append_resource_version("runtime-stale-update", runtime_id, runtime_version_id)
+        .await;
+
+    assert_route_execution_failed_closed(&fixture, &active, "runtime-stale-execute").await;
+}
+
+#[tokio::test]
+async fn active_route_rejects_stale_lifecycle_ref_without_builtin_fallback() {
+    let (fixture, active) = activated_route_fixture("capability-route-stale-lifecycle").await;
+    let lifecycle_id = active.module_lifecycle_ref["resourceId"]
+        .as_str()
+        .expect("lifecycle resource id");
+    let lifecycle_version_id = active.module_lifecycle_ref["versionId"]
+        .as_str()
+        .expect("lifecycle version id");
+
+    fixture
+        .append_resource_version("lifecycle-stale-update", lifecycle_id, lifecycle_version_id)
+        .await;
+
+    assert_route_execution_failed_closed(&fixture, &active, "lifecycle-stale-execute").await;
+}
+
+#[tokio::test]
+async fn active_route_rejects_disabled_lifecycle_without_builtin_fallback() {
+    let (fixture, active) = activated_route_fixture("capability-route-disabled-lifecycle").await;
+    let lifecycle_id = active.module_lifecycle_ref["resourceId"]
+        .as_str()
+        .expect("lifecycle resource id");
+
+    fixture
+        .set_resource_lifecycle("lifecycle-disable", lifecycle_id, "disabled")
+        .await;
+
+    assert_route_execution_failed_closed(&fixture, &active, "lifecycle-disabled-execute").await;
+}
+
+#[tokio::test]
+async fn active_route_rejects_cancelled_runtime_without_builtin_fallback() {
+    let (fixture, active) = activated_route_fixture("capability-route-cancelled-runtime").await;
+    let runtime_id = active.module_runtime_ref["resourceId"]
+        .as_str()
+        .expect("runtime resource id");
+
+    fixture
+        .set_resource_lifecycle("runtime-cancel", runtime_id, "cancelled")
+        .await;
+
+    assert_route_execution_failed_closed(&fixture, &active, "runtime-cancelled-execute").await;
+}
+
 fn contains_json_key(value: &Value, target: &str) -> bool {
     match value {
         Value::Object(object) => object
@@ -1557,6 +1829,133 @@ fn contains_json_key(value: &Value, target: &str) -> bool {
         Value::Array(items) => items.iter().any(|value| contains_json_key(value, target)),
         _ => false,
     }
+}
+
+async fn assert_failed_closed_lookup_event(
+    fixture: &RouteFixture,
+    key: &str,
+    expected_result: &str,
+) {
+    let events = list_route_event_value(
+        &fixture.deps,
+        &fixture.read_invocation(key, json!({"includeArchived": true})),
+        &json!({"includeArchived": true}),
+    )
+    .await
+    .expect("list route events");
+    let failed = events["routeEvents"]
+        .as_array()
+        .expect("route events")
+        .iter()
+        .find(|event| {
+            event["state"] == json!("failed_closed")
+                && event["event"]["kind"] == json!("route_lookup_failed")
+                && event["event"]["result"] == json!(expected_result)
+        })
+        .expect("failed-closed lookup event");
+    assert!(
+        !contains_json_key(failed, "resourceId"),
+        "failed lookup event list must not expose raw resource IDs"
+    );
+    assert!(
+        !contains_json_key(failed, "versionId"),
+        "failed lookup event list must not expose raw version IDs"
+    );
+    assert_eq!(failed["resourceRefs"][0]["resourceIdRedacted"], json!(true));
+    assert_eq!(failed["resourceRefs"][0]["versionIdRedacted"], json!(true));
+}
+
+async fn activated_route_fixture(label: &str) -> (RouteFixture, ActiveRoute) {
+    let fixture = RouteFixture::new(label).await;
+    let candidate_invocation = fixture.candidate_invocation("candidate").await;
+    let candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record candidate");
+    let binding = fixture.binding("binding", &candidate).await;
+    fixture.activation("activation", &binding).await;
+    let active = active_route_for_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-after-activation", json!({})),
+    )
+    .await
+    .expect("route lookup after activation")
+    .expect("active route");
+    (fixture, active)
+}
+
+async fn assert_route_execution_failed_closed(
+    fixture: &RouteFixture,
+    active: &ActiveRoute,
+    key: &str,
+) -> Value {
+    let routed = execute_routed_git_status(
+        &fixture.deps,
+        &fixture.read_invocation(key, json!({})),
+        active,
+    )
+    .await
+    .expect("execute rejected routed git_status");
+    assert_eq!(routed.is_error, Some(true));
+    let routed_details = routed.details.expect("routed details");
+    assert_eq!(routed_details["status"], json!("failed_closed"));
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeState"],
+        json!("active_route_failed_closed")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
+        json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["builtInProjectionUsed"],
+        json!(false)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["failureKind"],
+        json!("adapter_projection_rejected")
+    );
+    assert!(
+        routed_details["dynamicReplacement"]
+            .as_object()
+            .expect("dynamic replacement object")
+            .get("failure")
+            .is_none(),
+        "provider-visible route failure must not expose raw internal error text"
+    );
+    assert!(
+        routed_details.get("git").is_none(),
+        "failed active routes must not return a built-in git success projection"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "moduleRuntimeResourceId"),
+        "failed route details must not expose raw runtime resource IDs"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "resourceId"),
+        "failed route details must not expose raw resource IDs"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "versionId"),
+        "failed route details must not expose raw version IDs"
+    );
+    assert!(
+        !contains_json_key(&routed_details, "idempotencyFingerprint"),
+        "failed route details must not expose idempotency fingerprints"
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeEvent"]["state"],
+        json!("failed_closed")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeEvent"]["event"]["result"],
+        json!("adapter_projection_failed")
+    );
+    routed_details
 }
 
 #[tokio::test]
@@ -1597,6 +1996,12 @@ async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
         error.contains("stale capability route binding version"),
         "{error}"
     );
+    assert_failed_closed_lookup_event(
+        &binding_fixture,
+        "binding-stale-events",
+        "referenced_route_record_rejected",
+    )
+    .await;
 
     let candidate_fixture = RouteFixture::new("capability-route-stale-candidate").await;
     let candidate_invocation = candidate_fixture
@@ -1636,6 +2041,12 @@ async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
         error.contains("stale capability replacement candidate version"),
         "{error}"
     );
+    assert_failed_closed_lookup_event(
+        &candidate_fixture,
+        "candidate-stale-events",
+        "referenced_route_record_rejected",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1647,7 +2058,13 @@ async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
         .await;
     let fake_invocation = invocation(
         "fake-evidence-candidate",
-        route_candidate_payload("fake-evidence", fake_evidence_id, "missing-version"),
+        route_candidate_payload(
+            "fake-evidence",
+            fake_evidence_id,
+            "missing-version",
+            &synthetic_lifecycle_ref("fake-evidence"),
+            &synthetic_runtime_ref("fake-evidence"),
+        ),
         grant_id,
         &[
             READ_SCOPE,
@@ -1680,7 +2097,13 @@ async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
         .await;
     let stale_invocation = invocation(
         "stale-evidence-candidate",
-        route_candidate_payload("stale-evidence", evidence_id, "stale-version"),
+        route_candidate_payload(
+            "stale-evidence",
+            evidence_id,
+            "stale-version",
+            &synthetic_lifecycle_ref("stale-evidence"),
+            &synthetic_runtime_ref("stale-evidence"),
+        ),
         grant_id,
         &[
             READ_SCOPE,
@@ -2931,6 +3354,8 @@ fn route_candidate_payload(
     key: &str,
     shadow_evidence_resource_id: &str,
     shadow_evidence_version_id: &str,
+    module_lifecycle_ref: &Value,
+    module_runtime_ref: &Value,
 ) -> Value {
     json!({
         "capabilityReplacementCandidateId": format!("{key}-replacement-candidate"),
@@ -2946,16 +3371,8 @@ fn route_candidate_payload(
             "resourceId": "module_manifest:git-status-shadow",
             "role": "module"
         },
-        "moduleRuntimeRef": {
-            "kind": "module_runtime_state",
-            "resourceId": "module_runtime_state:git-status-shadow",
-            "role": "runtime"
-        },
-        "moduleLifecycleRef": {
-            "kind": "module_lifecycle_state",
-            "resourceId": "module_lifecycle_state:git-status-shadow",
-            "role": "lifecycle"
-        },
+        "moduleRuntimeRef": module_runtime_ref,
+        "moduleLifecycleRef": module_lifecycle_ref,
         "shadowEvidenceRef": {
             "kind": CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
             "resourceId": shadow_evidence_resource_id,
@@ -2992,6 +3409,196 @@ fn route_candidate_payload(
     })
 }
 
+fn route_lifecycle_payload(scope: &EngineResourceScope, lifecycle_id: &str) -> Value {
+    json!({
+        "schemaVersion": "tron.module_lifecycle_state.v1",
+        "state": "enabled",
+        "transitionId": "route-lifecycle-enabled",
+        "scope": {"kind": scope.kind(), "value": scope.value()},
+        "installDecision": {
+            "kind": "module_install_decision",
+            "resourceId": format!("module_install_decision:{lifecycle_id}"),
+            "role": "install_decision",
+            "lifecycle": "approved"
+        },
+        "transition": {
+            "action": "enable",
+            "from": null,
+            "to": "enabled",
+            "reason": "Route fixture enables a supervised adapter.",
+            "metadataOnly": true,
+            "stateMutationOnly": true,
+            "activationPerformed": false,
+            "executionPerformed": false,
+            "rollbackExecuted": false
+        },
+        "previous": {
+            "state": null,
+            "versionId": null,
+            "currentVersionRevalidated": false
+        },
+        "approval": {
+            "decision": "approved",
+            "evidenceOnly": true,
+            "approvalIsAuthority": false
+        },
+        "rollback": {
+            "proofRefs": [],
+            "status": "ready",
+            "metadataOnly": true,
+            "rollbackExecuted": false
+        },
+        "runtimeAuthorization": {
+            "failClosed": true,
+            "enabledAllowsRuntime": true,
+            "disabledDenied": true,
+            "quarantinedDenied": true,
+            "rolledBackDenied": true
+        },
+        "evidenceRefs": [],
+        "traceRefs": [],
+        "replayRefs": [],
+        "authority": {
+            "grantRedacted": true,
+            "rawAuthorityIdsStored": false,
+            "derivedRuntimeGrantRequired": true,
+            "approvalEvidenceIsAuthority": false,
+            "requiredScopes": [READ_SCOPE, WRITE_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE],
+            "resourceKinds": [MODULE_LIFECYCLE_STATE_KIND],
+            "wildcardGrantsAllowed": false
+        },
+        "idempotency": {
+            "fingerprint": "route-lifecycle-fixture",
+            "fingerprintAlgorithm": "sha256:tron.module_lifecycle_state.idempotency.v1",
+            "keyRedacted": true,
+            "rawKeyStored": false
+        },
+        "sideEffectProof": {
+            "metadataOnly": true,
+            "installPerformed": false,
+            "activationPerformed": false,
+            "executionPerformed": false,
+            "rollbackExecuted": false,
+            "dependencyRestorePerformed": false,
+            "packageManagerUsed": false,
+            "networkPolicy": "none",
+            "networkAccessPerformed": false,
+            "repoManagedSkillsTouched": false,
+            "physicalWorkspaceDirectoryCreated": false,
+            "rawCommandsStored": false,
+            "rawLogsStored": false,
+            "fileContentsStored": false,
+            "absolutePathsStored": false
+        },
+        "createdAt": DEFAULT_OPERATION_AT,
+        "updatedAt": DEFAULT_OPERATION_AT,
+        "revision": 1
+    })
+}
+
+fn route_runtime_payload(
+    scope: &EngineResourceScope,
+    lifecycle_id: &str,
+    lifecycle_version_id: &str,
+    key: &str,
+) -> Value {
+    json!({
+        "schemaVersion": "tron.module_runtime_state.v1",
+        "state": "running",
+        "runtimeRequestId": format!("{key}-runtime-request"),
+        "scope": {"kind": scope.kind(), "value": scope.value()},
+        "moduleLifecycle": {
+            "allowed": true,
+            "state": "enabled",
+            "resourceId": lifecycle_id,
+            "versionId": lifecycle_version_id,
+            "runtimeAuthorization": {
+                "failClosed": true,
+                "enabledAllowsRuntime": true
+            }
+        },
+        "runtime": {
+            "kind": "git_status_adapter",
+            "label": "Repository state adapter",
+            "featureSemanticsOwnedByPackage": true,
+            "supervisorEnvelopeOnly": true,
+            "processLaunched": false,
+            "jobDelegated": false,
+            "jobExposedToProvider": false
+        },
+        "supervision": {
+            "state": "running",
+            "sandbox": {"label": "metadata_only", "pty": false, "browserAutomation": false},
+            "network": {"policy": "none", "accessPerformed": false},
+            "secrets": {"available": false, "rawValuesStored": false},
+            "timeout": {"timeoutMs": 30000, "state": "armed"},
+            "cancellation": {"state": "not_requested", "cancelRequested": false},
+            "shutdown": {"state": "cancel_on_shutdown", "recorded": true}
+        },
+        "inputRefs": [],
+        "outputArtifactRefs": [],
+        "evidenceRefs": [],
+        "traceRefs": [],
+        "replayRefs": [],
+        "authority": {
+            "grantRedacted": true,
+            "rawAuthorityIdsStored": false,
+            "derivedRuntimeGrantRequired": true,
+            "lifecycleAuthorizationRequired": true,
+            "requiredScopes": [READ_SCOPE, WRITE_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE],
+            "resourceKinds": [MODULE_RUNTIME_STATE_KIND, MODULE_LIFECYCLE_STATE_KIND],
+            "wildcardGrantsAllowed": false
+        },
+        "idempotency": {
+            "fingerprint": "route-runtime-fixture",
+            "fingerprintAlgorithm": "sha256:tron.module_runtime_state.idempotency.v1",
+            "keyRedacted": true,
+            "rawKeyStored": false
+        },
+        "sideEffectProof": {
+            "supervisorEnvelopeOnly": true,
+            "installPerformed": false,
+            "activationPerformed": false,
+            "dependencyRestorePerformed": false,
+            "packageManagerUsed": false,
+            "networkPolicy": "none",
+            "networkAccessPerformed": false,
+            "repoManagedSkillsTouched": false,
+            "physicalWorkspaceDirectoryCreated": false,
+            "ptyAllocated": false,
+            "browserAutomationPerformed": false,
+            "rawCommandsStored": false,
+            "rawLogsStored": false,
+            "rawOutputStored": false,
+            "secretsExposed": false,
+            "fileContentsStored": false,
+            "absolutePathsStored": false
+        },
+        "reason": "Route fixture supervised runtime envelope.",
+        "createdAt": DEFAULT_OPERATION_AT,
+        "updatedAt": DEFAULT_OPERATION_AT,
+        "revision": 1
+    })
+}
+
+fn synthetic_lifecycle_ref(key: &str) -> Value {
+    json!({
+        "kind": MODULE_LIFECYCLE_STATE_KIND,
+        "resourceId": format!("module_lifecycle_state:{key}"),
+        "versionId": format!("version-{key}"),
+        "role": "lifecycle"
+    })
+}
+
+fn synthetic_runtime_ref(key: &str) -> Value {
+    json!({
+        "kind": MODULE_RUNTIME_STATE_KIND,
+        "resourceId": format!("module_runtime_state:{key}"),
+        "versionId": format!("version-{key}"),
+        "role": "runtime"
+    })
+}
+
 fn shadow_trial_kinds() -> [&'static str; 4] {
     [
         CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
@@ -3008,7 +3615,7 @@ fn shadow_trial_kind_selectors() -> Vec<String> {
         .collect()
 }
 
-fn route_kinds() -> [&'static str; 10] {
+fn route_kinds() -> [&'static str; 12] {
     [
         CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
         CAPABILITY_ROUTE_BINDING_KIND,
@@ -3020,6 +3627,8 @@ fn route_kinds() -> [&'static str; 10] {
         CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
         CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
         CAPABILITY_BINDING_POLICY_KIND,
+        MODULE_LIFECYCLE_STATE_KIND,
+        MODULE_RUNTIME_STATE_KIND,
     ]
 }
 

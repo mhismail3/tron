@@ -2,7 +2,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResourceLocation, Invocation, ListResources, UpdateResource,
+    CreateResource, EngineResource, EngineResourceLocation, Invocation, ListResources,
+    UpdateResource,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -34,6 +35,168 @@ pub(crate) struct DelegatedJobRuntimeUpdate {
     pub(crate) terminal: Option<Value>,
     pub(crate) cancellation: Option<Value>,
     pub(crate) cleanup: Option<Value>,
+}
+
+pub(crate) async fn project_provider_safe_adapter_output(
+    deps: &Deps,
+    invocation: &Invocation,
+    operation: &str,
+    module_runtime_ref: &Value,
+    module_lifecycle_ref: &Value,
+    provider_safe_projection: &Value,
+) -> Result<Value, CapabilityError> {
+    reject_unsafe_payload(provider_safe_projection)?;
+    if operation != "git_status" {
+        return Err(invalid(
+            "module runtime adapter projection currently supports exactly git_status",
+        ));
+    }
+    let scope = resource_scope(invocation)?;
+    let (lifecycle_resource_id, lifecycle_version_id) = versioned_ref(
+        module_lifecycle_ref,
+        "moduleLifecycleRef",
+        "module_lifecycle_state",
+    )?;
+    validate_module_lifecycle_resource_id(&lifecycle_resource_id)?;
+    let lifecycle_deps = crate::domains::module_lifecycle::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let lifecycle_authorization =
+        crate::domains::module_lifecycle::service::ensure_runtime_allowed(
+            &lifecycle_deps,
+            &scope,
+            &lifecycle_resource_id,
+        )
+        .await?;
+    if lifecycle_authorization
+        .get("versionId")
+        .and_then(Value::as_str)
+        != Some(lifecycle_version_id.as_str())
+    {
+        return Err(invalid(
+            "module runtime adapter projection rejected stale lifecycle ref",
+        ));
+    }
+
+    let (runtime_resource_id, runtime_version_id) = versioned_ref(
+        module_runtime_ref,
+        "moduleRuntimeRef",
+        MODULE_RUNTIME_STATE_KIND,
+    )?;
+    validate_module_runtime_resource_id(&runtime_resource_id)?;
+    let runtime =
+        inspect_resource_required(deps, &runtime_resource_id, "module runtime state").await?;
+    ensure_module_runtime_state(&runtime, "module_runtime_adapter_projection")?;
+    ensure_scope(&runtime, &scope, "module_runtime_adapter_projection")?;
+    if !matches!(runtime.resource.lifecycle.as_str(), "running" | "completed") {
+        return Err(invalid(format!(
+            "module runtime adapter projection denied for runtime state {}",
+            runtime.resource.lifecycle
+        )));
+    }
+    let (runtime_version, runtime_payload) =
+        current_payload(&runtime, "module_runtime_adapter_projection")?;
+    if runtime_version.version_id != runtime_version_id {
+        return Err(invalid(
+            "module runtime adapter projection rejected stale runtime ref",
+        ));
+    }
+    if runtime_payload
+        .pointer("/moduleLifecycle/resourceId")
+        .and_then(Value::as_str)
+        != Some(lifecycle_resource_id.as_str())
+        || runtime_payload
+            .pointer("/moduleLifecycle/versionId")
+            .and_then(Value::as_str)
+            != Some(lifecycle_version_id.as_str())
+    {
+        return Err(invalid(
+            "module runtime adapter projection rejected mismatched lifecycle authorization",
+        ));
+    }
+    ensure_supervised_runtime_projection(runtime_payload)?;
+    let projection = git_status_provider_safe_projection(provider_safe_projection)?;
+    Ok(json!({
+        "operation": operation,
+        "status": projection["status"],
+        "git": projection,
+        "adapterRuntime": {
+            "moduleAdapterInvoked": true,
+            "moduleAdapterInvocationState": "supervised_runtime_projection",
+            "builtInProjectionUsed": false,
+            "providerSafeProjection": true,
+            "moduleRuntime": adapter_runtime_summary(&runtime.resource, runtime_payload)?,
+            "moduleLifecycle": {
+                "state": "enabled",
+                "versionMatched": true,
+                "runtimeAuthorizationChecked": true
+            },
+            "networkPolicy": "none",
+            "failClosed": false
+        }
+    }))
+}
+
+fn adapter_runtime_summary(
+    resource: &EngineResource,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    let runtime_kind = payload
+        .pointer("/runtime/kind")
+        .and_then(Value::as_str)
+        .unwrap_or("module_adapter");
+    let runtime_kind = bounded_provider_visible_token(
+        "adapterRuntime.runtimeKind",
+        runtime_kind,
+        TOKEN_MAX_BYTES,
+    )?;
+    let runtime_label = payload
+        .pointer("/runtime/label")
+        .and_then(Value::as_str)
+        .unwrap_or("Module adapter");
+    let runtime_label = bounded_text(
+        "adapterRuntime.runtimeLabel",
+        runtime_label,
+        SUMMARY_MAX_BYTES,
+    )?;
+    let network_policy = payload
+        .pointer("/supervision/network/policy")
+        .and_then(Value::as_str)
+        .unwrap_or("none");
+    let network_policy = bounded_provider_visible_token(
+        "adapterRuntime.networkPolicy",
+        network_policy,
+        TOKEN_MAX_BYTES,
+    )?;
+    Ok(json!({
+        "state": resource.lifecycle,
+        "runtimeKind": runtime_kind,
+        "runtimeLabel": runtime_label,
+        "supervisorEnvelopeOnly": payload.pointer("/runtime/supervisorEnvelopeOnly")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "processLaunched": payload.pointer("/runtime/processLaunched")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "jobExposedToProvider": payload.pointer("/runtime/jobExposedToProvider")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "networkPolicy": network_policy,
+        "networkAccessPerformed": payload.pointer("/supervision/network/accessPerformed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "resourceIdRedacted": true,
+        "versionIdRedacted": true,
+        "rawResourceRefsReturned": false,
+        "idempotencyFingerprintRedacted": true,
+        "moduleLifecycle": {
+            "state": payload.pointer("/moduleLifecycle/state")
+                .and_then(Value::as_str)
+                .unwrap_or("enabled"),
+            "resourceIdRedacted": true,
+            "versionIdRedacted": true
+        }
+    }))
 }
 
 pub(crate) async fn request_module_runtime_value_at(
@@ -204,6 +367,126 @@ pub(crate) async fn request_module_runtime_value_at(
         "moduleRuntimeVersionId": version_id,
         "moduleRuntime": module_runtime_summary_for_resource(deps, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_runtime_state")]
+    }))
+}
+
+fn versioned_ref(
+    value: &Value,
+    field: &str,
+    expected_kind: &str,
+) -> Result<(String, String), CapabilityError> {
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires kind")))?;
+    if kind != expected_kind {
+        return Err(invalid(format!("{field} must reference {expected_kind}")));
+    }
+    let resource_id = value
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires resourceId")))?;
+    let version_id = value
+        .get("versionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires versionId")))?;
+    Ok((
+        bounded_provider_visible_token(
+            &format!("{field}.resourceId"),
+            resource_id,
+            TOKEN_MAX_BYTES,
+        )?,
+        bounded_provider_visible_token(&format!("{field}.versionId"), version_id, TOKEN_MAX_BYTES)?,
+    ))
+}
+
+fn ensure_supervised_runtime_projection(payload: &Value) -> Result<(), CapabilityError> {
+    let checks = [
+        ("/runtime/supervisorEnvelopeOnly", true),
+        ("/runtime/processLaunched", false),
+        ("/runtime/jobExposedToProvider", false),
+        ("/sideEffectProof/installPerformed", false),
+        ("/sideEffectProof/activationPerformed", false),
+        ("/sideEffectProof/dependencyRestorePerformed", false),
+        ("/sideEffectProof/packageManagerUsed", false),
+        ("/sideEffectProof/networkAccessPerformed", false),
+        ("/sideEffectProof/rawCommandsStored", false),
+        ("/sideEffectProof/rawLogsStored", false),
+        ("/sideEffectProof/rawOutputStored", false),
+        ("/sideEffectProof/secretsExposed", false),
+        ("/sideEffectProof/fileContentsStored", false),
+        ("/sideEffectProof/absolutePathsStored", false),
+    ];
+    for (pointer, expected) in checks {
+        if payload.pointer(pointer).and_then(Value::as_bool) != Some(expected) {
+            return Err(invalid(
+                "module runtime adapter projection requires supervised metadata-only runtime proof",
+            ));
+        }
+    }
+    if payload
+        .pointer("/sideEffectProof/networkPolicy")
+        .and_then(Value::as_str)
+        != Some("none")
+    {
+        return Err(invalid(
+            "module runtime adapter projection requires networkPolicy none",
+        ));
+    }
+    Ok(())
+}
+
+fn git_status_provider_safe_projection(value: &Value) -> Result<Value, CapabilityError> {
+    if value.get("operation").and_then(Value::as_str) != Some("git_status") {
+        return Err(invalid(
+            "module runtime adapter projection must return git_status projection",
+        ));
+    }
+    let status = value
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("git_status adapter projection requires status"))?;
+    bounded_provider_visible_token("gitStatusAdapterProjection.status", status, TOKEN_MAX_BYTES)?;
+    for field in ["headState", "indexState", "worktreeState", "truncation"] {
+        let Some(text) = value.get(field).and_then(Value::as_str) else {
+            return Err(invalid(format!(
+                "git_status adapter projection requires {field}"
+            )));
+        };
+        bounded_provider_visible_token(
+            &format!("gitStatusAdapterProjection.{field}"),
+            text,
+            TOKEN_MAX_BYTES,
+        )?;
+    }
+    if value
+        .get("evidenceRef")
+        .and_then(Value::as_object)
+        .is_none()
+    {
+        return Err(invalid(
+            "git_status adapter projection requires evidenceRef",
+        ));
+    }
+    Ok(json!({
+        "operation": "git_status",
+        "status": value["status"],
+        "headState": value["headState"],
+        "indexState": value["indexState"],
+        "worktreeState": value["worktreeState"],
+        "truncation": value["truncation"],
+        "evidence": {
+            "present": true,
+            "resourceIdRedacted": true,
+            "versionIdRedacted": true
+        },
+        "projection": {
+            "providerSafe": true,
+            "rawPathsReturned": false,
+            "rawCommandsReturned": false,
+            "rawLogsReturned": false,
+            "networkPolicy": "none"
+        }
     }))
 }
 
