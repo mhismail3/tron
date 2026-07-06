@@ -4,13 +4,13 @@ Status: **complete**
 
 Current score: **100/100**
 
-The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. Live module-adapter replacement execution is tracked by the dynamic replacement scorecard and remains intentionally deferred until the supervised module runtime exposes a provider-safe projection call.
+The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now executes through the supervised module-runtime provider-safe adapter projection boundary; broader operation coverage stays governed by the dynamic replacement scorecard.
 
 Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
 
 Provider-visible surface: one tool, `capability::execute`
 
-This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, a metadata-only `git_status` shadow trial, governed route records, a scoped `git_status` route seam, and a redacted cockpit projection for operator visibility; they do not add package installation, dependency restoration, network behavior, production deployment, or live module-adapter execution.
+This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, a metadata-only `git_status` shadow trial, governed route records, a scoped `git_status` route seam, supervised module-runtime adapter projection for that route, and a redacted cockpit projection for operator visibility; they do not add package installation, dependency restoration, network behavior, production deployment, or broad unapproved module-adapter execution.
 
 ## Artifacts
 
@@ -55,7 +55,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 | Family | Operations | Default decision |
 |---|---:|---|
-| `capability_binding` | 24 | Governance substrate for metadata-only binding requests, decisions, policies, the `git_status` shadow trial, and scoped route records; live module-adapter execution remains deferred. |
+| `capability_binding` | 24 | Governance substrate for metadata-only binding requests, decisions, policies, the `git_status` shadow trial, scoped route records, and the first scoped supervised module-runtime adapter projection for `git_status`; broader route targets remain dynamic replacement follow-ons. |
 | `catalog_discovery` | 3 | Engine-owned catalog trust and freshness substrate. |
 | `context_control` | 12 | Record-plane snapshot/action/epoch and survivor/exclusion policy custody; the compaction summarizer strategy is replaceable only behind a server-owned context-audit and policy-snapshot seam. |
 | `core` | 3 | Kernel diagnostics plus adapter review for `process_run`. |
@@ -100,7 +100,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 | CMS-1 | Ownership taxonomy | 10 | passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
 | CMS-2 | Per-operation inventory | 20 | passed | `capability-modularity-inventory.tsv` lists all 188 operations exactly once. |
 | CMS-3 | Kernel/governance lock | 12 | passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
-| CMS-4 | Adapter replacement targets | 12 | passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; capability binding can record proposals, shadow trials, and governed route controls, while live module-adapter execution remains deferred. |
+| CMS-4 | Adapter replacement targets | 12 | passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; capability binding can record proposals, shadow trials, governed route controls, and the first scoped supervised module-runtime adapter projection for `git_status`. |
 | CMS-5 | Record-plane custody | 10 | passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
 | CMS-6 | Module-owned template | 8 | passed | `module_program_execution_*` is classified as the first governed module-owned execution template. |
 | CMS-7 | Cockpit visibility contract | 8 | passed | `capability_binding::cockpit_overview` projects truthful total/returned operation counts, operation-list/resource-scan completeness, redacted operation owner and replacement-target summaries, server-derived readiness/next-action labels, scoped binding/shadow attempts, rollback/disable/abort availability, and redaction policy for cockpit clients. |
@@ -176,7 +176,7 @@ The Cockpit Visibility slice makes the scorecard inspectable from Engine Cockpit
 |---|---|
 | `capability_binding::cockpit_overview` | System-visible pure-read function registered by the `capability_binding` domain with `capability_binding.read`, low risk, and no write capability. |
 | Operation ownership | Joins `SUPPORTED_OPERATION_NAMES` and authoritative `operation_binding_metadata` with scoped binding/shadow-trial resources, so each operation reports a redacted current owner label, ownership status, built-in/module/locked flags, replacement/shadow/extension eligibility, redacted replacement target, readiness/next-action labels, and governance boundary from server truth. `capability_binding` is identified only as the cockpit projection source, not as the operation owner. |
-| Scoped activity | Counts current-session/workspace binding requests, approvals, rejections, active policies, failed replacement attempts, shadow requests/approvals/rejections/runs/results, and rollback/disable/abort controls without returning raw resource IDs. The response separately reports total operations, returned operations, operation-list truncation, and bounded resource-scan completeness so small limits and capped scans cannot appear complete. |
+| Scoped activity | Counts current-session/workspace binding requests, approvals, rejections, active policies, failed replacement attempts, shadow requests/approvals/rejections/runs/results, active route state, route events, routed invocations, failed-closed routes, route rollbacks, and rollback/disable/abort controls without returning raw resource IDs. The response separately reports total operations, returned operations, operation-list truncation, and bounded resource-scan completeness so small limits and capped scans cannot appear complete. |
 | Redaction and side effects | Response policy declares projection-only, metadata-only, server-owned truth with no dispatch-table mutation, hot swap, module activation/execution, package-manager, dependency, network, raw local material, grants, authority IDs, trace IDs, invocation IDs, token-like material, or hidden chain-of-thought. |
 | iOS rendering | Engine Cockpit keeps top-level summary compact and shows owner/status, replacement, attempts, rollback, and verification details only inside capability group and operation detail drill-down. |
 
@@ -200,7 +200,7 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 - `governance_locked` operations must not be routed through module replacement; they are the trust pipeline for future replacement.
 - Binding-policy records are governance-owned metadata only; an active policy is not a runtime route.
 - Shadow-trial records are governance-owned metadata only; an accepted trial result is not a runtime route or replacement.
-- Cockpit visibility is read-only projection over registry and scoped policy records; it must not become a routing, activation, or raw inspection surface.
+- Cockpit visibility is read-only projection over registry and scoped policy/route records; it must not become a routing, activation, or raw inspection surface.
 - `adapter_replaceable` operations must name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable constraints before any binding policy can route them.
 - `record_plane` operations may gain module producers, but records, policy refs, resource refs, trace refs, redaction, and replay custody stay server-owned.
 - `module_owned` operations must keep lifecycle/runtime prerequisites, inspectability, rollback, and provider-safe projections.
@@ -212,4 +212,4 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 2. Capability Binding Policy: complete. Metadata-only binding request, decision, policy, and history records now make future replacement proposals measurable without routing.
 3. Adapter Seam Hardening: complete. Source-backed invariants now lock seam prerequisites for filesystem, Git, jobs/process, web, subagent, and compaction-like strategies.
 4. Shadow Replacement Trial: complete. `git_status` now has governed request/decision/run/evidence records comparing built-in and deterministic candidate provider-safe projections with rollback/disable/abort controls and no candidate execution.
-5. Cockpit Visibility: complete. Engine Cockpit now reads `capability_binding::cockpit_overview` and progressively discloses total vs returned operations, list/scan completeness, redacted operation owner and replacement target, server-derived readiness/next action, built-in/module/locked status, replacement/shadow/extension eligibility, verification context, failed replacement attempts, shadow runs, and rollback/disable/abort availability without exposing raw internals.
+5. Cockpit Visibility: complete. Engine Cockpit now reads `capability_binding::cockpit_overview` and progressively discloses total vs returned operations, list/scan completeness, redacted operation owner and replacement target, server-derived readiness/next action, built-in/module/locked status, replacement/shadow/extension eligibility, active route state, route events, routed invocations, failed-closed/disabled/rolled-back routes, verification context, failed replacement attempts, shadow runs, and rollback/disable/abort availability without exposing raw internals.

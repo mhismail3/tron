@@ -732,6 +732,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Shadow Replacement Trial Evidence",
         "supervised module-runtime provider-safe adapter projection",
         "without returning a built-in success",
+        "active route state",
         "Follow-on Slices",
     ] {
         assert!(
@@ -744,6 +745,16 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         !scorecard.contains("does not yet invoke a live module-owned adapter projection"),
         "capability modularity scorecard must not describe the completed route projection milestone as missing"
     );
+    for forbidden in [
+        "live module-adapter replacement execution is tracked by the dynamic replacement scorecard and remains intentionally deferred",
+        "live module-adapter execution remains deferred",
+        "they do not add package installation, dependency restoration, network behavior, production deployment, or live module-adapter execution",
+    ] {
+        assert!(
+            !scorecard.contains(forbidden),
+            "capability modularity scorecard must not retain stale route-projection deferral text: {forbidden}"
+        );
+    }
     for class in OWNERSHIP_CLASSES {
         assert!(
             scorecard.contains(class),
@@ -760,11 +771,26 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Adapter seam hardening",
         "Shadow replacement trial",
         "Governed route records",
+        "supervised module-runtime provider-safe adapter projection",
+        "moduleAdapterInvoked: true",
+        "builtInProjectionUsed: false",
         "Future operations must update the TSV, this scorecard, and this manifest",
     ] {
         assert!(
             evidence.contains(required),
             "evidence manifest missing required text: {required}"
+        );
+    }
+    for forbidden in [
+        "annotates built-in provider-safe projections; live module-adapter projection execution remains deferred",
+        "annotates the built-in provider-safe projection with route evidence",
+        "It does not mutate the dispatch table, invoke a live module adapter projection",
+        "route event/projection fields set `moduleAdapterInvoked: false`",
+        "no runtime capability routing",
+    ] {
+        assert!(
+            !evidence.contains(forbidden),
+            "evidence manifest must not retain stale metadata-only routing text: {forbidden}"
         );
     }
 
