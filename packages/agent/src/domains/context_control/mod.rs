@@ -25,13 +25,15 @@
 //! # INVARIANT: context control never exposes raw prompt bodies
 //!
 //! Snapshot, action, survivor, exclusion, and policy-snapshot projections
-//! contain bounded labels, counts, token estimates, refs, redaction proof, and
-//! truncation proof only. They exclude raw system/soul prompt bodies, hidden
-//! chain-of-thought, secrets, local paths, commands, logs, grant ids, authority
-//! ids, and raw file contents. Clear and compact mutate only the session event
-//! stream through existing `context.cleared` and `compact.boundary` reducers;
-//! prior history remains durable and inspectable but is excluded from future
-//! provider context after those boundaries.
+//! contain bounded labels, counts, token estimates, typed non-wildcard refs,
+//! redaction proof, and truncation proof only. They exclude raw system/soul
+//! prompt bodies, hidden chain-of-thought, secrets, local paths, commands, logs,
+//! grant ids, authority ids, and raw file contents. Policy snapshots fail closed
+//! if the active survivor/exclusion set cannot fit in the bounded provider-safe
+//! projection. Clear and compact mutate only the session event stream through
+//! existing `context.cleared` and `compact.boundary` reducers; prior history
+//! remains durable and inspectable but is excluded from future provider context
+//! after those boundaries.
 //! The compaction adapter seam is the summarizer strategy only. Context-control
 //! snapshot/action/epoch and survivor/exclusion policy records, provider-safe
 //! projections, replay refs, and audit custody stay server-owned; a future

@@ -35,7 +35,8 @@ use super::resource_store::{
 use super::snapshot::build_snapshot_record;
 use super::validation::{
     actor_kind, bounded_text, engine_error, id_error, idempotency_key, optional_str, optional_u64,
-    reason, required_str, runtime_error, store_error, system_invocation, ui_system_invocation,
+    policy_target_kind, policy_target_ref, reason, required_reason, required_str, runtime_error,
+    store_error, system_invocation, ui_system_invocation,
 };
 use super::{
     CONTEXT_CONTROL_ACTION_KIND, CONTEXT_CONTROL_SNAPSHOT_KIND, CONTEXT_CONTROL_SNAPSHOT_SCHEMA_ID,
@@ -47,7 +48,6 @@ const DEFAULT_LIST_LIMIT: usize = 20;
 const MAX_LIST_LIMIT: usize = 50;
 const MAX_REASON_BYTES: usize = 500;
 const MAX_POLICY_LABEL_BYTES: usize = 200;
-const MAX_POLICY_REF_BYTES: usize = 256;
 
 pub(crate) struct RuntimeCompactionInput<'a> {
     pub(crate) session_id: &'a str,
@@ -1051,18 +1051,14 @@ async fn policy_record_value_at(
         ));
     }
 
-    let target_kind = bounded_text("targetKind", required_str(payload, "targetKind")?, 64)?;
-    let target_ref = bounded_text(
-        "targetRef",
-        required_str(payload, "targetRef")?,
-        MAX_POLICY_REF_BYTES,
-    )?;
+    let target_kind = policy_target_kind(required_str(payload, "targetKind")?)?;
+    let target_ref = policy_target_ref(&target_kind, required_str(payload, "targetRef")?)?;
     let label = bounded_text(
         "label",
         required_str(payload, "label")?,
         MAX_POLICY_LABEL_BYTES,
     )?;
-    let reason = reason(payload, "Context policy requested", MAX_REASON_BYTES)?;
+    let reason = required_reason(payload, MAX_REASON_BYTES)?;
     let priority = optional_u64(payload, "priority")?.unwrap_or(50).min(100);
     let now = operation_at.to_rfc3339();
     let policy_id = format!("{}-{idempotency_key}", kind.policy_kind());
@@ -1166,7 +1162,7 @@ async fn policy_disable_value_at(
         Some(resource_id),
     )
     .await?;
-    let reason = reason(payload, "Context policy disabled", MAX_REASON_BYTES)?;
+    let reason = required_reason(payload, MAX_REASON_BYTES)?;
     let idempotency_key = idempotency_key(invocation, payload, &operation)?;
     let inspection = inspect_resource_required(deps, resource_id, "context policy").await?;
     ensure_policy_kind(&inspection, kind, &operation)?;
@@ -1180,13 +1176,19 @@ async fn policy_disable_value_at(
         });
     }
     if inspection.resource.lifecycle == "disabled" {
-        return Ok(policy_record_response(
-            &operation,
-            &inspection.resource,
-            version,
-            payload_record,
-            true,
-        ));
+        let disabled_by = payload_record["idempotency"]["disabledBy"].as_str();
+        if disabled_by == Some(idempotency_key.as_str()) {
+            return Ok(policy_record_response(
+                &operation,
+                &inspection.resource,
+                version,
+                payload_record,
+                true,
+            ));
+        }
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{operation} already disabled by a different idempotencyKey"),
+        });
     }
     let now = operation_at.to_rfc3339();
     let mut updated = payload_record.clone();
@@ -1233,14 +1235,22 @@ async fn active_policy_summaries(
 ) -> Result<Vec<Value>, CapabilityError> {
     let resources = deps
         .engine_host
-        .list_resources(ListResources {
+        .scan_resources_internal(ListResources {
             kind: Some(kind.resource_kind().to_owned()),
             scope: Some(scope.clone()),
             lifecycle: Some("active".to_owned()),
-            limit: MAX_LIST_LIMIT,
+            limit: MAX_LIST_LIMIT + 1,
         })
         .await
         .map_err(engine_error)?;
+    if resources.len() > MAX_LIST_LIMIT {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "{} has more than {MAX_LIST_LIMIT} active records; disable stale context policy records before requesting a complete provider-safe projection",
+                kind.resource_kind()
+            ),
+        });
+    }
     let mut records = Vec::new();
     for resource in resources {
         if let Some(inspection) = deps

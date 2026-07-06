@@ -30,6 +30,90 @@ pub(super) fn reason(
         .map(|value| value.unwrap_or_else(|| default_reason.to_owned()))
 }
 
+pub(super) fn required_reason(
+    payload: &Value,
+    max_reason_bytes: usize,
+) -> Result<String, CapabilityError> {
+    bounded_text("reason", required_str(payload, "reason")?, max_reason_bytes)
+}
+
+pub(super) fn policy_target_kind(value: &str) -> Result<String, CapabilityError> {
+    let value = bounded_policy_token("targetKind", value, 64)?;
+    if !matches!(
+        value.as_str(),
+        "message"
+            | "turn"
+            | "resource"
+            | "trace"
+            | "goal"
+            | "decision"
+            | "execution"
+            | "memory_ref"
+            | "context_action"
+    ) {
+        return Err(invalid(
+            "targetKind must name a supported provider-safe context ref kind",
+        ));
+    }
+    Ok(value)
+}
+
+pub(super) fn policy_target_ref(kind: &str, value: &str) -> Result<String, CapabilityError> {
+    let value = bounded_policy_token("targetRef", value, 256)?;
+    if !value.contains(':') {
+        return Err(invalid("targetRef must be a typed provider-safe ref"));
+    }
+    if value.ends_with(":*") || value.contains("::*") {
+        return Err(invalid("targetRef must not contain wildcard selectors"));
+    }
+    let required_prefix = match kind {
+        "message" => "message:",
+        "turn" => "turn:",
+        "resource" => "resource:",
+        "trace" => "trace:",
+        "goal" => "goal:",
+        "decision" => "decision:",
+        "execution" => "execution:",
+        "memory_ref" => "memory_ref:",
+        "context_action" => "context_action:",
+        _ => {
+            return Err(invalid(
+                "targetKind must name a supported provider-safe context ref kind",
+            ));
+        }
+    };
+    if !value.starts_with(required_prefix) {
+        return Err(invalid(
+            "targetRef must match the provider-safe ref prefix for targetKind",
+        ));
+    }
+    Ok(value)
+}
+
+fn bounded_policy_token(
+    field: &str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<String, CapabilityError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > max_bytes
+        || trimmed == "*"
+        || trimmed.eq_ignore_ascii_case("all")
+        || trimmed.eq_ignore_ascii_case("any")
+        || !trimmed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'-' | b'_' | b'.'))
+        || looks_unsafe(trimmed)
+        || contains_wildcard_selector(trimmed)
+    {
+        return Err(invalid(format!(
+            "{field} must be a bounded provider-safe non-wildcard ref"
+        )));
+    }
+    Ok(trimmed.to_owned())
+}
+
 pub(super) fn actor_kind(invocation: &Invocation) -> &'static str {
     match invocation.causal_context.actor_kind {
         crate::engine::ActorKind::Agent => "agent",
@@ -114,14 +198,33 @@ fn looks_unsafe(value: &str) -> bool {
     lower.contains("sk-")
         || lower.contains("secret")
         || lower.contains("token=")
+        || lower.contains("token:")
+        || lower.contains("grantid")
+        || lower.contains("grant_id")
+        || lower.contains("authorityid")
+        || lower.contains("authority_id")
         || lower.contains("authorization:")
         || lower.contains("-----begin")
         || lower.contains("system prompt")
         || lower.contains("chain of thought")
+        || lower.contains("stdout")
+        || lower.contains("stderr")
+        || lower.contains("raw log")
+        || lower.contains("raw-log")
+        || lower.contains("debug payload")
         || lower.contains("sudo ")
         || lower.contains("rm -rf")
+        || lower.contains("$(")
+        || lower.contains("&&")
         || value.contains("/Users/")
         || value.contains("/home/")
+        || value.starts_with('/')
+        || value.starts_with("./")
+        || value.starts_with("../")
+}
+
+fn contains_wildcard_selector(value: &str) -> bool {
+    value.contains('*') || value.contains("resource:*") || value.contains("session:*")
 }
 
 pub(super) fn invalid(message: impl Into<String>) -> CapabilityError {

@@ -753,7 +753,240 @@ async fn context_policy_record_rejects_raw_local_paths() {
     assert!(
         error
             .to_string()
-            .contains("may not contain raw commands, paths, secrets, or prompt bodies"),
+            .contains("bounded provider-safe non-wildcard ref"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn context_policy_records_require_safe_refs_and_reason() {
+    let fixture = Fixture::new("context-control-policy-contract").await;
+    let base = json!({
+        "operation": "context_survivor_record",
+        "sessionId": fixture.session_id,
+        "targetKind": "message",
+        "targetRef": "message:decision-1",
+        "label": "Keep decision",
+        "reason": "Must survive compaction",
+        "idempotencyKey": "survivor-safe-contract"
+    });
+
+    let mut missing_reason = base.clone();
+    missing_reason.as_object_mut().unwrap().remove("reason");
+    let missing_reason_invocation = fixture.write_invocation(
+        "survivor-missing-reason",
+        "context_survivor_record",
+        missing_reason.clone(),
+    );
+    let error = survivor_record_value_at(
+        &fixture.deps,
+        &missing_reason_invocation,
+        &missing_reason,
+        operation_at(),
+    )
+    .await
+    .expect_err("policy reason is required");
+    assert!(error.to_string().contains("reason is required"), "{error}");
+
+    for (field, value, key) in [
+        ("targetKind", "*", "bad-kind-wildcard"),
+        ("targetRef", "resource:*", "bad-ref-wildcard"),
+        ("targetRef", "/etc/passwd", "bad-ref-path"),
+        ("targetRef", "grantId=abc123", "bad-ref-grant"),
+        ("targetRef", "command:git_status", "bad-ref-command"),
+    ] {
+        let mut payload = base.clone();
+        payload[field] = json!(value);
+        payload["idempotencyKey"] = json!(key);
+        let invocation = fixture.write_invocation(key, "context_survivor_record", payload.clone());
+        let error = survivor_record_value_at(&fixture.deps, &invocation, &payload, operation_at())
+            .await
+            .expect_err("unsafe policy ref rejected");
+        assert!(
+            error.to_string().contains("provider-safe")
+                || error
+                    .to_string()
+                    .contains("supported provider-safe context ref kind"),
+            "{field}={value} should be rejected, got {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn context_policy_snapshot_rejects_overflow_instead_of_truncating() {
+    let fixture = Fixture::new("context-control-policy-overflow").await;
+    for index in 0..51 {
+        let payload = json!({
+            "operation": "context_survivor_record",
+            "sessionId": fixture.session_id,
+            "targetKind": "message",
+            "targetRef": format!("message:decision-{index}"),
+            "label": format!("Keep decision {index}"),
+            "reason": "Must survive compaction",
+            "idempotencyKey": format!("survivor-overflow-{index}")
+        });
+        let invocation = fixture.write_invocation(
+            &format!("survivor-overflow-{index}"),
+            "context_survivor_record",
+            payload.clone(),
+        );
+        survivor_record_value_at(&fixture.deps, &invocation, &payload, operation_at())
+            .await
+            .expect("record survivor");
+    }
+
+    let snapshot_payload = json!({
+        "operation": "context_policy_snapshot",
+        "sessionId": fixture.session_id,
+        "idempotencyKey": "policy-snapshot-overflow"
+    });
+    let snapshot_invocation = fixture.write_invocation(
+        "policy-snapshot-overflow",
+        "context_policy_snapshot",
+        snapshot_payload.clone(),
+    );
+    let error = policy_snapshot_value_at(
+        &fixture.deps,
+        &snapshot_invocation,
+        &snapshot_payload,
+        operation_at(),
+    )
+    .await
+    .expect_err("overflow snapshot must fail closed");
+    assert!(
+        error.to_string().contains("more than 50 active records"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn context_policy_disable_replay_requires_same_idempotency_key() {
+    let fixture = Fixture::new("context-control-policy-disable-replay").await;
+    let survivor_payload = json!({
+        "operation": "context_survivor_record",
+        "sessionId": fixture.session_id,
+        "targetKind": "message",
+        "targetRef": "message:decision-1",
+        "label": "Keep project decision",
+        "reason": "Must survive future compaction",
+        "idempotencyKey": "survivor-disable-replay"
+    });
+    let survivor_invocation = fixture.write_invocation(
+        "survivor-disable-replay",
+        "context_survivor_record",
+        survivor_payload.clone(),
+    );
+    let survivor = survivor_record_value_at(
+        &fixture.deps,
+        &survivor_invocation,
+        &survivor_payload,
+        operation_at(),
+    )
+    .await
+    .expect("record survivor");
+    let survivor_id = survivor["contextPolicyResourceId"].as_str().unwrap();
+    let exact_selectors = [
+        "kind:context_control_snapshot".to_owned(),
+        "kind:context_control_action".to_owned(),
+        "kind:context_control_epoch".to_owned(),
+        "kind:context_survivor".to_owned(),
+        "kind:context_exclusion".to_owned(),
+        "kind:context_policy_snapshot".to_owned(),
+        format!("session:{}", fixture.session_id),
+        format!("resource:{survivor_id}"),
+    ];
+    let exact_grant = derive_grant(
+        &fixture.deps,
+        "survivor-disable-replay-exact",
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &[
+            CONTEXT_CONTROL_SNAPSHOT_KIND,
+            CONTEXT_CONTROL_ACTION_KIND,
+            CONTEXT_CONTROL_EPOCH_KIND,
+            CONTEXT_SURVIVOR_KIND,
+            CONTEXT_EXCLUSION_KIND,
+            CONTEXT_POLICY_SNAPSHOT_KIND,
+        ],
+        &exact_selectors
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    )
+    .await;
+    let disable_payload = json!({
+        "operation": "context_survivor_disable",
+        "sessionId": fixture.session_id,
+        "contextSurvivorResourceId": survivor_id,
+        "reason": "No longer needed",
+        "idempotencyKey": "disable-survivor-replay-1"
+    });
+    let disable_invocation = invocation(
+        "disable-survivor-replay-1",
+        "context_survivor_disable",
+        disable_payload.clone(),
+        exact_grant.clone(),
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    survivor_disable_value_at(
+        &fixture.deps,
+        &disable_invocation,
+        &disable_payload,
+        operation_at(),
+    )
+    .await
+    .expect("disable survivor");
+
+    let replay = survivor_disable_value_at(
+        &fixture.deps,
+        &disable_invocation,
+        &disable_payload,
+        operation_at(),
+    )
+    .await
+    .expect("same-key disable replay");
+    assert_eq!(replay["idempotentReplay"], json!(true));
+
+    let stale_payload = json!({
+        "operation": "context_survivor_disable",
+        "sessionId": fixture.session_id,
+        "contextSurvivorResourceId": survivor_id,
+        "reason": "Different retry must not be masked",
+        "idempotencyKey": "disable-survivor-replay-2"
+    });
+    let stale_invocation = invocation(
+        "disable-survivor-replay-2",
+        "context_survivor_disable",
+        stale_payload.clone(),
+        exact_grant,
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    let error = survivor_disable_value_at(
+        &fixture.deps,
+        &stale_invocation,
+        &stale_payload,
+        operation_at(),
+    )
+    .await
+    .expect_err("different-key disable cannot replay");
+    assert!(
+        error.to_string().contains("different idempotencyKey"),
         "{error}"
     );
 }
