@@ -719,8 +719,6 @@ pub(crate) async fn annotate_routed_git_status(
                 "routeVersion": route.route_version,
                 "candidateOwner": route.candidate_owner,
                 "candidateLabel": route.candidate_label,
-                "activationResourceId": route.activation_resource_id,
-                "activationVersionId": route.activation_version_id,
                 "moduleAdapterInvoked": false,
                 "moduleAdapterInvocationState": "deferred_supervised_runtime_adapter",
                 "builtInProjectionUsed": true,
@@ -1684,15 +1682,13 @@ fn route_schema_for_kind(kind: &str) -> &'static str {
 
 fn route_summary(
     resource: &EngineResource,
-    version: &EngineResourceVersion,
+    _version: &EngineResourceVersion,
     payload: &Value,
 ) -> Value {
     json!({
-        "resourceId": resource.resource_id,
         "kind": resource.kind,
         "schemaId": resource.schema_id,
         "state": resource.lifecycle,
-        "versionId": version.version_id,
         "operation": payload.get("operation"),
         "candidate": payload.get("candidate"),
         "binding": payload.get("binding"),
@@ -1701,7 +1697,19 @@ fn route_summary(
         "rollback": payload.get("rollback"),
         "createdAt": payload.get("createdAt"),
         "updatedAt": payload.get("updatedAt"),
-        "resourceRefs": [version_ref(resource, version, "capability_route")]
+        "resourceRefs": [redacted_route_ref(resource, "capability_route")]
+    })
+}
+
+fn redacted_route_ref(resource: &EngineResource, role: &str) -> Value {
+    json!({
+        "kind": resource.kind,
+        "role": role,
+        "schemaId": resource.schema_id,
+        "lifecycle": resource.lifecycle,
+        "resourceIdRedacted": true,
+        "versionIdRedacted": true,
+        "inspectRequiresExactResourceSelector": true
     })
 }
 

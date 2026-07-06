@@ -39,8 +39,8 @@ use super::{
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
-    EngineResourceVersioningMode, FunctionId, Invocation, InvocationId, RiskLevel, TraceId,
-    UpdateResource, builtin_resource_type_definitions,
+    EngineResourceScope, EngineResourceVersioningMode, FunctionId, Invocation, InvocationId,
+    ListResources, RiskLevel, TraceId, UpdateResource, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -1448,11 +1448,33 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
             .iter()
             .any(|event| event["event"]["kind"] == json!("activated"))
     );
-    let route_event_id = events["routeEvents"][0]["resourceId"]
-        .as_str()
-        .expect("route event id");
+    for event in events["routeEvents"].as_array().expect("route events") {
+        assert!(
+            event.get("resourceId").is_none(),
+            "route event list must not expose raw resource IDs"
+        );
+        assert!(
+            event.get("versionId").is_none(),
+            "route event list must not expose raw version IDs"
+        );
+        assert_eq!(event["resourceRefs"][0]["resourceIdRedacted"], json!(true));
+        assert_eq!(event["resourceRefs"][0]["versionIdRedacted"], json!(true));
+    }
+    let route_event_id = fixture
+        .deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(CAPABILITY_ROUTE_EVENT_KIND.to_owned()),
+            scope: Some(EngineResourceScope::Session(fixture.session_id.clone())),
+            lifecycle: None,
+            limit: 1,
+        })
+        .await
+        .expect("list route event resources internally")[0]
+        .resource_id
+        .clone();
     let event_read_grant = fixture
-        .exact_read_grant("event-read-exact", route_event_id)
+        .exact_read_grant("event-read-exact", &route_event_id)
         .await;
     let inspected_event = inspect_route_event_value(
         &fixture.deps,
