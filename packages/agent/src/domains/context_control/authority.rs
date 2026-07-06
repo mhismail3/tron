@@ -7,6 +7,7 @@ use super::Deps;
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::{
     CONTEXT_CONTROL_ACTION_KIND, CONTEXT_CONTROL_EPOCH_KIND, CONTEXT_CONTROL_SNAPSHOT_KIND,
+    CONTEXT_EXCLUSION_KIND, CONTEXT_POLICY_SNAPSHOT_KIND, CONTEXT_SURVIVOR_KIND,
 };
 
 pub(super) enum AccessMode {
@@ -46,6 +47,9 @@ pub(super) async fn ensure_authority(
         CONTEXT_CONTROL_SNAPSHOT_KIND,
         CONTEXT_CONTROL_ACTION_KIND,
         CONTEXT_CONTROL_EPOCH_KIND,
+        CONTEXT_SURVIVOR_KIND,
+        CONTEXT_EXCLUSION_KIND,
+        CONTEXT_POLICY_SNAPSHOT_KIND,
     ] {
         require_explicit_kind(&grant, kind, operation)?;
         require_kind_selector(&grant, kind, operation)?;

@@ -16,16 +16,21 @@ use crate::shared::server::errors::CapabilityError;
 use super::authority::{AccessMode, ensure_authority, session_scope_for_invocation};
 use super::contract::{ACTION_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION, WORKER};
 use super::projection::{
-    action_projection, action_response, action_summary, event_ref, safe_compacted_token_estimate,
+    action_projection, action_response, action_summary, event_ref, policy_record_response,
+    policy_snapshot_response, policy_summary, safe_compacted_token_estimate,
     safe_compaction_summary, snapshot_projection,
 };
 use super::records::{
-    ActionInput, EpochInput, action_record, action_resource_id, epoch_record, epoch_resource_id,
-    resource_policy, snapshot_resource_id, version_ref,
+    ActionInput, EpochInput, PolicyRecordInput, PolicySnapshotInput, action_record,
+    action_resource_id, epoch_record, epoch_resource_id, exclusion_resource_id, policy_record,
+    policy_snapshot_record, policy_snapshot_resource_id, resource_policy,
+    schema_version_for_policy_kind, snapshot_resource_id, survivor_resource_id, version_ref,
 };
 use super::resource_store::{
-    create_action_resource, create_epoch_resource, current_payload, ensure_context_action,
-    ensure_context_snapshot, ensure_scope, inspect_resource_required, publish_lifecycle_event,
+    create_action_resource, create_epoch_resource, create_policy_resource, current_payload,
+    ensure_context_action, ensure_context_exclusion, ensure_context_policy_snapshot,
+    ensure_context_snapshot, ensure_context_survivor, ensure_scope, inspect_resource_required,
+    publish_lifecycle_event, update_policy_resource,
 };
 use super::snapshot::build_snapshot_record;
 use super::validation::{
@@ -34,12 +39,15 @@ use super::validation::{
 };
 use super::{
     CONTEXT_CONTROL_ACTION_KIND, CONTEXT_CONTROL_SNAPSHOT_KIND, CONTEXT_CONTROL_SNAPSHOT_SCHEMA_ID,
-    Deps,
+    CONTEXT_EXCLUSION_KIND, CONTEXT_EXCLUSION_SCHEMA_ID, CONTEXT_POLICY_SNAPSHOT_KIND,
+    CONTEXT_POLICY_SNAPSHOT_SCHEMA_ID, CONTEXT_SURVIVOR_KIND, CONTEXT_SURVIVOR_SCHEMA_ID, Deps,
 };
 
 const DEFAULT_LIST_LIMIT: usize = 20;
 const MAX_LIST_LIMIT: usize = 50;
 const MAX_REASON_BYTES: usize = 500;
+const MAX_POLICY_LABEL_BYTES: usize = 200;
+const MAX_POLICY_REF_BYTES: usize = 256;
 
 pub(crate) struct RuntimeCompactionInput<'a> {
     pub(crate) session_id: &'a str,
@@ -71,6 +79,27 @@ operation_bindings! {
         },
         "action_inspect" => |invocation, deps| {
             action_inspect_value(deps, invocation, &invocation.payload).await
+        },
+        "survivor_record" => |invocation, deps| {
+            survivor_record_value_at(deps, invocation, &invocation.payload, Utc::now()).await
+        },
+        "survivor_list" => |invocation, deps| {
+            survivor_list_value(deps, invocation, &invocation.payload).await
+        },
+        "survivor_disable" => |invocation, deps| {
+            survivor_disable_value_at(deps, invocation, &invocation.payload, Utc::now()).await
+        },
+        "exclusion_record" => |invocation, deps| {
+            exclusion_record_value_at(deps, invocation, &invocation.payload, Utc::now()).await
+        },
+        "exclusion_list" => |invocation, deps| {
+            exclusion_list_value(deps, invocation, &invocation.payload).await
+        },
+        "exclusion_disable" => |invocation, deps| {
+            exclusion_disable_value_at(deps, invocation, &invocation.payload, Utc::now()).await
+        },
+        "policy_snapshot" => |invocation, deps| {
+            policy_snapshot_value_at(deps, invocation, &invocation.payload, Utc::now()).await
         },
         "ui_snapshot" => |invocation, deps| {
             ui_snapshot_value_at(deps, invocation, &invocation.payload, Utc::now()).await
@@ -779,6 +808,464 @@ pub(crate) async fn action_inspect_value(
         "contextControlActionVersionId": version.version_id,
         "projection": action_projection(&inspection.resource, version, record)
     }))
+}
+
+pub(crate) async fn survivor_record_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    policy_record_value_at(
+        deps,
+        invocation,
+        payload,
+        operation_at,
+        PolicyRecordKind::Survivor,
+    )
+    .await
+}
+
+pub(crate) async fn exclusion_record_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    policy_record_value_at(
+        deps,
+        invocation,
+        payload,
+        operation_at,
+        PolicyRecordKind::Exclusion,
+    )
+    .await
+}
+
+pub(crate) async fn survivor_list_value(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    policy_list_value(deps, invocation, payload, PolicyRecordKind::Survivor).await
+}
+
+pub(crate) async fn exclusion_list_value(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    policy_list_value(deps, invocation, payload, PolicyRecordKind::Exclusion).await
+}
+
+pub(crate) async fn survivor_disable_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    policy_disable_value_at(
+        deps,
+        invocation,
+        payload,
+        operation_at,
+        PolicyRecordKind::Survivor,
+        "contextSurvivorResourceId",
+    )
+    .await
+}
+
+pub(crate) async fn exclusion_disable_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    policy_disable_value_at(
+        deps,
+        invocation,
+        payload,
+        operation_at,
+        PolicyRecordKind::Exclusion,
+        "contextExclusionResourceId",
+    )
+    .await
+}
+
+pub(crate) async fn policy_snapshot_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    let (session_id, scope) = session_scope_for_invocation(
+        invocation,
+        optional_str(payload, "sessionId")?,
+        "context_policy_snapshot",
+    )?;
+    ensure_authority(
+        deps,
+        invocation,
+        "context_policy_snapshot",
+        AccessMode::Write,
+        &session_id,
+        None,
+    )
+    .await?;
+    let idempotency_key = idempotency_key(invocation, payload, "context_policy_snapshot")?;
+    let resource_id = policy_snapshot_resource_id(&session_id, &idempotency_key);
+    if let Some(existing) = deps
+        .engine_host
+        .inspect_resource(&resource_id)
+        .await
+        .map_err(engine_error)?
+    {
+        ensure_context_policy_snapshot(&existing, "context_policy_snapshot replay")?;
+        ensure_scope(&existing, &scope, "context_policy_snapshot replay")?;
+        let (version, record) = current_payload(&existing, "context_policy_snapshot replay")?;
+        return Ok(policy_snapshot_response(
+            &existing.resource,
+            version,
+            record,
+            true,
+        ));
+    }
+
+    let survivors = active_policy_summaries(deps, &scope, PolicyRecordKind::Survivor).await?;
+    let exclusions = active_policy_summaries(deps, &scope, PolicyRecordKind::Exclusion).await?;
+    let now = operation_at.to_rfc3339();
+    let snapshot_id = format!("policy-snapshot-{idempotency_key}");
+    let record = policy_snapshot_record(PolicySnapshotInput {
+        policy_snapshot_id: &snapshot_id,
+        scope: &scope,
+        session_id: &session_id,
+        survivor_refs: survivors,
+        exclusion_refs: exclusions,
+        created_at: &now,
+        invocation,
+        idempotency_key: &idempotency_key,
+    });
+    let (resource, version, payload) = create_policy_resource(
+        deps,
+        invocation,
+        &resource_id,
+        CONTEXT_POLICY_SNAPSHOT_KIND,
+        CONTEXT_POLICY_SNAPSHOT_SCHEMA_ID,
+        "available",
+        record,
+        "context-policy-snapshot",
+    )
+    .await?;
+    publish_lifecycle_event(
+        deps,
+        invocation,
+        "context_control.policy_snapshot_recorded",
+        &resource,
+        json!({"metadataOnly": true, "networkPolicy": "none"}),
+    )
+    .await?;
+    Ok(policy_snapshot_response(
+        &resource, &version, &payload, false,
+    ))
+}
+
+#[derive(Clone, Copy)]
+enum PolicyRecordKind {
+    Survivor,
+    Exclusion,
+}
+
+impl PolicyRecordKind {
+    fn resource_kind(self) -> &'static str {
+        match self {
+            Self::Survivor => CONTEXT_SURVIVOR_KIND,
+            Self::Exclusion => CONTEXT_EXCLUSION_KIND,
+        }
+    }
+
+    fn schema_id(self) -> &'static str {
+        match self {
+            Self::Survivor => CONTEXT_SURVIVOR_SCHEMA_ID,
+            Self::Exclusion => CONTEXT_EXCLUSION_SCHEMA_ID,
+        }
+    }
+
+    fn operation_prefix(self) -> &'static str {
+        match self {
+            Self::Survivor => "context_survivor",
+            Self::Exclusion => "context_exclusion",
+        }
+    }
+
+    fn policy_kind(self) -> &'static str {
+        match self {
+            Self::Survivor => "survivor",
+            Self::Exclusion => "exclusion",
+        }
+    }
+
+    fn resource_id(self, session_id: &str, idempotency_key: &str) -> String {
+        match self {
+            Self::Survivor => survivor_resource_id(session_id, idempotency_key),
+            Self::Exclusion => exclusion_resource_id(session_id, idempotency_key),
+        }
+    }
+}
+
+async fn policy_record_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+    kind: PolicyRecordKind,
+) -> Result<Value, CapabilityError> {
+    let operation = format!("{}_record", kind.operation_prefix());
+    let (session_id, scope) =
+        session_scope_for_invocation(invocation, optional_str(payload, "sessionId")?, &operation)?;
+    ensure_authority(
+        deps,
+        invocation,
+        &operation,
+        AccessMode::Write,
+        &session_id,
+        None,
+    )
+    .await?;
+    let idempotency_key = idempotency_key(invocation, payload, &operation)?;
+    let resource_id = kind.resource_id(&session_id, &idempotency_key);
+    if let Some(existing) = deps
+        .engine_host
+        .inspect_resource(&resource_id)
+        .await
+        .map_err(engine_error)?
+    {
+        ensure_policy_kind(&existing, kind, &operation)?;
+        ensure_scope(&existing, &scope, &operation)?;
+        let (version, record) = current_payload(&existing, "context policy record replay")?;
+        return Ok(policy_record_response(
+            &operation,
+            &existing.resource,
+            version,
+            record,
+            true,
+        ));
+    }
+
+    let target_kind = bounded_text("targetKind", required_str(payload, "targetKind")?, 64)?;
+    let target_ref = bounded_text(
+        "targetRef",
+        required_str(payload, "targetRef")?,
+        MAX_POLICY_REF_BYTES,
+    )?;
+    let label = bounded_text(
+        "label",
+        required_str(payload, "label")?,
+        MAX_POLICY_LABEL_BYTES,
+    )?;
+    let reason = reason(payload, "Context policy requested", MAX_REASON_BYTES)?;
+    let priority = optional_u64(payload, "priority")?.unwrap_or(50).min(100);
+    let now = operation_at.to_rfc3339();
+    let policy_id = format!("{}-{idempotency_key}", kind.policy_kind());
+    let record = policy_record(PolicyRecordInput {
+        policy_id: &policy_id,
+        schema_version: schema_version_for_policy_kind(kind.resource_kind()),
+        state: "active",
+        policy_kind: kind.policy_kind(),
+        scope: &scope,
+        session_id: &session_id,
+        target_kind: &target_kind,
+        target_ref: &target_ref,
+        label: &label,
+        reason: &reason,
+        priority,
+        actor_kind: actor_kind(invocation),
+        created_at: &now,
+        updated_at: &now,
+        invocation,
+        idempotency_key: &idempotency_key,
+        revision: 1,
+    });
+    let (resource, version, payload) = create_policy_resource(
+        deps,
+        invocation,
+        &resource_id,
+        kind.resource_kind(),
+        kind.schema_id(),
+        "active",
+        record,
+        &format!("context-policy-{}:{policy_id}", kind.policy_kind()),
+    )
+    .await?;
+    publish_lifecycle_event(
+        deps,
+        invocation,
+        &format!("context_control.{}_recorded", kind.policy_kind()),
+        &resource,
+        json!({"metadataOnly": true, "networkPolicy": "none"}),
+    )
+    .await?;
+    Ok(policy_record_response(
+        &operation, &resource, &version, &payload, false,
+    ))
+}
+
+async fn policy_list_value(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    kind: PolicyRecordKind,
+) -> Result<Value, CapabilityError> {
+    let operation = format!("{}_list", kind.operation_prefix());
+    let (session_id, scope) =
+        session_scope_for_invocation(invocation, optional_str(payload, "sessionId")?, &operation)?;
+    ensure_authority(
+        deps,
+        invocation,
+        &operation,
+        AccessMode::Read,
+        &session_id,
+        None,
+    )
+    .await?;
+    let limit = optional_u64(payload, "limit")?
+        .map(|value| value as usize)
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .clamp(1, MAX_LIST_LIMIT);
+    let records = active_policy_summaries(deps, &scope, kind).await?;
+    Ok(json!({
+        "schemaVersion": schema_version_for_policy_kind(kind.resource_kind()),
+        "operation": operation,
+        "status": "ok",
+        "sessionId": session_id,
+        "projection": {
+            "records": records.into_iter().take(limit).collect::<Vec<_>>(),
+            "limit": limit,
+            "providerSafe": true
+        }
+    }))
+}
+
+async fn policy_disable_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+    kind: PolicyRecordKind,
+    resource_field: &str,
+) -> Result<Value, CapabilityError> {
+    let operation = format!("{}_disable", kind.operation_prefix());
+    let (session_id, scope) =
+        session_scope_for_invocation(invocation, optional_str(payload, "sessionId")?, &operation)?;
+    let resource_id = required_str(payload, resource_field)?;
+    ensure_authority(
+        deps,
+        invocation,
+        &operation,
+        AccessMode::Write,
+        &session_id,
+        Some(resource_id),
+    )
+    .await?;
+    let reason = reason(payload, "Context policy disabled", MAX_REASON_BYTES)?;
+    let idempotency_key = idempotency_key(invocation, payload, &operation)?;
+    let inspection = inspect_resource_required(deps, resource_id, "context policy").await?;
+    ensure_policy_kind(&inspection, kind, &operation)?;
+    ensure_scope(&inspection, &scope, &operation)?;
+    let (version, payload_record) = current_payload(&inspection, &operation)?;
+    if let Some(expected) = optional_str(payload, "expectedVersionId")?
+        && expected != version.version_id
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{operation} expectedVersionId is stale"),
+        });
+    }
+    if inspection.resource.lifecycle == "disabled" {
+        return Ok(policy_record_response(
+            &operation,
+            &inspection.resource,
+            version,
+            payload_record,
+            true,
+        ));
+    }
+    let now = operation_at.to_rfc3339();
+    let mut updated = payload_record.clone();
+    updated["state"] = json!("disabled");
+    updated["policy"]["disabledReason"] = json!(reason);
+    updated["updatedAt"] = json!(now);
+    updated["revision"] = json!(updated["revision"].as_u64().unwrap_or(1).saturating_add(1));
+    updated["idempotency"] = json!({
+        "disabledBy": idempotency_key,
+        "previous": updated["idempotency"]
+    });
+    let new_version = update_policy_resource(
+        deps,
+        invocation,
+        resource_id,
+        version.version_id.clone(),
+        updated.clone(),
+    )
+    .await?;
+    let mut resource = inspection.resource.clone();
+    resource.lifecycle = "disabled".to_owned();
+    resource.current_version_id = Some(new_version.version_id.clone());
+    publish_lifecycle_event(
+        deps,
+        invocation,
+        &format!("context_control.{}_disabled", kind.policy_kind()),
+        &resource,
+        json!({"metadataOnly": true, "networkPolicy": "none"}),
+    )
+    .await?;
+    Ok(policy_record_response(
+        &operation,
+        &resource,
+        &new_version,
+        &updated,
+        false,
+    ))
+}
+
+async fn active_policy_summaries(
+    deps: &Deps,
+    scope: &EngineResourceScope,
+    kind: PolicyRecordKind,
+) -> Result<Vec<Value>, CapabilityError> {
+    let resources = deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(kind.resource_kind().to_owned()),
+            scope: Some(scope.clone()),
+            lifecycle: Some("active".to_owned()),
+            limit: MAX_LIST_LIMIT,
+        })
+        .await
+        .map_err(engine_error)?;
+    let mut records = Vec::new();
+    for resource in resources {
+        if let Some(inspection) = deps
+            .engine_host
+            .inspect_resource(&resource.resource_id)
+            .await
+            .map_err(engine_error)?
+        {
+            ensure_scope(&inspection, scope, "context_policy_snapshot")?;
+            let (version, payload) = current_payload(&inspection, "context policy summary")?;
+            records.push(policy_summary(&inspection.resource, version, payload));
+        }
+    }
+    Ok(records)
+}
+
+fn ensure_policy_kind(
+    inspection: &crate::engine::EngineResourceInspection,
+    kind: PolicyRecordKind,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    match kind {
+        PolicyRecordKind::Survivor => ensure_context_survivor(inspection, operation),
+        PolicyRecordKind::Exclusion => ensure_context_exclusion(inspection, operation),
+    }
 }
 
 async fn record_snapshot(

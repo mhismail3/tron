@@ -638,8 +638,16 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("context_control_clear"));
     assert!(result.contains("context_control_action_list"));
     assert!(result.contains("context_control_action_inspect"));
+    assert!(result.contains("context_survivor_record"));
+    assert!(result.contains("context_survivor_disable"));
+    assert!(result.contains("context_exclusion_record"));
+    assert!(result.contains("context_exclusion_disable"));
+    assert!(result.contains("context_policy_snapshot"));
     assert!(result.contains("contextControlActionResourceId"));
+    assert!(result.contains("contextSurvivorResourceId"));
+    assert!(result.contains("contextExclusionResourceId"));
     assert!(result.contains("current-session context snapshots"));
+    assert!(result.contains("server-owned survivor/exclusion policy refs"));
     assert!(result.contains("hidden system/soul prompt text"));
     for non_goal in [
         "web_search",

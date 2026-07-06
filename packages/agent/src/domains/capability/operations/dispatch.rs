@@ -109,6 +109,23 @@ pub(super) async fn execute_operation(
         "context_control_action_inspect" => {
             context_control_action_inspect(invocation, deps).await?
         }
+        "context_survivor_record" => {
+            context_survivor_record(invocation, deps, operation_at).await?
+        }
+        "context_survivor_list" => context_survivor_list(invocation, deps).await?,
+        "context_survivor_disable" => {
+            context_survivor_disable(invocation, deps, operation_at).await?
+        }
+        "context_exclusion_record" => {
+            context_exclusion_record(invocation, deps, operation_at).await?
+        }
+        "context_exclusion_list" => context_exclusion_list(invocation, deps).await?,
+        "context_exclusion_disable" => {
+            context_exclusion_disable(invocation, deps, operation_at).await?
+        }
+        "context_policy_snapshot" => {
+            context_policy_snapshot(invocation, deps, operation_at).await?
+        }
         "media_create" => media_create(invocation, deps, operation_at).await?,
         "media_list" => media_list(invocation, deps).await?,
         "media_inspect" => media_inspect(invocation, deps).await?,

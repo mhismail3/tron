@@ -6,12 +6,17 @@ use serde_json::{Value, json};
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::service::{
     RuntimeCompactionInput, action_inspect_value, action_list_value, clear_value_at,
-    record_runtime_compaction_action, snapshot_value_at, ui_action_list_value, ui_compact_value_at,
+    exclusion_list_value, exclusion_record_value_at, policy_snapshot_value_at,
+    record_runtime_compaction_action, snapshot_value_at, survivor_disable_value_at,
+    survivor_list_value, survivor_record_value_at, ui_action_list_value, ui_compact_value_at,
     ui_snapshot_value_at,
 };
 use super::{
     CONTEXT_CONTROL_ACTION_KIND, CONTEXT_CONTROL_ACTION_SCHEMA_ID, CONTEXT_CONTROL_EPOCH_KIND,
-    CONTEXT_CONTROL_SNAPSHOT_KIND, CONTEXT_CONTROL_SNAPSHOT_SCHEMA_ID, Deps,
+    CONTEXT_CONTROL_EPOCH_SCHEMA_ID, CONTEXT_CONTROL_SNAPSHOT_KIND,
+    CONTEXT_CONTROL_SNAPSHOT_SCHEMA_ID, CONTEXT_EXCLUSION_KIND, CONTEXT_EXCLUSION_SCHEMA_ID,
+    CONTEXT_POLICY_SNAPSHOT_KIND, CONTEXT_POLICY_SNAPSHOT_SCHEMA_ID, CONTEXT_SURVIVOR_KIND,
+    CONTEXT_SURVIVOR_SCHEMA_ID, Deps,
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::session::event_store::{AppendOptions, EventType};
@@ -61,6 +66,9 @@ impl Fixture {
             "kind:context_control_snapshot".to_owned(),
             "kind:context_control_action".to_owned(),
             "kind:context_control_epoch".to_owned(),
+            "kind:context_survivor".to_owned(),
+            "kind:context_exclusion".to_owned(),
+            "kind:context_policy_snapshot".to_owned(),
             format!("session:{session_id}"),
         ];
         let write_grant_id = derive_grant(
@@ -76,6 +84,9 @@ impl Fixture {
                 CONTEXT_CONTROL_SNAPSHOT_KIND,
                 CONTEXT_CONTROL_ACTION_KIND,
                 CONTEXT_CONTROL_EPOCH_KIND,
+                CONTEXT_SURVIVOR_KIND,
+                CONTEXT_EXCLUSION_KIND,
+                CONTEXT_POLICY_SNAPSHOT_KIND,
             ],
             &selectors.iter().map(String::as_str).collect::<Vec<_>>(),
         )
@@ -88,6 +99,9 @@ impl Fixture {
                 CONTEXT_CONTROL_SNAPSHOT_KIND,
                 CONTEXT_CONTROL_ACTION_KIND,
                 CONTEXT_CONTROL_EPOCH_KIND,
+                CONTEXT_SURVIVOR_KIND,
+                CONTEXT_EXCLUSION_KIND,
+                CONTEXT_POLICY_SNAPSHOT_KIND,
             ],
             &selectors.iter().map(String::as_str).collect::<Vec<_>>(),
         )
@@ -139,6 +153,13 @@ fn context_control_resource_types_are_registered_with_metadata_only_bounds() {
         (
             CONTEXT_CONTROL_ACTION_KIND,
             CONTEXT_CONTROL_ACTION_SCHEMA_ID,
+        ),
+        (CONTEXT_CONTROL_EPOCH_KIND, CONTEXT_CONTROL_EPOCH_SCHEMA_ID),
+        (CONTEXT_SURVIVOR_KIND, CONTEXT_SURVIVOR_SCHEMA_ID),
+        (CONTEXT_EXCLUSION_KIND, CONTEXT_EXCLUSION_SCHEMA_ID),
+        (
+            CONTEXT_POLICY_SNAPSHOT_KIND,
+            CONTEXT_POLICY_SNAPSHOT_SCHEMA_ID,
         ),
     ] {
         let definition = definitions
@@ -243,6 +264,9 @@ async fn clear_creates_durable_action_epoch_and_provider_safe_action_projection(
         "kind:context_control_snapshot".to_owned(),
         "kind:context_control_action".to_owned(),
         "kind:context_control_epoch".to_owned(),
+        "kind:context_survivor".to_owned(),
+        "kind:context_exclusion".to_owned(),
+        "kind:context_policy_snapshot".to_owned(),
         format!("session:{}", fixture.session_id),
         format!("resource:{action_id}"),
     ];
@@ -254,6 +278,9 @@ async fn clear_creates_durable_action_epoch_and_provider_safe_action_projection(
             CONTEXT_CONTROL_SNAPSHOT_KIND,
             CONTEXT_CONTROL_ACTION_KIND,
             CONTEXT_CONTROL_EPOCH_KIND,
+            CONTEXT_SURVIVOR_KIND,
+            CONTEXT_EXCLUSION_KIND,
+            CONTEXT_POLICY_SNAPSHOT_KIND,
         ],
         &exact_read_selectors
             .iter()
@@ -454,6 +481,284 @@ async fn session_briefing_ui_wrappers_accept_first_party_client_context() {
 }
 
 #[tokio::test]
+async fn context_policy_records_list_disable_and_snapshot_with_exact_authority() {
+    let fixture = Fixture::new("context-control-policy").await;
+    let survivor_payload = json!({
+        "operation": "context_survivor_record",
+        "sessionId": fixture.session_id,
+        "targetKind": "message",
+        "targetRef": "message:decision-1",
+        "label": "Keep project decision",
+        "reason": "Must survive future compaction",
+        "priority": 80,
+        "idempotencyKey": "survivor-1"
+    });
+    let survivor_invocation = fixture.write_invocation(
+        "survivor-1",
+        "context_survivor_record",
+        survivor_payload.clone(),
+    );
+    let survivor = survivor_record_value_at(
+        &fixture.deps,
+        &survivor_invocation,
+        &survivor_payload,
+        operation_at(),
+    )
+    .await
+    .expect("record survivor");
+    assert_eq!(survivor["operation"], json!("context_survivor_record"));
+    assert_eq!(survivor["status"], json!("active"));
+    assert_eq!(
+        survivor["projection"]["policyRecord"]["futureProviderContextBinding"],
+        json!("must_preserve_ref")
+    );
+    assert_eq!(
+        survivor["projection"]["target"]["providerSafeRefOnly"],
+        json!(true)
+    );
+    assert_eq!(
+        survivor["projection"]["proof"]["hiddenPromptBodiesExcluded"],
+        json!(true)
+    );
+
+    let replay = survivor_record_value_at(
+        &fixture.deps,
+        &survivor_invocation,
+        &survivor_payload,
+        operation_at(),
+    )
+    .await
+    .expect("survivor replay");
+    assert_eq!(replay["idempotentReplay"], json!(true));
+    assert_eq!(
+        replay["contextPolicyResourceId"],
+        survivor["contextPolicyResourceId"]
+    );
+
+    let exclusion_payload = json!({
+        "operation": "context_exclusion_record",
+        "sessionId": fixture.session_id,
+        "targetKind": "message",
+        "targetRef": "message:obsolete-1",
+        "label": "Drop outdated branch notes",
+        "reason": "Outdated state must not survive future context",
+        "priority": 60,
+        "idempotencyKey": "exclusion-1"
+    });
+    let exclusion_invocation = fixture.write_invocation(
+        "exclusion-1",
+        "context_exclusion_record",
+        exclusion_payload.clone(),
+    );
+    let exclusion = exclusion_record_value_at(
+        &fixture.deps,
+        &exclusion_invocation,
+        &exclusion_payload,
+        operation_at(),
+    )
+    .await
+    .expect("record exclusion");
+    assert_eq!(
+        exclusion["projection"]["policyRecord"]["futureProviderContextBinding"],
+        json!("must_omit_ref")
+    );
+
+    let list_payload = json!({
+        "operation": "context_survivor_list",
+        "sessionId": fixture.session_id,
+        "limit": 10
+    });
+    let list_invocation = fixture.read_invocation(
+        "survivor-list-1",
+        "context_survivor_list",
+        list_payload.clone(),
+    );
+    let list = survivor_list_value(&fixture.deps, &list_invocation, &list_payload)
+        .await
+        .expect("list survivor");
+    assert_eq!(list["projection"]["records"].as_array().unwrap().len(), 1);
+
+    let snapshot_payload = json!({
+        "operation": "context_policy_snapshot",
+        "sessionId": fixture.session_id,
+        "idempotencyKey": "policy-snapshot-1"
+    });
+    let snapshot_invocation = fixture.write_invocation(
+        "policy-snapshot-1",
+        "context_policy_snapshot",
+        snapshot_payload.clone(),
+    );
+    let snapshot = policy_snapshot_value_at(
+        &fixture.deps,
+        &snapshot_invocation,
+        &snapshot_payload,
+        operation_at(),
+    )
+    .await
+    .expect("policy snapshot");
+    assert_eq!(snapshot["status"], json!("available"));
+    assert_eq!(
+        snapshot["projection"]["policySnapshot"]["policy"]["survivorCount"],
+        json!(1)
+    );
+    assert_eq!(
+        snapshot["projection"]["policySnapshot"]["policy"]["exclusionCount"],
+        json!(1)
+    );
+
+    let survivor_id = survivor["contextPolicyResourceId"].as_str().unwrap();
+    let disable_payload = json!({
+        "operation": "context_survivor_disable",
+        "sessionId": fixture.session_id,
+        "contextSurvivorResourceId": survivor_id,
+        "reason": "No longer needed",
+        "idempotencyKey": "disable-survivor-1"
+    });
+    let denied = survivor_disable_value_at(
+        &fixture.deps,
+        &fixture.write_invocation(
+            "disable-survivor-denied",
+            "context_survivor_disable",
+            disable_payload.clone(),
+        ),
+        &disable_payload,
+        operation_at(),
+    )
+    .await
+    .expect_err("disable without exact resource selector denied");
+    assert!(
+        denied
+            .to_string()
+            .contains(&format!("requires exact resource:{survivor_id} selector")),
+        "{denied}"
+    );
+
+    let exact_selectors = [
+        "kind:context_control_snapshot".to_owned(),
+        "kind:context_control_action".to_owned(),
+        "kind:context_control_epoch".to_owned(),
+        "kind:context_survivor".to_owned(),
+        "kind:context_exclusion".to_owned(),
+        "kind:context_policy_snapshot".to_owned(),
+        format!("session:{}", fixture.session_id),
+        format!("resource:{survivor_id}"),
+    ];
+    let exact_grant = derive_grant(
+        &fixture.deps,
+        "survivor-disable-exact",
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &[
+            CONTEXT_CONTROL_SNAPSHOT_KIND,
+            CONTEXT_CONTROL_ACTION_KIND,
+            CONTEXT_CONTROL_EPOCH_KIND,
+            CONTEXT_SURVIVOR_KIND,
+            CONTEXT_EXCLUSION_KIND,
+            CONTEXT_POLICY_SNAPSHOT_KIND,
+        ],
+        &exact_selectors
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    )
+    .await;
+    let disable_invocation = invocation(
+        "disable-survivor-1",
+        "context_survivor_disable",
+        disable_payload.clone(),
+        exact_grant,
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    let disabled = survivor_disable_value_at(
+        &fixture.deps,
+        &disable_invocation,
+        &disable_payload,
+        operation_at(),
+    )
+    .await
+    .expect("disable survivor");
+    assert_eq!(disabled["status"], json!("disabled"));
+    assert_eq!(
+        disabled["projection"]["policyRecord"]["state"],
+        json!("disabled")
+    );
+
+    let list_after_disable = survivor_list_value(&fixture.deps, &list_invocation, &list_payload)
+        .await
+        .expect("list survivor after disable");
+    assert_eq!(
+        list_after_disable["projection"]["records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let exclusion_list_payload = json!({
+        "operation": "context_exclusion_list",
+        "sessionId": fixture.session_id,
+        "limit": 10
+    });
+    let exclusion_list_invocation = fixture.read_invocation(
+        "exclusion-list-1",
+        "context_exclusion_list",
+        exclusion_list_payload.clone(),
+    );
+    let exclusion_list = exclusion_list_value(
+        &fixture.deps,
+        &exclusion_list_invocation,
+        &exclusion_list_payload,
+    )
+    .await
+    .expect("list exclusion");
+    assert_eq!(
+        exclusion_list["projection"]["records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn context_policy_record_rejects_raw_local_paths() {
+    let fixture = Fixture::new("context-control-policy-unsafe").await;
+    let payload = json!({
+        "operation": "context_survivor_record",
+        "sessionId": fixture.session_id,
+        "targetKind": "message",
+        "targetRef": "/home/local-user/secret-notes.txt",
+        "label": "Unsafe raw path",
+        "reason": "This must fail",
+        "idempotencyKey": "survivor-unsafe"
+    });
+    let invocation = fixture.write_invocation(
+        "survivor-unsafe",
+        "context_survivor_record",
+        payload.clone(),
+    );
+    let error = survivor_record_value_at(&fixture.deps, &invocation, &payload, operation_at())
+        .await
+        .expect_err("raw local path rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("may not contain raw commands, paths, secrets, or prompt bodies"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn missing_session_selector_denies_provider_context_control_access() {
     let fixture = Fixture::new("context-control-selector").await;
     let bad_grant = derive_grant(
@@ -464,11 +769,17 @@ async fn missing_session_selector_denies_provider_context_control_access() {
             CONTEXT_CONTROL_SNAPSHOT_KIND,
             CONTEXT_CONTROL_ACTION_KIND,
             CONTEXT_CONTROL_EPOCH_KIND,
+            CONTEXT_SURVIVOR_KIND,
+            CONTEXT_EXCLUSION_KIND,
+            CONTEXT_POLICY_SNAPSHOT_KIND,
         ],
         &[
             "kind:context_control_snapshot",
             "kind:context_control_action",
             "kind:context_control_epoch",
+            "kind:context_survivor",
+            "kind:context_exclusion",
+            "kind:context_policy_snapshot",
         ],
     )
     .await;

@@ -59,8 +59,8 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 | Fact | Evidence |
 |---|---|
-| Registry count | 181 entries in `SUPPORTED_OPERATION_NAMES`. |
-| Dispatch parity | 181 static dispatch arms in `execute_operation`; no missing or extra names. |
+| Registry count | 188 entries in `SUPPORTED_OPERATION_NAMES`. |
+| Dispatch parity | 188 static dispatch arms in `execute_operation`; no missing or extra names. |
 | Provider surface | One model-facing tool, `capability::execute`. |
 | Machine inventory | `packages/agent/docs/capability-modularity-inventory.tsv` lists every operation exactly once. |
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |
@@ -134,7 +134,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | `jobs` | `packages/agent/src/domains/jobs/mod.rs` records supervised runtime authority, lifecycle evidence, bounded job side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
 | `web` | `packages/agent/src/domains/web/mod.rs` records exact network authority, robots/source evidence, fail-closed side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
 | `subagents` | `packages/agent/src/domains/subagents/mod.rs` records exact task/runtime/job authority, merge evidence, bounded subagent side effects, provider-safe refs, replay/idempotency evidence, and rollback/disable metadata as replacement prerequisites. |
-| `context_control_compact` | `packages/agent/src/domains/context_control/mod.rs` and `packages/agent/src/domains/agent/context/mod.rs` record the summarizer strategy seam, provider-safe summary, context audit records, replay/idempotency evidence, and rollback/disable metadata while keeping context-control records server-owned. |
+| `context_control_compact` | `packages/agent/src/domains/context_control/mod.rs` and `packages/agent/src/domains/agent/context/mod.rs` record the summarizer strategy seam, provider-safe summary, context audit records, survivor/exclusion policy refs, replay/idempotency evidence, and rollback/disable metadata while keeping context-control records server-owned. |
 
 ## Validation Commands
 
@@ -188,6 +188,6 @@ cargo check --manifest-path packages/agent/Cargo.toml
 - Cockpit visibility is intentionally read-only and redacted. It reports total versus returned operations, operation-list truncation, bounded resource-scan completeness, redacted owner/target labels, and server-derived readiness; it can make modularity inspectable, but it cannot approve, activate, disable, roll back, route, or execute replacement behavior.
 - `adapter_replaceable` rows now name required authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites and hand off to the shadow replacement trial.
 - `record_plane` rows allow module producers or workflow extension while preserving server-owned custody records and provider-safe projections.
-- `context_control_compact` is the only compaction-like strategy seam in this slice: a future summarizer replacement cannot bypass context audit records or expose raw prompt material.
+- `context_control_compact` is the only compaction-like strategy seam in this slice: a future summarizer replacement cannot bypass context audit records, survivor/exclusion policy refs, or expose raw prompt material.
 - `module_program_execution_*` is the first module-owned execution pack and is used as the baseline template for later governed replacement.
 - Future operations must update the TSV, this scorecard, and this manifest before the invariant test will pass.

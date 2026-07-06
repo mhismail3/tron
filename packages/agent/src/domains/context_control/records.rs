@@ -4,11 +4,13 @@ use sha2::{Digest, Sha256};
 use crate::engine::{EngineResource, EngineResourceScope, EngineResourceVersion, Invocation};
 
 use super::contract::{
-    ACTION_SCHEMA_VERSION, EPOCH_SCHEMA_VERSION, READ_SCOPE, RESOURCE_READ_SCOPE,
-    RESOURCE_WRITE_SCOPE, SNAPSHOT_SCHEMA_VERSION, WRITE_SCOPE,
+    ACTION_SCHEMA_VERSION, EPOCH_SCHEMA_VERSION, EXCLUSION_SCHEMA_VERSION,
+    POLICY_SNAPSHOT_SCHEMA_VERSION, READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE,
+    SNAPSHOT_SCHEMA_VERSION, SURVIVOR_SCHEMA_VERSION, WRITE_SCOPE,
 };
 use super::{
     CONTEXT_CONTROL_ACTION_KIND, CONTEXT_CONTROL_EPOCH_KIND, CONTEXT_CONTROL_SNAPSHOT_KIND,
+    CONTEXT_EXCLUSION_KIND, CONTEXT_POLICY_SNAPSHOT_KIND, CONTEXT_SURVIVOR_KIND,
 };
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.context_control.idempotency.v1";
@@ -162,6 +164,102 @@ pub(super) fn epoch_record(input: EpochInput<'_>) -> Value {
     })
 }
 
+pub(super) struct PolicyRecordInput<'a> {
+    pub(super) policy_id: &'a str,
+    pub(super) schema_version: &'a str,
+    pub(super) state: &'a str,
+    pub(super) policy_kind: &'a str,
+    pub(super) scope: &'a EngineResourceScope,
+    pub(super) session_id: &'a str,
+    pub(super) target_kind: &'a str,
+    pub(super) target_ref: &'a str,
+    pub(super) label: &'a str,
+    pub(super) reason: &'a str,
+    pub(super) priority: u64,
+    pub(super) actor_kind: &'a str,
+    pub(super) created_at: &'a str,
+    pub(super) updated_at: &'a str,
+    pub(super) invocation: &'a Invocation,
+    pub(super) idempotency_key: &'a str,
+    pub(super) revision: u64,
+}
+
+pub(super) fn policy_record(input: PolicyRecordInput<'_>) -> Value {
+    json!({
+        "schemaVersion": input.schema_version,
+        "state": input.state,
+        "policyId": input.policy_id,
+        "scope": scope_ref(input.scope),
+        "session": {
+            "sessionId": input.session_id
+        },
+        "target": {
+            "kind": input.target_kind,
+            "ref": input.target_ref,
+            "label": input.label,
+            "bodyExcluded": true,
+            "providerSafeRefOnly": true
+        },
+        "policy": {
+            "kind": input.policy_kind,
+            "reason": input.reason,
+            "priority": input.priority,
+            "actorKind": input.actor_kind,
+            "futureProviderContextBinding": if input.policy_kind == "survivor" {
+                "must_preserve_ref"
+            } else {
+                "must_omit_ref"
+            }
+        },
+        "auditRefs": [],
+        "proof": provider_safe_proof(false),
+        "idempotency": idempotency_evidence(input.idempotency_key),
+        "traceRefs": trace_refs(input.invocation),
+        "replayRefs": replay_refs(input.invocation),
+        "createdAt": input.created_at,
+        "updatedAt": input.updated_at,
+        "revision": input.revision
+    })
+}
+
+pub(super) struct PolicySnapshotInput<'a> {
+    pub(super) policy_snapshot_id: &'a str,
+    pub(super) scope: &'a EngineResourceScope,
+    pub(super) session_id: &'a str,
+    pub(super) survivor_refs: Vec<Value>,
+    pub(super) exclusion_refs: Vec<Value>,
+    pub(super) created_at: &'a str,
+    pub(super) invocation: &'a Invocation,
+    pub(super) idempotency_key: &'a str,
+}
+
+pub(super) fn policy_snapshot_record(input: PolicySnapshotInput<'_>) -> Value {
+    json!({
+        "schemaVersion": POLICY_SNAPSHOT_SCHEMA_VERSION,
+        "state": "available",
+        "policySnapshotId": input.policy_snapshot_id,
+        "scope": scope_ref(input.scope),
+        "session": {
+            "sessionId": input.session_id
+        },
+        "policy": {
+            "serverOwned": true,
+            "strategyReplaceable": false,
+            "summarizerMustConsume": true,
+            "survivorCount": input.survivor_refs.len(),
+            "exclusionCount": input.exclusion_refs.len()
+        },
+        "survivorRefs": input.survivor_refs,
+        "exclusionRefs": input.exclusion_refs,
+        "proof": provider_safe_proof(false),
+        "idempotency": idempotency_evidence(input.idempotency_key),
+        "traceRefs": trace_refs(input.invocation),
+        "replayRefs": replay_refs(input.invocation),
+        "createdAt": input.created_at,
+        "revision": 1
+    })
+}
+
 pub(super) fn snapshot_resource_id(session_id: &str, snapshot_id: &str) -> String {
     format!(
         "{CONTEXT_CONTROL_SNAPSHOT_KIND}:{}",
@@ -187,6 +285,35 @@ pub(super) fn epoch_resource_id(session_id: &str, epoch_id: &str) -> String {
         "{CONTEXT_CONTROL_EPOCH_KIND}:{}",
         sha256_hex(format!("session:{session_id}:epoch:{epoch_id}").as_bytes())
     )
+}
+
+pub(super) fn survivor_resource_id(session_id: &str, idempotency_key: &str) -> String {
+    format!(
+        "{CONTEXT_SURVIVOR_KIND}:{}",
+        sha256_hex(format!("session:{session_id}:survivor:{idempotency_key}").as_bytes())
+    )
+}
+
+pub(super) fn exclusion_resource_id(session_id: &str, idempotency_key: &str) -> String {
+    format!(
+        "{CONTEXT_EXCLUSION_KIND}:{}",
+        sha256_hex(format!("session:{session_id}:exclusion:{idempotency_key}").as_bytes())
+    )
+}
+
+pub(super) fn policy_snapshot_resource_id(session_id: &str, idempotency_key: &str) -> String {
+    format!(
+        "{CONTEXT_POLICY_SNAPSHOT_KIND}:{}",
+        sha256_hex(format!("session:{session_id}:policy_snapshot:{idempotency_key}").as_bytes())
+    )
+}
+
+pub(super) fn schema_version_for_policy_kind(kind: &str) -> &'static str {
+    if kind == CONTEXT_SURVIVOR_KIND {
+        SURVIVOR_SCHEMA_VERSION
+    } else {
+        EXCLUSION_SCHEMA_VERSION
+    }
 }
 
 pub(super) fn scope_ref(scope: &EngineResourceScope) -> Value {

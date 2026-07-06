@@ -385,6 +385,13 @@ fn is_context_control_operation(operation: &str) -> bool {
             | "context_control_clear"
             | "context_control_action_list"
             | "context_control_action_inspect"
+            | "context_survivor_record"
+            | "context_survivor_list"
+            | "context_survivor_disable"
+            | "context_exclusion_record"
+            | "context_exclusion_list"
+            | "context_exclusion_disable"
+            | "context_policy_snapshot"
     )
 }
 

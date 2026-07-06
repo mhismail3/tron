@@ -97,7 +97,7 @@ Current living entry points:
   kernel-locked, governance-locked, record-plane, adapter-replaceable,
   module-owned, or deferred so future modular replacement work is measurable.
 - `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 181-row inventory for the capability modularity scorecard.
+  machine-readable 188-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
@@ -734,13 +734,17 @@ procedural rules, hidden prompt memory, automatic retention, or network-backed
 memory behavior.
 `domains/context_control` is the implementation-candidate owner for user and
 agent context-management visibility. It records `context_control_snapshot`,
-`context_control_action`, and `context_control_epoch` resources with provider
+`context_control_action`, `context_control_epoch`, `context_survivor`,
+`context_exclusion`, and `context_policy_snapshot` resources with provider
 safe projections only. `context_control_snapshot`, `context_control_compact`,
 `context_control_clear`, `context_control_action_list`, and
-`context_control_action_inspect` stay behind `capability::execute` for model
+`context_control_action_inspect`, plus `context_survivor_record/list/disable`,
+`context_exclusion_record/list/disable`, and `context_policy_snapshot`, stay
+behind `capability::execute` for model
 use, with explicit `context_control.read` / `context_control.write` plus
 `resource.read` / `resource.write` authority, exact current-session selectors,
-exact action-resource inspect selectors, idempotency for write actions,
+exact action-resource inspect selectors, exact policy-resource disable
+selectors, idempotency for write actions,
 `networkPolicy: none`, no wildcard selectors, no `agent_state`, and no state
 inheritance. Snapshots expose bounded composition metadata, token estimates,
 memory/resource/execution refs, redaction proof, truncation proof, and epoch
@@ -748,7 +752,10 @@ freshness without raw prompt bodies, hidden chain-of-thought, secrets, env
 values, local paths, commands, logs, grant ids, or authority ids. Compact and
 clear write durable preflight/action/timeline evidence; clear creates a new
 context epoch while keeping chat history, resources, traces, and durable refs
-inspectable. The iOS Session Briefing sheet renders this substrate from the chat
+inspectable. Survivor and exclusion records let users or agents mark bounded
+refs that future compaction/replacement summarizers must preserve or omit, and
+policy snapshots provide the server-owned evidence packet used to verify that
+replaceable summarizers honored those refs. The iOS Session Briefing sheet renders this substrate from the chat
 timeline/model pill and audited timeline pills as a Context Breakdown section,
 alongside the same model picker used by new-session setup. Native Session Briefing
 uses first-party `context_control::ui_*` wrappers that validate the current
@@ -1184,7 +1191,7 @@ Capability modularity is tracked in
 machine-readable inventory in
 `packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
 in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 181
+`capability_modularity_scorecard_invariants` test locks the current 188
 operation baseline, registry/dispatch parity, and the ownership classes used for
 future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 `adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
@@ -1359,6 +1366,13 @@ Current primitive operations:
 | `context_control_clear` | Implementation-candidate operation that records a durable preflight snapshot, writes a context-cleared timeline event, creates a new `context_control_epoch`, and stores a context-control action record proving prior turns are excluded from future provider context while chat history, resources, traces, and durable refs remain inspectable. |
 | `context_control_action_list` | Implementation-candidate operation that lists current-session context-control action summaries as bounded provider-safe audit rows after stored kind/schema/scope revalidation, with no raw prompt/log/command/grant/authority material. |
 | `context_control_action_inspect` | Implementation-candidate operation that inspects one context-control action through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning provider-safe preflight, result, audit refs, and proof only. |
+| `context_survivor_record` | Records one current-session context survivor policy ref with bounded target kind/ref/label, reason, priority, idempotency evidence, `networkPolicy: none`, and proof that future provider context binding must preserve only the safe ref, not raw message bodies, prompts, local paths, commands, logs, secrets, grant ids, or authority ids. |
+| `context_survivor_list` | Lists active current-session survivor policy refs as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation. |
+| `context_survivor_disable` | Disables one survivor policy record through exact `resource:<id>` selector authorization, expected session scope, idempotency evidence, and provider-safe disabled-state projection. |
+| `context_exclusion_record` | Records one current-session context exclusion policy ref with bounded target kind/ref/label, reason, priority, idempotency evidence, `networkPolicy: none`, and proof that future provider context binding must omit only the safe ref, not raw message bodies, prompts, local paths, commands, logs, secrets, grant ids, or authority ids. |
+| `context_exclusion_list` | Lists active current-session exclusion policy refs as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation. |
+| `context_exclusion_disable` | Disables one exclusion policy record through exact `resource:<id>` selector authorization, expected session scope, idempotency evidence, and provider-safe disabled-state projection. |
+| `context_policy_snapshot` | Records a provider-safe current-session policy snapshot containing active survivor/exclusion summaries and proof that replacement summarizers must consume server-owned policy refs without bypassing context-control custody. |
 | `module_list` | List system-scoped `module_manifest` records as bounded provider-safe module summaries after stored kind/schema/scope/payload revalidation, with explicit truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency resolution, network, or write side effects. |
 | `module_inspect` | Inspect one system-scoped `module_manifest` after stored kind/schema/scope/version/payload revalidation, returning bounded provider-safe identity, declarations, authority/settings/dependency intents, validation, provenance, distinct resource and manifest lifecycle fields, refs, and redaction proof without raw manifests, local paths, env values, commands, secrets, token-like strings, raw grant ids, or personal-info literals. |
 | `module_proposal_record` | Accepted Slice 23B operation that records one scoped `module_proposal` resource for bounded module authoring metadata only, with title/summary identity, intended module refs, bounded source/doc/test refs, validation placeholder status, lifecycle evidence, trace/replay fingerprints, idempotency fingerprint, and explicit proof of no install, execution, dependency restore, package manager, network, physical workspace directory, repo-managed skills, raw prompt/proposal/code/command/file-content storage, raw grant/authority ids, or token-like provider-visible proposal metadata. |
@@ -1406,7 +1420,7 @@ Current primitive operations:
 | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
 | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
 | `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence, supervised adapter projection state, routed invocation results, fail-closed status, and rollback/disable history. |
-| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 181 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
+| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 188 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |

@@ -22,6 +22,12 @@ pub(crate) const ACTION_SCHEMA_VERSION: &str =
     crate::engine::CONTEXT_CONTROL_ACTION_PAYLOAD_SCHEMA_VERSION;
 pub(crate) const EPOCH_SCHEMA_VERSION: &str =
     crate::engine::CONTEXT_CONTROL_EPOCH_PAYLOAD_SCHEMA_VERSION;
+pub(crate) const SURVIVOR_SCHEMA_VERSION: &str =
+    crate::engine::CONTEXT_SURVIVOR_PAYLOAD_SCHEMA_VERSION;
+pub(crate) const EXCLUSION_SCHEMA_VERSION: &str =
+    crate::engine::CONTEXT_EXCLUSION_PAYLOAD_SCHEMA_VERSION;
+pub(crate) const POLICY_SNAPSHOT_SCHEMA_VERSION: &str =
+    crate::engine::CONTEXT_POLICY_SNAPSHOT_PAYLOAD_SCHEMA_VERSION;
 
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -93,6 +99,93 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .response_schema(common_response_schema("context_control_action_inspect"))
         .build()?,
         contract(
+            "context_control::survivor_record",
+            EffectClass::IdempotentWrite,
+            RiskLevel::Medium,
+            Some(WRITE_SCOPE),
+        )
+        .description("Pin a provider-safe context ref so future context policy must preserve it")
+        .tags(vec!["context", "policy", "survivor", "pin"])
+        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
+        .request_schema(policy_record_request_schema())
+        .response_schema(common_response_schema("context_survivor_record"))
+        .build()?,
+        contract(
+            "context_control::survivor_list",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some(READ_SCOPE),
+        )
+        .description("List active provider-safe context survivor policy records for a session")
+        .tags(vec!["context", "policy", "survivor"])
+        .request_schema(list_request_schema())
+        .response_schema(common_response_schema("context_survivor_list"))
+        .build()?,
+        contract(
+            "context_control::survivor_disable",
+            EffectClass::IdempotentWrite,
+            RiskLevel::Medium,
+            Some(WRITE_SCOPE),
+        )
+        .description("Disable one context survivor policy record without deleting its audit trail")
+        .tags(vec!["context", "policy", "survivor", "disable"])
+        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
+        .request_schema(policy_disable_request_schema("contextSurvivorResourceId"))
+        .response_schema(common_response_schema("context_survivor_disable"))
+        .build()?,
+        contract(
+            "context_control::exclusion_record",
+            EffectClass::IdempotentWrite,
+            RiskLevel::Medium,
+            Some(WRITE_SCOPE),
+        )
+        .description("Mark a provider-safe context ref that future provider context must omit")
+        .tags(vec!["context", "policy", "exclusion"])
+        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
+        .request_schema(policy_record_request_schema())
+        .response_schema(common_response_schema("context_exclusion_record"))
+        .build()?,
+        contract(
+            "context_control::exclusion_list",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some(READ_SCOPE),
+        )
+        .description("List active provider-safe context exclusion policy records for a session")
+        .tags(vec!["context", "policy", "exclusion"])
+        .request_schema(list_request_schema())
+        .response_schema(common_response_schema("context_exclusion_list"))
+        .build()?,
+        contract(
+            "context_control::exclusion_disable",
+            EffectClass::IdempotentWrite,
+            RiskLevel::Medium,
+            Some(WRITE_SCOPE),
+        )
+        .description("Disable one context exclusion policy record without deleting its audit trail")
+        .tags(vec!["context", "policy", "exclusion", "disable"])
+        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
+        .request_schema(policy_disable_request_schema("contextExclusionResourceId"))
+        .response_schema(common_response_schema("context_exclusion_disable"))
+        .build()?,
+        contract(
+            "context_control::policy_snapshot",
+            EffectClass::AppendOnlyEvent,
+            RiskLevel::Low,
+            Some(WRITE_SCOPE),
+        )
+        .description("Record the active context survivor/exclusion policy input for compaction or replay")
+        .tags(vec!["context", "policy", "snapshot", "audit"])
+        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
+        .request_schema(session_request_schema())
+        .response_schema(common_response_schema("context_policy_snapshot"))
+        .build()?,
+        contract(
             "context_control::ui_snapshot",
             EffectClass::AppendOnlyEvent,
             RiskLevel::Low,
@@ -162,6 +255,38 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .response_schema(common_response_schema("context_control_action_inspect"))
         .build()?,
     ])
+}
+
+fn policy_record_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId", "targetKind", "targetRef", "label", "reason", "idempotencyKey"],
+        "properties": {
+            "sessionId": {"type": "string", "minLength": 1},
+            "targetKind": {"type": "string", "minLength": 1, "maxLength": 64},
+            "targetRef": {"type": "string", "minLength": 1, "maxLength": 256},
+            "label": {"type": "string", "minLength": 1, "maxLength": 200},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            "priority": {"type": "integer", "minimum": 0, "maximum": 100},
+            "idempotencyKey": {"type": "string", "minLength": 1, "maxLength": 256}
+        }
+    })
+}
+
+fn policy_disable_request_schema(resource_field: &'static str) -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId", resource_field, "reason", "idempotencyKey"],
+        "properties": {
+            "sessionId": {"type": "string", "minLength": 1},
+            resource_field: {"type": "string", "minLength": 1},
+            "expectedVersionId": {"type": "string", "minLength": 1},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            "idempotencyKey": {"type": "string", "minLength": 1, "maxLength": 256}
+        }
+    })
 }
 
 fn contract(

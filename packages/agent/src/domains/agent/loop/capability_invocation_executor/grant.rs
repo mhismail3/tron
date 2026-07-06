@@ -99,6 +99,13 @@ pub(super) async fn derive_capability_runtime_grant(
             | "context_control_clear"
             | "context_control_action_list"
             | "context_control_action_inspect"
+            | "context_survivor_record"
+            | "context_survivor_list"
+            | "context_survivor_disable"
+            | "context_exclusion_record"
+            | "context_exclusion_list"
+            | "context_exclusion_disable"
+            | "context_policy_snapshot"
     );
     let module_program_execution_operation = matches!(
         operation,
@@ -454,7 +461,10 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
-        "context_control_action_list" | "context_control_action_inspect"
+        "context_control_action_list"
+            | "context_control_action_inspect"
+            | "context_survivor_list"
+            | "context_exclusion_list"
     ) {
         allowed_authority_scopes.extend([
             "context_control.read".to_owned(),
@@ -462,7 +472,14 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
-        "context_control_snapshot" | "context_control_compact" | "context_control_clear"
+        "context_control_snapshot"
+            | "context_control_compact"
+            | "context_control_clear"
+            | "context_survivor_record"
+            | "context_survivor_disable"
+            | "context_exclusion_record"
+            | "context_exclusion_disable"
+            | "context_policy_snapshot"
     ) {
         allowed_authority_scopes.extend([
             "context_control.read".to_owned(),
@@ -792,6 +809,9 @@ pub(super) async fn derive_capability_runtime_grant(
             "context_control_snapshot".to_owned(),
             "context_control_action".to_owned(),
             "context_control_epoch".to_owned(),
+            "context_survivor".to_owned(),
+            "context_exclusion".to_owned(),
+            "context_policy_snapshot".to_owned(),
         ]);
     } else if operation == "module_program_execution_start" {
         allowed_resource_kinds.extend([
@@ -1386,6 +1406,8 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
             &["context_control_action_inspect"],
             "contextControlActionResourceId",
         ),
+        (&["context_survivor_disable"], "contextSurvivorResourceId"),
+        (&["context_exclusion_disable"], "contextExclusionResourceId"),
         (&["module_inspect"], "moduleManifestResourceId"),
         (&["module_proposal_inspect"], "moduleProposalResourceId"),
         (

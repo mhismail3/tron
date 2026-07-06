@@ -612,6 +612,18 @@ fn ensure_context_control_grant_is_explicit(
             &["contextControlActionResourceId"],
             "context-control action inspect",
         ),
+        Some("context_survivor_disable") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["contextSurvivorResourceId"],
+            "context survivor disable",
+        ),
+        Some("context_exclusion_disable") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["contextExclusionResourceId"],
+            "context exclusion disable",
+        ),
         _ => Ok(()),
     }
 }
@@ -1047,11 +1059,25 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             push_unique(&mut scopes, "resource.read");
             push_unique(&mut scopes, "resource.write");
         }
-        Some("context_control_action_list" | "context_control_action_inspect") => {
+        Some(
+            "context_control_action_list"
+            | "context_control_action_inspect"
+            | "context_survivor_list"
+            | "context_exclusion_list",
+        ) => {
             push_unique(&mut scopes, "context_control.read");
             push_unique(&mut scopes, "resource.read");
         }
-        Some("context_control_snapshot" | "context_control_compact" | "context_control_clear") => {
+        Some(
+            "context_control_snapshot"
+            | "context_control_compact"
+            | "context_control_clear"
+            | "context_survivor_record"
+            | "context_survivor_disable"
+            | "context_exclusion_record"
+            | "context_exclusion_disable"
+            | "context_policy_snapshot",
+        ) => {
             push_unique(&mut scopes, "context_control.read");
             push_unique(&mut scopes, "context_control.write");
             push_unique(&mut scopes, "resource.read");
@@ -1336,11 +1362,21 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             | "context_control_compact"
             | "context_control_clear"
             | "context_control_action_list"
-            | "context_control_action_inspect",
+            | "context_control_action_inspect"
+            | "context_survivor_record"
+            | "context_survivor_list"
+            | "context_survivor_disable"
+            | "context_exclusion_record"
+            | "context_exclusion_list"
+            | "context_exclusion_disable"
+            | "context_policy_snapshot",
         ) => vec![
             "context_control_snapshot",
             "context_control_action",
             "context_control_epoch",
+            "context_survivor",
+            "context_exclusion",
+            "context_policy_snapshot",
         ],
         Some("module_program_execution_start") => vec![
             "module_runtime_state",
@@ -1547,6 +1583,13 @@ fn is_context_control_invocation(invocation: &Invocation) -> bool {
                     | "context_control_clear"
                     | "context_control_action_list"
                     | "context_control_action_inspect"
+                    | "context_survivor_record"
+                    | "context_survivor_list"
+                    | "context_survivor_disable"
+                    | "context_exclusion_record"
+                    | "context_exclusion_list"
+                    | "context_exclusion_disable"
+                    | "context_policy_snapshot"
             )
         )
 }
@@ -1762,6 +1805,15 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
             push_unique(&mut kinds, "context_control_snapshot");
             push_unique(&mut kinds, "context_control_action");
             push_unique(&mut kinds, "context_control_epoch");
+        }
+        Some("context_survivor_record" | "context_survivor_disable") => {
+            push_unique(&mut kinds, "context_survivor");
+        }
+        Some("context_exclusion_record" | "context_exclusion_disable") => {
+            push_unique(&mut kinds, "context_exclusion");
+        }
+        Some("context_policy_snapshot") => {
+            push_unique(&mut kinds, "context_policy_snapshot");
         }
         Some("module_program_execution_start") => {
             push_unique(&mut kinds, "module_runtime_state");
@@ -3084,22 +3136,38 @@ mod tests {
     #[test]
     fn context_control_operations_require_exact_session_and_action_authority() {
         let function = test_execute_function();
+        let context_kinds = [
+            "context_control_snapshot",
+            "context_control_action",
+            "context_control_epoch",
+            "context_survivor",
+            "context_exclusion",
+            "context_policy_snapshot",
+        ];
+        let context_selectors = [
+            "kind:context_control_snapshot",
+            "kind:context_control_action",
+            "kind:context_control_epoch",
+            "kind:context_survivor",
+            "kind:context_exclusion",
+            "kind:context_policy_snapshot",
+            "session:session-update-diagnostic-selector",
+        ];
         let read_grant = test_grant(
             &[
                 "capability.execute",
                 "context_control.read",
                 "resource.read",
             ],
+            &context_kinds,
             &[
-                "context_control_snapshot",
-                "context_control_action",
-                "context_control_epoch",
-            ],
-            &[
-                "kind:context_control_snapshot",
-                "kind:context_control_action",
-                "kind:context_control_epoch",
-                "session:session-update-diagnostic-selector",
+                context_selectors[0],
+                context_selectors[1],
+                context_selectors[2],
+                context_selectors[3],
+                context_selectors[4],
+                context_selectors[5],
+                context_selectors[6],
                 "resource:context_control_action:first",
             ],
         );
@@ -3146,16 +3214,8 @@ mod tests {
                 "resource.read",
                 "resource.write",
             ],
-            &[
-                "context_control_snapshot",
-                "context_control_action",
-                "context_control_epoch",
-            ],
-            &[
-                "kind:context_control_snapshot",
-                "kind:context_control_action",
-                "kind:context_control_epoch",
-            ],
+            &context_kinds,
+            &context_selectors[..6],
         );
         let error = authorize_with_grant(
             &missing_session_selector,
@@ -3176,17 +3236,8 @@ mod tests {
                 "authority",
                 test_grant(
                     &["*", "context_control.read", "resource.read"],
-                    &[
-                        "context_control_snapshot",
-                        "context_control_action",
-                        "context_control_epoch",
-                    ],
-                    &[
-                        "kind:context_control_snapshot",
-                        "kind:context_control_action",
-                        "kind:context_control_epoch",
-                        "session:session-update-diagnostic-selector",
-                    ],
+                    &context_kinds,
+                    &context_selectors,
                 ),
                 "wildcard authority scopes",
             ),
@@ -3200,16 +3251,14 @@ mod tests {
                     ],
                     &[
                         "*",
-                        "context_control_snapshot",
-                        "context_control_action",
-                        "context_control_epoch",
+                        context_kinds[0],
+                        context_kinds[1],
+                        context_kinds[2],
+                        context_kinds[3],
+                        context_kinds[4],
+                        context_kinds[5],
                     ],
-                    &[
-                        "kind:context_control_snapshot",
-                        "kind:context_control_action",
-                        "kind:context_control_epoch",
-                        "session:session-update-diagnostic-selector",
-                    ],
+                    &context_selectors,
                 ),
                 "wildcard resource kinds",
             ),
@@ -3221,17 +3270,16 @@ mod tests {
                         "context_control.read",
                         "resource.read",
                     ],
-                    &[
-                        "context_control_snapshot",
-                        "context_control_action",
-                        "context_control_epoch",
-                    ],
+                    &context_kinds,
                     &[
                         "*",
-                        "kind:context_control_snapshot",
-                        "kind:context_control_action",
-                        "kind:context_control_epoch",
-                        "session:session-update-diagnostic-selector",
+                        context_selectors[0],
+                        context_selectors[1],
+                        context_selectors[2],
+                        context_selectors[3],
+                        context_selectors[4],
+                        context_selectors[5],
+                        context_selectors[6],
                     ],
                 ),
                 "wildcard resource selectors",

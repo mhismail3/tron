@@ -107,6 +107,13 @@ pub(super) fn validate_execute_context(
             | "context_control_clear"
             | "context_control_action_list"
             | "context_control_action_inspect"
+            | "context_survivor_record"
+            | "context_survivor_list"
+            | "context_survivor_disable"
+            | "context_exclusion_record"
+            | "context_exclusion_list"
+            | "context_exclusion_disable"
+            | "context_policy_snapshot"
     ) {
         require_current_session(invocation, operation)?;
     }
@@ -128,6 +135,8 @@ pub(super) fn validate_execute_context(
         | "memory_decision_inspect"
         | "context_control_action_list"
         | "context_control_action_inspect"
+        | "context_survivor_list"
+        | "context_exclusion_list"
         | "module_list"
         | "module_inspect"
         | "module_program_execution_status"
@@ -173,6 +182,11 @@ pub(super) fn validate_execute_context(
         | "context_control_snapshot"
         | "context_control_compact"
         | "context_control_clear"
+        | "context_survivor_record"
+        | "context_survivor_disable"
+        | "context_exclusion_record"
+        | "context_exclusion_disable"
+        | "context_policy_snapshot"
         | "subagent_launch"
         | "subagent_cancel" => require_idempotency_key(invocation, operation),
         _ if requires_scheduler_idempotency(operation) => {

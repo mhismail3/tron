@@ -803,7 +803,7 @@ mod tests {
             "import_preview_record import_preview_list import_preview_inspect ",
             "program_execution_record program_execution_list program_execution_inspect ",
             "prompt_artifact_record prompt_artifact_list prompt_artifact_inspect ",
-            "context_control_snapshot context_control_compact context_control_clear context_control_action_list context_control_action_inspect ",
+            "context_control_snapshot context_control_compact context_control_clear context_control_action_list context_control_action_inspect context_survivor_record context_survivor_list context_survivor_disable context_exclusion_record context_exclusion_list context_exclusion_disable context_policy_snapshot ",
             "module_proposal_record module_proposal_list module_proposal_inspect module_validation_record module_validation_list module_validation_inspect ",
             "module_dependency_request_record module_dependency_request_list module_dependency_request_inspect module_dependency_decision_record module_dependency_decision_list module_dependency_decision_inspect module_dependency_policy_activate module_dependency_policy_list module_dependency_policy_inspect ",
             "capability_binding_request_record capability_binding_request_list capability_binding_request_inspect capability_binding_decision_record capability_binding_decision_list capability_binding_decision_inspect capability_binding_policy_activate capability_binding_policy_list capability_binding_policy_inspect ",

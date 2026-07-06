@@ -2552,12 +2552,12 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         overview["schemaVersion"],
         json!(super::contract::COCKPIT_VISIBILITY_SCHEMA_VERSION)
     );
-    assert_eq!(overview["summary"]["totalOperations"], json!(181));
-    assert_eq!(overview["summary"]["returnedOperations"], json!(181));
+    assert_eq!(overview["summary"]["totalOperations"], json!(188));
+    assert_eq!(overview["summary"]["returnedOperations"], json!(188));
     assert_eq!(overview["summary"]["operationListComplete"], json!(true));
     assert_eq!(overview["summary"]["resourceScanComplete"], json!(true));
-    assert_eq!(overview["operationList"]["totalOperations"], json!(181));
-    assert_eq!(overview["operationList"]["returnedOperations"], json!(181));
+    assert_eq!(overview["operationList"]["totalOperations"], json!(188));
+    assert_eq!(overview["operationList"]["returnedOperations"], json!(188));
     assert_eq!(overview["operationList"]["truncated"], json!(false));
     assert_eq!(overview["resourceScan"]["complete"], json!(true));
     assert_eq!(overview["resourceScan"]["truncated"], json!(false));
@@ -2661,11 +2661,11 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     )
     .await
     .expect("limited cockpit overview");
-    assert_eq!(limited["summary"]["totalOperations"], json!(181));
+    assert_eq!(limited["summary"]["totalOperations"], json!(188));
     assert_eq!(limited["summary"]["returnedOperations"], json!(1));
     assert_eq!(limited["summary"]["operationListComplete"], json!(false));
     assert_eq!(limited["summary"]["operationListTruncated"], json!(true));
-    assert_eq!(limited["operationList"]["totalOperations"], json!(181));
+    assert_eq!(limited["operationList"]["totalOperations"], json!(188));
     assert_eq!(limited["operationList"]["returnedOperations"], json!(1));
     assert_eq!(limited["operationList"]["requestedLimit"], json!(1));
     assert_eq!(limited["operationList"]["state"], json!("truncated"));
@@ -2680,8 +2680,8 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     )
     .await
     .expect("bounded scan cockpit overview");
-    assert_eq!(full["summary"]["totalOperations"], json!(181));
-    assert_eq!(full["summary"]["returnedOperations"], json!(181));
+    assert_eq!(full["summary"]["totalOperations"], json!(188));
+    assert_eq!(full["summary"]["returnedOperations"], json!(188));
     assert_eq!(full["summary"]["resourceScanComplete"], json!(false));
     assert_eq!(full["summary"]["resourceScanTruncated"], json!(true));
     assert_eq!(full["resourceScan"]["complete"], json!(false));

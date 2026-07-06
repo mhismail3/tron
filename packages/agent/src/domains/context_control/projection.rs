@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::engine::{EngineResource, EngineResourceVersion};
 
-use super::contract::ACTION_SCHEMA_VERSION;
+use super::contract::{ACTION_SCHEMA_VERSION, POLICY_SNAPSHOT_SCHEMA_VERSION};
 use super::records::version_ref;
 
 pub(super) fn snapshot_projection(
@@ -68,6 +68,74 @@ pub(super) fn action_summary(
         "createdAt": payload["createdAt"],
         "updatedAt": payload["updatedAt"],
         "resultStatus": payload["result"]["status"]
+    })
+}
+
+pub(super) fn policy_record_response(
+    operation: &str,
+    resource: &EngineResource,
+    version: &EngineResourceVersion,
+    payload: &Value,
+    replay: bool,
+) -> Value {
+    json!({
+        "schemaVersion": payload["schemaVersion"],
+        "operation": operation,
+        "status": resource.lifecycle,
+        "idempotentReplay": replay,
+        "contextPolicyResourceId": resource.resource_id,
+        "contextPolicyVersionId": version.version_id,
+        "projection": {
+            "policyRecord": policy_summary(resource, version, payload),
+            "target": payload["target"],
+            "policy": payload["policy"],
+            "auditRefs": payload["auditRefs"],
+            "proof": payload["proof"]
+        }
+    })
+}
+
+pub(super) fn policy_summary(
+    resource: &EngineResource,
+    version: &EngineResourceVersion,
+    payload: &Value,
+) -> Value {
+    json!({
+        "resource": version_ref(resource, version, "context_policy"),
+        "policyId": payload["policyId"],
+        "state": payload["state"],
+        "kind": payload["policy"]["kind"],
+        "targetKind": payload["target"]["kind"],
+        "targetLabel": payload["target"]["label"],
+        "futureProviderContextBinding": payload["policy"]["futureProviderContextBinding"],
+        "createdAt": payload["createdAt"],
+        "updatedAt": payload["updatedAt"]
+    })
+}
+
+pub(super) fn policy_snapshot_response(
+    resource: &EngineResource,
+    version: &EngineResourceVersion,
+    payload: &Value,
+    replay: bool,
+) -> Value {
+    json!({
+        "schemaVersion": POLICY_SNAPSHOT_SCHEMA_VERSION,
+        "operation": "context_policy_snapshot",
+        "status": resource.lifecycle,
+        "idempotentReplay": replay,
+        "contextPolicySnapshotResourceId": resource.resource_id,
+        "contextPolicySnapshotVersionId": version.version_id,
+        "projection": {
+            "policySnapshot": {
+                "resource": version_ref(resource, version, "context_policy_snapshot"),
+                "session": payload["session"],
+                "policy": payload["policy"],
+                "survivorRefs": payload["survivorRefs"],
+                "exclusionRefs": payload["exclusionRefs"],
+                "proof": payload["proof"]
+            }
+        }
     })
 }
 

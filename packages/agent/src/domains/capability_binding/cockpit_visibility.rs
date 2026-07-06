@@ -25,7 +25,7 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_RUN_KIND, Deps,
 };
 
-const DEFAULT_LIMIT: usize = 181;
+const DEFAULT_LIMIT: usize = 188;
 const MAX_LIMIT: usize = 200;
 const MAX_RESOURCES_PER_KIND_SCOPE: usize = 100;
 

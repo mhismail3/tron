@@ -58,6 +58,13 @@ pub(crate) const SUPPORTED_OPERATION_NAMES: &[&str] = &[
     "context_control_clear",
     "context_control_action_list",
     "context_control_action_inspect",
+    "context_survivor_record",
+    "context_survivor_list",
+    "context_survivor_disable",
+    "context_exclusion_record",
+    "context_exclusion_list",
+    "context_exclusion_disable",
+    "context_policy_snapshot",
     "media_create",
     "media_list",
     "media_inspect",
@@ -291,6 +298,18 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "record_plane",
             "modules_may_consume_context_audit_refs_but_must_not_bypass_epoch_or_action_records",
         ),
+        operation
+            if operation.starts_with("context_survivor_")
+                || operation.starts_with("context_exclusion_")
+                || operation == "context_policy_snapshot" =>
+        {
+            (
+                "context_control",
+                "domains::capability::operations::context_control + domains::context_control",
+                "record_plane",
+                "modules_may_consume_context_policy_refs_but_must_not_bypass_survivor_exclusion_or_policy_snapshot_custody",
+            )
+        }
         operation if operation.starts_with("memory_") => (
             "memory",
             "domains::capability::operations::memory + domains::memory",

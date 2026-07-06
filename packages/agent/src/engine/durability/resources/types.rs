@@ -273,6 +273,18 @@ pub const CONTEXT_CONTROL_ACTION_SCHEMA_ID: &str = "tron.resource.context_contro
 pub const CONTEXT_CONTROL_EPOCH_KIND: &str = "context_control_epoch";
 /// Built-in context-control epoch resource schema id.
 pub const CONTEXT_CONTROL_EPOCH_SCHEMA_ID: &str = "tron.resource.context_control_epoch.v1";
+/// Built-in context-policy survivor resource kind.
+pub const CONTEXT_SURVIVOR_KIND: &str = "context_survivor";
+/// Built-in context-policy survivor resource schema id.
+pub const CONTEXT_SURVIVOR_SCHEMA_ID: &str = "tron.resource.context_survivor.v1";
+/// Built-in context-policy exclusion resource kind.
+pub const CONTEXT_EXCLUSION_KIND: &str = "context_exclusion";
+/// Built-in context-policy exclusion resource schema id.
+pub const CONTEXT_EXCLUSION_SCHEMA_ID: &str = "tron.resource.context_exclusion.v1";
+/// Built-in context-policy snapshot resource kind.
+pub const CONTEXT_POLICY_SNAPSHOT_KIND: &str = "context_policy_snapshot";
+/// Built-in context-policy snapshot resource schema id.
+pub const CONTEXT_POLICY_SNAPSHOT_SCHEMA_ID: &str = "tron.resource.context_policy_snapshot.v1";
 /// Built-in metadata-only web research request resource kind.
 pub const WEB_RESEARCH_REQUEST_KIND: &str = "web_research_request";
 /// Built-in metadata-only web research request resource schema id.

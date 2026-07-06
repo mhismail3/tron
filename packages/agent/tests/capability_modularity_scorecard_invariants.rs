@@ -15,7 +15,7 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-
 const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const README_PATH: &str = "README.md";
-const EXPECTED_OPERATION_COUNT: usize = 181;
+const EXPECTED_OPERATION_COUNT: usize = 188;
 
 const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";
 
@@ -220,6 +220,13 @@ fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
         }
         operation if operation.starts_with("schedule_") => ("scheduler", "record_plane"),
         operation if operation.starts_with("context_control_") => {
+            ("context_control", "record_plane")
+        }
+        operation
+            if operation.starts_with("context_survivor_")
+                || operation.starts_with("context_exclusion_")
+                || operation == "context_policy_snapshot" =>
+        {
             ("context_control", "record_plane")
         }
         operation if operation.starts_with("memory_") => ("memory", "record_plane"),
@@ -679,7 +686,8 @@ fn adapter_seam_areas() -> Vec<AdapterSeamArea> {
                     markers: &[
                         "summarizer strategy only",
                         "server-owned",
-                        "provider-safe projections",
+                        "provider-safe",
+                        "survivor/exclusion policy records",
                         "rollback/disable metadata",
                     ],
                 },
