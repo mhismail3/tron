@@ -159,7 +159,14 @@ The Dynamic Replacement slice adds scoped route records for the first read-only 
 | `capability_route_event` | Records activation, disable, rollback, and routed-invocation events as durable trace-linked route evidence. |
 | `capability_route_rollback` | Records deterministic built-in restoration proof for route rollback. |
 
-The current dispatcher seam resolves an active scoped `git_status` route and annotates the built-in provider-safe projection with route evidence. It fails closed on stale, disabled, missing-authority, missing-lifecycle, or unsafe route records. It does not yet invoke a live module-owned adapter projection; that missing projection call is the next dynamic replacement milestone.
+The current dispatcher seam resolves an active scoped `git_status` route. When
+no active route exists, it returns the built-in provider-safe projection. When a
+validated route is active, it verifies the route/binding/candidate refs,
+lifecycle/runtime refs, and supervised-envelope proof, then invokes the
+supervised module-runtime provider-safe adapter projection and emits route
+events. It fails closed on stale, disabled, missing-authority,
+missing-lifecycle, or unsafe route records without returning a built-in success
+projection as fallback.
 
 ## Cockpit Visibility Evidence
 

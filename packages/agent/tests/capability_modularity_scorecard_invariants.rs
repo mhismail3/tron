@@ -730,6 +730,8 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Binding Policy Evidence",
         "Adapter Seam Hardening Evidence",
         "Shadow Replacement Trial Evidence",
+        "supervised module-runtime provider-safe adapter projection",
+        "without returning a built-in success",
         "Follow-on Slices",
     ] {
         assert!(
@@ -737,6 +739,11 @@ fn capability_modularity_artifacts_are_linked_and_described() {
             "scorecard missing required text: {required}"
         );
     }
+
+    assert!(
+        !scorecard.contains("does not yet invoke a live module-owned adapter projection"),
+        "capability modularity scorecard must not describe the completed route projection milestone as missing"
+    );
     for class in OWNERSHIP_CLASSES {
         assert!(
             scorecard.contains(class),
