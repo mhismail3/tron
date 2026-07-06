@@ -124,6 +124,9 @@ pub(crate) async fn project_provider_safe_adapter_output(
             "moduleAdapterInvoked": true,
             "moduleAdapterInvocationState": "supervised_runtime_projection",
             "builtInProjectionUsed": false,
+            "routeExecutionMode": "supervised_projection_boundary",
+            "candidateProjectionSource": "accepted_shadow_trial_evidence",
+            "liveModuleCodeExecuted": false,
             "providerSafeProjection": true,
             "moduleRuntime": adapter_runtime_summary(&runtime.resource, runtime_payload)?,
             "moduleLifecycle": {

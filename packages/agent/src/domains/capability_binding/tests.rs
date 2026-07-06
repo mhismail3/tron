@@ -1636,6 +1636,18 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         candidate["replacementCandidate"]["candidate"]["moduleAdapterInvokedByDispatcher"],
         json!(true)
     );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["routeExecutionMode"],
+        json!("supervised_projection_boundary")
+    );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["candidateProjectionSource"],
+        json!("accepted_shadow_trial_evidence")
+    );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["liveModuleCodeExecutedByRoute"],
+        json!(false)
+    );
     let replay = record_replacement_candidate_value_at(
         &fixture.deps,
         &candidate_invocation,
@@ -1749,6 +1761,18 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         json!(true)
     );
     assert_eq!(
+        routed_details["dynamicReplacement"]["routeExecutionMode"],
+        json!("supervised_projection_boundary")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["candidateProjectionSource"],
+        json!("accepted_shadow_trial_evidence")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["liveModuleCodeExecuted"],
+        json!(false)
+    );
+    assert_eq!(
         routed_details["dynamicReplacement"]["builtInProjectionUsed"],
         json!(false)
     );
@@ -1759,6 +1783,10 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     assert_eq!(
         routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
         json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["adapterRuntime"]["liveModuleCodeExecuted"],
+        json!(false)
     );
     assert!(
         !contains_json_key(&routed_details, "moduleRuntimeResourceId"),
@@ -1891,6 +1919,66 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
 }
 
 #[tokio::test]
+async fn active_route_lookup_rejects_multiple_active_routes_in_scope() {
+    let fixture = RouteFixture::new("capability-route-ambiguous").await;
+
+    let first_candidate_invocation = fixture.candidate_invocation("candidate-one").await;
+    let first_candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &first_candidate_invocation,
+        &first_candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record first candidate");
+    let first_binding = fixture.binding("binding-one", &first_candidate).await;
+    let first_activation = fixture.activation("activation-one", &first_binding).await;
+    assert_eq!(first_activation["status"], json!("active"));
+
+    let second_candidate_invocation = fixture.candidate_invocation("candidate-two").await;
+    let second_candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &second_candidate_invocation,
+        &second_candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record second candidate");
+    let second_binding = fixture.binding("binding-two", &second_candidate).await;
+    let second_activation = fixture.activation("activation-two", &second_binding).await;
+    assert_eq!(second_activation["status"], json!("active"));
+
+    let error = active_route_for_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("ambiguous-route-lookup", json!({})),
+    )
+    .await
+    .expect_err("multiple active routes must fail closed");
+    let error = format!("{error}");
+    assert!(
+        error.contains("multiple active git_status routes"),
+        "unexpected ambiguous route error: {error}"
+    );
+
+    let _disabled = fixture
+        .disable("disable-second-route", &second_binding, &second_activation)
+        .await;
+    let active = active_route_for_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-after-ambiguous-disable", json!({})),
+    )
+    .await
+    .expect("single route lookup after disable")
+    .expect("first route remains active");
+    assert_eq!(
+        active.activation_resource_id,
+        first_activation["capabilityRouteActivationResourceId"]
+            .as_str()
+            .expect("first activation id")
+    );
+}
+
+#[tokio::test]
 async fn capability_execute_dispatch_routes_git_status_through_active_replacement() {
     let fixture = RouteFixture::new("capability-route-execute-dispatch").await;
 
@@ -1922,6 +2010,18 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
         json!(true)
     );
     assert_eq!(
+        routed_details["dynamicReplacement"]["routeExecutionMode"],
+        json!("supervised_projection_boundary")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["candidateProjectionSource"],
+        json!("accepted_shadow_trial_evidence")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["liveModuleCodeExecuted"],
+        json!(false)
+    );
+    assert_eq!(
         routed_details["dynamicReplacement"]["builtInProjectionUsed"],
         json!(false)
     );
@@ -1932,6 +2032,10 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
     assert_eq!(
         routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
         json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["adapterRuntime"]["routeExecutionMode"],
+        json!("supervised_projection_boundary")
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeEvent"]["event"]["kind"],
@@ -2247,6 +2351,18 @@ async fn assert_route_execution_failed_closed(
     assert_eq!(
         routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
         json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeExecutionMode"],
+        json!("supervised_projection_boundary")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["candidateProjectionSource"],
+        json!("accepted_shadow_trial_evidence")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["liveModuleCodeExecuted"],
+        json!(false)
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["builtInProjectionUsed"],

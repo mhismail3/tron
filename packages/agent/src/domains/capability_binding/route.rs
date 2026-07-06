@@ -559,7 +559,7 @@ pub(crate) async fn active_route_for_git_status(
         })
         .await
         .map_err(engine_error)?;
-    let mut selected: Option<(String, ActiveRoute)> = None;
+    let mut selected: Option<ActiveRoute> = None;
     for resource in activations {
         let Some(inspection) = deps
             .engine_host
@@ -655,19 +655,24 @@ pub(crate) async fn active_route_for_git_status(
             module_lifecycle_ref: records.module_lifecycle_ref,
             candidate_projection: records.candidate_projection,
         };
-        let updated_at = payload
-            .get("updatedAt")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        if selected
-            .as_ref()
-            .is_none_or(|(current, _)| updated_at > *current)
-        {
-            selected = Some((updated_at, route));
+        if selected.is_some() {
+            emit_route_lookup_failed_event(
+                deps,
+                invocation,
+                &scope,
+                &inspection,
+                version,
+                payload,
+                "multiple_active_routes",
+            )
+            .await?;
+            return Err(invalid(
+                "multiple active git_status routes in scope; disable or roll back one route before invoking",
+            ));
         }
+        selected = Some(route);
     }
-    Ok(selected.map(|(_, route)| route))
+    Ok(selected)
 }
 
 async fn emit_route_lookup_failed_event(
@@ -717,6 +722,9 @@ async fn emit_route_lookup_failed_event(
                 .unwrap_or("Governed Git status adapter"),
             "moduleAdapterInvoked": false,
             "moduleAdapterInvocationState": "not_invoked",
+            "routeExecutionMode": "not_invoked",
+            "candidateProjectionSource": "none",
+            "liveModuleCodeExecuted": false,
             "providerSafeProjectionRequired": true
         },
         "binding": {
@@ -813,6 +821,9 @@ pub(crate) async fn emit_routed_invocation_event(
             "label": route.candidate_label,
             "moduleAdapterInvoked": module_adapter_invoked,
             "moduleAdapterInvocationState": if module_adapter_invoked { "supervised_runtime_projection" } else { "not_invoked" },
+            "routeExecutionMode": if module_adapter_invoked { "supervised_projection_boundary" } else { "not_invoked" },
+            "candidateProjectionSource": if module_adapter_invoked { "accepted_shadow_trial_evidence" } else { "none" },
+            "liveModuleCodeExecuted": false,
             "providerSafeProjectionRequired": true
         },
         "binding": {
@@ -906,6 +917,9 @@ pub(crate) async fn execute_routed_git_status(
                             "candidateLabel": route.candidate_label,
                             "moduleAdapterInvoked": true,
                             "moduleAdapterInvocationState": "supervised_runtime_projection_rejected",
+                            "routeExecutionMode": "supervised_projection_boundary",
+                            "candidateProjectionSource": "accepted_shadow_trial_evidence",
+                            "liveModuleCodeExecuted": false,
                             "builtInProjectionUsed": false,
                             "networkPolicy": "none",
                             "failClosed": true,
@@ -948,6 +962,9 @@ pub(crate) async fn execute_routed_git_status(
                 "candidateLabel": route.candidate_label,
                 "moduleAdapterInvoked": true,
                 "moduleAdapterInvocationState": "supervised_runtime_projection",
+                "routeExecutionMode": "supervised_projection_boundary",
+                "candidateProjectionSource": "accepted_shadow_trial_evidence",
+                "liveModuleCodeExecuted": false,
                 "builtInProjectionUsed": false,
                 "networkPolicy": "none",
                 "failClosed": false,
@@ -1796,6 +1813,9 @@ fn candidate_contract(
         "executionMode": "supervised_module_runtime_adapter",
         "moduleAdapterInvokedByDispatcher": true,
         "moduleAdapterInvocationState": "supervised_runtime_projection",
+        "routeExecutionMode": "supervised_projection_boundary",
+        "candidateProjectionSource": "accepted_shadow_trial_evidence",
+        "liveModuleCodeExecutedByRoute": false,
         "providerSafeProjectionRequired": true
     }))
 }
