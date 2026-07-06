@@ -2647,6 +2647,121 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
 }
 
 #[tokio::test]
+async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_without_raw_leakage() {
+    let fixture = RouteFixture::new("capability-cockpit-route").await;
+    let candidate_invocation = fixture.candidate_invocation("candidate").await;
+    let candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record route candidate");
+    let binding = fixture.binding("binding", &candidate).await;
+    let activation = fixture.activation("activation", &binding).await;
+    let active = active_route_for_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-after-activation", json!({})),
+    )
+    .await
+    .expect("route lookup after activation")
+    .expect("active route");
+    execute_routed_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-execute", json!({})),
+        &active,
+    )
+    .await
+    .expect("execute routed git_status");
+
+    let active_overview = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation("cockpit-route-active", json!({"limit": 200})),
+    )
+    .await
+    .expect("active route cockpit overview");
+    assert!(
+        super::cockpit_visibility::test_serialized_has_no_raw_cockpit_material(&active_overview)
+    );
+    assert_eq!(active_overview["summary"]["routeCandidates"], json!(1));
+    assert_eq!(active_overview["summary"]["activeRoutes"], json!(1));
+    assert_eq!(active_overview["summary"]["routedInvocations"], json!(1));
+    assert_eq!(active_overview["summary"]["routeEvents"], json!(2));
+    let active_git_status = operation_projection(&active_overview, "git_status");
+    assert_eq!(
+        active_git_status["readiness"]["state"],
+        json!("runtime_route_active")
+    );
+    assert_eq!(active_git_status["route"]["state"], json!("active"));
+    assert_eq!(active_git_status["route"]["activeRoutes"], json!(1));
+    assert_eq!(active_git_status["route"]["routedInvocations"], json!(1));
+    assert_eq!(active_git_status["route"]["routeEvents"], json!(2));
+    assert_eq!(active_git_status["route"]["rollbackAvailable"], json!(true));
+    assert_eq!(active_git_status["route"]["disableAvailable"], json!(true));
+    assert_eq!(active_git_status["rollback"]["available"], json!(true));
+    assert_eq!(
+        active_git_status["rollback"]["disableAvailable"],
+        json!(true)
+    );
+
+    let disabled = fixture.disable("disable", &binding, &activation).await;
+    assert_eq!(disabled["status"], json!("disabled"));
+    let disabled_overview = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation("cockpit-route-disabled", json!({"limit": 200})),
+    )
+    .await
+    .expect("disabled route cockpit overview");
+    let disabled_git_status = operation_projection(&disabled_overview, "git_status");
+    assert_eq!(disabled_git_status["route"]["state"], json!("disabled"));
+    assert_eq!(disabled_git_status["route"]["activeRoutes"], json!(0));
+    assert_eq!(disabled_git_status["route"]["disabled"], json!(1));
+    assert_eq!(
+        disabled_git_status["readiness"]["state"],
+        json!("route_disabled")
+    );
+
+    let rollback = fixture.rollback("rollback", &binding, &activation).await;
+    assert_eq!(rollback["status"], json!("rolled_back"));
+    let rolled_back_overview = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation("cockpit-route-rolled-back", json!({"limit": 200})),
+    )
+    .await
+    .expect("rolled back route cockpit overview");
+    let rolled_back_git_status = operation_projection(&rolled_back_overview, "git_status");
+    assert_eq!(
+        rolled_back_git_status["route"]["state"],
+        json!("rolled_back")
+    );
+    assert_eq!(rolled_back_git_status["route"]["activeRoutes"], json!(0));
+    assert_eq!(rolled_back_git_status["route"]["rolledBack"], json!(1));
+    assert_eq!(rolled_back_git_status["route"]["rollbackRecords"], json!(1));
+    assert_eq!(
+        rolled_back_git_status["readiness"]["state"],
+        json!("route_rolled_back")
+    );
+
+    let other_scope = cockpit_overview_value(
+        &fixture.deps,
+        &invocation(
+            "cockpit-route-other-scope",
+            json!({"limit": 200}),
+            fixture.read_grant_id.clone(),
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            "other-session",
+        ),
+    )
+    .await
+    .expect("other scope route cockpit overview");
+    let other_git_status = operation_projection(&other_scope, "git_status");
+    assert_eq!(other_git_status["route"]["candidates"], json!(0));
+    assert_eq!(other_git_status["route"]["activeRoutes"], json!(0));
+    assert_eq!(other_git_status["route"]["routeEvents"], json!(0));
+}
+
+#[tokio::test]
 async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_truth() {
     let fixture = Fixture::new("capability-cockpit-truth").await;
     for index in 0..=100 {

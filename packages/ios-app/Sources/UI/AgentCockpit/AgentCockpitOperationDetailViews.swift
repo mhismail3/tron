@@ -13,6 +13,7 @@ struct CapabilityOperationDetailSheet: View {
                     ownership
                     readiness
                     replacement
+                    route
                     attempts
                     rollback
                     verification
@@ -149,6 +150,30 @@ struct CapabilityOperationDetailSheet: View {
         .sectionFill(operation.failedReplacementAttempts > 0 || operation.shadowFailed > 0 ? .tronWarning : .tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
     }
 
+    private var route: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Runtime Route")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("State", operation.routeLabel)
+            detailRow("Active", "\(operation.activeRoutes)")
+            detailRow("Events", "\(operation.routeEvents)")
+            detailRow("Invocations", "\(operation.routedInvocations)")
+            detailRow("Failed closed", "\(operation.routeFailedClosed)")
+            detailRow("Disabled", "\(operation.routeDisabled)")
+            detailRow("Rolled back", "\(operation.routeRolledBack)")
+            if let latest = AgentCockpitPresentation.safeTimestamp(operation.routeLastUpdatedAt) ?? operation.routeLatestState.map(AgentCockpitPresentation.displayLabel) {
+                detailRow("Latest", latest)
+            }
+            Text(operation.routeDetail)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(routeTint, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
     private var rollback: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Rollback")
@@ -187,6 +212,19 @@ struct CapabilityOperationDetailSheet: View {
             operation.canReplace ? "Replace allowed" : "No replace",
             operation.canExtend ? "Extend allowed" : "No extend"
         ]
+    }
+
+    private var routeTint: Color {
+        switch operation.routeState {
+        case "active":
+            return .tronSuccess
+        case "failed_closed":
+            return .tronWarning
+        case "disabled", "rolled_back":
+            return .tronInfo
+        default:
+            return .tronEmerald
+        }
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {

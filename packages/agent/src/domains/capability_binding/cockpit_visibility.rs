@@ -1,7 +1,4 @@
-use std::collections::BTreeMap;
-
-#[cfg(test)]
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -20,7 +17,9 @@ use super::resource_store::{current_payload, engine_error};
 use super::validation::invalid;
 use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_POLICY_KIND,
-    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
+    CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_EVENT_KIND,
+    CAPABILITY_ROUTE_ROLLBACK_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
     CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
     CAPABILITY_SHADOW_TRIAL_RUN_KIND, Deps,
 };
@@ -42,10 +41,19 @@ const SHADOW_TRIAL_KINDS: &[&str] = &[
     CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
 ];
 
+const ROUTE_KINDS: &[&str] = &[
+    CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
+    CAPABILITY_ROUTE_BINDING_KIND,
+    CAPABILITY_ROUTE_ACTIVATION_KIND,
+    CAPABILITY_ROUTE_EVENT_KIND,
+    CAPABILITY_ROUTE_ROLLBACK_KIND,
+];
+
 #[derive(Clone, Debug, Default)]
 struct OperationFacts {
     binding: BindingFacts,
     shadow: ShadowFacts,
+    route: RouteFacts,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -76,6 +84,36 @@ struct ShadowFacts {
     abort_available: bool,
     latest_state: Option<String>,
     last_updated_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct RouteFacts {
+    candidates: usize,
+    bindings: usize,
+    route_events: usize,
+    routed_invocations: usize,
+    failed_closed: usize,
+    disabled: usize,
+    rolled_back: usize,
+    rollback_records: usize,
+    rollback_available: bool,
+    disable_available: bool,
+    latest_state: Option<String>,
+    last_updated_at: Option<String>,
+    active_activation_ids: BTreeSet<String>,
+    terminal_activation_ids: BTreeSet<String>,
+}
+
+impl RouteFacts {
+    fn active_route_count(&self) -> usize {
+        self.active_activation_ids
+            .difference(&self.terminal_activation_ids)
+            .count()
+    }
+
+    fn has_active_route(&self) -> bool {
+        self.active_route_count() > 0
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -113,6 +151,12 @@ struct CockpitSummary {
     active_policies: usize,
     shadow_requests: usize,
     shadow_runs: usize,
+    route_candidates: usize,
+    active_routes: usize,
+    route_events: usize,
+    routed_invocations: usize,
+    failed_closed_routes: usize,
+    route_rollbacks: usize,
     rollback_available: usize,
     title: String,
     detail: String,
@@ -159,6 +203,7 @@ struct FamilySummary {
     module_owned: usize,
     binding_activity: usize,
     shadow_activity: usize,
+    route_activity: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -173,6 +218,7 @@ struct OperationVisibility {
     readiness: ReadinessProjection,
     binding: BindingProjection,
     shadow_trial: ShadowTrialProjection,
+    route: RouteProjection,
     rollback: RollbackProjection,
 }
 
@@ -253,6 +299,27 @@ struct ShadowTrialProjection {
     latest_state: Option<String>,
     last_updated_at: Option<String>,
     available_for_this_operation: bool,
+    detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RouteProjection {
+    candidates: usize,
+    bindings: usize,
+    active_routes: usize,
+    route_events: usize,
+    routed_invocations: usize,
+    failed_closed: usize,
+    disabled: usize,
+    rolled_back: usize,
+    rollback_records: usize,
+    rollback_available: bool,
+    disable_available: bool,
+    latest_state: Option<String>,
+    last_updated_at: Option<String>,
+    state: String,
+    label: String,
     detail: String,
 }
 
@@ -438,6 +505,9 @@ async fn collect_facts(
     for kind in SHADOW_TRIAL_KINDS {
         collect_kind_facts(deps, scopes, kind, &mut collection, apply_shadow_resource).await?;
     }
+    for kind in ROUTE_KINDS {
+        collect_kind_facts(deps, scopes, kind, &mut collection, apply_route_resource).await?;
+    }
     Ok(collection)
 }
 
@@ -597,6 +667,77 @@ fn apply_shadow_resource(
     );
 }
 
+fn apply_route_resource(
+    resource: &EngineResource,
+    _version: &EngineResourceVersion,
+    payload: &Value,
+    facts: &mut OperationFacts,
+) {
+    let state = state(resource, payload);
+    let updated_at = timestamp(resource, payload);
+    match resource.kind.as_str() {
+        CAPABILITY_REPLACEMENT_CANDIDATE_KIND => {
+            facts.route.candidates += 1;
+        }
+        CAPABILITY_ROUTE_BINDING_KIND => {
+            facts.route.bindings += 1;
+        }
+        CAPABILITY_ROUTE_ACTIVATION_KIND => {
+            if normalize(&state) == "active" {
+                facts
+                    .route
+                    .active_activation_ids
+                    .insert(resource.resource_id.clone());
+            }
+            if bool_at(payload, "/activation/rollbackAvailable") {
+                facts.route.rollback_available = true;
+            }
+            if bool_at(payload, "/activation/disableAvailable") {
+                facts.route.disable_available = true;
+            }
+        }
+        CAPABILITY_ROUTE_EVENT_KIND => {
+            facts.route.route_events += 1;
+            let event_kind = payload
+                .pointer("/event/kind")
+                .and_then(Value::as_str)
+                .unwrap_or(state.as_str());
+            match normalize(event_kind).as_str() {
+                "routedinvocation" => facts.route.routed_invocations += 1,
+                "disabled" => {
+                    facts.route.disabled += 1;
+                    if let Some(activation_id) = route_event_activation_id(payload) {
+                        facts.route.terminal_activation_ids.insert(activation_id);
+                    }
+                }
+                "rolledback" => {
+                    facts.route.rolled_back += 1;
+                    if let Some(activation_id) = route_event_activation_id(payload) {
+                        facts.route.terminal_activation_ids.insert(activation_id);
+                    }
+                }
+                _ => {}
+            }
+            if normalize(&state) == "failedclosed" || bool_at(payload, "/event/failClosed") {
+                facts.route.failed_closed += 1;
+            }
+        }
+        CAPABILITY_ROUTE_ROLLBACK_KIND => {
+            facts.route.rollback_records += 1;
+            if bool_at(payload, "/rollback/builtInRestored") {
+                facts.route.rollback_available = true;
+            }
+        }
+        _ => {}
+    }
+    update_latest(
+        &mut facts.route.latest_state,
+        &mut facts.route.last_updated_at,
+        state,
+        updated_at,
+    );
+}
+
 fn operation_visibility(
     metadata: OperationBindingMetadata,
     facts: OperationFacts,
@@ -608,6 +749,7 @@ fn operation_visibility(
     );
     let rollback = rollback_projection(metadata.ownership_class, &facts);
     let readiness = readiness_projection(metadata.ownership_class, &facts, &replacement);
+    let route = route_projection(&facts.route);
     OperationVisibility {
         name: metadata.operation.to_owned(),
         family: metadata.family.to_owned(),
@@ -622,6 +764,7 @@ fn operation_visibility(
         readiness,
         binding: binding_projection(&facts.binding),
         shadow_trial: shadow_projection(metadata.operation, &facts.shadow),
+        route,
         rollback,
     }
 }
@@ -792,10 +935,49 @@ fn readiness_projection(
     replacement: &ReplacementProjection,
 ) -> ReadinessProjection {
     let (state, label, detail, next_action_label, next_action_detail) = if facts
-        .binding
-        .active_policies
-        > 0
+        .route
+        .has_active_route()
     {
+        (
+            "runtime_route_active",
+            "Runtime route active",
+            "A governed scoped route is active for this operation. Invocations use the supervised module-runtime adapter projection boundary.",
+            "Monitor route events",
+            "Use route events and rollback controls to verify or restore built-in ownership.",
+        )
+    } else if facts.route.failed_closed > 0 {
+        (
+            "route_failed_closed",
+            "Route failed closed",
+            "A routed replacement attempt failed closed; the server did not report a built-in success fallback as the replacement result.",
+            "Inspect route event",
+            "Review route events, runtime refs, and rollback evidence before another activation attempt.",
+        )
+    } else if facts.route.rolled_back > 0 || facts.route.rollback_records > 0 {
+        (
+            "route_rolled_back",
+            "Route rolled back",
+            "A previous active route was rolled back and built-in ownership is restored for future lookups.",
+            "Review rollback",
+            "Use route rollback evidence before proposing another replacement.",
+        )
+    } else if facts.route.disabled > 0 {
+        (
+            "route_disabled",
+            "Route disabled",
+            "A previous active route was disabled and no active route is currently selected.",
+            "Review route history",
+            "Inspect route events before deciding whether to reactivate or roll back.",
+        )
+    } else if facts.route.bindings > 0 || facts.route.candidates > 0 {
+        (
+            "route_candidate_recorded",
+            "Route candidate recorded",
+            "A governed route candidate or binding exists, but no active route is currently selected.",
+            "Review route candidate",
+            "Confirm candidate, shadow evidence, approval refs, and rollback controls before activation.",
+        )
+    } else if facts.binding.active_policies > 0 {
         (
             "metadata_policy_active",
             "Policy metadata active",
@@ -947,11 +1129,112 @@ fn shadow_projection(operation: &str, facts: &ShadowFacts) -> ShadowTrialProject
     }
 }
 
+fn route_projection(facts: &RouteFacts) -> RouteProjection {
+    let active_routes = facts.active_route_count();
+    let (state, label, detail) = if active_routes > 0 {
+        (
+            "active",
+            "Active route",
+            format!(
+                "{} governed route{} active; {} routed invocation{} recorded.",
+                active_routes,
+                plural(active_routes),
+                facts.routed_invocations,
+                plural(facts.routed_invocations)
+            ),
+        )
+    } else if facts.failed_closed > 0 {
+        (
+            "failed_closed",
+            "Failed closed",
+            format!(
+                "{} route event{} failed closed; no built-in success fallback was projected as the replacement result.",
+                facts.failed_closed,
+                plural(facts.failed_closed)
+            ),
+        )
+    } else if facts.rolled_back > 0 || facts.rollback_records > 0 {
+        let rollback_count = facts.rolled_back.max(facts.rollback_records);
+        (
+            "rolled_back",
+            "Rolled back",
+            format!(
+                "{} rollback event{} recorded; built-in ownership is restored.",
+                rollback_count,
+                plural(rollback_count)
+            ),
+        )
+    } else if facts.disabled > 0 {
+        (
+            "disabled",
+            "Disabled",
+            format!(
+                "{} disable event{} recorded; no active route is selected.",
+                facts.disabled,
+                plural(facts.disabled)
+            ),
+        )
+    } else if facts.bindings > 0 || facts.candidates > 0 {
+        (
+            "candidate",
+            "Candidate recorded",
+            format!(
+                "{} candidate{} and {} binding{} recorded; activation has not changed runtime routing.",
+                facts.candidates,
+                plural(facts.candidates),
+                facts.bindings,
+                plural(facts.bindings)
+            ),
+        )
+    } else {
+        (
+            "none",
+            "No runtime route",
+            "No dynamic replacement route records exist for this operation in the current scope."
+                .to_owned(),
+        )
+    };
+    RouteProjection {
+        candidates: facts.candidates,
+        bindings: facts.bindings,
+        active_routes,
+        route_events: facts.route_events,
+        routed_invocations: facts.routed_invocations,
+        failed_closed: facts.failed_closed,
+        disabled: facts.disabled,
+        rolled_back: facts.rolled_back,
+        rollback_records: facts.rollback_records,
+        rollback_available: facts.rollback_available,
+        disable_available: facts.disable_available,
+        latest_state: facts.latest_state.clone(),
+        last_updated_at: facts.last_updated_at.clone(),
+        state: state.to_owned(),
+        label: label.to_owned(),
+        detail,
+    }
+}
+
 fn rollback_projection(ownership_class: &str, facts: &OperationFacts) -> RollbackProjection {
-    let available = facts.binding.rollback_available || facts.shadow.rollback_available;
-    let disable_available = facts.binding.disable_available || facts.shadow.disable_available;
+    let available = facts.binding.rollback_available
+        || facts.shadow.rollback_available
+        || facts.route.rollback_available
+        || facts.route.rolled_back > 0
+        || facts.route.has_active_route();
+    let disable_available = facts.binding.disable_available
+        || facts.shadow.disable_available
+        || facts.route.disable_available
+        || facts.route.has_active_route();
     let abort_available = facts.shadow.abort_available;
-    let detail = if available {
+    let detail = if facts.route.has_active_route() {
+        "An active runtime replacement route has rollback and disable controls recorded; built-in ownership can be restored through route governance."
+            .to_owned()
+    } else if facts.route.rolled_back > 0 || facts.route.rollback_records > 0 {
+        "A runtime replacement route was rolled back; built-in ownership has been restored through route governance."
+            .to_owned()
+    } else if facts.route.disabled > 0 {
+        "A runtime replacement route was disabled; no active replacement route is selected."
+            .to_owned()
+    } else if available {
         "Rollback metadata is available for the recorded policy or shadow trial; live routing still has not changed."
             .to_owned()
     } else {
@@ -975,7 +1258,7 @@ fn rollback_projection(ownership_class: &str, facts: &OperationFacts) -> Rollbac
         available,
         disable_available,
         abort_available,
-        boundary: "capability binding governance",
+        boundary: "capability binding and route governance",
         detail,
     }
 }
@@ -1019,7 +1302,7 @@ fn resource_scan_projection(scan: ResourceScanFacts) -> ResourceScanProjection {
     };
     let detail = if truncated {
         format!(
-            "{} of {} kind/scope scan{} reached the per-scan limit of {}; binding and shadow counts are lower-bound facts.",
+            "{} of {} kind/scope scan{} reached the per-scan limit of {}; binding, shadow, and route counts are lower-bound facts.",
             scan.truncated_queries,
             scan.queries,
             plural(scan.queries),
@@ -1087,6 +1370,15 @@ fn summary(
         summary.active_policies += operation.binding.active_policies;
         summary.shadow_requests += operation.shadow_trial.requested;
         summary.shadow_runs += operation.shadow_trial.runs;
+        summary.route_candidates += operation.route.candidates;
+        summary.active_routes += operation.route.active_routes;
+        summary.route_events += operation.route.route_events;
+        summary.routed_invocations += operation.route.routed_invocations;
+        summary.failed_closed_routes += operation.route.failed_closed;
+        summary.route_rollbacks += operation
+            .route
+            .rolled_back
+            .max(operation.route.rollback_records);
         if operation.rollback.available {
             summary.rollback_available += 1;
         }
@@ -1101,6 +1393,16 @@ fn summary(
             } else {
                 "resource scan is complete"
             }
+        );
+    } else if summary.active_routes > 0 || summary.route_events > 0 {
+        summary.detail = format!(
+            "{} operations returned from {} total, {} active route{}, {} route event{} in this scope.",
+            summary.returned_operations,
+            summary.total_operations,
+            summary.active_routes,
+            plural(summary.active_routes),
+            summary.route_events,
+            plural(summary.route_events)
         );
     } else if summary.binding_requests > 0 || summary.shadow_requests > 0 {
         summary.detail = format!(
@@ -1132,6 +1434,7 @@ fn family_summaries(operations: &[OperationVisibility]) -> Vec<FamilySummary> {
                 module_owned: 0,
                 binding_activity: 0,
                 shadow_activity: 0,
+                route_activity: 0,
             });
         entry.operations += 1;
         match operation.status.kind.as_str() {
@@ -1147,6 +1450,10 @@ fn family_summaries(operations: &[OperationVisibility]) -> Vec<FamilySummary> {
             + operation.binding.rejected
             + operation.binding.active_policies;
         entry.shadow_activity += operation.shadow_trial.requested + operation.shadow_trial.runs;
+        entry.route_activity += operation.route.candidates
+            + operation.route.bindings
+            + operation.route.route_events
+            + operation.route.rollback_records;
     }
     families.into_values().collect()
 }
@@ -1214,6 +1521,18 @@ fn has_truthy(payload: &Value, pointer: &str) -> bool {
 
 fn bool_at(payload: &Value, pointer: &str) -> bool {
     payload.pointer(pointer).and_then(Value::as_bool) == Some(true)
+}
+
+fn route_event_activation_id(payload: &Value) -> Option<String> {
+    payload
+        .pointer("/activation/resourceId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            payload
+                .pointer("/activation/resource/resourceId")
+                .and_then(Value::as_str)
+        })
+        .map(str::to_owned)
 }
 
 fn owner_label(family: &str, current_owner: &str, ownership_class: &str) -> String {

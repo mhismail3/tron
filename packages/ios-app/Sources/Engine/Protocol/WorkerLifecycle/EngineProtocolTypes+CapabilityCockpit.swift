@@ -35,6 +35,12 @@ struct CapabilityCockpitSummaryDTO: Codable, Equatable, Sendable {
     var activePolicies: Int
     var shadowRequests: Int
     var shadowRuns: Int
+    var routeCandidates: Int? = nil
+    var activeRoutes: Int? = nil
+    var routeEvents: Int? = nil
+    var routedInvocations: Int? = nil
+    var failedClosedRoutes: Int? = nil
+    var routeRollbacks: Int? = nil
     var rollbackAvailable: Int
     var title: String
     var detail: String
@@ -75,6 +81,7 @@ struct CapabilityCockpitFamilyDTO: Codable, Equatable, Identifiable, Sendable {
     var moduleOwned: Int
     var bindingActivity: Int
     var shadowActivity: Int
+    var routeActivity: Int? = nil
 
     var id: String { family }
 }
@@ -89,6 +96,7 @@ struct CapabilityCockpitOperationDTO: Codable, Equatable, Identifiable, Sendable
     var readiness: CapabilityCockpitReadinessDTO
     var binding: CapabilityCockpitBindingDTO
     var shadowTrial: CapabilityCockpitShadowTrialDTO
+    var route: CapabilityCockpitRouteDTO? = nil
     var rollback: CapabilityCockpitRollbackDTO
 
     var id: String { name }
@@ -158,6 +166,25 @@ struct CapabilityCockpitShadowTrialDTO: Codable, Equatable, Sendable {
     var lastUpdatedAt: String?
     var availableForThisOperation: Bool
     var detail: String
+}
+
+struct CapabilityCockpitRouteDTO: Codable, Equatable, Sendable {
+    var candidates: Int = 0
+    var bindings: Int = 0
+    var activeRoutes: Int = 0
+    var routeEvents: Int = 0
+    var routedInvocations: Int = 0
+    var failedClosed: Int = 0
+    var disabled: Int = 0
+    var rolledBack: Int = 0
+    var rollbackRecords: Int = 0
+    var rollbackAvailable: Bool = false
+    var disableAvailable: Bool = false
+    var latestState: String? = nil
+    var lastUpdatedAt: String? = nil
+    var state: String = "none"
+    var label: String = "No runtime route"
+    var detail: String = "No dynamic replacement route records exist for this operation in the current scope."
 }
 
 struct CapabilityCockpitRollbackDTO: Codable, Equatable, Sendable {

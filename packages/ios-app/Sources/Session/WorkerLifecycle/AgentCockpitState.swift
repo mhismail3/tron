@@ -96,6 +96,22 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var shadowLastUpdatedAt: String?
     var shadowAvailable: Bool
     var shadowDetail: String
+    var routeCandidates: Int
+    var routeBindings: Int
+    var activeRoutes: Int
+    var routeEvents: Int
+    var routedInvocations: Int
+    var routeFailedClosed: Int
+    var routeDisabled: Int
+    var routeRolledBack: Int
+    var routeRollbackRecords: Int
+    var routeRollbackAvailable: Bool
+    var routeDisableAvailable: Bool
+    var routeLatestState: String?
+    var routeLastUpdatedAt: String?
+    var routeState: String
+    var routeLabel: String
+    var routeDetail: String
     var rollbackAvailable: Bool
     var disableAvailable: Bool
     var abortAvailable: Bool
@@ -103,7 +119,16 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var rollbackDetail: String
 
     var activityCount: Int {
-        bindingRequested + bindingApproved + bindingRejected + activePolicies + shadowRequested + shadowRuns
+        bindingRequested
+            + bindingApproved
+            + bindingRejected
+            + activePolicies
+            + shadowRequested
+            + shadowRuns
+            + routeCandidates
+            + routeBindings
+            + routeEvents
+            + routeRollbackRecords
     }
 }
 
@@ -580,6 +605,7 @@ enum AgentCockpitProjection {
     }
 
     private static func operationRow(_ operation: CapabilityCockpitOperationDTO) -> AgentCockpitOperationRow {
+        let route = operation.route ?? CapabilityCockpitRouteDTO()
         AgentCockpitOperationRow(
             name: operation.name,
             family: operation.family,
@@ -627,6 +653,22 @@ enum AgentCockpitProjection {
             shadowLastUpdatedAt: operation.shadowTrial.lastUpdatedAt,
             shadowAvailable: operation.shadowTrial.availableForThisOperation,
             shadowDetail: operation.shadowTrial.detail,
+            routeCandidates: route.candidates,
+            routeBindings: route.bindings,
+            activeRoutes: route.activeRoutes,
+            routeEvents: route.routeEvents,
+            routedInvocations: route.routedInvocations,
+            routeFailedClosed: route.failedClosed,
+            routeDisabled: route.disabled,
+            routeRolledBack: route.rolledBack,
+            routeRollbackRecords: route.rollbackRecords,
+            routeRollbackAvailable: route.rollbackAvailable,
+            routeDisableAvailable: route.disableAvailable,
+            routeLatestState: route.latestState,
+            routeLastUpdatedAt: route.lastUpdatedAt,
+            routeState: route.state,
+            routeLabel: route.label,
+            routeDetail: route.detail,
             rollbackAvailable: operation.rollback.available,
             disableAvailable: operation.rollback.disableAvailable,
             abortAvailable: operation.rollback.abortAvailable,

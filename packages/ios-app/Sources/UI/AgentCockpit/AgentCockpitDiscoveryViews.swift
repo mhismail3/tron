@@ -343,6 +343,15 @@ private struct CapabilityOperationCard: View {
     }
 
     private var activitySummary: String {
+        if operation.activeRoutes > 0 {
+            return "\(operation.activeRoutes) active route, \(operation.routedInvocations) routed invocations"
+        }
+        if operation.routeFailedClosed > 0 {
+            return "\(operation.routeFailedClosed) route failed closed · \(operation.readinessLabel)"
+        }
+        if operation.routeRolledBack > 0 || operation.routeDisabled > 0 {
+            return "\(operation.routeLabel) · \(operation.routeEvents) route events"
+        }
         if operation.activityCount > 0 {
             return "\(operation.bindingRequested) binding, \(operation.shadowRuns) shadow runs, \(operation.readinessLabel.lowercased())"
         }
