@@ -65,6 +65,7 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_dependency_policy_list"
             | "module_dependency_policy_inspect"
     );
+    let capability_route_operation = is_capability_route_operation(operation);
     let web_research_operation = matches!(
         operation,
         "web_research_request_record"
@@ -126,6 +127,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_dependencies_operation
+        || capability_route_operation
         || web_research_operation
         || module_lifecycle_operation
         || module_runtime_operation
@@ -153,6 +155,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_validation_operation
         && !module_install_operation
         && !module_dependencies_operation
+        && !capability_route_operation
         && !web_research_operation
         && !module_lifecycle_operation
         && !module_runtime_operation
@@ -385,6 +388,18 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
+    } else if is_capability_route_read_operation(operation) {
+        allowed_authority_scopes.extend([
+            "capability_binding.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if is_capability_route_write_operation(operation) {
+        allowed_authority_scopes.extend([
+            "capability_binding.read".to_owned(),
+            "capability_binding.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
     } else if matches!(
         operation,
         "web_research_request_list"
@@ -599,6 +614,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_dependencies_operation
+        || capability_route_operation
         || web_research_operation
         || module_lifecycle_operation
         || module_runtime_operation
@@ -733,6 +749,8 @@ pub(super) async fn derive_capability_runtime_grant(
             "module_dependency_decision".to_owned(),
             "module_dependency_policy".to_owned(),
         ]);
+    } else if capability_route_operation {
+        allowed_resource_kinds.extend(capability_route_resource_kinds());
     } else if matches!(
         operation,
         "web_research_request_record"
@@ -873,6 +891,9 @@ pub(super) async fn derive_capability_runtime_grant(
         .map(|kind| format!("kind:{kind}"))
         .collect::<Vec<_>>();
     if context_control_operation {
+        resource_selectors.push(format!("session:{session_id}"));
+    }
+    if capability_route_operation {
         resource_selectors.push(format!("session:{session_id}"));
     }
     for (operations, field) in exact_resource_selector_fields() {
@@ -1090,6 +1111,48 @@ fn is_memory_module_operation(operation: &str) -> bool {
             | "memory_decision_list"
             | "memory_decision_inspect"
     )
+}
+
+fn is_capability_route_operation(operation: &str) -> bool {
+    is_capability_route_read_operation(operation) || is_capability_route_write_operation(operation)
+}
+
+fn is_capability_route_read_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "capability_replacement_candidate_list"
+            | "capability_replacement_candidate_inspect"
+            | "capability_route_binding_list"
+            | "capability_route_binding_inspect"
+            | "capability_route_event_list"
+            | "capability_route_event_inspect"
+    )
+}
+
+fn is_capability_route_write_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "capability_replacement_candidate_record"
+            | "capability_route_binding_record"
+            | "capability_route_activate"
+            | "capability_route_disable"
+            | "capability_route_rollback"
+    )
+}
+
+fn capability_route_resource_kinds() -> Vec<String> {
+    vec![
+        "capability_replacement_candidate".to_owned(),
+        "capability_route_binding".to_owned(),
+        "capability_route_activation".to_owned(),
+        "capability_route_event".to_owned(),
+        "capability_route_rollback".to_owned(),
+        "capability_shadow_trial_evidence".to_owned(),
+        "capability_shadow_trial_run".to_owned(),
+        "capability_shadow_trial_decision".to_owned(),
+        "capability_shadow_trial_request".to_owned(),
+        "capability_binding_policy".to_owned(),
+    ]
 }
 
 fn delegated_subagent_module_scopes(operation: &str) -> Vec<String> {
@@ -1361,6 +1424,33 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (
             &["module_dependency_policy_inspect"],
             "moduleDependencyPolicyResourceId",
+        ),
+        (
+            &["capability_replacement_candidate_inspect"],
+            "capabilityReplacementCandidateResourceId",
+        ),
+        (
+            &["capability_route_binding_record"],
+            "capabilityReplacementCandidateResourceId",
+        ),
+        (
+            &[
+                "capability_route_binding_inspect",
+                "capability_route_activate",
+            ],
+            "capabilityRouteBindingResourceId",
+        ),
+        (
+            &["capability_route_disable", "capability_route_rollback"],
+            "capabilityRouteBindingResourceId",
+        ),
+        (
+            &["capability_route_disable", "capability_route_rollback"],
+            "capabilityRouteActivationResourceId",
+        ),
+        (
+            &["capability_route_event_inspect"],
+            "capabilityRouteEventResourceId",
         ),
         (
             &[

@@ -2,7 +2,7 @@
 
 Status: **complete**
 
-This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard, binding policy, adapter seam hardening, shadow replacement trial, and cockpit visibility slices add documentation, invariants, source-backed seam contracts, metadata-only governance records, and redacted operator projections; they add no runtime routing behavior.
+This manifest records the evidence reviewed for the capability modularity scorecard. The scorecard, binding policy, adapter seam hardening, shadow replacement trial, governed route records, and cockpit visibility slices add documentation, invariants, source-backed seam contracts, governance records, and redacted operator projections. The first scoped `git_status` route seam records route state and annotates built-in provider-safe projections; live module-adapter projection execution remains deferred.
 
 ## Reviewed Source Files
 
@@ -15,6 +15,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Capability contract | `packages/agent/src/domains/capability/contract.rs` |
 | Capability binding schema fields | `packages/agent/src/domains/capability/capability_binding_contract.rs` |
 | Capability binding docs/service | `packages/agent/src/domains/capability_binding/mod.rs` |
+| Capability route service | `packages/agent/src/domains/capability_binding/route.rs` |
 | Capability cockpit projection | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
 | Capability cockpit contract | `packages/agent/src/domains/capability_binding/contract.rs` |
 | Capability shadow trial service | `packages/agent/src/domains/capability_binding/shadow_trial.rs` |
@@ -58,17 +59,18 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 | Fact | Evidence |
 |---|---|
-| Registry count | 170 entries in `SUPPORTED_OPERATION_NAMES`. |
-| Dispatch parity | 170 static dispatch arms in `execute_operation`; no missing or extra names. |
+| Registry count | 181 entries in `SUPPORTED_OPERATION_NAMES`. |
+| Dispatch parity | 181 static dispatch arms in `execute_operation`; no missing or extra names. |
 | Provider surface | One model-facing tool, `capability::execute`. |
 | Machine inventory | `packages/agent/docs/capability-modularity-inventory.tsv` lists every operation exactly once. |
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |
 | Kernel boundary lockdown | Static invariants require source anchors for authority/grants, event/session log, resource store, redaction/provider-safety, trace/audit/replay/catalog, transport boundary, and module governance pipeline before locked rows can change ownership class. |
 | Capability binding policy | `capability_binding_request`, `capability_binding_decision`, and `capability_binding_policy` resources record metadata-only replacement governance with exact selectors, idempotency, stale-version guards, rollback/disable refs, and provider-safe projections. |
 | Shadow replacement trial | `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` resources record a governed metadata-only `git_status` trial with exact selectors, stale evidence rejection, rollback/disable/abort refs, provider-safe projections, and no dispatch mutation. |
+| Governed route records | `capability_replacement_candidate`, `capability_route_binding`, `capability_route_activation`, `capability_route_event`, and `capability_route_rollback` resources record scoped `git_status` route state, activation, routed-invocation, disable, and rollback evidence with exact selectors, stale-version guards, rollback/disable refs, provider-safe projections, and no package-manager/network/deploy behavior. |
 | Cockpit visibility | `capability_binding::cockpit_overview` projects registry ownership plus scoped binding/shadow-trial state for Engine Cockpit as bounded redacted metadata, including total/returned operation counts, list/scan completeness, redacted replacement-target summaries, and server-derived readiness labels, with no raw IDs/material and no dispatch or routing behavior. |
 | Adapter seam hardening | Adapter-replaceable families and the compaction strategy seam now name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites in source docs, inventory metadata, scorecard prose, and static tests. |
-| Runtime behavior | No runtime routing, dispatch mutation, module hot-swap, install, activation, execution, package-manager, dependency-restore, or network behavior changed in this slice. |
+| Runtime behavior | The `git_status` dispatcher now checks scoped active route records and annotates the built-in provider-safe projection with route evidence. It does not mutate the dispatch table, invoke a live module adapter projection, hot-swap modules, install, activate packages, run package managers, restore dependencies, access networks, or deploy. |
 
 ## Kernel Boundary Lockdown Evidence
 
@@ -90,7 +92,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Locked ownership classes cannot request replacement; adapter/module replacement proposals require rollback/disable metadata and remain metadata only. | `packages/agent/src/domains/capability_binding/validation.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
 | Provider-visible operations require exact selectors for inspect/linked writes, explicit non-wildcard grants, `networkPolicy: none`, and bounded provider-safe projections with no `agent_state` inheritance. | `packages/agent/src/engine/authority/grants/authorization.rs`, `packages/agent/src/domains/capability_binding/authority.rs`, `packages/agent/src/domains/capability_binding/projection.rs` |
 | Decision/policy records revalidate expected request/decision versions and preserve audit history through resource versions/events. | `packages/agent/src/domains/capability_binding/service.rs`, `packages/agent/src/domains/capability_binding/resource_store.rs` |
-| Side-effect proof explicitly records no runtime routing, dispatch mutation, hot-swap, module activation/execution, dependency restore, package-manager, network, raw path/command/log/file/grant/authority exposure, or repo-managed skill touch. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
+| Side-effect proof explicitly records no dispatch mutation, hot-swap, module activation/execution, dependency restore, package-manager, network, raw path/command/log/file/grant/authority exposure, or repo-managed skill touch. | `packages/agent/src/domains/capability_binding/records.rs`, `packages/agent/src/domains/capability_binding/route.rs`, `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
 
 ## Shadow Replacement Trial Evidence
 
@@ -102,6 +104,16 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Trial evidence stores only bounded built-in/candidate `git_status` projections and server-computed comparison evidence; evidence inspect requires an exact resource selector and rejects stale expected evidence versions. | `packages/agent/src/domains/capability_binding/shadow_trial.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
 | No dispatch mutation or live replacement occurs: `git_status` remains owned by the built-in Git adapter, and shadow-trial side-effect proof records no runtime routing, hot-swap, candidate execution, module activation, package-manager, dependency, or network behavior. | `packages/agent/src/domains/capability/operations/mod.rs`, `packages/agent/src/domains/capability/operations/registry.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
 
+## Governed Route Record Evidence
+
+| Evidence | Source |
+|---|---|
+| Route candidate records are limited to the first read-only target, `git_status`, and require candidate owner/module/runtime/lifecycle refs, contract evidence, exact authority constraints, rollback controls, safe audit refs, idempotency, and `networkPolicy: none`. | `packages/agent/src/domains/capability_binding/route.rs`, `packages/agent/src/domains/capability/capability_binding_contract.rs` |
+| Route binding records require an exact candidate resource selector, expected candidate version, exact scope, a ready lifecycle state, and a route version before a route can activate. | `packages/agent/src/domains/capability_binding/route.rs`, `packages/agent/src/engine/authority/grants/authorization.rs` |
+| Route activation requires a ready binding, exact expected binding version, approval refs, rollback and disable controls, exact non-wildcard route/resource selectors, and `networkPolicy: none`. | `packages/agent/src/domains/capability_binding/route.rs`, `packages/agent/src/domains/capability_binding/authority.rs` |
+| `git_status` resolves active scoped route records, skips terminal disabled/rolled-back events, verifies referenced binding/candidate records, emits a durable routed-invocation event, and annotates the built-in provider-safe status projection with route evidence. | `packages/agent/src/domains/capability/operations/git.rs`, `packages/agent/src/domains/capability_binding/route.rs` |
+| Live module-adapter projection execution is intentionally not claimed: route event/projection fields set `moduleAdapterInvoked: false`, `moduleAdapterInvocationState: deferred_supervised_runtime_adapter`, and `builtInProjectionUsed: true` until the supervised runtime exposes a safe adapter projection call. | `packages/agent/src/domains/capability_binding/route.rs` |
+
 ## Cockpit Visibility Evidence
 
 | Evidence | Source |
@@ -109,7 +121,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | The projection is registered as a `capability_binding` system-visible pure-read function with low risk and `capability_binding.read`; it is not a provider-visible `capability::execute` operation. | `packages/agent/src/domains/capability_binding/contract.rs`, `packages/agent/src/domains/capability_binding/mod.rs`, `packages/agent/src/domains/capability_binding/service.rs` |
 | Operation owner/status/replacement/readiness fields are derived from `SUPPORTED_OPERATION_NAMES` and authoritative binding metadata, not from iOS inference. Owner labels and replacement target summaries are redacted; `capability_binding` is exposed as projection source rather than operation owner. | `packages/agent/src/domains/capability/operations/registry.rs`, `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
 | Scoped binding and shadow-trial summaries count current-session/workspace records only and omit raw resource ids, local paths, commands, logs, code, file contents, grant ids, authority ids, trace ids, invocation ids, token-like strings, and hidden chain-of-thought. The projection reports total versus returned operation count plus operation-list and bounded resource-scan truncation states so partial results remain visibly degraded. | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs`, `packages/agent/src/domains/capability_binding/tests.rs` |
-| Projection policy states server-owned truth, projection-only and metadata-only behavior, plus no autonomy creation, dispatch mutation, hot swap, module activation/execution, dependency restore, package-manager, network, or runtime-routing side effects. | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
+| Projection policy states server-owned truth, projection-only and metadata-only behavior, plus no autonomy creation, dispatch mutation, hot swap, module activation/execution, dependency restore, package-manager, or network side effects. | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
 | iOS DTOs decode the server projection, view models pass trusted session/workspace context, state maps display labels, and views render details through capability group and operation drill-down instead of top-level telemetry. | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift`, `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`, `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
 
 ## Adapter Seam Hardening Evidence

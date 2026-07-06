@@ -10,9 +10,28 @@ use crate::shared::server::errors::CapabilityError;
 
 pub(super) async fn git_status(
     invocation: &Invocation,
+    deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
     let result = service::status_value(invocation, &invocation.payload).await?;
-    git_result("git_status", result)
+    let result = git_result("git_status", result)?;
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let Some(route) = crate::domains::capability_binding::route::active_route_for_git_status(
+        &binding_deps,
+        invocation,
+    )
+    .await?
+    else {
+        return Ok(result);
+    };
+    crate::domains::capability_binding::route::annotate_routed_git_status(
+        &binding_deps,
+        invocation,
+        result,
+        &route,
+    )
+    .await
 }
 
 pub(super) async fn git_diff(invocation: &Invocation) -> Result<CapabilityResult, CapabilityError> {

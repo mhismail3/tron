@@ -63,7 +63,7 @@ pub(super) async fn execute_operation(
         "filesystem_write" => filesystem_write(invocation, deps).await?,
         "filesystem_edit" => filesystem_edit(invocation, deps).await?,
         "filesystem_apply_patch" => filesystem_apply_patch(invocation, deps).await?,
-        "git_status" => git_status(invocation).await?,
+        "git_status" => git_status(invocation, deps).await?,
         "git_diff" => git_diff(invocation).await?,
         "git_branch_inventory" => git_branch_inventory(invocation).await?,
         "git_stage" => git_stage(invocation, deps).await?,
@@ -273,6 +273,35 @@ pub(super) async fn execute_operation(
         }
         "capability_shadow_trial_evidence_inspect" => {
             capability_shadow_trial_evidence_inspect(invocation, deps).await?
+        }
+        "capability_replacement_candidate_record" => {
+            capability_replacement_candidate_record(invocation, deps, operation_at).await?
+        }
+        "capability_replacement_candidate_list" => {
+            capability_replacement_candidate_list(invocation, deps).await?
+        }
+        "capability_replacement_candidate_inspect" => {
+            capability_replacement_candidate_inspect(invocation, deps).await?
+        }
+        "capability_route_binding_record" => {
+            capability_route_binding_record(invocation, deps, operation_at).await?
+        }
+        "capability_route_binding_list" => capability_route_binding_list(invocation, deps).await?,
+        "capability_route_binding_inspect" => {
+            capability_route_binding_inspect(invocation, deps).await?
+        }
+        "capability_route_activate" => {
+            capability_route_activate(invocation, deps, operation_at).await?
+        }
+        "capability_route_disable" => {
+            capability_route_disable(invocation, deps, operation_at).await?
+        }
+        "capability_route_rollback" => {
+            capability_route_rollback(invocation, deps, operation_at).await?
+        }
+        "capability_route_event_list" => capability_route_event_list(invocation, deps).await?,
+        "capability_route_event_inspect" => {
+            capability_route_event_inspect(invocation, deps).await?
         }
         "module_lifecycle_request" => {
             module_lifecycle_request(invocation, deps, operation_at).await?

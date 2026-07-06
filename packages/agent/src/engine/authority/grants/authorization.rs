@@ -299,6 +299,49 @@ fn ensure_capability_binding_grant_is_explicit(
             &["capabilityBindingPolicyResourceId"],
             "capability binding policy inspect",
         ),
+        Some("capability_replacement_candidate_inspect") => {
+            ensure_exact_payload_resource_selectors(
+                grant,
+                invocation,
+                &["capabilityReplacementCandidateResourceId"],
+                "capability replacement candidate inspect",
+            )
+        }
+        Some("capability_route_binding_record") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityReplacementCandidateResourceId"],
+            "capability route binding record",
+        ),
+        Some("capability_route_binding_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityRouteBindingResourceId"],
+            "capability route binding inspect",
+        ),
+        Some("capability_route_activate") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityRouteBindingResourceId"],
+            "capability route activation",
+        ),
+        Some("capability_route_disable" | "capability_route_rollback") => {
+            ensure_exact_payload_resource_selectors(
+                grant,
+                invocation,
+                &[
+                    "capabilityRouteBindingResourceId",
+                    "capabilityRouteActivationResourceId",
+                ],
+                "capability route control",
+            )
+        }
+        Some("capability_route_event_inspect") => ensure_exact_payload_resource_selectors(
+            grant,
+            invocation,
+            &["capabilityRouteEventResourceId"],
+            "capability route event inspect",
+        ),
         _ => Ok(()),
     }
 }
@@ -937,7 +980,13 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             | "capability_binding_decision_list"
             | "capability_binding_decision_inspect"
             | "capability_binding_policy_list"
-            | "capability_binding_policy_inspect",
+            | "capability_binding_policy_inspect"
+            | "capability_replacement_candidate_list"
+            | "capability_replacement_candidate_inspect"
+            | "capability_route_binding_list"
+            | "capability_route_binding_inspect"
+            | "capability_route_event_list"
+            | "capability_route_event_inspect",
         ) => {
             push_unique(&mut scopes, "capability_binding.read");
             push_unique(&mut scopes, "resource.read");
@@ -945,7 +994,12 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some(
             "capability_binding_request_record"
             | "capability_binding_decision_record"
-            | "capability_binding_policy_activate",
+            | "capability_binding_policy_activate"
+            | "capability_replacement_candidate_record"
+            | "capability_route_binding_record"
+            | "capability_route_activate"
+            | "capability_route_disable"
+            | "capability_route_rollback",
         ) => {
             push_unique(&mut scopes, "capability_binding.read");
             push_unique(&mut scopes, "capability_binding.write");
@@ -1229,6 +1283,30 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
             "capability_binding_policy",
         ],
         Some(
+            "capability_replacement_candidate_record"
+            | "capability_replacement_candidate_list"
+            | "capability_replacement_candidate_inspect"
+            | "capability_route_binding_record"
+            | "capability_route_binding_list"
+            | "capability_route_binding_inspect"
+            | "capability_route_activate"
+            | "capability_route_disable"
+            | "capability_route_rollback"
+            | "capability_route_event_list"
+            | "capability_route_event_inspect",
+        ) => vec![
+            "capability_binding_policy",
+            "capability_shadow_trial_request",
+            "capability_shadow_trial_decision",
+            "capability_shadow_trial_run",
+            "capability_shadow_trial_evidence",
+            "capability_replacement_candidate",
+            "capability_route_binding",
+            "capability_route_activation",
+            "capability_route_event",
+            "capability_route_rollback",
+        ],
+        Some(
             "web_research_request_record"
             | "web_research_request_list"
             | "web_research_request_inspect"
@@ -1400,6 +1478,17 @@ fn is_capability_binding_invocation(invocation: &Invocation) -> bool {
                     | "capability_binding_policy_activate"
                     | "capability_binding_policy_list"
                     | "capability_binding_policy_inspect"
+                    | "capability_replacement_candidate_record"
+                    | "capability_replacement_candidate_list"
+                    | "capability_replacement_candidate_inspect"
+                    | "capability_route_binding_record"
+                    | "capability_route_binding_list"
+                    | "capability_route_binding_inspect"
+                    | "capability_route_activate"
+                    | "capability_route_disable"
+                    | "capability_route_rollback"
+                    | "capability_route_event_list"
+                    | "capability_route_event_inspect"
             )
         )
 }
@@ -1649,6 +1738,18 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         }
         Some("capability_binding_policy_activate") => {
             push_unique(&mut kinds, "capability_binding_policy")
+        }
+        Some("capability_replacement_candidate_record") => {
+            push_unique(&mut kinds, "capability_replacement_candidate")
+        }
+        Some("capability_route_binding_record") => {
+            push_unique(&mut kinds, "capability_route_binding")
+        }
+        Some("capability_route_activate") => push_unique(&mut kinds, "capability_route_activation"),
+        Some("capability_route_disable") => push_unique(&mut kinds, "capability_route_event"),
+        Some("capability_route_rollback") => {
+            push_unique(&mut kinds, "capability_route_event");
+            push_unique(&mut kinds, "capability_route_rollback");
         }
         Some("module_lifecycle_request") => push_unique(&mut kinds, "module_lifecycle_state"),
         Some("module_runtime_request") => push_unique(&mut kinds, "module_runtime_state"),

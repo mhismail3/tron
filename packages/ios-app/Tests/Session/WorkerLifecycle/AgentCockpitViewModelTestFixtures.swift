@@ -161,7 +161,7 @@ extension AgentCockpitViewModelTests {
             operationList: CapabilityCockpitOperationListDTO(
                 totalOperations: 2,
                 returnedOperations: 2,
-                requestedLimit: 170,
+                requestedLimit: 181,
                 complete: true,
                 truncated: false,
                 state: "complete",

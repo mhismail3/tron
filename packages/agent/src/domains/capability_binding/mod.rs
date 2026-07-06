@@ -1,13 +1,14 @@
-//! Metadata-only capability binding policy and shadow-trial custody.
+//! Capability binding policy, shadow-trial custody, and scoped route control.
 //!
 //! Capability binding owns durable `capability_binding_request`,
 //! `capability_binding_decision`, `capability_binding_policy`, and
-//! `capability_shadow_trial_*` resources for future capability replacement
-//! governance. It records who asked to shadow, extend, or replace one
-//! `capability::execute` operation, what evidence and authority constraints are
-//! required, what decision was made, what metadata-only policy exists for later
-//! slices, and the first bounded `git_status` shadow replacement trial. It does
-//! not route execution, hot-swap modules, activate packages, or change dispatch.
+//! `capability_shadow_trial_*` resources for capability replacement governance.
+//! It also owns the governed route records that activate, disable, and roll
+//! back scoped replacements. The first runtime route is deliberately narrow:
+//! read-only `git_status` can be routed only after validated candidate,
+//! shadow-trial, activation, rollback, exact-scope, and cockpit evidence
+//! records exist. It does not hot-swap modules, activate packages, mutate
+//! dispatch, restore dependencies, run package managers, or access networks.
 //!
 //! The provider-visible surface is limited to `capability::execute` operations
 //! `capability_binding_request_record`, `capability_binding_request_list`,
@@ -18,13 +19,16 @@
 //! `capability_shadow_trial_request_record`,
 //! `capability_shadow_trial_decision_record`,
 //! `capability_shadow_trial_run_record`, and
-//! `capability_shadow_trial_evidence_inspect`. Native cockpit clients also get
-//! one read-only `capability_binding::cockpit_overview` projection that
+//! `capability_shadow_trial_evidence_inspect`, plus
+//! `capability_replacement_candidate_*`, `capability_route_binding_*`,
+//! `capability_route_activate`, `capability_route_disable`,
+//! `capability_route_rollback`, and `capability_route_event_*`. Native cockpit
+//! clients also get one read-only `capability_binding::cockpit_overview` projection that
 //! summarizes total/returned operations, list and bounded resource-scan
 //! completeness, redacted operation ownership, replacement target, readiness,
-//! and scoped binding/shadow-trial state without exposing raw resource ids or
-//! changing routing. The `capability_binding` domain owns the projection, not
-//! the operations being described.
+//! and scoped binding/shadow-trial/route state without exposing raw resource
+//! ids. The `capability_binding` domain owns the projection, not the operations
+//! being described.
 //!
 //! ## Submodules
 //!
@@ -37,31 +41,27 @@
 //! | `projection` | Bounded provider-safe request, decision, and policy projections |
 //! | `records` | Metadata-only payload, idempotency, audit, and side-effect proof builders |
 //! | `resource_store` | Resource inspection, lifecycle stream, kind/schema helpers |
+//! | `route` | Governed route candidate, binding, activation, event, rollback, and resolver logic |
 //! | `service` | Timestamp-injected record/list/inspect/activate behavior |
 //! | `shadow_trial` | Metadata-only governed `git_status` shadow trial records and evidence comparison |
 //! | `validation` | Text, ref, registry-derived target metadata, binding-mode, authority, and stale-guard checks |
 //! | `tests` | Schema, authority, replay, stale guard, locked-class, shadow-trial, and no-routing regressions |
 //!
-//! # INVARIANT: binding policy is governance metadata only
+//! # INVARIANT: routing is governed, scoped, and reversible
 //!
-//! This domain stores review and policy metadata only. It must not route
-//! `capability::execute`, install or activate modules, execute module code,
-//! restore dependencies, run package managers, mutate manifests, create
-//! physical workspaces, access networks, touch repo-managed
-//! `packages/agent/skills`, expose raw commands/logs/env/code/file contents,
-//! or return raw grant/authority ids. Target operation owner/class metadata is
-//! derived from the server-owned execute registry; caller-supplied owner/class
-//! assertions must match it. `kernel_locked` and `governance_locked` operations
-//! cannot request `replace`; `adapter_replaceable` and `module_owned` requests
-//! are accepted only as strict metadata proposals with runtime routing disabled
-//! in this slice.
-//! Shadow trials are narrower: this slice accepts only the read-only
-//! `git_status` target and stores deterministic candidate-adapter descriptions
-//! and provider-safe projections for comparison. It never executes candidate
-//! module code or changes live operation routing. Cockpit visibility follows
-//! the same fail-closed rule: if operation-list limits or bounded resource
-//! scans make the projection partial, it reports truncation/degraded scan state
-//! instead of presenting lower-bound facts as complete.
+//! This domain stores review, policy, shadow, and route metadata, and it owns
+//! route resolution for explicitly supported adapter replacements. It must not
+//! install or activate modules, restore dependencies, run package managers,
+//! mutate manifests, create physical workspaces, access networks, touch
+//! repo-managed `packages/agent/skills`, expose raw commands/logs/env/code/file
+//! contents, or return raw grant/authority ids. Target operation owner/class
+//! metadata is derived from the server-owned execute registry; caller-supplied
+//! owner/class assertions must match it. `kernel_locked` and
+//! `governance_locked` operations cannot request or activate replacement.
+//! Cockpit visibility follows a fail-closed rule: if operation-list limits or
+//! bounded resource scans make the projection partial, it reports
+//! truncation/degraded scan state instead of presenting lower-bound facts as
+//! complete.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -72,6 +72,7 @@ mod payload_safety;
 mod projection;
 mod records;
 mod resource_store;
+pub(crate) mod route;
 pub(crate) mod service;
 pub(crate) mod shadow_trial;
 mod validation;
@@ -93,10 +94,15 @@ pub(crate) use crate::engine::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
     CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
+    CAPABILITY_REPLACEMENT_CANDIDATE_KIND, CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID,
+    CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
+    CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_BINDING_SCHEMA_ID, CAPABILITY_ROUTE_EVENT_KIND,
+    CAPABILITY_ROUTE_EVENT_SCHEMA_ID, CAPABILITY_ROUTE_ROLLBACK_KIND,
+    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+    CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+    CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+    CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID,
 };
 
 pub(crate) fn worker_module(

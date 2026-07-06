@@ -255,7 +255,7 @@ struct WorkerLifecycleDTOTests {
           "schemaVersion": "tron.capability_binding.cockpit_overview.v1",
           "operation": "capability_binding_cockpit_overview",
           "summary": {
-            "totalOperations": 170,
+            "totalOperations": 181,
             "returnedOperations": 1,
             "operationListComplete": false,
             "operationListTruncated": true,
@@ -275,17 +275,17 @@ struct WorkerLifecycleDTOTests {
             "shadowRuns": 1,
             "rollbackAvailable": 1,
             "title": "Capability ownership visible",
-            "detail": "1 of 170 operations returned; resource counts are bounded lower-bound facts"
+            "detail": "1 of 181 operations returned; resource counts are bounded lower-bound facts"
           },
           "operationList": {
-            "totalOperations": 170,
+            "totalOperations": 181,
             "returnedOperations": 1,
             "requestedLimit": 1,
             "complete": false,
             "truncated": true,
             "state": "truncated",
             "label": "Operation list truncated",
-            "detail": "1 of 170 operations are returned because the client requested limit 1."
+            "detail": "1 of 181 operations are returned because the client requested limit 1."
           },
           "resourceScan": {
             "queries": 14,
@@ -410,7 +410,7 @@ struct WorkerLifecycleDTOTests {
 
         let overview = try JSONDecoder().decode(CapabilityCockpitOverviewDTO.self, from: Data(json.utf8))
 
-        #expect(overview.summary.totalOperations == 170)
+        #expect(overview.summary.totalOperations == 181)
         #expect(overview.summary.returnedOperations == 1)
         #expect(overview.operationList.truncated == true)
         #expect(overview.resourceScan.state == "bounded_degraded")

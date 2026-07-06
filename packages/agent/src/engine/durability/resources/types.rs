@@ -231,6 +231,28 @@ pub const CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND: &str = "capability_shadow_trial
 /// Built-in metadata-only capability shadow trial evidence resource schema id.
 pub const CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID: &str =
     "tron.resource.capability_shadow_trial_evidence.v1";
+/// Built-in governed capability replacement candidate resource kind.
+pub const CAPABILITY_REPLACEMENT_CANDIDATE_KIND: &str = "capability_replacement_candidate";
+/// Built-in governed capability replacement candidate resource schema id.
+pub const CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID: &str =
+    "tron.resource.capability_replacement_candidate.v1";
+/// Built-in governed capability route binding resource kind.
+pub const CAPABILITY_ROUTE_BINDING_KIND: &str = "capability_route_binding";
+/// Built-in governed capability route binding resource schema id.
+pub const CAPABILITY_ROUTE_BINDING_SCHEMA_ID: &str = "tron.resource.capability_route_binding.v1";
+/// Built-in governed capability route activation resource kind.
+pub const CAPABILITY_ROUTE_ACTIVATION_KIND: &str = "capability_route_activation";
+/// Built-in governed capability route activation resource schema id.
+pub const CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID: &str =
+    "tron.resource.capability_route_activation.v1";
+/// Built-in governed capability route event resource kind.
+pub const CAPABILITY_ROUTE_EVENT_KIND: &str = "capability_route_event";
+/// Built-in governed capability route event resource schema id.
+pub const CAPABILITY_ROUTE_EVENT_SCHEMA_ID: &str = "tron.resource.capability_route_event.v1";
+/// Built-in governed capability route rollback resource kind.
+pub const CAPABILITY_ROUTE_ROLLBACK_KIND: &str = "capability_route_rollback";
+/// Built-in governed capability route rollback resource schema id.
+pub const CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID: &str = "tron.resource.capability_route_rollback.v1";
 /// Built-in metadata-only module lifecycle state resource kind.
 pub const MODULE_LIFECYCLE_STATE_KIND: &str = "module_lifecycle_state";
 /// Built-in metadata-only module lifecycle state resource schema id.

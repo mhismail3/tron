@@ -97,10 +97,13 @@ Current living entry points:
   kernel-locked, governance-locked, record-plane, adapter-replaceable,
   module-owned, or deferred so future modular replacement work is measurable.
 - `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 170-row inventory for the capability modularity scorecard.
+  machine-readable 181-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
+- `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
+  scorecard for governed candidate, route, activation, event, rollback, and
+  deferred module-adapter replacement milestones.
 - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
   clean-break primitive engine teardown scorecard for stripping hard-coded
   capabilities, policies, skills, rules, helper launch products, and fixed iOS product
@@ -1181,7 +1184,7 @@ Capability modularity is tracked in
 machine-readable inventory in
 `packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
 in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 170
+`capability_modularity_scorecard_invariants` test locks the current 181
 operation baseline, registry/dispatch parity, and the ownership classes used for
 future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 `adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
@@ -1212,6 +1215,15 @@ built-in and deterministic candidate projections, requires exact selectors,
 rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`,
 and still performs no candidate execution, dispatch mutation, hot-swap, module
 activation, package-manager, dependency, or network behavior.
+Dynamic Replacement adds governed route records for the first read-only target,
+`git_status`: `capability_replacement_candidate`,
+`capability_route_binding`, `capability_route_activation`,
+`capability_route_event`, and `capability_route_rollback`. These records make a
+scoped route explicit, versioned, auditable, disableable, and rollbackable. The
+current dispatcher seam resolves an active scoped `git_status` route and
+annotates the built-in provider-safe projection with route evidence; it does
+not yet invoke a live module-owned adapter projection because the supervised
+module runtime still lacks that synchronous projection call.
 Cockpit Visibility adds the system-visible pure-read
 `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
 It joins registry ownership metadata with scoped binding-policy and shadow-trial
@@ -1221,8 +1233,9 @@ target summaries, server-derived readiness/next-action labels,
 built-in/module/locked status, replaceability, binding/shadow attempts,
 verification context, and rollback/disable/abort availability without exposing
 raw resource IDs, paths, commands, logs, grants, authority IDs, or token-like
-material and without changing runtime routing. `capability_binding` is the
-projection source for these facts, not the operation owner.
+material, package-manager output, dependency artifacts, or module adapter
+payloads. `capability_binding` is the projection source for these facts, not
+the operation owner.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -1378,7 +1391,18 @@ Current primitive operations:
 | `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. |
 | `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. |
 | `capability_shadow_trial_evidence_inspect` | Shadow Replacement Trial operation that inspects one scoped `capability_shadow_trial_evidence` through exact `resource:<id>` selector authorization and optional expected evidence version freshness, returning provider-safe comparison, rollback/disable/abort refs, and no-routing proof without raw commands, logs, paths, files, grant ids, authority ids, or `agent_state` inheritance. |
-| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 170 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch mutation, runtime routing, activation, dependency restore, package-manager, network, or autonomy side effects. |
+| `capability_replacement_candidate_record` | Dynamic Replacement operation that records one scoped `capability_replacement_candidate` for the exact read-only `git_status` target, with candidate owner/module/runtime/lifecycle refs, schema/effect/risk evidence, exact authority constraints, rollback controls, safe audit refs, idempotency, `networkPolicy: none`, and no package-manager, network, deploy, or live module-adapter execution. |
+| `capability_replacement_candidate_list` | Dynamic Replacement operation that lists scoped replacement candidates as bounded provider-safe summaries after kind/schema/scope/current-version revalidation, with lifecycle state, candidate owner labels, operation target, truncation metadata, `networkPolicy: none`, and no routing side effects. |
+| `capability_replacement_candidate_inspect` | Dynamic Replacement operation that inspects one scoped replacement candidate through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded candidate contract and rollback evidence without raw paths, secrets, commands, logs, code, file contents, grant ids, authority ids, or module payloads. |
+| `capability_route_binding_record` | Dynamic Replacement operation that records one scoped `capability_route_binding` after exact candidate selector authority and expected candidate version freshness, linking a validated `git_status` candidate to a route version with activation gates, rollback/disable requirements, idempotency, `networkPolicy: none`, and no dispatch-table mutation. |
+| `capability_route_binding_list` | Dynamic Replacement operation that lists scoped route bindings as bounded provider-safe summaries with ready/disabled state, route version, target operation, truncation metadata, and no package-manager, network, deploy, or module execution side effects. |
+| `capability_route_binding_inspect` | Dynamic Replacement operation that inspects one scoped route binding through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded activation-gate and route-version evidence without raw local material or authority internals. |
+| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, and `networkPolicy: none`, recording activation and route-event resources while leaving live module-adapter projection execution deferred. |
+| `capability_route_disable` | Dynamic Replacement operation that records a terminal disable event for one active scoped route after exact binding and activation selector authority plus expected current versions, restoring built-in ownership for future route lookups without mutating dispatch tables. |
+| `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
+| `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
+| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence and deferred module-adapter state. |
+| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 181 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -1950,14 +1974,21 @@ The Capability Binding Policy owner registers metadata-only
 `capability_binding_request`, `capability_binding_decision`,
 `capability_binding_policy`, `capability_shadow_trial_request`,
 `capability_shadow_trial_decision`, `capability_shadow_trial_run`, and
-`capability_shadow_trial_evidence` resources with payload schema versions
+`capability_shadow_trial_evidence` resources plus governed route
+`capability_replacement_candidate`, `capability_route_binding`,
+`capability_route_activation`, `capability_route_event`, and
+`capability_route_rollback` resources with payload schema versions
 `tron.capability_binding_request.v1`, `tron.capability_binding_decision.v1`,
 `tron.capability_binding_policy.v1`,
 `tron.capability_shadow_trial_request.v1`,
 `tron.capability_shadow_trial_decision.v1`,
 `tron.capability_shadow_trial_run.v1`, and
-`tron.capability_shadow_trial_evidence.v1`. Binding request, decision, policy,
-and shadow-trial operations stay behind the single `capability::execute`
+`tron.capability_shadow_trial_evidence.v1`,
+`tron.capability_replacement_candidate.v1`,
+`tron.capability_route_binding.v1`, `tron.capability_route_activation.v1`,
+`tron.capability_route_event.v1`, and `tron.capability_route_rollback.v1`.
+Binding request, decision, policy, shadow-trial, and route operations stay
+behind the single `capability::execute`
 primitive and require explicit capability-binding/resource authority,
 non-wildcard kind selectors, `networkPolicy: none`, idempotency keys,
 stale-version guards, and exact selectors for inspect plus linked writes. The request path
@@ -1970,9 +2001,12 @@ rationale, contract/evidence refs, authority constraints, rollback/disable
 refs, decision state, and audit history. `kernel_locked` and
 `governance_locked` operations cannot request replacement even when a request
 claims an adapter class; `adapter_replaceable` and `module_owned` replacement
-requests require rollback/disable metadata and remain proposals only. This plane never
-changes runtime routing, mutates dispatch, hot-swaps modules, installs or
-activates modules, executes module code, restores dependencies, runs package
+requests require rollback/disable metadata and remain proposals only. Route
+activation is currently limited to scoped `git_status`: it records activation,
+route-event, disable, and rollback evidence and annotates the built-in
+provider-safe projection while live module-adapter projection execution remains
+deferred. This plane never mutates dispatch tables, hot-swaps modules, installs
+or activates modules, executes module code, restores dependencies, runs package
 managers, inherits `agent_state`, accesses networks, stores raw local material,
 exposes raw grant or authority ids, adds public `/engine` APIs, or adds fixed
 iOS panels.
@@ -2703,7 +2737,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, accepted `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, accepted `capability_binding_request`, `capability_binding_decision`, `capability_binding_policy`, `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` metadata policy records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, `web_source` source-provenance records, `web_robots_policy` robots-policy evidence records, accepted `web_research_request`, `web_research_review`, and `web_research_source` metadata records, inert `tool_source_proposal`, `tool_source_conformance_report`, `subagent_task` lifecycle records, `procedural_record` skill/rule/hook/procedure provenance records, `procedural_activation_request` and `procedural_activation_decision` review evidence records, `module_manifest` registry records, accepted `module_proposal` authoring records, accepted `module_validation_report` contract-test evidence records, accepted `module_install_request` and `module_install_decision` review-gate records, accepted `module_dependency_request`, `module_dependency_decision`, and `module_dependency_policy` metadata policy records, accepted `capability_binding_request`, `capability_binding_decision`, `capability_binding_policy`, `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, `capability_shadow_trial_evidence`, `capability_replacement_candidate`, `capability_route_binding`, `capability_route_activation`, `capability_route_event`, and `capability_route_rollback` governance records, memory engine/policy/record/prompt-trace/query/decision/eval-run/migration contracts, durable `schedule` and `schedule_run` records, Slice 13 `device_registration`, `notification`, and `notification_delivery` records, import/repository/update/program-execution metadata records, accepted `prompt_artifact` records, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

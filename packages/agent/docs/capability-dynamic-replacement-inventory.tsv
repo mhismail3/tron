@@ -1,0 +1,10 @@
+area	weight	status	score	currentEvidence	remainingGap	nextAction
+runtime_route_model	15	partial	10	capability_route_activation resources plus git_status active-route lookup and route-event annotation	live module adapter projection execution is deferred	add_module_adapter_projection_call
+candidate_module_contract	15	partial	10	capability_replacement_candidate records capture schema authority risk lifecycle runtime rollback and audit refs	no executable candidate adapter contract is called from dispatcher	add_runtime_projection_contract
+shadow_execution	12	passed	12	capability_shadow_trial_request decision run and evidence records compare bounded git_status projections	candidate execution remains intentionally disabled until runtime projection contract exists	none
+activation_and_routing	14	partial	8	capability_route_activate requires ready binding expected version approval refs rollback disable exact selectors and networkPolicy none	active route annotates built-in projection rather than module-owned projection	add_module_projection_routing
+rollback_and_disable	12	passed	12	capability_route_disable capability_route_rollback and route events provide deterministic terminal controls	none	none
+agent_workflow	10	partial	5	operations allow candidate record binding activation event list inspect disable and rollback	no scripted stress workflow proves model can execute the sequence end to end	add_agent_workflow_stress
+cockpit_session_visibility	10	partial	3	new operations are visible through capability catalog and operation detail schema	dedicated cockpit/session route-state sections are not yet implemented	add_route_visibility_sections
+tests_stress_harness	8	partial	2	static dynamic replacement invariants guard source and docs	full backend lifecycle and simulator stress tests remain	add_lifecycle_and_simulator_tests
+minimal_engine_guardrails	4	passed	4	route operations are governance_locked and route docs forbid package-manager network deploy agent_state and raw material leakage	none	none

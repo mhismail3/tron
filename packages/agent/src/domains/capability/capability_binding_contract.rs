@@ -1,10 +1,11 @@
-//! Provider schema additions for capability binding policy operations.
+//! Provider schema additions for capability binding and route operations.
 //!
 //! These fields describe metadata-only binding requests, decisions, policies,
-//! and the first governed shadow-trial records. They never authorize runtime
-//! routing, module hot-swapping, module activation, dispatch mutation,
-//! package-manager execution, dependency restoration, network access, or raw
-//! local material exposure.
+//! the first governed shadow-trial records, and explicit scoped route records.
+//! Route operations can mark a governed route active for the first read-only
+//! `git_status` trial, but they still never authorize module hot-swapping,
+//! module activation, package-manager execution, dependency restoration,
+//! network access, dispatch-table mutation, or raw local material exposure.
 
 use serde_json::{Map, Value, json};
 
@@ -16,6 +17,11 @@ pub(super) const CAPABILITY_BINDING_SCHEMA_FIELDS: &[&str] = &[
     "capabilityShadowTrialRequestResourceId",
     "capabilityShadowTrialDecisionResourceId",
     "capabilityShadowTrialEvidenceResourceId",
+    "capabilityReplacementCandidateResourceId",
+    "capabilityRouteBindingResourceId",
+    "capabilityRouteActivationResourceId",
+    "capabilityRouteEventResourceId",
+    "capabilityRouteRollbackResourceId",
     "capabilityBindingRequestId",
     "capabilityBindingDecisionId",
     "capabilityBindingPolicyId",
@@ -23,6 +29,18 @@ pub(super) const CAPABILITY_BINDING_SCHEMA_FIELDS: &[&str] = &[
     "capabilityShadowTrialDecisionId",
     "capabilityShadowTrialRunId",
     "capabilityShadowTrialEvidenceId",
+    "capabilityReplacementCandidateId",
+    "capabilityRouteBindingId",
+    "capabilityRouteActivationId",
+    "capabilityRouteEventId",
+    "capabilityRouteRollbackId",
+    "routeVersion",
+    "candidateLabel",
+    "candidateOwner",
+    "moduleRef",
+    "moduleRuntimeRef",
+    "moduleLifecycleRef",
+    "shadowEvidenceRef",
     "targetOperation",
     "currentBuiltInOwner",
     "replacementTarget",
@@ -47,6 +65,9 @@ pub(super) const CAPABILITY_BINDING_SCHEMA_FIELDS: &[&str] = &[
     "expectedCapabilityShadowTrialRequestVersionId",
     "expectedCapabilityShadowTrialDecisionVersionId",
     "expectedCapabilityShadowTrialEvidenceVersionId",
+    "expectedCapabilityReplacementCandidateVersionId",
+    "expectedCapabilityRouteBindingVersionId",
+    "expectedCapabilityRouteActivationVersionId",
 ];
 
 pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
@@ -76,6 +97,26 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
             "Durable capability_shadow_trial_evidence resource id for exact-selector inspection.",
         ),
         (
+            "capabilityReplacementCandidateResourceId",
+            "Durable capability_replacement_candidate resource id for route binding or inspect.",
+        ),
+        (
+            "capabilityRouteBindingResourceId",
+            "Durable capability_route_binding resource id for activation, control, or inspect.",
+        ),
+        (
+            "capabilityRouteActivationResourceId",
+            "Durable capability_route_activation resource id for disable, rollback, or event inspection.",
+        ),
+        (
+            "capabilityRouteEventResourceId",
+            "Durable capability_route_event resource id for inspect.",
+        ),
+        (
+            "capabilityRouteRollbackResourceId",
+            "Durable capability_route_rollback resource id for audit refs.",
+        ),
+        (
             "capabilityBindingRequestId",
             "Optional caller-visible capability binding request id.",
         ),
@@ -102,6 +143,38 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         (
             "capabilityShadowTrialEvidenceId",
             "Optional caller-visible capability shadow trial evidence id.",
+        ),
+        (
+            "capabilityReplacementCandidateId",
+            "Optional caller-visible replacement candidate id.",
+        ),
+        (
+            "capabilityRouteBindingId",
+            "Optional caller-visible route binding id.",
+        ),
+        (
+            "capabilityRouteActivationId",
+            "Optional caller-visible route activation/control id.",
+        ),
+        (
+            "capabilityRouteEventId",
+            "Optional caller-visible route event id.",
+        ),
+        (
+            "capabilityRouteRollbackId",
+            "Optional caller-visible route rollback id.",
+        ),
+        (
+            "routeVersion",
+            "Caller-visible route version label for an explicit scoped replacement route.",
+        ),
+        (
+            "candidateLabel",
+            "Bounded user-facing label for the replacement candidate.",
+        ),
+        (
+            "candidateOwner",
+            "Bounded provider-safe owner token for the replacement candidate.",
         ),
         (
             "targetOperation",
@@ -155,6 +228,18 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
             "expectedCapabilityShadowTrialEvidenceVersionId",
             "Expected current capability_shadow_trial_evidence version id for stale-evidence rejection during inspect.",
         ),
+        (
+            "expectedCapabilityReplacementCandidateVersionId",
+            "Expected current capability_replacement_candidate version id for route binding freshness.",
+        ),
+        (
+            "expectedCapabilityRouteBindingVersionId",
+            "Expected current capability_route_binding version id for activation or route control freshness.",
+        ),
+        (
+            "expectedCapabilityRouteActivationVersionId",
+            "Expected current capability_route_activation version id for disable or rollback freshness.",
+        ),
     ] {
         insert_string(properties, name, description);
     }
@@ -194,6 +279,22 @@ pub(super) fn append_schema_properties(properties: &mut Map<String, Value>) {
         (
             "candidateProjection",
             "Bounded provider-safe candidate git_status projection for metadata-only shadow comparison.",
+        ),
+        (
+            "moduleRef",
+            "Bounded module manifest/ref evidence for a replacement candidate.",
+        ),
+        (
+            "moduleRuntimeRef",
+            "Bounded module runtime ref proving the candidate has a supervised runtime envelope.",
+        ),
+        (
+            "moduleLifecycleRef",
+            "Bounded module lifecycle ref proving the candidate module is enabled in the current scope.",
+        ),
+        (
+            "shadowEvidenceRef",
+            "Bounded capability_shadow_trial_evidence ref proving the candidate matched the built-in provider-safe projection.",
         ),
     ] {
         properties.insert(

@@ -2,6 +2,12 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
+use super::route::{
+    activate_route_value_at, active_route_for_git_status, disable_route_value_at,
+    inspect_replacement_candidate_value, inspect_route_binding_value, inspect_route_event_value,
+    list_route_event_value, record_replacement_candidate_value_at, record_route_binding_value_at,
+    rollback_route_value_at,
+};
 use super::service::{
     activate_capability_binding_policy_value_at, cockpit_overview_value,
     inspect_capability_binding_policy_value, inspect_capability_binding_request_value,
@@ -21,10 +27,15 @@ use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
     CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND, CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_REQUEST_KIND, CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID,
-    CAPABILITY_SHADOW_TRIAL_RUN_KIND, CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
+    CAPABILITY_REPLACEMENT_CANDIDATE_KIND, CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID,
+    CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
+    CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_BINDING_SCHEMA_ID, CAPABILITY_ROUTE_EVENT_KIND,
+    CAPABILITY_ROUTE_EVENT_SCHEMA_ID, CAPABILITY_ROUTE_ROLLBACK_KIND,
+    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+    CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+    CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+    CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
@@ -489,6 +500,339 @@ impl ShadowFixture {
     }
 }
 
+struct RouteFixture {
+    deps: Deps,
+    session_id: String,
+    write_grant_id: AuthorityGrantId,
+    read_grant_id: AuthorityGrantId,
+}
+
+impl RouteFixture {
+    async fn new(label: &str) -> Self {
+        let ctx = make_test_context();
+        let deps = Deps {
+            engine_host: ctx.engine_host.clone(),
+        };
+        let session_id = format!("{label}-session");
+        let write_kinds = route_kinds();
+        let write_selectors = route_kind_selectors();
+        let write_selector_refs = write_selectors
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let write_grant_id = derive_grant(
+            &deps,
+            &format!("{label}-route-write"),
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &write_kinds,
+            &write_selector_refs,
+            "none",
+        )
+        .await;
+        let read_kinds = route_kinds();
+        let read_selectors = route_kind_selectors();
+        let read_selector_refs = read_selectors
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let read_grant_id = derive_grant(
+            &deps,
+            &format!("{label}-route-read"),
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &read_kinds,
+            &read_selector_refs,
+            "none",
+        )
+        .await;
+        Self {
+            deps,
+            session_id,
+            write_grant_id,
+            read_grant_id,
+        }
+    }
+
+    async fn candidate(&self, key: &str) -> Value {
+        let invocation = self.write_invocation(key, route_candidate_payload(key));
+        record_replacement_candidate_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record route candidate")
+    }
+
+    async fn binding(&self, key: &str, candidate: &Value) -> Value {
+        let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
+            .as_str()
+            .expect("candidate id");
+        let candidate_version_id = candidate["capabilityReplacementCandidateVersionId"]
+            .as_str()
+            .expect("candidate version id");
+        let grant_id = self
+            .exact_write_grant(&format!("{key}-candidate-exact"), &[candidate_id])
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityReplacementCandidateResourceId": candidate_id,
+                "expectedCapabilityReplacementCandidateVersionId": candidate_version_id,
+                "capabilityRouteBindingId": format!("{key}-route-binding"),
+                "routeVersion": "git-status-route-v1",
+                "lifecycleState": "ready",
+                "auditRefs": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-binding-audit",
+                    "role": "audit"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        record_route_binding_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record route binding")
+    }
+
+    async fn activation(&self, key: &str, binding: &Value) -> Value {
+        let binding_id = binding["capabilityRouteBindingResourceId"]
+            .as_str()
+            .expect("binding id");
+        let binding_version_id = binding["capabilityRouteBindingVersionId"]
+            .as_str()
+            .expect("binding version id");
+        let grant_id = self
+            .exact_write_grant(&format!("{key}-binding-exact"), &[binding_id])
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityRouteBindingResourceId": binding_id,
+                "expectedCapabilityRouteBindingVersionId": binding_version_id,
+                "capabilityRouteActivationId": format!("{key}-route-activation"),
+                "reason": "Activate scoped git_status route after approval.",
+                "approvalRefs": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-approval",
+                    "role": "approval"
+                }],
+                "auditRefs": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-activation-audit",
+                    "role": "audit"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        activate_route_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("activate route")
+    }
+
+    async fn disable(&self, key: &str, binding: &Value, activation: &Value) -> Value {
+        let binding_id = binding["capabilityRouteBindingResourceId"]
+            .as_str()
+            .expect("binding id");
+        let binding_version_id = binding["capabilityRouteBindingVersionId"]
+            .as_str()
+            .expect("binding version id");
+        let activation_id = activation["capabilityRouteActivationResourceId"]
+            .as_str()
+            .expect("activation id");
+        let activation_version_id = activation["capabilityRouteActivationVersionId"]
+            .as_str()
+            .expect("activation version id");
+        let grant_id = self
+            .exact_write_grant(
+                &format!("{key}-binding-activation-exact"),
+                &[binding_id, activation_id],
+            )
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityRouteBindingResourceId": binding_id,
+                "expectedCapabilityRouteBindingVersionId": binding_version_id,
+                "capabilityRouteActivationResourceId": activation_id,
+                "expectedCapabilityRouteActivationVersionId": activation_version_id,
+                "capabilityRouteActivationId": format!("{key}-disable-event"),
+                "reason": "Disable scoped route and resume built-in projection.",
+                "auditRefs": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-disable-audit",
+                    "role": "audit"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        disable_route_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("disable route")
+    }
+
+    async fn rollback(&self, key: &str, binding: &Value, activation: &Value) -> Value {
+        let binding_id = binding["capabilityRouteBindingResourceId"]
+            .as_str()
+            .expect("binding id");
+        let binding_version_id = binding["capabilityRouteBindingVersionId"]
+            .as_str()
+            .expect("binding version id");
+        let activation_id = activation["capabilityRouteActivationResourceId"]
+            .as_str()
+            .expect("activation id");
+        let activation_version_id = activation["capabilityRouteActivationVersionId"]
+            .as_str()
+            .expect("activation version id");
+        let grant_id = self
+            .exact_write_grant(
+                &format!("{key}-binding-activation-exact"),
+                &[binding_id, activation_id],
+            )
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityRouteBindingResourceId": binding_id,
+                "expectedCapabilityRouteBindingVersionId": binding_version_id,
+                "capabilityRouteActivationResourceId": activation_id,
+                "expectedCapabilityRouteActivationVersionId": activation_version_id,
+                "capabilityRouteActivationId": format!("{key}-rollback-event"),
+                "capabilityRouteRollbackId": format!("{key}-route-rollback"),
+                "reason": "Roll back scoped route and restore built-in projection.",
+                "auditRefs": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-rollback-audit",
+                    "role": "audit"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        rollback_route_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("rollback route")
+    }
+
+    async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
+        let mut selectors = route_kind_selectors();
+        selectors.push(format!("resource:{resource_id}"));
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        let kinds = route_kinds();
+        derive_grant(
+            &self.deps,
+            suffix,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &kinds,
+            &selector_refs,
+            "none",
+        )
+        .await
+    }
+
+    async fn exact_write_grant(&self, suffix: &str, resource_ids: &[&str]) -> AuthorityGrantId {
+        let mut selectors = route_kind_selectors();
+        selectors.extend(
+            resource_ids
+                .iter()
+                .map(|resource_id| format!("resource:{resource_id}")),
+        );
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        let kinds = route_kinds();
+        derive_grant(
+            &self.deps,
+            suffix,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &kinds,
+            &selector_refs,
+            "none",
+        )
+        .await
+    }
+
+    fn write_invocation(&self, key: &str, payload: Value) -> Invocation {
+        invocation(
+            key,
+            payload,
+            self.write_grant_id.clone(),
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        )
+    }
+
+    fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
+        invocation(
+            key,
+            payload,
+            self.read_grant_id.clone(),
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &self.session_id,
+        )
+    }
+}
+
 #[test]
 fn capability_binding_resource_types_are_registered_with_metadata_only_bounds() {
     let definitions = builtin_resource_type_definitions();
@@ -599,6 +943,69 @@ fn capability_shadow_trial_resource_types_are_registered_with_metadata_only_boun
                 .as_array()
                 .expect("redaction list")
                 .contains(&json!("rawCommand"))
+        );
+    }
+}
+
+#[test]
+fn capability_route_resource_types_are_registered_with_governed_runtime_bounds() {
+    let definitions = builtin_resource_type_definitions();
+    for (kind, schema_id) in [
+        (
+            CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
+            CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_ROUTE_BINDING_KIND,
+            CAPABILITY_ROUTE_BINDING_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_ROUTE_ACTIVATION_KIND,
+            CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_ROUTE_EVENT_KIND,
+            CAPABILITY_ROUTE_EVENT_SCHEMA_ID,
+        ),
+        (
+            CAPABILITY_ROUTE_ROLLBACK_KIND,
+            CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID,
+        ),
+    ] {
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.kind == kind)
+            .expect("capability route definition");
+        assert_eq!(definition.schema_id, schema_id);
+        assert_eq!(
+            definition.versioning_mode,
+            EngineResourceVersioningMode::AppendOnly
+        );
+        assert_eq!(
+            definition.required_capabilities["read"],
+            json!([READ_SCOPE, RESOURCE_READ_SCOPE])
+        );
+        assert_eq!(
+            definition.required_capabilities["write"],
+            json!([WRITE_SCOPE, RESOURCE_WRITE_SCOPE])
+        );
+        assert_eq!(
+            definition.materialization_rules["runtimeRouting"],
+            json!("governed_explicit_scoped_reversible")
+        );
+        assert_eq!(
+            definition.materialization_rules["networkPolicy"],
+            json!("none")
+        );
+        assert_eq!(
+            definition.materialization_rules["dispatchMutation"],
+            json!("forbidden")
+        );
+        assert!(
+            definition.redaction_rules["neverReturn"]
+                .as_array()
+                .expect("redaction list")
+                .contains(&json!("rawAuthorityId"))
         );
     }
 }
@@ -736,6 +1143,178 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
     assert_eq!(
         inspected_policy["bindingPolicy"]["bindingPolicy"]["sideEffectProof"]["moduleExecuted"],
         json!(false)
+    );
+}
+
+#[tokio::test]
+async fn route_records_candidate_binding_activation_disable_and_rollback_for_git_status() {
+    let fixture = RouteFixture::new("capability-route-flow").await;
+
+    let candidate = fixture.candidate("candidate").await;
+    assert_eq!(candidate["status"], json!("validated"));
+    assert_eq!(
+        candidate["replacementCandidate"]["operation"]["name"],
+        json!("git_status")
+    );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["moduleAdapterInvokedByDispatcher"],
+        json!(false)
+    );
+    let replay = fixture.candidate("candidate").await;
+    assert_eq!(replay["idempotentReplay"], json!(true));
+
+    let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
+        .as_str()
+        .expect("candidate id");
+    let candidate_read_grant = fixture
+        .exact_read_grant("candidate-read-exact", candidate_id)
+        .await;
+    let inspected_candidate = inspect_replacement_candidate_value(
+        &fixture.deps,
+        &invocation(
+            "candidate-inspect",
+            json!({"capabilityReplacementCandidateResourceId": candidate_id}),
+            candidate_read_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({"capabilityReplacementCandidateResourceId": candidate_id}),
+    )
+    .await
+    .expect("inspect candidate");
+    assert_eq!(
+        inspected_candidate["replacementCandidate"]["projection"]["rawCommandsReturned"],
+        json!(false)
+    );
+    assert_eq!(
+        inspected_candidate["replacementCandidate"]["sideEffectProof"]["runtimeRoutingChanged"],
+        json!(false)
+    );
+
+    let binding = fixture.binding("binding", &candidate).await;
+    assert_eq!(binding["status"], json!("ready"));
+    assert_eq!(
+        binding["routeBinding"]["binding"]["routeCanActivate"],
+        json!(true)
+    );
+
+    let binding_id = binding["capabilityRouteBindingResourceId"]
+        .as_str()
+        .expect("binding id");
+    let binding_read_grant = fixture
+        .exact_read_grant("binding-read-exact", binding_id)
+        .await;
+    let inspected_binding = inspect_route_binding_value(
+        &fixture.deps,
+        &invocation(
+            "binding-inspect",
+            json!({"capabilityRouteBindingResourceId": binding_id}),
+            binding_read_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({"capabilityRouteBindingResourceId": binding_id}),
+    )
+    .await
+    .expect("inspect binding");
+    assert_eq!(
+        inspected_binding["routeBinding"]["projection"]["providerSafe"],
+        json!(true)
+    );
+
+    assert!(
+        active_route_for_git_status(
+            &fixture.deps,
+            &fixture.read_invocation("route-before-activation", json!({}))
+        )
+        .await
+        .expect("route lookup before activation")
+        .is_none()
+    );
+
+    let activation = fixture.activation("activation", &binding).await;
+    assert_eq!(activation["status"], json!("active"));
+    assert_eq!(
+        activation["routeActivation"]["activation"]["runtimeRoutingEnabled"],
+        json!(true)
+    );
+
+    let active = active_route_for_git_status(
+        &fixture.deps,
+        &fixture.read_invocation("route-after-activation", json!({})),
+    )
+    .await
+    .expect("route lookup after activation")
+    .expect("active route");
+    assert_eq!(active.route_version, "git-status-route-v1");
+    assert_eq!(active.candidate_owner, "module:git-status-shadow");
+
+    let events = list_route_event_value(
+        &fixture.deps,
+        &fixture.read_invocation("route-events", json!({"includeArchived": true})),
+        &json!({"includeArchived": true}),
+    )
+    .await
+    .expect("list route events");
+    assert_eq!(events["sideEffects"]["dispatchTableMutated"], json!(false));
+    assert!(
+        events["routeEvents"]
+            .as_array()
+            .expect("route events")
+            .iter()
+            .any(|event| event["event"]["kind"] == json!("activated"))
+    );
+    let route_event_id = events["routeEvents"][0]["resourceId"]
+        .as_str()
+        .expect("route event id");
+    let event_read_grant = fixture
+        .exact_read_grant("event-read-exact", route_event_id)
+        .await;
+    let inspected_event = inspect_route_event_value(
+        &fixture.deps,
+        &invocation(
+            "route-event-inspect",
+            json!({"capabilityRouteEventResourceId": route_event_id}),
+            event_read_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({"capabilityRouteEventResourceId": route_event_id}),
+    )
+    .await
+    .expect("inspect route event");
+    assert_eq!(
+        inspected_event["routeEvent"]["projection"]["rawAuthorityIdsReturned"],
+        json!(false)
+    );
+
+    let disabled = fixture.disable("disable", &binding, &activation).await;
+    assert_eq!(disabled["status"], json!("disabled"));
+    assert_eq!(disabled["routeEvent"]["event"]["kind"], json!("disabled"));
+    assert!(
+        active_route_for_git_status(
+            &fixture.deps,
+            &fixture.read_invocation("route-after-disable", json!({}))
+        )
+        .await
+        .expect("route lookup after disable")
+        .is_none()
+    );
+
+    let rollback = fixture.rollback("rollback", &binding, &activation).await;
+    assert_eq!(rollback["status"], json!("rolled_back"));
+    assert_eq!(
+        rollback["routeRollback"]["rollback"]["builtInRestored"],
+        json!(true)
+    );
+    assert!(
+        active_route_for_git_status(
+            &fixture.deps,
+            &fixture.read_invocation("route-after-rollback", json!({}))
+        )
+        .await
+        .expect("route lookup after rollback")
+        .is_none()
     );
 }
 
@@ -1086,12 +1665,12 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         overview["schemaVersion"],
         json!(super::contract::COCKPIT_VISIBILITY_SCHEMA_VERSION)
     );
-    assert_eq!(overview["summary"]["totalOperations"], json!(170));
-    assert_eq!(overview["summary"]["returnedOperations"], json!(170));
+    assert_eq!(overview["summary"]["totalOperations"], json!(181));
+    assert_eq!(overview["summary"]["returnedOperations"], json!(181));
     assert_eq!(overview["summary"]["operationListComplete"], json!(true));
     assert_eq!(overview["summary"]["resourceScanComplete"], json!(true));
-    assert_eq!(overview["operationList"]["totalOperations"], json!(170));
-    assert_eq!(overview["operationList"]["returnedOperations"], json!(170));
+    assert_eq!(overview["operationList"]["totalOperations"], json!(181));
+    assert_eq!(overview["operationList"]["returnedOperations"], json!(181));
     assert_eq!(overview["operationList"]["truncated"], json!(false));
     assert_eq!(overview["resourceScan"]["complete"], json!(true));
     assert_eq!(overview["resourceScan"]["truncated"], json!(false));
@@ -1195,11 +1774,11 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     )
     .await
     .expect("limited cockpit overview");
-    assert_eq!(limited["summary"]["totalOperations"], json!(170));
+    assert_eq!(limited["summary"]["totalOperations"], json!(181));
     assert_eq!(limited["summary"]["returnedOperations"], json!(1));
     assert_eq!(limited["summary"]["operationListComplete"], json!(false));
     assert_eq!(limited["summary"]["operationListTruncated"], json!(true));
-    assert_eq!(limited["operationList"]["totalOperations"], json!(170));
+    assert_eq!(limited["operationList"]["totalOperations"], json!(181));
     assert_eq!(limited["operationList"]["returnedOperations"], json!(1));
     assert_eq!(limited["operationList"]["requestedLimit"], json!(1));
     assert_eq!(limited["operationList"]["state"], json!("truncated"));
@@ -1214,8 +1793,8 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     )
     .await
     .expect("bounded scan cockpit overview");
-    assert_eq!(full["summary"]["totalOperations"], json!(170));
-    assert_eq!(full["summary"]["returnedOperations"], json!(170));
+    assert_eq!(full["summary"]["totalOperations"], json!(181));
+    assert_eq!(full["summary"]["returnedOperations"], json!(181));
     assert_eq!(full["summary"]["resourceScanComplete"], json!(false));
     assert_eq!(full["summary"]["resourceScanTruncated"], json!(true));
     assert_eq!(full["resourceScan"]["complete"], json!(false));
@@ -1884,6 +2463,66 @@ fn status_projection(status: &str) -> Value {
     })
 }
 
+fn route_candidate_payload(key: &str) -> Value {
+    json!({
+        "capabilityReplacementCandidateId": format!("{key}-replacement-candidate"),
+        "targetOperation": "git_status",
+        "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
+        "replacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
+        "ownershipClass": "adapter_replaceable",
+        "lifecycleState": "validated",
+        "candidateLabel": "Governed repository state adapter",
+        "candidateOwner": "module:git-status-shadow",
+        "moduleRef": {
+            "kind": "module_manifest",
+            "resourceId": "module_manifest:git-status-shadow",
+            "role": "module"
+        },
+        "moduleRuntimeRef": {
+            "kind": "module_runtime_state",
+            "resourceId": "module_runtime_state:git-status-shadow",
+            "role": "runtime"
+        },
+        "moduleLifecycleRef": {
+            "kind": "module_lifecycle_state",
+            "resourceId": "module_lifecycle_state:git-status-shadow",
+            "role": "lifecycle"
+        },
+        "shadowEvidenceRef": {
+            "kind": CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+            "resourceId": "capability_shadow_trial_evidence:git-status-shadow",
+            "role": "shadow_evidence"
+        },
+        "contractEvidenceRefs": [{
+            "kind": "evidence",
+            "resourceId": "evidence:route-contract",
+            "role": "contract"
+        }],
+        "authorityConstraints": {
+            "networkPolicy": "none",
+            "authorityScopes": ["capability.execute", "git.read", "resource.read"],
+            "resourceKinds": ["git_status_shadow_projection"],
+            "resourceSelectors": ["resource:git_status_shadow_projection:current"],
+            "agentStateInherited": false
+        },
+        "rollbackRef": {
+            "kind": "evidence",
+            "resourceId": "evidence:route-rollback",
+            "role": "rollback"
+        },
+        "disableRef": {
+            "kind": "evidence",
+            "resourceId": "evidence:route-disable",
+            "role": "disable"
+        },
+        "auditRefs": [{
+            "kind": "evidence",
+            "resourceId": "evidence:route-candidate-audit",
+            "role": "audit"
+        }]
+    })
+}
+
 fn shadow_trial_kinds() -> [&'static str; 4] {
     [
         CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
@@ -1895,6 +2534,28 @@ fn shadow_trial_kinds() -> [&'static str; 4] {
 
 fn shadow_trial_kind_selectors() -> Vec<String> {
     shadow_trial_kinds()
+        .iter()
+        .map(|kind| format!("kind:{kind}"))
+        .collect()
+}
+
+fn route_kinds() -> [&'static str; 10] {
+    [
+        CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
+        CAPABILITY_ROUTE_BINDING_KIND,
+        CAPABILITY_ROUTE_ACTIVATION_KIND,
+        CAPABILITY_ROUTE_EVENT_KIND,
+        CAPABILITY_ROUTE_ROLLBACK_KIND,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+        CAPABILITY_SHADOW_TRIAL_RUN_KIND,
+        CAPABILITY_SHADOW_TRIAL_DECISION_KIND,
+        CAPABILITY_SHADOW_TRIAL_REQUEST_KIND,
+        CAPABILITY_BINDING_POLICY_KIND,
+    ]
+}
+
+fn route_kind_selectors() -> Vec<String> {
+    route_kinds()
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect()

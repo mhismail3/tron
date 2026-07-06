@@ -1,9 +1,10 @@
 //! Static invariants for the capability modularity scorecard.
 //!
-//! The scorecard is intentionally documentation-first: it does not route
-//! capabilities through modules. These tests make sure the documentation stays
-//! complete and prevents accidental replacement semantics from sneaking into
-//! kernel or governance operations.
+//! The scorecard is intentionally boundary-first: it classifies current
+//! operations and locks the kernel/governance substrate before any replacement
+//! route can be trusted. These tests make sure the documentation stays complete
+//! and prevents accidental replacement semantics from sneaking into kernel or
+//! governance operations.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-
 const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const README_PATH: &str = "README.md";
-const EXPECTED_OPERATION_COUNT: usize = 170;
+const EXPECTED_OPERATION_COUNT: usize = 181;
 
 const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";
 
@@ -270,6 +271,12 @@ fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
         operation if operation.starts_with("capability_shadow_trial_") => {
             ("capability_binding", "governance_locked")
         }
+        operation if operation.starts_with("capability_replacement_") => {
+            ("capability_binding", "governance_locked")
+        }
+        operation if operation.starts_with("capability_route_") => {
+            ("capability_binding", "governance_locked")
+        }
         operation if operation.starts_with("module_lifecycle_") => {
             ("module_lifecycle", "governance_locked")
         }
@@ -453,8 +460,8 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
                 SourceRequirement {
                     path: "packages/agent/src/domains/capability_binding/mod.rs",
                     markers: &[
-                        "Metadata-only capability binding policy and shadow-trial custody",
-                        "must not route",
+                        "Capability binding policy, shadow-trial custody, and scoped route control",
+                        "governed route records",
                         "kernel_locked",
                     ],
                 },
@@ -737,7 +744,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
         "Capability binding policy",
         "Adapter seam hardening",
         "Shadow replacement trial",
-        "No runtime routing, dispatch mutation",
+        "Governed route records",
         "Future operations must update the TSV, this scorecard, and this manifest",
     ] {
         assert!(

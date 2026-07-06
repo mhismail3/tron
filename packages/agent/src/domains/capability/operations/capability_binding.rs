@@ -305,6 +305,248 @@ pub(super) async fn capability_shadow_trial_evidence_inspect(
     ))
 }
 
+pub(super) async fn capability_replacement_candidate_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::record_replacement_candidate_value_at(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+        operation_at,
+    )
+    .await?;
+    Ok(route_result(
+        "Capability replacement candidate recorded.",
+        "capability_replacement_candidate_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_replacement_candidate_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::list_replacement_candidate_value(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    let count = details
+        .get("replacementCandidates")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(route_result(
+        &format!("Listed {count} capability replacement candidate(s)."),
+        "capability_replacement_candidate_list",
+        details,
+    ))
+}
+
+pub(super) async fn capability_replacement_candidate_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::inspect_replacement_candidate_value(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(route_result(
+        "Inspected capability replacement candidate.",
+        "capability_replacement_candidate_inspect",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_binding_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::record_route_binding_value_at(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+        operation_at,
+    )
+    .await?;
+    Ok(route_result(
+        "Capability route binding recorded.",
+        "capability_route_binding_record",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_binding_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::list_route_binding_value(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    let count = details
+        .get("routeBindings")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(route_result(
+        &format!("Listed {count} capability route binding(s)."),
+        "capability_route_binding_list",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_binding_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::inspect_route_binding_value(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(route_result(
+        "Inspected capability route binding.",
+        "capability_route_binding_inspect",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_activate(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::activate_route_value_at(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+        operation_at,
+    )
+    .await?;
+    Ok(route_result(
+        "Capability route activated.",
+        "capability_route_activate",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_disable(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::disable_route_value_at(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+        operation_at,
+    )
+    .await?;
+    Ok(route_result(
+        "Capability route disabled.",
+        "capability_route_disable",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_rollback(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::rollback_route_value_at(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+        operation_at,
+    )
+    .await?;
+    Ok(route_result(
+        "Capability route rolled back.",
+        "capability_route_rollback",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_event_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::list_route_event_value(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    let count = details
+        .get("routeEvents")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Ok(route_result(
+        &format!("Listed {count} capability route event(s)."),
+        "capability_route_event_list",
+        details,
+    ))
+}
+
+pub(super) async fn capability_route_event_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::route::inspect_route_event_value(
+        &binding_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(route_result(
+        "Inspected capability route event.",
+        "capability_route_event_inspect",
+        details,
+    ))
+}
+
 fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
     ok_result(
         text.to_owned(),
@@ -312,6 +554,17 @@ fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
             "primitiveOperation": operation,
             "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
             "capabilityBinding": details
+        }),
+    )
+}
+
+fn route_result(text: &str, operation: &str, details: Value) -> CapabilityResult {
+    ok_result(
+        text.to_owned(),
+        json!({
+            "primitiveOperation": operation,
+            "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
+            "capabilityRoute": details
         }),
     )
 }

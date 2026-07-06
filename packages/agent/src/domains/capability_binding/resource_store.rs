@@ -16,7 +16,12 @@ use super::validation::invalid;
 use super::{
     CAPABILITY_BINDING_DECISION_KIND, CAPABILITY_BINDING_DECISION_SCHEMA_ID,
     CAPABILITY_BINDING_POLICY_KIND, CAPABILITY_BINDING_POLICY_SCHEMA_ID,
-    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID, Deps,
+    CAPABILITY_BINDING_REQUEST_KIND, CAPABILITY_BINDING_REQUEST_SCHEMA_ID,
+    CAPABILITY_REPLACEMENT_CANDIDATE_KIND, CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID,
+    CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
+    CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_BINDING_SCHEMA_ID, CAPABILITY_ROUTE_EVENT_KIND,
+    CAPABILITY_ROUTE_EVENT_SCHEMA_ID, CAPABILITY_ROUTE_ROLLBACK_KIND,
+    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, Deps,
 };
 
 pub(super) async fn inspect_resource_required(
@@ -114,6 +119,66 @@ pub(super) fn ensure_capability_binding_policy(
     )
 }
 
+pub(super) fn ensure_capability_replacement_candidate(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    ensure_kind_schema(
+        inspection,
+        operation,
+        CAPABILITY_REPLACEMENT_CANDIDATE_KIND,
+        CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID,
+    )
+}
+
+pub(super) fn ensure_capability_route_binding(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    ensure_kind_schema(
+        inspection,
+        operation,
+        CAPABILITY_ROUTE_BINDING_KIND,
+        CAPABILITY_ROUTE_BINDING_SCHEMA_ID,
+    )
+}
+
+pub(super) fn ensure_capability_route_activation(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    ensure_kind_schema(
+        inspection,
+        operation,
+        CAPABILITY_ROUTE_ACTIVATION_KIND,
+        CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
+    )
+}
+
+pub(super) fn ensure_capability_route_event(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    ensure_kind_schema(
+        inspection,
+        operation,
+        CAPABILITY_ROUTE_EVENT_KIND,
+        CAPABILITY_ROUTE_EVENT_SCHEMA_ID,
+    )
+}
+
+pub(super) fn ensure_capability_route_rollback(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    ensure_kind_schema(
+        inspection,
+        operation,
+        CAPABILITY_ROUTE_ROLLBACK_KIND,
+        CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID,
+    )
+}
+
 fn ensure_kind_schema(
     inspection: &EngineResourceInspection,
     operation: &str,
@@ -180,7 +245,10 @@ pub(super) async fn publish_lifecycle_event(
                 "details": payload,
                 "capabilityBindingBoundary": {
                     "metadataOnly": true,
-                    "runtimeRoutingChanged": false,
+                    "runtimeRoutingChanged": payload
+                        .get("runtimeRoutingChanged")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
                     "dispatchTableMutated": false,
                     "hotSwapPerformed": false,
                     "moduleActivated": false,
