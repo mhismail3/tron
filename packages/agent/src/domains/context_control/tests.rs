@@ -513,6 +513,10 @@ async fn context_policy_records_list_disable_and_snapshot_with_exact_authority()
         json!("must_preserve_ref")
     );
     assert_eq!(
+        survivor["projection"]["policyRecord"]["targetRef"],
+        json!("message:decision-1")
+    );
+    assert_eq!(
         survivor["projection"]["target"]["providerSafeRefOnly"],
         json!(true)
     );
@@ -577,6 +581,10 @@ async fn context_policy_records_list_disable_and_snapshot_with_exact_authority()
         .await
         .expect("list survivor");
     assert_eq!(list["projection"]["records"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        list["projection"]["records"][0]["targetRef"],
+        json!("message:decision-1")
+    );
 
     let snapshot_payload = json!({
         "operation": "context_policy_snapshot",
@@ -604,6 +612,14 @@ async fn context_policy_records_list_disable_and_snapshot_with_exact_authority()
     assert_eq!(
         snapshot["projection"]["policySnapshot"]["policy"]["exclusionCount"],
         json!(1)
+    );
+    assert_eq!(
+        snapshot["projection"]["policySnapshot"]["survivorRefs"][0]["targetRef"],
+        json!("message:decision-1")
+    );
+    assert_eq!(
+        snapshot["projection"]["policySnapshot"]["exclusionRefs"][0]["targetRef"],
+        json!("message:obsolete-1")
     );
 
     let survivor_id = survivor["contextPolicyResourceId"].as_str().unwrap();
@@ -727,6 +743,10 @@ async fn context_policy_records_list_disable_and_snapshot_with_exact_authority()
             .unwrap()
             .len(),
         1
+    );
+    assert_eq!(
+        exclusion_list["projection"]["records"][0]["targetRef"],
+        json!("message:obsolete-1")
     );
 }
 
@@ -855,6 +875,47 @@ async fn context_policy_snapshot_rejects_overflow_instead_of_truncating() {
     .expect_err("overflow snapshot must fail closed");
     assert!(
         error.to_string().contains("more than 50 active records"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn context_policy_list_rejects_limit_truncation() {
+    let fixture = Fixture::new("context-control-policy-list-overflow").await;
+    for index in 0..21 {
+        let payload = json!({
+            "operation": "context_survivor_record",
+            "sessionId": fixture.session_id,
+            "targetKind": "message",
+            "targetRef": format!("message:list-decision-{index}"),
+            "label": format!("Keep list decision {index}"),
+            "reason": "Must survive compaction",
+            "idempotencyKey": format!("survivor-list-overflow-{index}")
+        });
+        let invocation = fixture.write_invocation(
+            &format!("survivor-list-overflow-{index}"),
+            "context_survivor_record",
+            payload.clone(),
+        );
+        survivor_record_value_at(&fixture.deps, &invocation, &payload, operation_at())
+            .await
+            .expect("record survivor");
+    }
+
+    let list_payload = json!({
+        "operation": "context_survivor_list",
+        "sessionId": fixture.session_id
+    });
+    let list_invocation = fixture.read_invocation(
+        "survivor-list-overflow",
+        "context_survivor_list",
+        list_payload.clone(),
+    );
+    let error = survivor_list_value(&fixture.deps, &list_invocation, &list_payload)
+        .await
+        .expect_err("list must fail closed instead of truncating active policies");
+    assert!(
+        error.to_string().contains("exceeds requested limit 20"),
         "{error}"
     );
 }

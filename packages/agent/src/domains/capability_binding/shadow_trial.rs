@@ -1020,12 +1020,7 @@ fn status_projection(payload: &Value, field: &str) -> Result<Value, CapabilityEr
     if !matches!(truncation, "none" | "bounded" | "truncated" | "unknown") {
         return Err(invalid(format!("{field}.truncation has unsupported value")));
     }
-    let evidence_ref = match map.get("evidenceRef") {
-        Some(value) => {
-            super::validation::required_ref(&json!({"evidenceRef": value}), "evidenceRef")?
-        }
-        None => json!({"kind": "evidence", "resourceId": "evidence:none", "role": "projection"}),
-    };
+    let evidence_ref = required_projection_evidence_ref(map, field)?;
     Ok(json!({
         "operation": TARGET_OPERATION,
         "status": status,
@@ -1044,6 +1039,28 @@ fn status_projection(payload: &Value, field: &str) -> Result<Value, CapabilityEr
         "rawPathsStored": false,
         "rawCommandsStored": false
     }))
+}
+
+fn required_projection_evidence_ref(
+    map: &Map<String, Value>,
+    field: &str,
+) -> Result<Value, CapabilityError> {
+    let Some(value) = map.get("evidenceRef") else {
+        return Err(invalid(format!(
+            "{field}.evidenceRef is required for completed shadow trial projections"
+        )));
+    };
+    let evidence_ref = required_ref(&json!({"evidenceRef": value}), "evidenceRef")?;
+    let resource_id = evidence_ref
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if resource_id == "evidence:none" || resource_id.starts_with("evidence:none:") {
+        return Err(invalid(format!(
+            "{field}.evidenceRef must reference concrete shadow projection evidence"
+        )));
+    }
+    Ok(evidence_ref)
 }
 
 fn not_evaluated_projection() -> Value {

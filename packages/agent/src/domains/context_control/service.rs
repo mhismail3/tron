@@ -1128,13 +1128,22 @@ async fn policy_list_value(
         .unwrap_or(DEFAULT_LIST_LIMIT)
         .clamp(1, MAX_LIST_LIMIT);
     let records = active_policy_summaries(deps, &scope, kind).await?;
+    if records.len() > limit {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "{} has {} active records, which exceeds requested limit {limit}; request a larger bounded limit or use context_policy_snapshot for a complete provider-safe policy packet",
+                kind.resource_kind(),
+                records.len()
+            ),
+        });
+    }
     Ok(json!({
         "schemaVersion": schema_version_for_policy_kind(kind.resource_kind()),
         "operation": operation,
         "status": "ok",
         "sessionId": session_id,
         "projection": {
-            "records": records.into_iter().take(limit).collect::<Vec<_>>(),
+            "records": records,
             "limit": limit,
             "providerSafe": true
         }

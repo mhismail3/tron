@@ -106,6 +106,7 @@ pub(super) fn policy_summary(
         "state": payload["state"],
         "kind": payload["policy"]["kind"],
         "targetKind": payload["target"]["kind"],
+        "targetRef": payload["target"]["ref"],
         "targetLabel": payload["target"]["label"],
         "futureProviderContextBinding": payload["policy"]["futureProviderContextBinding"],
         "createdAt": payload["createdAt"],

@@ -3409,6 +3409,60 @@ async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missin
 }
 
 #[tokio::test]
+async fn shadow_trial_rejects_completed_projection_without_concrete_evidence() {
+    let fixture = ShadowFixture::new("capability-shadow-output-evidence").await;
+    let request = fixture.shadow_request("output-evidence-request").await;
+    let decision = fixture
+        .shadow_decision("output-evidence-decision", &request, "approved")
+        .await;
+
+    let mut missing = fixture
+        .shadow_run_invocation("output-evidence-missing", &decision, "completed")
+        .await;
+    missing.payload["candidateProjection"]
+        .as_object_mut()
+        .expect("candidate projection")
+        .remove("evidenceRef");
+    let error = record_capability_shadow_trial_run_value_at(
+        &fixture.deps,
+        &missing,
+        &missing.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("completed shadow projection must require evidence")
+    .to_string();
+    assert!(
+        error.contains("candidateProjection.evidenceRef is required"),
+        "{error}"
+    );
+
+    let mut placeholder = fixture
+        .shadow_run_invocation("output-evidence-placeholder", &decision, "completed")
+        .await;
+    placeholder.payload["candidateProjection"]["evidenceRef"] = json!({
+        "kind": "evidence",
+        "resourceId": "evidence:none",
+        "role": "projection"
+    });
+    let error = record_capability_shadow_trial_run_value_at(
+        &fixture.deps,
+        &placeholder,
+        &placeholder.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("placeholder evidence must not become accepted shadow proof")
+    .to_string();
+    assert!(
+        error.contains(
+            "candidateProjection.evidenceRef must reference concrete shadow projection evidence"
+        ),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn shadow_trial_records_abort_and_disable_semantics_without_live_replacement() {
     let fixture = ShadowFixture::new("capability-shadow-controls").await;
     let request = fixture.shadow_request("control-request").await;

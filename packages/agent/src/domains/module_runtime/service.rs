@@ -462,13 +462,19 @@ fn git_status_provider_safe_projection(value: &Value) -> Result<Value, Capabilit
             TOKEN_MAX_BYTES,
         )?;
     }
-    if value
-        .get("evidenceRef")
-        .and_then(Value::as_object)
-        .is_none()
-    {
+    let Some(evidence_ref) = value.get("evidenceRef").and_then(Value::as_object) else {
         return Err(invalid(
             "git_status adapter projection requires evidenceRef",
+        ));
+    };
+    let evidence_resource_id = evidence_ref
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if evidence_resource_id == "evidence:none" || evidence_resource_id.starts_with("evidence:none:")
+    {
+        return Err(invalid(
+            "git_status adapter projection requires concrete evidenceRef",
         ));
     }
     Ok(json!({

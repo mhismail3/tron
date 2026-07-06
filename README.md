@@ -1255,6 +1255,17 @@ without exposing raw resource IDs, paths, commands, logs, grants, authority
 IDs, or token-like material, package-manager output, dependency artifacts, or
 module adapter payloads. `capability_binding` is the projection source for
 these facts, not the operation owner.
+The Minimal Kernel Self-Adaptation Hardening capstone in
+`packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md`
+ties these slices together without adding another runtime surface. Its
+invariant test proves that the irreducible kernel/governance substrate remains
+authority, transport, event log, resource custody, redaction,
+trace/replay/catalog, module governance, context policy, route resolution, and
+server-owned visibility; replaceable behavior must pass through exact evidence,
+provider-safety, route events, and rollback/disable contracts. This foundation
+proves the first scoped read-only `git_status` route and the contract future
+routes must satisfy. It does not claim broad autonomous self-update across every
+operation.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -2670,7 +2681,7 @@ When context crosses the proactive trigger (default
 before the next provider call:
 
 1. **Summarize**: The loop handler invokes an explicit compaction summarizer strategy; the default primitive strategy is the deterministic keyword summarizer.
-2. **Prove**: the handler records a context-control action and preflight snapshot, including survivor/exclusion policy refs that a replacement summarizer had to preserve or omit.
+2. **Prove**: the handler records a context-control action and preflight snapshot for the compact boundary. Survivor/exclusion policy snapshots remain server-owned proof inputs that a future replacement summarizer must consume before it can be routed.
 3. **Boundary**: a `compact.boundary` event commits the cutoff only after the context-control proof is durable; the boundary carries the summary and proof refs used by server-side reconstruction.
 4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
 5. **Preserve recent**: The most recent `preserveRecentCount` turns always survive the cut.
