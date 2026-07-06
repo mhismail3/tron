@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
+use super::resource_store::current_payload;
 use super::route::{
     activate_route_value_at, active_route_for_git_status, disable_route_value_at,
     inspect_replacement_candidate_value, inspect_route_binding_value, inspect_route_event_value,
@@ -697,10 +698,20 @@ impl RouteFixture {
         let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
             .as_str()
             .expect("candidate id");
-        let shadow_evidence_id =
-            candidate["replacementCandidate"]["candidate"]["shadowEvidenceRef"]["resourceId"]
-                .as_str()
-                .expect("candidate shadow evidence id");
+        let candidate_inspection = self
+            .deps
+            .engine_host
+            .inspect_resource(candidate_id)
+            .await
+            .expect("inspect candidate resource internally")
+            .expect("candidate resource exists");
+        let (_, candidate_payload) =
+            current_payload(&candidate_inspection, "candidate fixture payload")
+                .expect("candidate current payload");
+        let shadow_evidence_id = candidate_payload
+            .pointer("/candidate/shadowEvidenceRef/resourceId")
+            .and_then(Value::as_str)
+            .expect("candidate shadow evidence id");
         let candidate_version_id = candidate["capabilityReplacementCandidateVersionId"]
             .as_str()
             .expect("candidate version id");
@@ -1450,15 +1461,29 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
     for event in events["routeEvents"].as_array().expect("route events") {
         assert!(
-            event.get("resourceId").is_none(),
-            "route event list must not expose raw resource IDs"
+            !contains_json_key(event, "resourceId"),
+            "route event list must not expose raw resource IDs at any depth"
         );
         assert!(
-            event.get("versionId").is_none(),
-            "route event list must not expose raw version IDs"
+            !contains_json_key(event, "versionId"),
+            "route event list must not expose raw version IDs at any depth"
+        );
+        assert!(
+            !contains_json_key(event, "currentVersionId"),
+            "route event list must not expose raw current version IDs at any depth"
+        );
+        assert!(
+            !contains_json_key(event, "activationResourceId"),
+            "route event list must not expose raw activation resource IDs at any depth"
+        );
+        assert!(
+            !contains_json_key(event, "activationVersionId"),
+            "route event list must not expose raw activation version IDs at any depth"
         );
         assert_eq!(event["resourceRefs"][0]["resourceIdRedacted"], json!(true));
         assert_eq!(event["resourceRefs"][0]["versionIdRedacted"], json!(true));
+        assert!(contains_json_key(event, "resourceIdRedacted"));
+        assert!(contains_json_key(event, "versionIdRedacted"));
     }
     let route_event_id = fixture
         .deps
@@ -1522,6 +1547,16 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .expect("route lookup after rollback")
         .is_none()
     );
+}
+
+fn contains_json_key(value: &Value, target: &str) -> bool {
+    match value {
+        Value::Object(object) => object
+            .iter()
+            .any(|(key, value)| key == target || contains_json_key(value, target)),
+        Value::Array(items) => items.iter().any(|value| contains_json_key(value, target)),
+        _ => false,
+    }
 }
 
 #[tokio::test]

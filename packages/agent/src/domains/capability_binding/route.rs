@@ -1689,16 +1689,53 @@ fn route_summary(
         "kind": resource.kind,
         "schemaId": resource.schema_id,
         "state": resource.lifecycle,
-        "operation": payload.get("operation"),
-        "candidate": payload.get("candidate"),
-        "binding": payload.get("binding"),
-        "activation": payload.get("activation"),
-        "event": payload.get("event"),
-        "rollback": payload.get("rollback"),
-        "createdAt": payload.get("createdAt"),
-        "updatedAt": payload.get("updatedAt"),
+        "operation": route_summary_value(payload.get("operation")),
+        "candidate": route_summary_value(payload.get("candidate")),
+        "binding": route_summary_value(payload.get("binding")),
+        "activation": route_summary_value(payload.get("activation")),
+        "event": route_summary_value(payload.get("event")),
+        "rollback": route_summary_value(payload.get("rollback")),
+        "createdAt": route_summary_value(payload.get("createdAt")),
+        "updatedAt": route_summary_value(payload.get("updatedAt")),
         "resourceRefs": [redacted_route_ref(resource, "capability_route")]
     })
+}
+
+fn route_summary_value(value: Option<&Value>) -> Value {
+    value.map(redact_route_summary_ids).unwrap_or(Value::Null)
+}
+
+fn redact_route_summary_ids(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.iter().map(redact_route_summary_ids).collect()),
+        Value::Object(object) => {
+            let mut redacted = serde_json::Map::new();
+            for (key, value) in object {
+                match key.as_str() {
+                    "resourceId" => {
+                        redacted.insert("resourceIdRedacted".to_owned(), json!(true));
+                    }
+                    "versionId" => {
+                        redacted.insert("versionIdRedacted".to_owned(), json!(true));
+                    }
+                    "currentVersionId" => {
+                        redacted.insert("currentVersionIdRedacted".to_owned(), json!(true));
+                    }
+                    "activationResourceId" => {
+                        redacted.insert("activationResourceIdRedacted".to_owned(), json!(true));
+                    }
+                    "activationVersionId" => {
+                        redacted.insert("activationVersionIdRedacted".to_owned(), json!(true));
+                    }
+                    _ => {
+                        redacted.insert(key.clone(), redact_route_summary_ids(value));
+                    }
+                }
+            }
+            Value::Object(redacted)
+        }
+        _ => value.clone(),
+    }
 }
 
 fn redacted_route_ref(resource: &EngineResource, role: &str) -> Value {
