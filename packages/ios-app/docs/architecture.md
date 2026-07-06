@@ -469,21 +469,23 @@ metadata/projection source labels, total/returned operation completeness,
 bounded resource-scan state, locked/built-in/module status, redacted
 replacement target, readiness/next-action labels,
 replacement/shadow/extension eligibility, binding and shadow-trial attempts,
-rollback/disable/abort availability, effect/risk, schema-health, worker,
-trigger, tags, request/response schema bodies, and safe verification details.
+active route state, route events, routed invocations,
+failed-closed/disabled/rolled-back route state, rollback/disable/abort
+availability, effect/risk, schema-health, worker, trigger, tags,
+request/response schema bodies, and safe verification details.
 Capability map version and recent `catalog_discovery_report` resources are rendered
 inside the cockpit as capability-check evidence, not as top-level telemetry.
 Capability modularity rows come from `capability_binding::cockpit_overview`,
 which is a server-owned redacted projection over registry metadata plus scoped
-binding/shadow-trial records. iOS may shape display labels and grouping, but it
-must not infer ownership class, replacement policy, readiness, attempt state,
-or rollback availability locally. `capability_binding` is a projection source,
-not an operation owner. Catalog snapshot DTOs accept both camelCase client
-fixtures and the engine's snake_case catalog definitions at the protocol
-boundary so schema, owner, risk, and authority evidence are not misclassified as
-missing by presentation code. The top-level cockpit must stay high-signal;
-binding, shadow-trial, readiness, scan completeness, and rollback details belong
-in group and operation drill-down.
+binding/shadow-trial/route records. iOS may shape display labels and grouping,
+but it must not infer ownership class, replacement policy, readiness, route
+state, attempt state, or rollback availability locally. `capability_binding` is
+a projection source, not an operation owner. Catalog snapshot DTOs accept both
+camelCase client fixtures and the engine's snake_case catalog definitions at
+the protocol boundary so schema, owner, risk, and authority evidence are not
+misclassified as missing by presentation code. The top-level cockpit must stay
+high-signal; binding, shadow-trial, route, readiness, scan completeness, and
+rollback details belong in group and operation drill-down.
 Dashboard, capability group, and operation cards use the whole glass container
 as the disclosure target instead of decorative chevron glyphs; drill-down is
 communicated by the surface hierarchy and tap target, while functional

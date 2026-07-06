@@ -21,8 +21,12 @@ autonomous self-update across every operation.
 | Route service | `packages/agent/src/domains/capability_binding/route.rs` |
 | Module runtime projection boundary | `packages/agent/src/domains/module_runtime/service.rs` |
 | Route authority | `packages/agent/src/domains/capability_binding/authority.rs` |
+| Cockpit route projection | `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` |
 | Route resource definitions | `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs` |
 | Grant authorization | `packages/agent/src/engine/authority/grants/authorization.rs` |
+| iOS cockpit DTOs | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift` |
+| iOS cockpit state | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift` |
+| iOS cockpit UI | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
 | Modularity inventory | `packages/agent/docs/capability-modularity-inventory.tsv` |
 | Canonical README | `README.md` |
 
@@ -39,6 +43,7 @@ autonomous self-update across every operation.
 | Routed invocation evidence is durable. | `emit_routed_invocation_event` records a `capability_route_event` resource with route version, activation refs, trace/replay refs, idempotency, and side-effect proof. |
 | Active routes use a supervised module-runtime projection boundary. | `git_status` dispatch calls `execute_routed_git_status` when `active_route_for_git_status` returns a route; route execution calls `module_runtime::service::project_provider_safe_adapter_output`, requires exact lifecycle/runtime version refs, lifecycle runtime authorization, `networkPolicy: none`, supervised-envelope proof, and a bounded `git_status` projection. |
 | Active routes fail closed instead of silently falling back. | A rejected supervised projection emits a `failed_closed` `capability_route_event` and returns an errored `git_status route failed closed` result with `moduleAdapterInvoked: true`, `builtInProjectionUsed: false`, and no built-in success projection. Stale referenced route records emit a `failed_closed` lookup event before returning the stale-record error. |
+| Cockpit visibility reflects route truth without local fabrication. | `capability_binding::cockpit_overview` now scans candidate, binding, activation, route-event, and rollback resources; projects active route count, route-event count, routed invocations, failed-closed/disabled/rolled-back state, rollback records, terminal controls, and safe state labels; and iOS renders those server-owned route facts in operation cards and drill-down details without raw ids. |
 | Minimal-engine guardrails hold. | Route records forbid package-manager, network, deploy, dependency restore, dispatch-table mutation, raw paths/commands/logs/code/file contents, raw grant IDs, raw authority IDs, and repo-managed skills. |
 
 ## Validation Commands
@@ -54,6 +59,7 @@ CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::active_route_rejects_unsafe_adapter_projection_without_builtin_fallback -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_lookup_rejects_stale_binding_or_candidate_current_versions -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_candidate_rejects_fabricated_or_stale_shadow_evidence -- --nocapture
+CARGO_TARGET_DIR=/tmp/tron-agent-target-cockpit-route cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::cockpit_overview -- --quiet
 scripts/personal-info-guard.sh
 git diff --check
 git diff --cached --check

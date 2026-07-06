@@ -18,6 +18,8 @@ const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/di
 const GIT_OPERATION_PATH: &str = "packages/agent/src/domains/capability/operations/git.rs";
 const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs";
 const VALIDATION_PATH: &str = "packages/agent/src/domains/capability_binding/validation.rs";
+const COCKPIT_VISIBILITY_PATH: &str =
+    "packages/agent/src/domains/capability_binding/cockpit_visibility.rs";
 const RESOURCE_DEFINITIONS_PATH: &str =
     "packages/agent/src/engine/durability/resources/capability_binding_definitions.rs";
 const README_PATH: &str = "README.md";
@@ -120,7 +122,7 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     for required in [
-        "Current foundation score: **92/100**",
+        "Current foundation score: **94/100**",
         "Provider-visible surface remains one tool: `capability::execute`",
         "supervised module-runtime provider-safe adapter projection",
         "active_route_module_adapter_projection",
@@ -132,6 +134,40 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
                 || evidence.contains(required)
                 || readme.contains(required),
             "dynamic replacement artifacts missing required text: {required}"
+        );
+    }
+}
+
+#[test]
+fn dynamic_replacement_cockpit_projects_route_state() {
+    let cockpit = read_repo_file(COCKPIT_VISIBILITY_PATH);
+    let ios_dto = read_repo_file(
+        "packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift",
+    );
+    let ios_state =
+        read_repo_file("packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift");
+    let ios_detail = read_repo_file(
+        "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift",
+    );
+
+    for required in [
+        "CAPABILITY_ROUTE_ACTIVATION_KIND",
+        "CAPABILITY_ROUTE_EVENT_KIND",
+        "CAPABILITY_ROUTE_ROLLBACK_KIND",
+        "activeRoutes",
+        "routedInvocations",
+        "failedClosed",
+        "rolledBack",
+        "runtime_route_active",
+        "route_failed_closed",
+        "route_rolled_back",
+    ] {
+        assert!(
+            cockpit.contains(required)
+                || ios_dto.contains(required)
+                || ios_state.contains(required)
+                || ios_detail.contains(required),
+            "dynamic replacement cockpit projection missing route marker {required}"
         );
     }
 }

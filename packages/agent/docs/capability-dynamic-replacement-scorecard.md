@@ -2,7 +2,7 @@
 
 Status: **foundational runtime route complete**
 
-Current foundation score: **92/100**
+Current foundation score: **94/100**
 
 This scorecard tracks the path from measurable modularity to governed dynamic
 replacement. It is intentionally narrower than "self-update everything": the
@@ -43,7 +43,7 @@ Provider-visible surface remains one tool: `capability::execute`.
 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
 | Agent workflow | 10 | partial | 8 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, invoke, explain, disable, and roll back the first route through durable operations. Broader live stress workflows should now test breadth rather than unblock foundation. |
-| Cockpit/session visibility | 10 | partial | 7 | Engine Cockpit can derive route operations and replacement metadata from server-owned catalog/binding facts. Dedicated high-level route-story cards remain product polish, not a routing prerequisite. |
+| Cockpit/session visibility | 10 | partial | 9 | Engine Cockpit can derive route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, and terminal controls from server-owned catalog/binding/route facts. Dedicated high-level route-story cards remain product polish after live testing, not a routing prerequisite. |
 | Tests/stress harness | 8 | partial | 7 | Backend lifecycle tests and static invariants prove the first route. Simulator/live Tron stress tests are the next practical validation layer, not another foundation scorecard. |
 | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
 

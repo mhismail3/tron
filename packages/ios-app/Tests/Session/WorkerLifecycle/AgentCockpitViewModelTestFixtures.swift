@@ -154,6 +154,12 @@ extension AgentCockpitViewModelTests {
                 activePolicies: 0,
                 shadowRequests: 1,
                 shadowRuns: 1,
+                routeCandidates: 1,
+                activeRoutes: 1,
+                routeEvents: 2,
+                routedInvocations: 1,
+                failedClosedRoutes: 0,
+                routeRollbacks: 0,
                 rollbackAvailable: 1,
                 title: "Capability ownership visible",
                 detail: "2 operations, 1 binding request, 1 shadow request in this scope."
@@ -268,6 +274,24 @@ extension AgentCockpitViewModelTests {
                         lastUpdatedAt: "2026-06-27T12:00:00Z",
                         availableForThisOperation: true,
                         detail: "1 metadata-only shadow run recorded; candidate execution and routing stayed disabled."
+                    ),
+                    route: CapabilityCockpitRouteDTO(
+                        candidates: 1,
+                        bindings: 1,
+                        activeRoutes: 1,
+                        routeEvents: 2,
+                        routedInvocations: 1,
+                        failedClosed: 0,
+                        disabled: 0,
+                        rolledBack: 0,
+                        rollbackRecords: 0,
+                        rollbackAvailable: true,
+                        disableAvailable: true,
+                        latestState: "routed_invocation",
+                        lastUpdatedAt: "2026-06-27T12:01:00Z",
+                        state: "active",
+                        label: "Active route",
+                        detail: "A scoped dynamic replacement route is active and recent invocations used the module adapter projection."
                     ),
                     rollback: CapabilityCockpitRollbackDTO(
                         available: true,

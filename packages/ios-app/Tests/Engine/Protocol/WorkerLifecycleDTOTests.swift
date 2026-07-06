@@ -366,6 +366,12 @@ struct WorkerLifecycleDTOTests {
             "activePolicies": 0,
             "shadowRequests": 1,
             "shadowRuns": 1,
+            "routeCandidates": 1,
+            "activeRoutes": 1,
+            "routeEvents": 2,
+            "routedInvocations": 1,
+            "failedClosedRoutes": 0,
+            "routeRollbacks": 0,
             "rollbackAvailable": 1,
             "title": "Capability ownership visible",
             "detail": "1 of 181 operations returned; resource counts are bounded lower-bound facts"
@@ -456,6 +462,24 @@ struct WorkerLifecycleDTOTests {
                 "availableForThisOperation": true,
                 "detail": "1 metadata-only shadow run recorded; candidate execution and routing stayed disabled."
               },
+              "route": {
+                "candidates": 1,
+                "bindings": 1,
+                "activeRoutes": 1,
+                "routeEvents": 2,
+                "routedInvocations": 1,
+                "failedClosed": 0,
+                "disabled": 0,
+                "rolledBack": 0,
+                "rollbackRecords": 0,
+                "rollbackAvailable": true,
+                "disableAvailable": true,
+                "latestState": "routed_invocation",
+                "lastUpdatedAt": "2026-06-27T12:01:00Z",
+                "state": "active",
+                "label": "Active route",
+                "detail": "A scoped dynamic replacement route is active and recent invocations used the module adapter projection."
+              },
               "rollback": {
                 "available": true,
                 "disableAvailable": true,
@@ -510,6 +534,9 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.operations.first?.owner.metadataSourceLabel == "Capability execute registry")
         #expect(overview.operations.first?.replacement.target.label == "Governed Git adapter")
         #expect(overview.operations.first?.readiness.nextActionLabel == "Inspect decisions")
+        #expect(overview.operations.first?.route?.state == "active")
+        #expect(overview.operations.first?.route?.activeRoutes == 1)
+        #expect(overview.operations.first?.route?.routedInvocations == 1)
         #expect(overview.projection.runtimeRoutingChanged == false)
     }
 

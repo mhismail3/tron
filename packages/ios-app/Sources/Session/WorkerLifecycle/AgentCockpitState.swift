@@ -606,7 +606,7 @@ enum AgentCockpitProjection {
 
     private static func operationRow(_ operation: CapabilityCockpitOperationDTO) -> AgentCockpitOperationRow {
         let route = operation.route ?? CapabilityCockpitRouteDTO()
-        AgentCockpitOperationRow(
+        return AgentCockpitOperationRow(
             name: operation.name,
             family: operation.family,
             familyLabel: operation.familyLabel,

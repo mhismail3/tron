@@ -1240,16 +1240,17 @@ or projection shape are unsafe, routing fails closed and does not return a
 built-in success projection as a fallback.
 Cockpit Visibility adds the system-visible pure-read
 `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
-It joins registry ownership metadata with scoped binding-policy and shadow-trial
-records so iOS can show total versus returned operations, operation-list and
-bounded resource-scan completeness, redacted operation owner and replacement
-target summaries, server-derived readiness/next-action labels,
-built-in/module/locked status, replaceability, binding/shadow attempts,
-verification context, and rollback/disable/abort availability without exposing
-raw resource IDs, paths, commands, logs, grants, authority IDs, or token-like
-material, package-manager output, dependency artifacts, or module adapter
-payloads. `capability_binding` is the projection source for these facts, not
-the operation owner.
+It joins registry ownership metadata with scoped binding-policy, shadow-trial,
+and dynamic route records so iOS can show total versus returned operations,
+operation-list and bounded resource-scan completeness, redacted operation owner
+and replacement target summaries, server-derived readiness/next-action labels,
+built-in/module/locked status, replaceability, binding/shadow attempts, active
+routes, route events, routed invocations, failed-closed/disabled/rolled-back
+route state, verification context, and rollback/disable/abort availability
+without exposing raw resource IDs, paths, commands, logs, grants, authority
+IDs, or token-like material, package-manager output, dependency artifacts, or
+module adapter payloads. `capability_binding` is the projection source for
+these facts, not the operation owner.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -2851,8 +2852,8 @@ packages/ios-app/Sources/
   contextual capability-check evidence rather than top-level telemetry.
   Replacement-disclosure rows derive from
   `capability_binding::cockpit_overview`, which reshapes server-owned registry,
-  binding-policy, and shadow-trial facts without exposing raw operation
-  internals, grants, authority ids, or resource handles at top level.
+  binding-policy, shadow-trial, and dynamic route facts without exposing raw
+  operation internals, grants, authority ids, or resource handles at top level.
   Deeper worker/package/surface tabs appear only when server evidence exists.
   The sheet renders live worker lifecycle rows, capability schema/health gaps,
   package lifecycle status,
