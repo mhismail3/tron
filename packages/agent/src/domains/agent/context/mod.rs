@@ -27,7 +27,10 @@
 //! evidence.
 //! Compaction uses token pressure to decide when to compact context, and only
 //! commits when an older message window can be summarized and the result
-//! reduces the durable context.
+//! reduces the durable context. Runtime compaction also requires the loop
+//! handler to persist context-control proof before provider context is mutated;
+//! proof failure restores the pre-compaction checkpoint instead of creating an
+//! unaudited boundary.
 //! The replaceable strategy seam is limited to the summarizer implementation:
 //! context snapshots, compaction actions, epoch records, audit refs, and
 //! provider-safe projections remain server-owned record-plane custody.

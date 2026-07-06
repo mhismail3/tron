@@ -2662,16 +2662,18 @@ When context crosses the proactive trigger (default
 before the next provider call:
 
 1. **Summarize**: The loop handler invokes an explicit compaction summarizer strategy; the default primitive strategy is the deterministic keyword summarizer.
-2. **Stage**: A `compact.summary_staging` event durably records the summary before commit.
-3. **Boundary**: A `compact.boundary` event commits the cutoff and carries the summary used by server-side reconstruction.
+2. **Prove**: the handler records a context-control action and preflight snapshot, including survivor/exclusion policy refs that a replacement summarizer had to preserve or omit.
+3. **Boundary**: a `compact.boundary` event commits the cutoff only after the context-control proof is durable; the boundary carries the summary and proof refs used by server-side reconstruction.
 4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
 5. **Preserve recent**: The most recent `preserveRecentCount` turns always survive the cut.
 
 If a triggered compaction produces no durable token reduction, the server does
-not persist `compact.summary_staging` or `compact.boundary`. It still emits a
-terminal live `agent.compaction` event with `success=false` so connected
-clients can retire any in-progress compaction indicator without reconstructing
-a false boundary.
+not persist a `compact.boundary`. If the summarizer produces a reduction but
+context-control proof cannot be recorded, compaction fails closed: the runtime
+restores the pre-compaction provider context checkpoint, appends no unaudited
+boundary, and emits a terminal live `agent.compaction` event with
+`success=false` so connected clients can retire any in-progress compaction
+indicator without reconstructing a false boundary.
 
 Compaction is internal prompt-loop infrastructure. It is observable through
 session events and primitive trace records, not through public `context::*`
@@ -2679,7 +2681,9 @@ capabilities.
 The loop owns the strategy injection boundary, while context-control records own
 manual and automatic compact action audit. A future engine-owned compaction
 strategy can replace the summarizer without changing session persistence,
-context-control records, or the iOS notification surface.
+context-control records, or the iOS notification surface. Replacement
+strategies are contractually limited to summary generation; the server-owned
+proof and boundary commit remain the custody substrate.
 
 ### Context Assembly Order
 

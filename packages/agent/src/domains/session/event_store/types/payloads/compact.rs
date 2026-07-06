@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 /// non-empty value for the reconstruction view. `deny_unknown_fields`
 /// guards against drift; adding a field here means adding it at every
 /// emit site in the same commit.
+///
+/// Runtime compactions commit through context-control action and preflight
+/// snapshot resources. The action/snapshot refs remain optional at the wire
+/// type so historical/imported boundaries can still decode, but new runtime
+/// compactions fail closed before appending a boundary if those refs cannot be
+/// recorded.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompactBoundaryPayload {

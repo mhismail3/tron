@@ -39,6 +39,12 @@ pub struct ContextManager {
     turn_shape_refreshed_at_generation: Option<u64>,
 }
 
+pub(crate) struct CompactionCheckpoint {
+    messages: Vec<Message>,
+    api_context_tokens: Option<u64>,
+    extracted_data: Option<ExtractedData>,
+}
+
 impl ContextManager {
     pub fn new(mut config: ContextManagerConfig) -> Self {
         if config.working_directory.is_none() {
@@ -306,6 +312,20 @@ impl ContextManager {
         }
         self.api_context_tokens = None;
         Ok(result)
+    }
+
+    pub(crate) fn compaction_checkpoint(&self) -> CompactionCheckpoint {
+        CompactionCheckpoint {
+            messages: self.get_messages(),
+            api_context_tokens: self.api_context_tokens,
+            extracted_data: self.last_extracted_data.clone(),
+        }
+    }
+
+    pub(crate) fn restore_compaction_checkpoint(&mut self, checkpoint: CompactionCheckpoint) {
+        self.messages.set(checkpoint.messages);
+        self.api_context_tokens = checkpoint.api_context_tokens;
+        self.last_extracted_data = checkpoint.extracted_data;
     }
 
     #[must_use]

@@ -185,7 +185,7 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 | `jobs` | supervised runtime authority plus durable lifecycle evidence parity. | bounded job side effects, resource-backed job/output refs, provider-safe refs, replay/idempotency evidence, rollback/disable metadata, and no raw command/stdout/stderr/provider-visible job payloads. |
 | `web` | exact network authority plus robots/source evidence parity. | fail-closed side effects, provider-safe refs, replay/idempotency evidence, rollback/disable metadata, and no search, crawl, browser automation, login/cookie reuse, or raw HTML dumps. |
 | `subagents` | exact task/runtime/job authority plus reviewable merge evidence parity. | bounded subagent side effects, provider-safe refs, replay/idempotency evidence, rollback/disable metadata, no hidden parent-state mutation, and no inherited `agent_state`. |
-| `context_control_compact` | summarizer strategy replacement only; context audit records and survivor/exclusion policies stay server-owned. | provider-safe summary, context audit records, context policy snapshot refs, replay/idempotency evidence, rollback/disable metadata, and no raw prompt bodies, hidden chain-of-thought, secrets, local paths, commands, logs, grant IDs, or authority IDs. |
+| `context_control_compact` | summarizer strategy replacement only; context audit records, survivor/exclusion policies, and boundary commit stay server-owned. | provider-safe summary, context audit records, context policy snapshot refs, fail-closed proof before provider-context mutation, replay/idempotency evidence, rollback/disable metadata, and no raw prompt bodies, hidden chain-of-thought, secrets, local paths, commands, logs, grant IDs, or authority IDs. |
 
 ## Hard Rules
 

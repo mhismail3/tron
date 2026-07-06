@@ -188,6 +188,6 @@ cargo check --manifest-path packages/agent/Cargo.toml
 - Cockpit visibility is intentionally read-only and redacted. It reports total versus returned operations, operation-list truncation, bounded resource-scan completeness, redacted owner/target labels, and server-derived readiness; it can make modularity inspectable, but it cannot approve, activate, disable, roll back, route, or execute replacement behavior.
 - `adapter_replaceable` rows now name required authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites and hand off to the shadow replacement trial.
 - `record_plane` rows allow module producers or workflow extension while preserving server-owned custody records and provider-safe projections.
-- `context_control_compact` is the only compaction-like strategy seam in this slice: a future summarizer replacement cannot bypass context audit records, survivor/exclusion policy refs, or expose raw prompt material.
+- `context_control_compact` is the only compaction-like strategy seam in this slice: a future summarizer replacement cannot bypass context audit records, survivor/exclusion policy refs, fail-closed proof before provider-context mutation, or expose raw prompt material.
 - `module_program_execution_*` is the first module-owned execution pack and is used as the baseline template for later governed replacement.
 - Future operations must update the TSV, this scorecard, and this manifest before the invariant test will pass.
