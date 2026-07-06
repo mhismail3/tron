@@ -51,6 +51,7 @@ const DEFAULT_OPERATION_AT: &str = "2026-06-27T12:00:00Z";
 
 struct Fixture {
     deps: Deps,
+    capability_deps: crate::domains::capability::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -61,6 +62,15 @@ impl Fixture {
         let ctx = make_test_context();
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
+        };
+        let capability_deps = crate::domains::capability::Deps {
+            engine_host: ctx.engine_host.clone(),
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
+            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
+                startup_cutoff: Utc::now(),
+            },
         };
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
@@ -104,6 +114,7 @@ impl Fixture {
         .await;
         Self {
             deps,
+            capability_deps,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -275,6 +286,7 @@ impl Fixture {
 
 struct ShadowFixture {
     deps: Deps,
+    capability_deps: crate::domains::capability::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -285,6 +297,15 @@ impl ShadowFixture {
         let ctx = make_test_context();
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
+        };
+        let capability_deps = crate::domains::capability::Deps {
+            engine_host: ctx.engine_host.clone(),
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
+            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
+                startup_cutoff: Utc::now(),
+            },
         };
         let session_id = format!("{label}-session");
         let write_kinds = shadow_trial_kinds();
@@ -324,6 +345,7 @@ impl ShadowFixture {
         .await;
         Self {
             deps,
+            capability_deps,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -331,7 +353,7 @@ impl ShadowFixture {
     }
 
     async fn shadow_request(&self, key: &str) -> Value {
-        let invocation = self.write_invocation(key, shadow_request_payload(key));
+        let invocation = self.shadow_request_invocation(key);
         record_capability_shadow_trial_request_value_at(
             &self.deps,
             &invocation,
@@ -342,7 +364,30 @@ impl ShadowFixture {
         .expect("record shadow request")
     }
 
+    fn shadow_request_invocation(&self, key: &str) -> Invocation {
+        self.write_invocation(key, shadow_request_payload(key))
+    }
+
     async fn shadow_decision(&self, key: &str, request: &Value, decision: &str) -> Value {
+        let invocation = self
+            .shadow_decision_invocation(key, request, decision)
+            .await;
+        record_capability_shadow_trial_decision_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record shadow decision")
+    }
+
+    async fn shadow_decision_invocation(
+        &self,
+        key: &str,
+        request: &Value,
+        decision: &str,
+    ) -> Invocation {
         let request_id = request["capabilityShadowTrialRequestResourceId"]
             .as_str()
             .expect("shadow request id");
@@ -352,7 +397,7 @@ impl ShadowFixture {
         let grant_id = self
             .exact_write_grant(&format!("{key}-shadow-request-exact"), request_id)
             .await;
-        let invocation = invocation(
+        invocation(
             key,
             json!({
                 "capabilityShadowTrialRequestResourceId": request_id,
@@ -379,18 +424,27 @@ impl ShadowFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        );
-        record_capability_shadow_trial_decision_value_at(
+        )
+    }
+
+    async fn shadow_run(&self, key: &str, decision: &Value, outcome: &str) -> Value {
+        let invocation = self.shadow_run_invocation(key, decision, outcome).await;
+        record_capability_shadow_trial_run_value_at(
             &self.deps,
             &invocation,
             &invocation.payload,
             default_operation_at(),
         )
         .await
-        .expect("record shadow decision")
+        .expect("record shadow run")
     }
 
-    async fn shadow_run(&self, key: &str, decision: &Value, outcome: &str) -> Value {
+    async fn shadow_run_invocation(
+        &self,
+        key: &str,
+        decision: &Value,
+        outcome: &str,
+    ) -> Invocation {
         let decision_id = decision["capabilityShadowTrialDecisionResourceId"]
             .as_str()
             .expect("shadow decision id");
@@ -416,7 +470,7 @@ impl ShadowFixture {
             payload["builtInProjection"] = status_projection("clean");
             payload["candidateProjection"] = status_projection("clean");
         }
-        let invocation = invocation(
+        invocation(
             key,
             payload,
             grant_id,
@@ -427,15 +481,7 @@ impl ShadowFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        );
-        record_capability_shadow_trial_run_value_at(
-            &self.deps,
-            &invocation,
-            &invocation.payload,
-            default_operation_at(),
         )
-        .await
-        .expect("record shadow run")
     }
 
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
@@ -500,6 +546,35 @@ impl ShadowFixture {
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &self.session_id,
         )
+    }
+
+    async fn execute_capability_from_invocation(
+        &self,
+        key: &str,
+        operation: &str,
+        source: &Invocation,
+    ) -> Value {
+        let mut context = CausalContext::new(
+            ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
+            ActorKind::Agent,
+            source.causal_context.authority_grant_id.clone(),
+            TraceId::new(format!("trace-{key}")).expect("trace id"),
+        )
+        .with_session_id(self.session_id.clone())
+        .with_idempotency_key(format!("idempotency-{key}"));
+        for scope in &source.causal_context.authority_scopes {
+            context = context.with_scope(scope.clone());
+        }
+        let invocation = Invocation {
+            id: InvocationId::new(format!("invocation-{key}")).expect("invocation id"),
+            function_id: FunctionId::new("capability::execute").expect("function id"),
+            delivery_mode: DeliveryMode::Sync,
+            payload: payload_with_operation(operation, &source.payload),
+            causal_context: context,
+        };
+        crate::domains::capability::execute_value(&invocation, &self.capability_deps)
+            .await
+            .expect("execute shadow trial operation through dispatcher")
     }
 }
 
@@ -2585,6 +2660,112 @@ async fn shadow_trial_records_git_status_request_decision_run_and_evidence_witho
 }
 
 #[tokio::test]
+async fn capability_execute_dispatch_controls_shadow_trial_workflow() {
+    let fixture = ShadowFixture::new("capability-shadow-dispatch-flow").await;
+
+    let request_invocation = fixture.shadow_request_invocation("shadow-request-dispatch");
+    let request_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-shadow-request",
+            "capability_shadow_trial_request_record",
+            &request_invocation,
+        )
+        .await;
+    assert_eq!(request_result["isError"], json!(false));
+    let request = request_result["details"]["capabilityShadowTrial"].clone();
+    assert_eq!(request["status"], json!("pending_review"));
+    assert_eq!(
+        request["shadowTrialRequest"]["operation"]["name"],
+        json!("git_status")
+    );
+    assert_eq!(
+        request["shadowTrialRequest"]["candidate"]["executionMode"],
+        json!("metadata_only")
+    );
+
+    let decision_invocation = fixture
+        .shadow_decision_invocation("shadow-decision-dispatch", &request, "approved")
+        .await;
+    let decision_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-shadow-decision",
+            "capability_shadow_trial_decision_record",
+            &decision_invocation,
+        )
+        .await;
+    assert_eq!(decision_result["isError"], json!(false));
+    let decision = decision_result["details"]["capabilityShadowTrial"].clone();
+    assert_eq!(decision["status"], json!("approved_trial"));
+    assert_eq!(
+        decision["shadowTrialDecision"]["runGate"]["runAllowed"],
+        json!(true)
+    );
+
+    let run_invocation = fixture
+        .shadow_run_invocation("shadow-run-dispatch", &decision, "completed")
+        .await;
+    let run_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-shadow-run",
+            "capability_shadow_trial_run_record",
+            &run_invocation,
+        )
+        .await;
+    assert_eq!(run_result["isError"], json!(false));
+    let run = run_result["details"]["capabilityShadowTrial"].clone();
+    assert_eq!(run["status"], json!("passed"));
+    assert_eq!(
+        run["shadowTrialRun"]["run"]["candidateExecuted"],
+        json!(false)
+    );
+    assert_eq!(
+        run["shadowTrialEvidence"]["comparison"]["result"],
+        json!("equivalent")
+    );
+
+    let evidence_id = run["capabilityShadowTrialEvidenceResourceId"]
+        .as_str()
+        .expect("evidence id");
+    let evidence_version_id = run["capabilityShadowTrialEvidenceVersionId"]
+        .as_str()
+        .expect("evidence version id");
+    let evidence_grant = fixture
+        .exact_read_grant("shadow-dispatch-evidence-exact", evidence_id)
+        .await;
+    let evidence_invocation = invocation(
+        "shadow-evidence-dispatch-inspect",
+        json!({
+            "capabilityShadowTrialEvidenceResourceId": evidence_id,
+            "expectedCapabilityShadowTrialEvidenceVersionId": evidence_version_id
+        }),
+        evidence_grant,
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &fixture.session_id,
+    );
+    let inspected_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-shadow-evidence-inspect",
+            "capability_shadow_trial_evidence_inspect",
+            &evidence_invocation,
+        )
+        .await;
+    assert_eq!(inspected_result["isError"], json!(false));
+    let inspected = inspected_result["details"]["capabilityShadowTrial"].clone();
+    assert_eq!(
+        inspected["shadowTrialEvidence"]["projection"]["providerSafe"],
+        json!(true)
+    );
+    assert_eq!(
+        inspected["shadowTrialEvidence"]["shadowTrialEvidence"]["candidateProjection"]["rawPathsStored"],
+        json!(false)
+    );
+    assert_eq!(
+        inspected["shadowTrialEvidence"]["shadowTrialEvidence"]["authority"]["agentStateInherited"],
+        json!(false)
+    );
+}
+
+#[tokio::test]
 async fn shadow_trial_rejects_non_git_status_wildcards_stale_evidence_and_missing_exact_selectors()
 {
     let fixture = ShadowFixture::new("capability-shadow-guards").await;
@@ -2769,6 +2950,7 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         .collect::<Vec<_>>();
     let shadow_fixture = ShadowFixture {
         deps: fixture.deps.clone(),
+        capability_deps: fixture.capability_deps.clone(),
         session_id: fixture.session_id.clone(),
         write_grant_id: derive_grant(
             &fixture.deps,
