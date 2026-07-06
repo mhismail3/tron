@@ -11,6 +11,7 @@ struct CapabilityCockpitOverviewDTO: Codable, Equatable, Sendable {
     var operationList: CapabilityCockpitOperationListDTO
     var resourceScan: CapabilityCockpitResourceScanDTO
     var families: [CapabilityCockpitFamilyDTO]
+    var routeStories: [CapabilityCockpitRouteStoryDTO]? = nil
     var operations: [CapabilityCockpitOperationDTO]
     var scope: CapabilityCockpitScopeDTO
     var projection: CapabilityCockpitProjectionPolicyDTO
@@ -84,6 +85,19 @@ struct CapabilityCockpitFamilyDTO: Codable, Equatable, Identifiable, Sendable {
     var routeActivity: Int? = nil
 
     var id: String { family }
+}
+
+struct CapabilityCockpitRouteStoryDTO: Codable, Equatable, Identifiable, Sendable {
+    var kind: String
+    var operation: String
+    var title: String
+    var detail: String
+    var status: String
+    var evidenceCount: Int
+    var lastUpdatedAt: String?
+    var drillDownLabel: String
+
+    var id: String { "\(kind):\(operation):\(lastUpdatedAt ?? "none")" }
 }
 
 struct CapabilityCockpitOperationDTO: Codable, Equatable, Identifiable, Sendable {

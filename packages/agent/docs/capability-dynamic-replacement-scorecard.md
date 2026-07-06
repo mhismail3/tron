@@ -2,7 +2,7 @@
 
 Status: **foundational runtime route complete**
 
-Current foundation score: **99/100**
+Current foundation score: **100/100**
 
 This scorecard tracks the path from measurable modularity to governed dynamic
 replacement. It is intentionally narrower than "self-update everything": the
@@ -18,7 +18,10 @@ activations, route events, and route rollbacks through the model-facing
 `git_status` route through the same path, require accepted shadow evidence,
 verify the candidate lifecycle/runtime refs at candidate-record and invocation
 time, reject ambiguous multiple active routes in one scope, and route to a
-supervised module-runtime provider-safe adapter projection. The first route uses
+supervised module-runtime provider-safe adapter projection. Engine Cockpit now
+also projects bounded route-story cards from server-owned route facts so users
+can see what changed, what failed closed, and whether rollback/disable evidence
+exists before drilling into operation detail. The first route uses
 accepted shadow-trial evidence as the candidate projection source; it is a
 supervised projection boundary, not arbitrary live module-code execution. If the runtime envelope, lifecycle
 authorization, version refs, scope, network policy, or projection shape are not
@@ -49,7 +52,7 @@ Provider-visible surface remains one tool: `capability::execute`.
 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
 | Agent workflow | 10 | passed | 10 | Tron can inspect gaps, propose replacements, run shadow trials, inspect evidence, request approval, activate, invoke, explain, disable, and roll back the first route through durable `capability::execute` operations. Broader live stress workflows should now test model ergonomics and breadth rather than unblock foundation. |
-| Cockpit/session visibility | 10 | partial | 9 | Engine Cockpit can derive route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, and terminal controls from server-owned catalog/binding/route facts. Dedicated high-level route-story cards remain product polish after live testing, not a routing prerequisite. |
+| Cockpit/session visibility | 10 | passed | 10 | Engine Cockpit derives route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, terminal controls, and bounded high-level route-story cards from server-owned catalog/binding/route facts. Route-story cards tap through to operation detail without exposing raw IDs or local-only truth. |
 | Tests/stress harness | 8 | passed | 8 | Backend lifecycle tests, dispatcher-level `capability::execute` route coverage, and static invariants prove the first route. Simulator/live Tron stress tests are the next practical product validation layer, not another foundation scorecard. |
 | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
 
@@ -130,7 +133,7 @@ plan:
   record the shadow run, inspect shadow evidence, record candidate, approve,
 	  activate, invoke, explain, disable, and roll back.
 - Use the failures from that workflow to decide which cockpit/session briefing
-  polish is necessary for user comprehension.
+  polish is necessary beyond the current route-story cockpit layer.
 - Add the next adapter only after the first route proves operational in live
   sessions. Write operations, network adapters, package managers, dependency
   restoration, and production deployment remain out of scope until separate

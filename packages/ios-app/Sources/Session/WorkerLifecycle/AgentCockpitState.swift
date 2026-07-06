@@ -132,6 +132,18 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     }
 }
 
+struct AgentCockpitRouteStoryRow: Equatable, Identifiable, Sendable {
+    var id: String
+    var kind: String
+    var operation: String
+    var title: String
+    var detail: String
+    var status: String
+    var evidenceCount: Int
+    var lastUpdatedAt: String?
+    var drillDownLabel: String
+}
+
 struct AgentCockpitTriggerRow: Equatable, Identifiable, Sendable {
     var id: String
     var ownerWorker: String
@@ -224,6 +236,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var runtimeSurfaces: [AgentCockpitRuntimeSurface]
     var discovery: AgentCockpitDiscoveryOverview
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
+    var routeStories: [AgentCockpitRouteStoryRow]
     var moduleActivity: ModuleActivityOverviewDTO?
     var activity: [AgentCockpitActivityItem]
     var currentRevision: UInt64?
@@ -248,6 +261,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
             runtimeSurfaces: [],
             discovery: .empty,
             capabilityVisibility: nil,
+            routeStories: [],
             moduleActivity: nil,
             activity: [],
             currentRevision: nil,
@@ -331,6 +345,7 @@ enum AgentCockpitProjection {
             runtimeSurfaces: runtimeSurfaces.sorted { $0.surface.title < $1.surface.title },
             discovery: discovery,
             capabilityVisibility: capabilityVisibility,
+            routeStories: capabilityVisibility?.routeStories?.map(routeStoryRow) ?? [],
             moduleActivity: moduleActivity,
             activity: activity,
             currentRevision: snapshot.currentRevision,
@@ -674,6 +689,20 @@ enum AgentCockpitProjection {
             abortAvailable: operation.rollback.abortAvailable,
             rollbackBoundary: displayLabel(operation.rollback.boundary),
             rollbackDetail: operation.rollback.detail
+        )
+    }
+
+    private static func routeStoryRow(_ story: CapabilityCockpitRouteStoryDTO) -> AgentCockpitRouteStoryRow {
+        AgentCockpitRouteStoryRow(
+            id: story.id,
+            kind: story.kind,
+            operation: story.operation,
+            title: story.title,
+            detail: story.detail,
+            status: story.status,
+            evidenceCount: story.evidenceCount,
+            lastUpdatedAt: story.lastUpdatedAt,
+            drillDownLabel: story.drillDownLabel
         )
     }
 

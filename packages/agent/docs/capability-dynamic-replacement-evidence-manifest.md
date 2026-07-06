@@ -6,7 +6,9 @@ This manifest records the source-backed evidence for the first dynamic
 replacement slice. The slice adds governed route records and a scoped
 `git_status` route seam that resolves an active route, verifies lifecycle and
 runtime refs, projects supervised module-runtime provider-safe output, and
-fails closed when the replacement boundary is unsafe. It does not claim full
+fails closed when the replacement boundary is unsafe. Engine Cockpit also
+projects server-owned route-story cards so route changes, failures, and
+rollback availability are visible before operation-level drill-down. It does not claim full
 autonomous self-update across every operation.
 
 ## Reviewed Source Files
@@ -26,7 +28,7 @@ autonomous self-update across every operation.
 | Grant authorization | `packages/agent/src/engine/authority/grants/authorization.rs` |
 | iOS cockpit DTOs | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift` |
 | iOS cockpit state | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift` |
-| iOS cockpit UI | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
+| iOS cockpit UI | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
 | Modularity inventory | `packages/agent/docs/capability-modularity-inventory.tsv` |
 | Canonical README | `README.md` |
 
@@ -47,7 +49,7 @@ autonomous self-update across every operation.
 | Routed invocation evidence is durable. | `emit_routed_invocation_event` records a `capability_route_event` resource with route version, activation refs, trace/replay refs, idempotency, and side-effect proof. |
 | Active routes use a supervised module-runtime projection boundary. | `git_status` dispatch calls `execute_routed_git_status` when `active_route_for_git_status` returns a route; route execution calls `module_runtime::service::project_provider_safe_adapter_output`, requires exact lifecycle/runtime version refs, lifecycle runtime authorization, `networkPolicy: none`, supervised-envelope proof, accepted shadow-trial evidence as the projection source, `liveModuleCodeExecuted: false`, and a bounded `git_status` projection. |
 | Active routes fail closed instead of silently falling back. | A rejected supervised projection emits a `failed_closed` `capability_route_event` and returns an errored `git_status route failed closed` result with `moduleAdapterInvoked: true`, `builtInProjectionUsed: false`, and no built-in success projection. Stale referenced route records emit a `failed_closed` lookup event before returning the stale-record error. |
-| Cockpit visibility reflects route truth without local fabrication. | `capability_binding::cockpit_overview` now scans candidate, binding, activation, route-event, and rollback resources; projects active route count, route-event count, routed invocations, failed-closed/disabled/rolled-back state, rollback records, terminal controls, and safe state labels; and iOS renders those server-owned route facts in operation cards and drill-down details without raw ids. |
+| Cockpit visibility reflects route truth without local fabrication. | `capability_binding::cockpit_overview` now scans candidate, binding, activation, route-event, and rollback resources; projects active route count, route-event count, routed invocations, failed-closed/disabled/rolled-back state, rollback records, terminal controls, safe state labels, and bounded `routeStories`; and iOS renders those server-owned route facts in "What Changed" cards, operation cards, and drill-down details without raw ids. |
 | Minimal-engine guardrails hold. | Route records forbid package-manager, network, deploy, dependency restore, dispatch-table mutation, raw paths/commands/logs/code/file contents, raw grant IDs, raw authority IDs, and repo-managed skills. |
 
 ## Validation Commands
@@ -70,6 +72,7 @@ CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::route_candidate_rejects_fabricated_or_stale_shadow_evidence -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-cockpit-route cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::cockpit_overview -- --quiet
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AgentCockpitStateTests -only-testing:TronMobileTests/WorkerLifecycleDTOTests
 scripts/personal-info-guard.sh
 git diff --check
 git diff --cached --check

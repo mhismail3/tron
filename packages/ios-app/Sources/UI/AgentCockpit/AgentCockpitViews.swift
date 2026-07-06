@@ -9,6 +9,7 @@ struct AgentCockpitSheet: View {
 
     @State private var selectedTab: AgentCockpitTab = .capabilities
     @State private var selectedCapabilityGroup: AgentCockpitCapabilityGroupRow?
+    @State private var selectedRouteStory: AgentCockpitOperationSelection?
 
     var body: some View {
         NavigationStack {
@@ -71,6 +72,13 @@ struct AgentCockpitSheet: View {
         .sheet(item: $selectedCapabilityGroup) { group in
             CapabilityGroupDetailSheet(
                 group: group,
+                latestReport: viewModel.overview.discovery.latestReport
+            )
+        }
+        .sheet(item: $selectedRouteStory) { selection in
+            CapabilityOperationDetailSheet(
+                operation: selection.operation,
+                group: selection.group,
                 latestReport: viewModel.overview.discovery.latestReport
             )
         }
@@ -185,6 +193,24 @@ struct AgentCockpitSheet: View {
                     ? viewModel.overview.functions.count
                     : viewModel.overview.modularityOperations.count
             )
+            if !viewModel.overview.routeStories.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("What Changed")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextSecondary)
+                    ForEach(viewModel.overview.routeStories) { story in
+                        Button {
+                            selectedRouteStory = routeStorySelection(for: story)
+                        } label: {
+                            RouteStoryCard(story: story)
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .disabled(routeStorySelection(for: story) == nil)
+                        .accessibilityIdentifier("route-story-\(story.operation)")
+                    }
+                }
+            }
             if viewModel.overview.discovery.groups.isEmpty {
                 CockpitEmptyState(symbol: "questionmark.folder", title: "No capabilities", detail: "The connected engine has not published visible capabilities.")
             } else {
@@ -292,6 +318,22 @@ struct AgentCockpitSheet: View {
             connectionState: connectionState
         )
     }
+
+    private func routeStorySelection(for story: AgentCockpitRouteStoryRow) -> AgentCockpitOperationSelection? {
+        for group in viewModel.overview.discovery.groups {
+            if let operation = group.operations.first(where: { $0.name == story.operation }) {
+                return AgentCockpitOperationSelection(operation: operation, group: group)
+            }
+        }
+        return nil
+    }
+}
+
+private struct AgentCockpitOperationSelection: Identifiable {
+    let operation: AgentCockpitOperationRow
+    let group: AgentCockpitCapabilityGroupRow
+
+    var id: String { operation.id }
 }
 
 private enum AgentCockpitTab: String, CaseIterable, Identifiable {

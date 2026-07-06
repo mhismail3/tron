@@ -125,6 +125,7 @@ struct CockpitProjection {
     operation_list: OperationListProjection,
     resource_scan: ResourceScanProjection,
     families: Vec<FamilySummary>,
+    route_stories: Vec<RouteStoryProjection>,
     operations: Vec<OperationVisibility>,
     scope: ScopeProjection,
     projection: ProjectionPolicy,
@@ -204,6 +205,19 @@ struct FamilySummary {
     binding_activity: usize,
     shadow_activity: usize,
     route_activity: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RouteStoryProjection {
+    kind: &'static str,
+    operation: String,
+    title: String,
+    detail: String,
+    status: String,
+    evidence_count: usize,
+    last_updated_at: Option<String>,
+    drill_down_label: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -442,6 +456,7 @@ pub(crate) async fn cockpit_overview_value(
         .take(limit)
         .cloned()
         .collect::<Vec<_>>();
+    let route_stories = route_stories(&all_operations);
     let projection = CockpitProjection {
         schema_version: contract::COCKPIT_VISIBILITY_SCHEMA_VERSION,
         operation: "capability_binding_cockpit_overview",
@@ -454,6 +469,7 @@ pub(crate) async fn cockpit_overview_value(
         operation_list,
         resource_scan,
         families: family_summaries(&all_operations),
+        route_stories,
         operations,
         scope: ScopeProjection {
             session_scoped: invocation.causal_context.session_id.is_some(),
@@ -1456,6 +1472,139 @@ fn family_summaries(operations: &[OperationVisibility]) -> Vec<FamilySummary> {
             + operation.route.rollback_records;
     }
     families.into_values().collect()
+}
+
+fn route_stories(operations: &[OperationVisibility]) -> Vec<RouteStoryProjection> {
+    let mut stories = operations
+        .iter()
+        .filter_map(route_story)
+        .collect::<Vec<_>>();
+    stories.sort_by(|left, right| {
+        route_story_rank(left.kind)
+            .cmp(&route_story_rank(right.kind))
+            .then_with(|| {
+                right
+                    .last_updated_at
+                    .as_deref()
+                    .unwrap_or_default()
+                    .cmp(left.last_updated_at.as_deref().unwrap_or_default())
+            })
+            .then_with(|| left.operation.cmp(&right.operation))
+    });
+    stories.truncate(8);
+    stories
+}
+
+fn route_story(operation: &OperationVisibility) -> Option<RouteStoryProjection> {
+    let route = &operation.route;
+    let operation_name = operation.name.clone();
+    let evidence_count =
+        route.route_events + route.candidates + route.bindings + route.rollback_records;
+    if route.active_routes > 0 {
+        return Some(RouteStoryProjection {
+            kind: "active_route",
+            operation: operation_name.clone(),
+            title: format!("{operation_name} is using a governed replacement route"),
+            detail: format!(
+                "{} routed invocation{} recorded. Rollback {} and disable {}.",
+                route.routed_invocations,
+                plural(route.routed_invocations),
+                availability_label(route.rollback_available),
+                availability_label(route.disable_available)
+            ),
+            status: "active".to_owned(),
+            evidence_count,
+            last_updated_at: route.last_updated_at.clone(),
+            drill_down_label: "Inspect route evidence",
+        });
+    }
+    if route.failed_closed > 0 {
+        return Some(RouteStoryProjection {
+            kind: "failed_closed",
+            operation: operation_name.clone(),
+            title: format!("{operation_name} replacement failed closed"),
+            detail: format!(
+                "{} failed-closed route event{} recorded; the engine did not project a built-in success result as replacement output.",
+                route.failed_closed,
+                plural(route.failed_closed)
+            ),
+            status: "needs_review".to_owned(),
+            evidence_count,
+            last_updated_at: route.last_updated_at.clone(),
+            drill_down_label: "Inspect failure evidence",
+        });
+    }
+    if route.rolled_back > 0 || route.rollback_records > 0 {
+        return Some(RouteStoryProjection {
+            kind: "rolled_back",
+            operation: operation_name.clone(),
+            title: format!("{operation_name} returned to built-in ownership"),
+            detail: format!(
+                "{} rollback record{} or event{} prove built-in ownership was restored.",
+                route.rollback_records.max(route.rolled_back),
+                plural(route.rollback_records.max(route.rolled_back)),
+                plural(route.rollback_records.max(route.rolled_back))
+            ),
+            status: "restored".to_owned(),
+            evidence_count,
+            last_updated_at: route.last_updated_at.clone(),
+            drill_down_label: "Inspect rollback evidence",
+        });
+    }
+    if route.disabled > 0 {
+        return Some(RouteStoryProjection {
+            kind: "disabled",
+            operation: operation_name.clone(),
+            title: format!("{operation_name} replacement route was disabled"),
+            detail: format!(
+                "{} disable event{} recorded; no active replacement route is selected.",
+                route.disabled,
+                plural(route.disabled)
+            ),
+            status: "disabled".to_owned(),
+            evidence_count,
+            last_updated_at: route.last_updated_at.clone(),
+            drill_down_label: "Inspect route history",
+        });
+    }
+    if route.candidates > 0 || route.bindings > 0 {
+        return Some(RouteStoryProjection {
+            kind: "candidate",
+            operation: operation_name.clone(),
+            title: format!("{operation_name} has a replacement candidate"),
+            detail: format!(
+                "{} candidate{} and {} binding{} exist; runtime routing has not changed.",
+                route.candidates,
+                plural(route.candidates),
+                route.bindings,
+                plural(route.bindings)
+            ),
+            status: "candidate".to_owned(),
+            evidence_count,
+            last_updated_at: route.last_updated_at.clone(),
+            drill_down_label: "Inspect candidate evidence",
+        });
+    }
+    None
+}
+
+fn route_story_rank(kind: &str) -> usize {
+    match kind {
+        "failed_closed" => 0,
+        "active_route" => 1,
+        "candidate" => 2,
+        "disabled" => 3,
+        "rolled_back" => 4,
+        _ => 5,
+    }
+}
+
+fn availability_label(available: bool) -> &'static str {
+    if available {
+        "available"
+    } else {
+        "not published"
+    }
 }
 
 fn readable_scopes(invocation: &Invocation) -> Vec<EngineResourceScope> {

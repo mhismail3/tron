@@ -113,6 +113,66 @@ struct WorkerTriggerExplanationCard: View {
     }
 }
 
+struct RouteStoryCard: View {
+    let story: AgentCockpitRouteStoryRow
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(story.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(story.detail)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(3)
+                HStack(spacing: 6) {
+                    Text("\(story.evidenceCount) evidence")
+                    if let checked = AgentCockpitPresentation.safeTimestamp(story.lastUpdatedAt) {
+                        Text("·")
+                        Text(checked)
+                    }
+                    Text("·")
+                    Text(story.drillDownLabel)
+                }
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sectionFill(tint, cornerRadius: 12, subtle: true, interactive: true)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var systemImage: String {
+        switch story.kind {
+        case "active_route": return "arrow.triangle.2.circlepath"
+        case "failed_closed": return "exclamationmark.octagon"
+        case "rolled_back": return "arrow.uturn.backward.circle"
+        case "disabled": return "pause.circle"
+        case "candidate": return "doc.badge.gearshape"
+        default: return "point.3.connected.trianglepath.dotted"
+        }
+    }
+
+    private var tint: Color {
+        switch story.status {
+        case "active": return .tronSuccess
+        case "needs_review": return .tronWarning
+        case "restored", "disabled": return .tronInfo
+        default: return .tronEmerald
+        }
+    }
+}
+
 struct CapabilityGroupCard: View {
     let group: AgentCockpitCapabilityGroupRow
 

@@ -3651,6 +3651,22 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     assert_eq!(active_overview["summary"]["activeRoutes"], json!(1));
     assert_eq!(active_overview["summary"]["routedInvocations"], json!(1));
     assert_eq!(active_overview["summary"]["routeEvents"], json!(2));
+    assert_eq!(
+        active_overview["routeStories"][0]["kind"],
+        json!("active_route")
+    );
+    assert_eq!(
+        active_overview["routeStories"][0]["operation"],
+        json!("git_status")
+    );
+    assert_eq!(
+        active_overview["routeStories"][0]["status"],
+        json!("active")
+    );
+    assert_eq!(
+        active_overview["routeStories"][0]["drillDownLabel"],
+        json!("Inspect route evidence")
+    );
     let active_git_status = operation_projection(&active_overview, "git_status");
     assert_eq!(
         active_git_status["readiness"]["state"],
@@ -3676,6 +3692,10 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     )
     .await
     .expect("disabled route cockpit overview");
+    assert_eq!(
+        disabled_overview["routeStories"][0]["kind"],
+        json!("disabled")
+    );
     let disabled_git_status = operation_projection(&disabled_overview, "git_status");
     assert_eq!(disabled_git_status["route"]["state"], json!("disabled"));
     assert_eq!(disabled_git_status["route"]["activeRoutes"], json!(0));
@@ -3693,6 +3713,10 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     )
     .await
     .expect("rolled back route cockpit overview");
+    assert_eq!(
+        rolled_back_overview["routeStories"][0]["kind"],
+        json!("rolled_back")
+    );
     let rolled_back_git_status = operation_projection(&rolled_back_overview, "git_status");
     assert_eq!(
         rolled_back_git_status["route"]["state"],
@@ -3722,6 +3746,7 @@ async fn cockpit_overview_projects_dynamic_route_state_and_terminal_controls_wit
     assert_eq!(other_git_status["route"]["candidates"], json!(0));
     assert_eq!(other_git_status["route"]["activeRoutes"], json!(0));
     assert_eq!(other_git_status["route"]["routeEvents"], json!(0));
+    assert_eq!(other_scope["routeStories"], json!([]));
 }
 
 #[tokio::test]

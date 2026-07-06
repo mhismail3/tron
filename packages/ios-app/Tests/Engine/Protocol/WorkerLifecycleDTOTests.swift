@@ -399,6 +399,18 @@ struct WorkerLifecycleDTOTests {
             "detail": "1 of 14 kind/scope scans reached the per-scan limit of 100; binding and shadow counts are lower-bound facts."
           },
           "families": [],
+          "routeStories": [
+            {
+              "kind": "active_route",
+              "operation": "git_status",
+              "title": "git_status is using a governed replacement route",
+              "detail": "1 routed invocation recorded. Rollback available and disable available.",
+              "status": "active",
+              "evidenceCount": 4,
+              "lastUpdatedAt": "2026-06-27T12:01:00Z",
+              "drillDownLabel": "Inspect route evidence"
+            }
+          ],
           "operations": [
             {
               "name": "git_status",
@@ -537,6 +549,9 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.operations.first?.route?.state == "active")
         #expect(overview.operations.first?.route?.activeRoutes == 1)
         #expect(overview.operations.first?.route?.routedInvocations == 1)
+        #expect(overview.routeStories?.first?.operation == "git_status")
+        #expect(overview.routeStories?.first?.kind == "active_route")
+        #expect(overview.routeStories?.first?.drillDownLabel == "Inspect route evidence")
         #expect(overview.projection.runtimeRoutingChanged == false)
     }
 

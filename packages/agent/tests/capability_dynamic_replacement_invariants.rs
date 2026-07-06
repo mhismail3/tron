@@ -124,9 +124,11 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     for required in [
-        "Current foundation score: **99/100**",
+        "Current foundation score: **100/100**",
         "Provider-visible surface remains one tool: `capability::execute`",
         "supervised module-runtime provider-safe adapter projection",
+        "route-story cards",
+        "routeStories",
         "active_route_module_adapter_projection",
         "accepted shadow-trial evidence",
         "not arbitrary live module-code execution",
@@ -171,6 +173,8 @@ fn dynamic_replacement_cockpit_projects_route_state() {
     );
     let ios_state =
         read_repo_file("packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift");
+    let ios_views =
+        read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift");
     let ios_detail = read_repo_file(
         "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift",
     );
@@ -180,6 +184,8 @@ fn dynamic_replacement_cockpit_projects_route_state() {
         "CAPABILITY_ROUTE_EVENT_KIND",
         "CAPABILITY_ROUTE_ROLLBACK_KIND",
         "activeRoutes",
+        "routeStories",
+        "What Changed",
         "routedInvocations",
         "failedClosed",
         "rolledBack",
@@ -191,6 +197,7 @@ fn dynamic_replacement_cockpit_projects_route_state() {
             cockpit.contains(required)
                 || ios_dto.contains(required)
                 || ios_state.contains(required)
+                || ios_views.contains(required)
                 || ios_detail.contains(required),
             "dynamic replacement cockpit projection missing route marker {required}"
         );

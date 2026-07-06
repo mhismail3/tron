@@ -104,6 +104,11 @@ struct AgentCockpitStateTests {
         #expect(git?.rollbackAvailable == true)
         #expect(git?.ownerLabel.contains("domains::") == false)
         #expect(git?.metadataSourceLabel.contains("domains::") == false)
+        #expect(overview.routeStories.count == 1)
+        #expect(overview.routeStories.first?.operation == "git_status")
+        #expect(overview.routeStories.first?.kind == "active_route")
+        #expect(overview.routeStories.first?.title == "git_status is using a governed replacement route")
+        #expect(overview.routeStories.first?.drillDownLabel == "Inspect route evidence")
 
         let observe = overview.modularityOperations.first { $0.name == "observe" }
         #expect(observe?.isLocked == true)

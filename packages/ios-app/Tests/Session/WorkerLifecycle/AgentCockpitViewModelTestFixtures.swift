@@ -212,6 +212,18 @@ extension AgentCockpitViewModelTests {
                     shadowActivity: 0
                 )
             ],
+            routeStories: [
+                CapabilityCockpitRouteStoryDTO(
+                    kind: "active_route",
+                    operation: "git_status",
+                    title: "git_status is using a governed replacement route",
+                    detail: "1 routed invocation recorded. Rollback available and disable available.",
+                    status: "active",
+                    evidenceCount: 4,
+                    lastUpdatedAt: "2026-06-27T12:01:00Z",
+                    drillDownLabel: "Inspect route evidence"
+                )
+            ],
             operations: [
                 CapabilityCockpitOperationDTO(
                     name: "git_status",

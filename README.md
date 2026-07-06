@@ -1249,7 +1249,8 @@ operation-list and bounded resource-scan completeness, redacted operation owner
 and replacement target summaries, server-derived readiness/next-action labels,
 built-in/module/locked status, replaceability, binding/shadow attempts, active
 routes, route events, routed invocations, failed-closed/disabled/rolled-back
-route state, verification context, and rollback/disable/abort availability
+route state, bounded route-story cards for "What Changed" cockpit summaries,
+verification context, and rollback/disable/abort availability
 without exposing raw resource IDs, paths, commands, logs, grants, authority
 IDs, or token-like material, package-manager output, dependency artifacts, or
 module adapter payloads. `capability_binding` is the projection source for
@@ -2855,8 +2856,9 @@ packages/ios-app/Sources/
   contextual capability-check evidence rather than top-level telemetry.
   Replacement-disclosure rows derive from
   `capability_binding::cockpit_overview`, which reshapes server-owned registry,
-  binding-policy, shadow-trial, and dynamic route facts without exposing raw
-  operation internals, grants, authority ids, or resource handles at top level.
+  binding-policy, shadow-trial, and dynamic route facts into route-story cards,
+  operation summaries, and drill-down details without exposing raw operation
+  internals, grants, authority ids, or resource handles at top level.
   Deeper worker/package/surface tabs appear only when server evidence exists.
   The sheet renders live worker lifecycle rows, capability schema/health gaps,
   package lifecycle status,
