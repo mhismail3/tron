@@ -2,7 +2,7 @@
 
 Status: **foundational runtime route complete**
 
-Current foundation score: **95/100**
+Current foundation score: **96/100**
 
 This scorecard tracks the path from measurable modularity to governed dynamic
 replacement. It is intentionally narrower than "self-update everything": the
@@ -13,9 +13,10 @@ custody, redaction, trace/audit, module governance, route decisions, and
 fail-closed routing.
 
 The current implementation can record candidates, route bindings, route
-activations, route events, and route rollbacks. The dispatcher can resolve an
-active scoped `git_status` route through the model-facing `capability::execute`
-path, require accepted shadow evidence, verify the
+activations, route events, and route rollbacks through the model-facing
+`capability::execute` path. The dispatcher can resolve an active scoped
+`git_status` route through the same path, require accepted shadow evidence,
+verify the
 candidate lifecycle/runtime refs, and route to a supervised module-runtime provider-safe adapter projection. If the runtime envelope, lifecycle
 authorization, version refs, scope, network policy, or projection shape are not
 safe, routing fails closed and does not fall back to a built-in success result.
@@ -43,7 +44,7 @@ Provider-visible surface remains one tool: `capability::execute`.
 | Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
-| Agent workflow | 10 | partial | 8 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, invoke, explain, disable, and roll back the first route through durable operations. Broader live stress workflows should now test breadth rather than unblock foundation. |
+| Agent workflow | 10 | partial | 9 | Tron can inspect gaps, propose replacements, run trials, request approval, activate, invoke, explain, disable, and roll back the first route through durable `capability::execute` operations. Broader live stress workflows should now test model ergonomics and breadth rather than unblock foundation. |
 | Cockpit/session visibility | 10 | partial | 9 | Engine Cockpit can derive route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, and terminal controls from server-owned catalog/binding/route facts. Dedicated high-level route-story cards remain product polish after live testing, not a routing prerequisite. |
 | Tests/stress harness | 8 | passed | 8 | Backend lifecycle tests, dispatcher-level `capability::execute` route coverage, and static invariants prove the first route. Simulator/live Tron stress tests are the next practical product validation layer, not another foundation scorecard. |
 | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |

@@ -124,10 +124,11 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     for required in [
-        "Current foundation score: **95/100**",
+        "Current foundation score: **96/100**",
         "Provider-visible surface remains one tool: `capability::execute`",
         "supervised module-runtime provider-safe adapter projection",
         "active_route_module_adapter_projection",
+        "capability_execute_dispatch_controls_full_route_lifecycle",
         "capability_execute_dispatch_routes_git_status_through_active_replacement",
         "packages/agent/docs/capability-dynamic-replacement-inventory.tsv",
         "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md",
@@ -141,11 +142,15 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     let capability_binding_tests = read_repo_file(CAPABILITY_BINDING_TESTS_PATH);
-    assert!(
-        capability_binding_tests
-            .contains("capability_execute_dispatch_routes_git_status_through_active_replacement"),
-        "dynamic replacement proof must include dispatcher-level capability::execute coverage"
-    );
+    for required_test in [
+        "capability_execute_dispatch_controls_full_route_lifecycle",
+        "capability_execute_dispatch_routes_git_status_through_active_replacement",
+    ] {
+        assert!(
+            capability_binding_tests.contains(required_test),
+            "dynamic replacement proof must include dispatcher-level capability::execute coverage: {required_test}"
+        );
+    }
 }
 
 #[test]

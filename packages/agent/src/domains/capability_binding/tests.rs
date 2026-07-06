@@ -802,6 +802,18 @@ impl RouteFixture {
     }
 
     async fn binding(&self, key: &str, candidate: &Value) -> Value {
+        let invocation = self.binding_invocation(key, candidate).await;
+        record_route_binding_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record route binding")
+    }
+
+    async fn binding_invocation(&self, key: &str, candidate: &Value) -> Invocation {
         let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
             .as_str()
             .expect("candidate id");
@@ -828,7 +840,7 @@ impl RouteFixture {
                 &[candidate_id, shadow_evidence_id],
             )
             .await;
-        let invocation = invocation(
+        invocation(
             key,
             json!({
                 "capabilityReplacementCandidateResourceId": candidate_id,
@@ -850,18 +862,22 @@ impl RouteFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        );
-        record_route_binding_value_at(
+        )
+    }
+
+    async fn activation(&self, key: &str, binding: &Value) -> Value {
+        let invocation = self.activation_invocation(key, binding).await;
+        activate_route_value_at(
             &self.deps,
             &invocation,
             &invocation.payload,
             default_operation_at(),
         )
         .await
-        .expect("record route binding")
+        .expect("activate route")
     }
 
-    async fn activation(&self, key: &str, binding: &Value) -> Value {
+    async fn activation_invocation(&self, key: &str, binding: &Value) -> Invocation {
         let binding_id = binding["capabilityRouteBindingResourceId"]
             .as_str()
             .expect("binding id");
@@ -871,7 +887,7 @@ impl RouteFixture {
         let grant_id = self
             .exact_write_grant(&format!("{key}-binding-exact"), &[binding_id])
             .await;
-        let invocation = invocation(
+        invocation(
             key,
             json!({
                 "capabilityRouteBindingResourceId": binding_id,
@@ -897,18 +913,27 @@ impl RouteFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        );
-        activate_route_value_at(
+        )
+    }
+
+    async fn disable(&self, key: &str, binding: &Value, activation: &Value) -> Value {
+        let invocation = self.disable_invocation(key, binding, activation).await;
+        disable_route_value_at(
             &self.deps,
             &invocation,
             &invocation.payload,
             default_operation_at(),
         )
         .await
-        .expect("activate route")
+        .expect("disable route")
     }
 
-    async fn disable(&self, key: &str, binding: &Value, activation: &Value) -> Value {
+    async fn disable_invocation(
+        &self,
+        key: &str,
+        binding: &Value,
+        activation: &Value,
+    ) -> Invocation {
         let binding_id = binding["capabilityRouteBindingResourceId"]
             .as_str()
             .expect("binding id");
@@ -927,7 +952,7 @@ impl RouteFixture {
                 &[binding_id, activation_id],
             )
             .await;
-        let invocation = invocation(
+        invocation(
             key,
             json!({
                 "capabilityRouteBindingResourceId": binding_id,
@@ -950,18 +975,27 @@ impl RouteFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        );
-        disable_route_value_at(
+        )
+    }
+
+    async fn rollback(&self, key: &str, binding: &Value, activation: &Value) -> Value {
+        let invocation = self.rollback_invocation(key, binding, activation).await;
+        rollback_route_value_at(
             &self.deps,
             &invocation,
             &invocation.payload,
             default_operation_at(),
         )
         .await
-        .expect("disable route")
+        .expect("rollback route")
     }
 
-    async fn rollback(&self, key: &str, binding: &Value, activation: &Value) -> Value {
+    async fn rollback_invocation(
+        &self,
+        key: &str,
+        binding: &Value,
+        activation: &Value,
+    ) -> Invocation {
         let binding_id = binding["capabilityRouteBindingResourceId"]
             .as_str()
             .expect("binding id");
@@ -980,7 +1014,7 @@ impl RouteFixture {
                 &[binding_id, activation_id],
             )
             .await;
-        let invocation = invocation(
+        invocation(
             key,
             json!({
                 "capabilityRouteBindingResourceId": binding_id,
@@ -1004,15 +1038,7 @@ impl RouteFixture {
                 RESOURCE_WRITE_SCOPE,
             ],
             &self.session_id,
-        );
-        rollback_route_value_at(
-            &self.deps,
-            &invocation,
-            &invocation.payload,
-            default_operation_at(),
         )
-        .await
-        .expect("rollback route")
     }
 
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
@@ -1149,16 +1175,43 @@ impl RouteFixture {
     }
 
     async fn execute_capability(&self, key: &str, payload: Value) -> Value {
+        let scopes = vec![READ_SCOPE.to_owned(), RESOURCE_READ_SCOPE.to_owned()];
+        self.execute_capability_with_grant(key, payload, self.read_grant_id.clone(), &scopes)
+            .await
+    }
+
+    async fn execute_capability_from_invocation(
+        &self,
+        key: &str,
+        operation: &str,
+        source: &Invocation,
+    ) -> Value {
+        self.execute_capability_with_grant(
+            key,
+            payload_with_operation(operation, &source.payload),
+            source.causal_context.authority_grant_id.clone(),
+            &source.causal_context.authority_scopes,
+        )
+        .await
+    }
+
+    async fn execute_capability_with_grant(
+        &self,
+        key: &str,
+        payload: Value,
+        grant_id: AuthorityGrantId,
+        scopes: &[String],
+    ) -> Value {
         let mut context = CausalContext::new(
             ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
             ActorKind::Agent,
-            self.read_grant_id.clone(),
+            grant_id,
             TraceId::new(format!("trace-{key}")).expect("trace id"),
         )
         .with_session_id(self.session_id.clone())
         .with_idempotency_key(format!("idempotency-{key}"));
-        for scope in [READ_SCOPE, RESOURCE_READ_SCOPE] {
-            context = context.with_scope(scope.to_owned());
+        for scope in scopes {
+            context = context.with_scope(scope.clone());
         }
         let invocation = Invocation {
             id: InvocationId::new(format!("invocation-{key}")).expect("invocation id"),
@@ -1826,6 +1879,113 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
     assert!(
         !contains_json_key(routed_details, "idempotencyFingerprint"),
         "dispatcher-routed provider details must not expose idempotency fingerprints"
+    );
+}
+
+#[tokio::test]
+async fn capability_execute_dispatch_controls_full_route_lifecycle() {
+    let fixture = RouteFixture::new("capability-route-lifecycle-dispatch").await;
+
+    let candidate_invocation = fixture
+        .candidate_invocation("candidate-dispatch-flow")
+        .await;
+    let candidate_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-candidate-record",
+            "capability_replacement_candidate_record",
+            &candidate_invocation,
+        )
+        .await;
+    assert_eq!(candidate_result["isError"], json!(false));
+    let candidate = candidate_result["details"]["capabilityRoute"].clone();
+    assert_eq!(candidate["status"], json!("validated"));
+
+    let binding_invocation = fixture
+        .binding_invocation("binding-dispatch-flow", &candidate)
+        .await;
+    let binding_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-binding-record",
+            "capability_route_binding_record",
+            &binding_invocation,
+        )
+        .await;
+    assert_eq!(binding_result["isError"], json!(false));
+    let binding = binding_result["details"]["capabilityRoute"].clone();
+    assert_eq!(binding["status"], json!("ready"));
+
+    let activation_invocation = fixture
+        .activation_invocation("activation-dispatch-flow", &binding)
+        .await;
+    let activation_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-route-activate",
+            "capability_route_activate",
+            &activation_invocation,
+        )
+        .await;
+    assert_eq!(activation_result["isError"], json!(false));
+    let activation = activation_result["details"]["capabilityRoute"].clone();
+    assert_eq!(activation["status"], json!("active"));
+    assert!(
+        active_route_for_git_status(
+            &fixture.deps,
+            &fixture.read_invocation("dispatch-flow-active-route", json!({}))
+        )
+        .await
+        .expect("route lookup after dispatched activation")
+        .is_some()
+    );
+
+    let disable_invocation = fixture
+        .disable_invocation("disable-dispatch-flow", &binding, &activation)
+        .await;
+    let disabled_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-route-disable",
+            "capability_route_disable",
+            &disable_invocation,
+        )
+        .await;
+    assert_eq!(disabled_result["isError"], json!(false));
+    let disabled = disabled_result["details"]["capabilityRoute"].clone();
+    assert_eq!(disabled["status"], json!("disabled"));
+    assert_eq!(disabled["routeEvent"]["event"]["kind"], json!("disabled"));
+    assert!(
+        active_route_for_git_status(
+            &fixture.deps,
+            &fixture.read_invocation("dispatch-flow-disabled-route", json!({}))
+        )
+        .await
+        .expect("route lookup after dispatched disable")
+        .is_none()
+    );
+
+    let rollback_invocation = fixture
+        .rollback_invocation("rollback-dispatch-flow", &binding, &activation)
+        .await;
+    let rollback_result = fixture
+        .execute_capability_from_invocation(
+            "dispatch-route-rollback",
+            "capability_route_rollback",
+            &rollback_invocation,
+        )
+        .await;
+    assert_eq!(rollback_result["isError"], json!(false));
+    let rollback = rollback_result["details"]["capabilityRoute"].clone();
+    assert_eq!(rollback["status"], json!("rolled_back"));
+    assert_eq!(
+        rollback["routeRollback"]["rollback"]["builtInRestored"],
+        json!(true)
+    );
+    assert!(
+        active_route_for_git_status(
+            &fixture.deps,
+            &fixture.read_invocation("dispatch-flow-rolled-back-route", json!({}))
+        )
+        .await
+        .expect("route lookup after dispatched rollback")
+        .is_none()
     );
 }
 
@@ -3890,6 +4050,15 @@ fn invocation(
         payload,
         causal_context: context,
     }
+}
+
+fn payload_with_operation(operation: &str, payload: &Value) -> Value {
+    let mut payload = payload
+        .as_object()
+        .expect("execute operation payload must be an object")
+        .clone();
+    payload.insert("operation".to_owned(), json!(operation));
+    Value::Object(payload)
 }
 
 fn default_operation_at() -> DateTime<Utc> {
