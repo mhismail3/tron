@@ -505,6 +505,7 @@ impl ShadowFixture {
 
 struct RouteFixture {
     deps: Deps,
+    capability_deps: crate::domains::capability::Deps,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -515,6 +516,15 @@ impl RouteFixture {
         let ctx = make_test_context();
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
+        };
+        let capability_deps = crate::domains::capability::Deps {
+            engine_host: ctx.engine_host.clone(),
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
+            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
+                startup_cutoff: Utc::now(),
+            },
         };
         let session_id = format!("{label}-session");
         let write_kinds = route_kinds();
@@ -554,6 +564,7 @@ impl RouteFixture {
         .await;
         Self {
             deps,
+            capability_deps,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -1135,6 +1146,30 @@ impl RouteFixture {
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &self.session_id,
         )
+    }
+
+    async fn execute_capability(&self, key: &str, payload: Value) -> Value {
+        let mut context = CausalContext::new(
+            ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
+            ActorKind::Agent,
+            self.read_grant_id.clone(),
+            TraceId::new(format!("trace-{key}")).expect("trace id"),
+        )
+        .with_session_id(self.session_id.clone())
+        .with_idempotency_key(format!("idempotency-{key}"));
+        for scope in [READ_SCOPE, RESOURCE_READ_SCOPE] {
+            context = context.with_scope(scope.to_owned());
+        }
+        let invocation = Invocation {
+            id: InvocationId::new(format!("invocation-{key}")).expect("invocation id"),
+            function_id: FunctionId::new("capability::execute").expect("function id"),
+            delivery_mode: DeliveryMode::Sync,
+            payload,
+            causal_context: context,
+        };
+        crate::domains::capability::execute_value(&invocation, &self.capability_deps)
+            .await
+            .expect("execute capability operation through dispatcher")
     }
 }
 
@@ -1724,6 +1759,73 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .await
         .expect("route lookup after rollback")
         .is_none()
+    );
+}
+
+#[tokio::test]
+async fn capability_execute_dispatch_routes_git_status_through_active_replacement() {
+    let fixture = RouteFixture::new("capability-route-execute-dispatch").await;
+
+    let candidate_invocation = fixture.candidate_invocation("candidate-dispatch").await;
+    let candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record dispatch route candidate");
+    let binding = fixture.binding("binding-dispatch", &candidate).await;
+    let activation = fixture.activation("activation-dispatch", &binding).await;
+    assert_eq!(activation["status"], json!("active"));
+
+    let executed = fixture
+        .execute_capability(
+            "dispatch-git-status",
+            json!({
+                "operation": "git_status"
+            }),
+        )
+        .await;
+    assert_eq!(executed["isError"], json!(false));
+    let routed_details = &executed["details"];
+    assert_eq!(
+        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
+        json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["builtInProjectionUsed"],
+        json!(false)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeState"],
+        json!("active_route_module_adapter_projection")
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
+        json!(true)
+    );
+    assert_eq!(
+        routed_details["dynamicReplacement"]["routeEvent"]["event"]["kind"],
+        json!("routed_invocation")
+    );
+    assert_eq!(routed_details["status"], json!("clean"));
+    assert_eq!(routed_details["git"]["worktreeState"], json!("clean"));
+    assert!(
+        !contains_json_key(routed_details, "moduleRuntimeResourceId"),
+        "dispatcher-routed provider details must not expose raw runtime resource IDs"
+    );
+    assert!(
+        !contains_json_key(routed_details, "resourceId"),
+        "dispatcher-routed provider details must not expose raw resource IDs"
+    );
+    assert!(
+        !contains_json_key(routed_details, "versionId"),
+        "dispatcher-routed provider details must not expose raw version IDs"
+    );
+    assert!(
+        !contains_json_key(routed_details, "idempotencyFingerprint"),
+        "dispatcher-routed provider details must not expose idempotency fingerprints"
     );
 }
 

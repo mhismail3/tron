@@ -20,6 +20,8 @@ const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs
 const VALIDATION_PATH: &str = "packages/agent/src/domains/capability_binding/validation.rs";
 const COCKPIT_VISIBILITY_PATH: &str =
     "packages/agent/src/domains/capability_binding/cockpit_visibility.rs";
+const CAPABILITY_BINDING_TESTS_PATH: &str =
+    "packages/agent/src/domains/capability_binding/tests.rs";
 const RESOURCE_DEFINITIONS_PATH: &str =
     "packages/agent/src/engine/durability/resources/capability_binding_definitions.rs";
 const README_PATH: &str = "README.md";
@@ -122,10 +124,11 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     for required in [
-        "Current foundation score: **94/100**",
+        "Current foundation score: **95/100**",
         "Provider-visible surface remains one tool: `capability::execute`",
         "supervised module-runtime provider-safe adapter projection",
         "active_route_module_adapter_projection",
+        "capability_execute_dispatch_routes_git_status_through_active_replacement",
         "packages/agent/docs/capability-dynamic-replacement-inventory.tsv",
         "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md",
     ] {
@@ -136,6 +139,13 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
             "dynamic replacement artifacts missing required text: {required}"
         );
     }
+
+    let capability_binding_tests = read_repo_file(CAPABILITY_BINDING_TESTS_PATH);
+    assert!(
+        capability_binding_tests
+            .contains("capability_execute_dispatch_routes_git_status_through_active_replacement"),
+        "dynamic replacement proof must include dispatcher-level capability::execute coverage"
+    );
 }
 
 #[test]
