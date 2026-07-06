@@ -166,6 +166,7 @@ struct CapabilityGroupCard: View {
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: true)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func compactMetric(_ title: String, _ value: Int) -> some View {
@@ -336,7 +337,9 @@ private struct CapabilityOperationCard: View {
             Spacer()
         }
         .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(tint, cornerRadius: 10, subtle: true, interactive: true)
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var activitySummary: String {
@@ -387,7 +390,9 @@ private struct CapabilityFunctionCard: View {
             Spacer()
         }
         .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .sectionFill(function.schemaComplete ? .tronEmerald : .tronWarning, cornerRadius: 10, subtle: true, interactive: true)
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var operationName: String {

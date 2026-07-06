@@ -178,6 +178,57 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.groups.first?.missingSchemaCount == 1)
     }
 
+    @Test("Projection treats server snake-case schema evidence as complete")
+    func projectionTreatsServerSnakeCaseSchemaEvidenceAsComplete() {
+        let snapshot = CatalogWatchSnapshotDTO(
+            changes: [],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "context_control::snapshot",
+                        "owner_worker": "context_control",
+                        "description": "Read a provider-safe context snapshot",
+                        "visibility": "System",
+                        "effect_class": "PureRead",
+                        "risk_level": "Low",
+                        "health": "Healthy",
+                        "request_schema": ["type": "object"],
+                        "response_schema": ["type": "object"],
+                        "opaque_response": false
+                    ])
+                ],
+                workers: [],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 4,
+            nextRevision: 5,
+            hasMore: false
+        )
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: snapshot,
+            resources: [],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:4:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            connectionState: .connected
+        )
+
+        #expect(overview.status.kind == .idle)
+        #expect(overview.discovery.title == "Verified")
+        #expect(overview.discovery.missingSchemaCount == 0)
+        #expect(overview.discovery.groups.first?.missingSchemaCount == 0)
+        #expect(overview.functions.first?.ownerWorker == "context_control")
+        #expect(overview.functions.first?.effectClass == "PureRead")
+        #expect(overview.functions.first?.riskLevel == "Low")
+        #expect(overview.functions.first?.schemaComplete == true)
+    }
+
     @Test("Projection explains built-in operations without workers or triggers")
     func projectionExplainsBuiltInOperationsWithoutWorkersOrTriggers() {
         let snapshot = CatalogWatchSnapshotDTO(

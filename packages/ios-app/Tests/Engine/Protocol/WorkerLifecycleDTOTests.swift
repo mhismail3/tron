@@ -102,6 +102,99 @@ struct WorkerLifecycleDTOTests {
         #expect(triggerTypeResult?.issues.isEmpty == true)
     }
 
+    @Test("Catalog snapshot decodes server snake-case catalog definitions")
+    func catalogSnapshotDecodesServerSnakeCaseDefinitions() throws {
+        let json = """
+        {
+          "snapshot": {
+            "workers": [
+              {
+                "id": "worker-alpha",
+                "revision": 3,
+                "kind": "External",
+                "lifecycle": "Ready",
+                "owner_actor": "system",
+                "authority_grant": "engine-transport",
+                "namespace_claims": ["alpha"],
+                "visibility": "System",
+                "provenance": {"origin": "test"}
+              }
+            ],
+            "functions": [
+              {
+                "id": "alpha::run",
+                "revision": 4,
+                "owner_worker": "worker-alpha",
+                "description": "Run alpha",
+                "tags": ["alpha", "run"],
+                "visibility": "Agent",
+                "effect_class": "ExternalSideEffect",
+                "risk_level": "High",
+                "health": "Healthy",
+                "required_authority": {"scopes": ["alpha.run"]},
+                "opaque_response": false,
+                "request_schema": {"type": "object"},
+                "response_schema": {"type": "object"},
+                "metadata": {"ui": "generated"}
+              }
+            ],
+            "triggers": [
+              {
+                "id": "alpha-trigger",
+                "revision": 5,
+                "owner_worker": "worker-alpha",
+                "trigger_type": "cron",
+                "target_function": "alpha::run",
+                "delivery_mode": "Async",
+                "authority_grant": "engine-transport",
+                "visibility": "System",
+                "config": {"schedule": "* * * * *"}
+              }
+            ],
+            "triggerTypes": [
+              {
+                "id": "cron",
+                "owner_worker": "worker-alpha",
+                "description": "Cron schedule",
+                "allowed_delivery_modes": ["Async"],
+                "visibility": "System",
+                "config_schema": {"type": "object"}
+              }
+            ]
+          }
+        }
+        """
+
+        let snapshot = try JSONDecoder().decode(CatalogWatchSnapshotDTO.self, from: Data(json.utf8))
+        let workerResult = snapshot.snapshot?.workerDefinitionResult()
+        let functionResult = snapshot.snapshot?.functionDefinitionResult()
+        let triggerResult = snapshot.snapshot?.triggerDefinitionResult()
+        let triggerTypeResult = snapshot.snapshot?.triggerTypeDefinitionResult()
+
+        #expect(workerResult?.definitions.first?.ownerActor == "system")
+        #expect(workerResult?.definitions.first?.authorityGrant == "engine-transport")
+        #expect(workerResult?.definitions.first?.namespaceClaims == ["alpha"])
+        #expect(functionResult?.definitions.first?.ownerWorker == "worker-alpha")
+        #expect(functionResult?.definitions.first?.effectClass == "ExternalSideEffect")
+        #expect(functionResult?.definitions.first?.riskLevel == "High")
+        #expect(functionResult?.definitions.first?.requiredAuthority?["scopes"]?.arrayValue?.count == 1)
+        #expect(functionResult?.definitions.first?.requestSchema != nil)
+        #expect(functionResult?.definitions.first?.responseSchema != nil)
+        #expect(functionResult?.definitions.first?.opaqueResponse == false)
+        #expect(triggerResult?.definitions.first?.ownerWorker == "worker-alpha")
+        #expect(triggerResult?.definitions.first?.triggerType == "cron")
+        #expect(triggerResult?.definitions.first?.targetFunction == "alpha::run")
+        #expect(triggerResult?.definitions.first?.deliveryMode == "Async")
+        #expect(triggerResult?.definitions.first?.authorityGrant == "engine-transport")
+        #expect(triggerTypeResult?.definitions.first?.ownerWorker == "worker-alpha")
+        #expect(triggerTypeResult?.definitions.first?.allowedDeliveryModes == ["Async"])
+        #expect(triggerTypeResult?.definitions.first?.configSchema != nil)
+        #expect(workerResult?.issues.isEmpty == true)
+        #expect(functionResult?.issues.isEmpty == true)
+        #expect(triggerResult?.issues.isEmpty == true)
+        #expect(triggerTypeResult?.issues.isEmpty == true)
+    }
+
     @Test("Malformed catalog entries report decode diagnostics")
     func malformedCatalogEntriesReportDecodeDiagnostics() throws {
         let json = """

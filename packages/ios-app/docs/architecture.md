@@ -478,13 +478,16 @@ which is a server-owned redacted projection over registry metadata plus scoped
 binding/shadow-trial records. iOS may shape display labels and grouping, but it
 must not infer ownership class, replacement policy, readiness, attempt state,
 or rollback availability locally. `capability_binding` is a projection source,
-not an operation owner. The top-level cockpit must stay high-signal; binding,
-shadow-trial, readiness, scan completeness, and rollback details belong in
-group and operation drill-down.
-Dashboard and operation cards use the whole glass container as the disclosure
-target instead of decorative chevron glyphs; drill-down is communicated by the
-surface hierarchy and tap target, while functional navigation and expansion
-controls keep their own directional icons.
+not an operation owner. Catalog snapshot DTOs accept both camelCase client
+fixtures and the engine's snake_case catalog definitions at the protocol
+boundary so schema, owner, risk, and authority evidence are not misclassified as
+missing by presentation code. The top-level cockpit must stay high-signal;
+binding, shadow-trial, readiness, scan completeness, and rollback details belong
+in group and operation drill-down.
+Dashboard, capability group, and operation cards use the whole glass container
+as the disclosure target instead of decorative chevron glyphs; drill-down is
+communicated by the surface hierarchy and tap target, while functional
+navigation and expansion controls keep their own directional icons.
 The verify action can request a new
 `catalog_discovery::conformance_report`; that action writes durable
 report/stream evidence only and does not execute discovered functions. Deeper
