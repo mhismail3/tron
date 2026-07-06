@@ -124,7 +124,7 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
     }
 
     for required in [
-        "Current foundation score: **97/100**",
+        "Current foundation score: **99/100**",
         "Provider-visible surface remains one tool: `capability::execute`",
         "supervised module-runtime provider-safe adapter projection",
         "active_route_module_adapter_projection",
@@ -132,6 +132,8 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
         "not arbitrary live module-code execution",
         "capability_execute_dispatch_controls_shadow_trial_workflow",
         "active_route_lookup_rejects_multiple_active_routes_in_scope",
+        "route_candidate_accepts_refs_created_by_module_lifecycle_and_runtime_operations",
+        "route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs",
         "capability_execute_dispatch_controls_full_route_lifecycle",
         "capability_execute_dispatch_routes_git_status_through_active_replacement",
         "packages/agent/docs/capability-dynamic-replacement-inventory.tsv",
@@ -151,6 +153,8 @@ fn dynamic_replacement_scorecard_artifacts_are_present_and_weighted() {
         "capability_execute_dispatch_controls_shadow_trial_workflow",
         "capability_execute_dispatch_routes_git_status_through_active_replacement",
         "active_route_lookup_rejects_multiple_active_routes_in_scope",
+        "route_candidate_accepts_refs_created_by_module_lifecycle_and_runtime_operations",
+        "route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs",
     ] {
         assert!(
             capability_binding_tests.contains(required_test),
@@ -251,6 +255,8 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
         "supervised_projection_boundary",
         "accepted_shadow_trial_evidence",
         "liveModuleCodeExecuted",
+        "validate_candidate_runtime_contract",
+        "routeCandidateAcceptedOnlyAfterRuntimeProjectionCheck",
         "builtInProjectionUsed",
         "active_route_module_adapter_projection",
         "active_route_failed_closed",

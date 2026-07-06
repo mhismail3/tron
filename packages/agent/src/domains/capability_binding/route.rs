@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use crate::engine::{
     CreateResource, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceLocation,
     EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    MODULE_LIFECYCLE_STATE_KIND, MODULE_RUNTIME_STATE_KIND,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -112,7 +113,10 @@ pub(crate) async fn record_replacement_candidate_value_at(
         "capability_replacement_candidate_record",
     )
     .await?;
-    let candidate = candidate_contract(payload, shadow_evidence)?;
+    let runtime_contract =
+        validate_candidate_runtime_contract(deps, invocation, &grant, payload, &shadow_evidence)
+            .await?;
+    let candidate = candidate_contract(payload, shadow_evidence, runtime_contract)?;
     let contract = contract_evidence(payload)?;
     let authority = route_authority(payload)?;
     let rollback = rollback_controls(payload)?;
@@ -1667,6 +1671,17 @@ struct ValidatedShadowEvidence {
     candidate_projection: Value,
 }
 
+struct CandidateRuntimeContract {
+    module_runtime_ref: Value,
+    module_lifecycle_ref: Value,
+    proof: Value,
+}
+
+struct VersionedRouteRef {
+    value: Value,
+    resource_id: String,
+}
+
 async fn validated_shadow_evidence_from_payload(
     deps: &Deps,
     grant: Option<&EngineGrant>,
@@ -1784,9 +1799,63 @@ fn required_shadow_evidence_ref(payload: &Value) -> Result<Value, CapabilityErro
     Ok(shadow_evidence_ref)
 }
 
+async fn validate_candidate_runtime_contract(
+    deps: &Deps,
+    invocation: &Invocation,
+    grant: &EngineGrant,
+    payload: &Value,
+    shadow_evidence: &ValidatedShadowEvidence,
+) -> Result<CandidateRuntimeContract, CapabilityError> {
+    let lifecycle_ref =
+        required_versioned_route_ref(payload, "moduleLifecycleRef", MODULE_LIFECYCLE_STATE_KIND)?;
+    let runtime_ref =
+        required_versioned_route_ref(payload, "moduleRuntimeRef", MODULE_RUNTIME_STATE_KIND)?;
+    require_exact_resource_selector(
+        grant,
+        &lifecycle_ref.resource_id,
+        "capability_replacement_candidate_record",
+    )?;
+    require_exact_resource_selector(
+        grant,
+        &runtime_ref.resource_id,
+        "capability_replacement_candidate_record",
+    )?;
+    let runtime_deps = crate::domains::module_runtime::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let projection = crate::domains::module_runtime::service::project_provider_safe_adapter_output(
+        &runtime_deps,
+        invocation,
+        TARGET_OPERATION,
+        &runtime_ref.value,
+        &lifecycle_ref.value,
+        &shadow_evidence.candidate_projection,
+    )
+    .await?;
+    let adapter_runtime = projection
+        .get("adapterRuntime")
+        .cloned()
+        .unwrap_or_else(|| json!({"providerSafeProjection": true}));
+    Ok(CandidateRuntimeContract {
+        module_runtime_ref: runtime_ref.value,
+        module_lifecycle_ref: lifecycle_ref.value,
+        proof: json!({
+            "candidateRefsVerified": true,
+            "runtimeProjectionBoundaryChecked": true,
+            "lifecycleRuntimeAuthorizationChecked": true,
+            "acceptedShadowProjectionRevalidated": true,
+            "routeCandidateAcceptedOnlyAfterRuntimeProjectionCheck": true,
+            "adapterRuntime": adapter_runtime,
+            "networkPolicy": "none",
+            "failClosed": true
+        }),
+    })
+}
+
 fn candidate_contract(
     payload: &Value,
     shadow_evidence: ValidatedShadowEvidence,
+    runtime_contract: CandidateRuntimeContract,
 ) -> Result<Value, CapabilityError> {
     let label = bounded_text(
         "candidateLabel",
@@ -1799,14 +1868,12 @@ fn candidate_contract(
         TOKEN_MAX_BYTES,
     )?;
     let module_ref = required_ref(payload, "moduleRef")?;
-    let runtime_ref = required_versioned_ref(payload, "moduleRuntimeRef")?;
-    let lifecycle_ref = required_versioned_ref(payload, "moduleLifecycleRef")?;
     Ok(json!({
         "label": label,
         "owner": owner,
         "moduleRef": module_ref,
-        "moduleRuntimeRef": runtime_ref,
-        "moduleLifecycleRef": lifecycle_ref,
+        "moduleRuntimeRef": runtime_contract.module_runtime_ref,
+        "moduleLifecycleRef": runtime_contract.module_lifecycle_ref,
         "shadowEvidenceRef": shadow_evidence.version_ref,
         "operation": TARGET_OPERATION,
         "outputContract": "git_status_provider_safe_projection_v1",
@@ -1816,8 +1883,27 @@ fn candidate_contract(
         "routeExecutionMode": "supervised_projection_boundary",
         "candidateProjectionSource": "accepted_shadow_trial_evidence",
         "liveModuleCodeExecutedByRoute": false,
+        "runtimeContract": runtime_contract.proof,
         "providerSafeProjectionRequired": true
     }))
+}
+
+fn required_versioned_route_ref(
+    payload: &Value,
+    field: &str,
+    expected_kind: &str,
+) -> Result<VersionedRouteRef, CapabilityError> {
+    let value = required_versioned_ref(payload, field)?;
+    if value.get("kind").and_then(Value::as_str) != Some(expected_kind) {
+        return Err(invalid(format!("{field} must reference {expected_kind}")));
+    }
+    let resource_id = value
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{field} requires resourceId")))?
+        .to_owned();
+    validate_route_resource_id(&resource_id, expected_kind)?;
+    Ok(VersionedRouteRef { value, resource_id })
 }
 
 fn required_versioned_ref(payload: &Value, field: &str) -> Result<Value, CapabilityError> {

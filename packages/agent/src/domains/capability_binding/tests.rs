@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE};
 use super::resource_store::current_payload;
@@ -38,10 +39,13 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_REQUEST_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_RUN_KIND,
     CAPABILITY_SHADOW_TRIAL_RUN_SCHEMA_ID, Deps,
 };
+use crate::domains::module_lifecycle::contract as module_lifecycle_contract;
+use crate::domains::module_runtime::contract as module_runtime_contract;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeliveryMode, DeriveGrant,
     EngineResourceLocation, EngineResourceScope, EngineResourceVersioningMode, FunctionId,
-    Invocation, InvocationId, ListResources, MODULE_LIFECYCLE_STATE_KIND,
+    Invocation, InvocationId, ListResources, MODULE_INSTALL_DECISION_KIND,
+    MODULE_INSTALL_DECISION_SCHEMA_ID, MODULE_LIFECYCLE_STATE_KIND,
     MODULE_LIFECYCLE_STATE_SCHEMA_ID, MODULE_RUNTIME_STATE_KIND, MODULE_RUNTIME_STATE_SCHEMA_ID,
     RiskLevel, TraceId, UpdateResource, WorkerId, builtin_resource_type_definitions,
 };
@@ -688,6 +692,51 @@ impl RouteFixture {
         )
     }
 
+    async fn candidate_invocation_with_runtime_refs(
+        &self,
+        key: &str,
+        module_lifecycle_ref: &Value,
+        module_runtime_ref: &Value,
+    ) -> Invocation {
+        let shadow_evidence = self.shadow_evidence(&format!("{key}-shadow")).await;
+        let shadow_evidence_id = shadow_evidence["capabilityShadowTrialEvidenceResourceId"]
+            .as_str()
+            .expect("shadow evidence id");
+        let shadow_evidence_version_id = shadow_evidence["capabilityShadowTrialEvidenceVersionId"]
+            .as_str()
+            .expect("shadow evidence version id");
+        let lifecycle_id = module_lifecycle_ref["resourceId"]
+            .as_str()
+            .expect("lifecycle ref resource id");
+        let runtime_id = module_runtime_ref["resourceId"]
+            .as_str()
+            .expect("runtime ref resource id");
+        let grant_id = self
+            .exact_write_grant(
+                &format!("{key}-shadow-evidence-exact"),
+                &[shadow_evidence_id, lifecycle_id, runtime_id],
+            )
+            .await;
+        invocation(
+            key,
+            route_candidate_payload(
+                key,
+                shadow_evidence_id,
+                shadow_evidence_version_id,
+                module_lifecycle_ref,
+                module_runtime_ref,
+            ),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        )
+    }
+
     async fn runtime_refs(&self, key: &str) -> (Value, Value) {
         let scope = EngineResourceScope::Session(self.session_id.clone());
         let lifecycle_id = format!("module_lifecycle_state:{key}");
@@ -766,6 +815,244 @@ impl RouteFixture {
                 "role": "runtime"
             }),
         )
+    }
+
+    async fn runtime_refs_from_module_operations(&self, key: &str) -> (Value, Value) {
+        let scope = EngineResourceScope::Session(self.session_id.clone());
+        let install_decision_id = format!("module_install_decision:{key}-install-candidate");
+        self.deps
+            .engine_host
+            .create_resource(CreateResource {
+                resource_id: Some(install_decision_id.clone()),
+                kind: MODULE_INSTALL_DECISION_KIND.to_owned(),
+                schema_id: Some(MODULE_INSTALL_DECISION_SCHEMA_ID.to_owned()),
+                scope: scope.clone(),
+                owner_worker_id: WorkerId::new("module_install").expect("worker id"),
+                owner_actor_id: ActorId::new(format!("agent:{}", self.session_id))
+                    .expect("actor id"),
+                lifecycle: Some("install_candidate".to_owned()),
+                policy: json!({"metadataOnly": true, "networkPolicy": "none"}),
+                initial_payload: Some(route_install_decision_payload(&scope)),
+                locations: vec![EngineResourceLocation {
+                    kind: "module_install_decision".to_owned(),
+                    uri: format!("module-install-decision:{key}"),
+                    mime_type: Some("application/json".to_owned()),
+                    size_bytes: None,
+                }],
+                trace_id: TraceId::new(format!("trace-route-install-{key}")).expect("trace id"),
+                invocation_id: None,
+            })
+            .await
+            .expect("seed install decision prerequisite");
+
+        let lifecycle_id = deterministic_module_lifecycle_resource_id(&scope, &install_decision_id);
+        let lifecycle_selector = format!("resource:{lifecycle_id}");
+        let lifecycle_grant_id = derive_grant(
+            &self.deps,
+            &format!("{key}-lifecycle-write"),
+            &[
+                module_lifecycle_contract::READ_SCOPE,
+                module_lifecycle_contract::WRITE_SCOPE,
+                module_lifecycle_contract::RESOURCE_READ_SCOPE,
+                module_lifecycle_contract::RESOURCE_WRITE_SCOPE,
+            ],
+            &[MODULE_LIFECYCLE_STATE_KIND],
+            &["kind:module_lifecycle_state", lifecycle_selector.as_str()],
+            "none",
+        )
+        .await;
+        let lifecycle_deps = crate::domains::module_lifecycle::Deps {
+            engine_host: self.deps.engine_host.clone(),
+        };
+        let lifecycle_request_payload = json!({
+            "moduleInstallDecisionResourceId": install_decision_id,
+            "lifecycleAction": "enable",
+            "reason": "Enable governed route adapter through module lifecycle.",
+            "evidenceRefs": [{"kind": "evidence", "resourceId": "evidence:route-lifecycle", "role": "lifecycle"}]
+        });
+        let lifecycle_request =
+            crate::domains::module_lifecycle::service::request_module_lifecycle_value_at(
+                &lifecycle_deps,
+                &invocation(
+                    &format!("{key}-lifecycle-request"),
+                    lifecycle_request_payload.clone(),
+                    lifecycle_grant_id.clone(),
+                    &[
+                        module_lifecycle_contract::READ_SCOPE,
+                        module_lifecycle_contract::WRITE_SCOPE,
+                        module_lifecycle_contract::RESOURCE_READ_SCOPE,
+                        module_lifecycle_contract::RESOURCE_WRITE_SCOPE,
+                    ],
+                    &self.session_id,
+                ),
+                &lifecycle_request_payload,
+                default_operation_at(),
+            )
+            .await
+            .expect("request lifecycle through module lifecycle service");
+        let lifecycle_version = lifecycle_request["moduleLifecycleVersionId"]
+            .as_str()
+            .expect("pending lifecycle version");
+        let approval = self.lifecycle_approval(key, &lifecycle_id, "enable").await;
+        let lifecycle_decision_payload = json!({
+            "moduleLifecycleResourceId": lifecycle_id,
+            "expectedModuleLifecycleVersionId": lifecycle_version,
+            "decision": "approved",
+            "reason": "Approve governed route adapter lifecycle enable.",
+            "approvalRequestResourceId": approval["requestResourceId"],
+            "approvalDecisionResourceId": approval["decisionResourceId"]
+        });
+        let lifecycle_decision =
+            crate::domains::module_lifecycle::service::decide_module_lifecycle_value_at(
+                &lifecycle_deps,
+                &invocation(
+                    &format!("{key}-lifecycle-decision"),
+                    lifecycle_decision_payload.clone(),
+                    lifecycle_grant_id,
+                    &[
+                        module_lifecycle_contract::READ_SCOPE,
+                        module_lifecycle_contract::WRITE_SCOPE,
+                        module_lifecycle_contract::RESOURCE_READ_SCOPE,
+                        module_lifecycle_contract::RESOURCE_WRITE_SCOPE,
+                    ],
+                    &self.session_id,
+                ),
+                &lifecycle_decision_payload,
+                default_operation_at(),
+            )
+            .await
+            .expect("approve lifecycle through module lifecycle service");
+        assert_eq!(lifecycle_decision["status"], json!("enabled"));
+        let lifecycle_version_id = lifecycle_decision["moduleLifecycleVersionId"]
+            .as_str()
+            .expect("enabled lifecycle version")
+            .to_owned();
+
+        let runtime_request_id = format!("{key}-runtime-request");
+        let runtime_id =
+            deterministic_module_runtime_resource_id(&scope, &lifecycle_id, &runtime_request_id);
+        let runtime_selector = format!("resource:{runtime_id}");
+        let runtime_grant_id = derive_grant(
+            &self.deps,
+            &format!("{key}-runtime-write"),
+            &[
+                module_runtime_contract::READ_SCOPE,
+                module_runtime_contract::WRITE_SCOPE,
+                module_runtime_contract::RESOURCE_READ_SCOPE,
+                module_runtime_contract::RESOURCE_WRITE_SCOPE,
+            ],
+            &[MODULE_RUNTIME_STATE_KIND, MODULE_LIFECYCLE_STATE_KIND],
+            &[
+                "kind:module_runtime_state",
+                "kind:module_lifecycle_state",
+                runtime_selector.as_str(),
+                lifecycle_selector.as_str(),
+            ],
+            "none",
+        )
+        .await;
+        let runtime_deps = crate::domains::module_runtime::Deps {
+            engine_host: self.deps.engine_host.clone(),
+        };
+        let runtime_payload = json!({
+            "moduleLifecycleResourceId": lifecycle_id,
+            "runtimeRequestId": runtime_request_id,
+            "runtimeKind": "git_status_adapter",
+            "runtimeLabel": "Repository state adapter",
+            "runtimeState": "running",
+            "reason": "Run enabled route adapter through supervisor metadata envelope.",
+            "inputRefs": [{"kind": "resource", "resourceId": "capability_shadow_trial_evidence:input", "role": "input"}],
+            "outputArtifactRefs": [{"kind": "execution_output", "resourceId": "execution_output:route-adapter", "role": "output_ref", "summary": "Bounded route adapter output ref only"}],
+            "evidenceRefs": [{"kind": "evidence", "resourceId": "evidence:route-runtime", "role": "supervision"}],
+            "timeoutMs": 30000
+        });
+        let runtime = crate::domains::module_runtime::service::request_module_runtime_value_at(
+            &runtime_deps,
+            &invocation(
+                &format!("{key}-runtime-request"),
+                runtime_payload.clone(),
+                runtime_grant_id,
+                &[
+                    module_runtime_contract::READ_SCOPE,
+                    module_runtime_contract::WRITE_SCOPE,
+                    module_runtime_contract::RESOURCE_READ_SCOPE,
+                    module_runtime_contract::RESOURCE_WRITE_SCOPE,
+                ],
+                &self.session_id,
+            ),
+            &runtime_payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("request runtime through module runtime service");
+        assert_eq!(runtime["status"], json!("running"));
+        (
+            json!({
+                "kind": MODULE_LIFECYCLE_STATE_KIND,
+                "resourceId": lifecycle_id,
+                "versionId": lifecycle_version_id,
+                "role": "lifecycle"
+            }),
+            json!({
+                "kind": MODULE_RUNTIME_STATE_KIND,
+                "resourceId": runtime["moduleRuntimeResourceId"],
+                "versionId": runtime["moduleRuntimeVersionId"],
+                "role": "runtime"
+            }),
+        )
+    }
+
+    async fn lifecycle_approval(&self, key: &str, lifecycle_id: &str, action: &str) -> Value {
+        let request_invocation = approval_invocation(
+            &format!("{key}-approval-request"),
+            json!({
+                "action": {
+                    "kind": "module_lifecycle",
+                    "operation": "module_lifecycle_decision",
+                    "lifecycleAction": action,
+                    "metadataOnly": true
+                },
+                "scope": {"kind": "session", "value": self.session_id},
+                "riskClass": "medium",
+                "expiresAt": future_time(30),
+                "freshness": {"staleAt": future_time(20)},
+                "evidenceRefs": [{"kind": "evidence", "resourceId": "evidence:route-lifecycle-approval"}],
+                "resourceSelectors": [
+                    {"kind": MODULE_LIFECYCLE_STATE_KIND, "resourceId": lifecycle_id},
+                    {"kind": MODULE_INSTALL_DECISION_KIND, "resourceId": format!("module_install_decision:{key}-install-candidate")}
+                ],
+                "denialBehavior": {"mode": "fail_closed", "onDenied": "record_denial"}
+            }),
+            key,
+            &self.session_id,
+        );
+        let request = crate::domains::approval::service::request_approval_value(
+            &self.deps.engine_host,
+            &request_invocation,
+            &request_invocation.payload,
+        )
+        .await
+        .expect("request lifecycle approval");
+        let decision_invocation = approval_invocation(
+            &format!("{key}-approval-decision"),
+            json!({
+                "requestResourceId": request["requestResourceId"],
+                "expectedRequestVersionId": request["requestVersionId"],
+                "state": "approved",
+                "decisionActor": {"kind": "user", "id": "operator"},
+                "expiresAt": future_time(30),
+                "freshnessUntil": future_time(20)
+            }),
+            key,
+            &self.session_id,
+        );
+        crate::domains::approval::service::decide_approval_value(
+            &self.deps.engine_host,
+            &decision_invocation,
+            &decision_invocation.payload,
+        )
+        .await
+        .expect("decide lifecycle approval")
     }
 
     async fn shadow_evidence(&self, key: &str) -> Value {
@@ -1648,6 +1935,14 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         candidate["replacementCandidate"]["candidate"]["liveModuleCodeExecutedByRoute"],
         json!(false)
     );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["routeCandidateAcceptedOnlyAfterRuntimeProjectionCheck"],
+        json!(true)
+    );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["adapterRuntime"]["providerSafeProjection"],
+        json!(true)
+    );
     let replay = record_replacement_candidate_value_at(
         &fixture.deps,
         &candidate_invocation,
@@ -1915,6 +2210,39 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .await
         .expect("route lookup after rollback")
         .is_none()
+    );
+}
+
+#[tokio::test]
+async fn route_candidate_accepts_refs_created_by_module_lifecycle_and_runtime_operations() {
+    let fixture = RouteFixture::new("capability-route-real-module-refs").await;
+    let (module_lifecycle_ref, module_runtime_ref) = fixture
+        .runtime_refs_from_module_operations("real-module-refs")
+        .await;
+    let candidate_invocation = fixture
+        .candidate_invocation_with_runtime_refs(
+            "real-module-refs-candidate",
+            &module_lifecycle_ref,
+            &module_runtime_ref,
+        )
+        .await;
+    let candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record candidate from real module lifecycle/runtime refs");
+    assert_eq!(candidate["status"], json!("validated"));
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["lifecycleRuntimeAuthorizationChecked"],
+        json!(true)
+    );
+    assert_eq!(
+        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["adapterRuntime"]["moduleLifecycle"]
+            ["versionMatched"],
+        json!(true)
     );
 }
 
@@ -2656,6 +2984,81 @@ async fn route_candidate_rejects_target_and_authority_spoofing() {
     .expect_err("route candidate agent_state inheritance rejected")
     .to_string();
     assert!(error.contains("rejects agent_state inheritance"), "{error}");
+}
+
+#[tokio::test]
+async fn route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs() {
+    let fixture = RouteFixture::new("capability-route-runtime-contract-guards").await;
+
+    let mut stale_runtime = fixture.candidate_invocation("stale-runtime-ref").await;
+    stale_runtime.payload["moduleRuntimeRef"]["versionId"] = json!("stale-runtime-version");
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &stale_runtime,
+        &stale_runtime.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("stale runtime ref rejected at candidate record time")
+    .to_string();
+    assert!(
+        error.contains("module runtime adapter projection rejected stale runtime ref"),
+        "{error}"
+    );
+
+    let mut stale_lifecycle = fixture.candidate_invocation("stale-lifecycle-ref").await;
+    stale_lifecycle.payload["moduleLifecycleRef"]["versionId"] = json!("stale-lifecycle-version");
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &stale_lifecycle,
+        &stale_lifecycle.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("stale lifecycle ref rejected at candidate record time")
+    .to_string();
+    assert!(
+        error.contains("module runtime adapter projection rejected stale lifecycle ref"),
+        "{error}"
+    );
+
+    let unauthorized = fixture
+        .candidate_invocation("missing-runtime-selector")
+        .await;
+    let shadow_evidence_id = unauthorized.payload["shadowEvidenceRef"]["resourceId"]
+        .as_str()
+        .expect("shadow evidence id");
+    let lifecycle_id = unauthorized.payload["moduleLifecycleRef"]["resourceId"]
+        .as_str()
+        .expect("lifecycle id");
+    let grant_id = fixture
+        .exact_write_grant(
+            "missing-runtime-selector-exact",
+            &[shadow_evidence_id, lifecycle_id],
+        )
+        .await;
+    let unauthorized = invocation(
+        "missing-runtime-selector",
+        unauthorized.payload,
+        grant_id,
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &unauthorized,
+        &unauthorized.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("candidate runtime ref requires exact grant selector")
+    .to_string();
+    assert!(error.contains("requires exact resource:"), "{error}");
 }
 
 #[tokio::test]
@@ -4256,6 +4659,87 @@ fn route_runtime_payload(
     })
 }
 
+fn route_install_decision_payload(scope: &EngineResourceScope) -> Value {
+    json!({
+        "schemaVersion": "tron.module_install_decision.v1",
+        "state": "install_candidate",
+        "decisionId": "route-install-candidate",
+        "scope": {"kind": scope.kind(), "value": scope.value()},
+        "request": {
+            "kind": "module_install_request",
+            "resourceId": "module_install_request:route-candidate",
+            "versionId": "version:route-request",
+            "role": "install_request"
+        },
+        "validationReport": {
+            "kind": "module_validation_report",
+            "resourceId": "module_validation_report:route-candidate",
+            "versionId": "version:route-validation",
+            "status": "passed"
+        },
+        "approval": {
+            "allowed": true,
+            "approvalEvidenceOnly": true,
+            "derivedAuthorityRequired": true,
+            "rawAuthorityIdsStored": false
+        },
+        "decision": {
+            "state": "install_candidate",
+            "result": "approved",
+            "reason": "Route fixture install candidate.",
+            "denialEvidence": [],
+            "metadataOnly": true,
+            "installPerformed": false
+        },
+        "dependencyPolicy": {
+            "refs": [],
+            "status": "not_required",
+            "metadataOnly": true,
+            "restored": false,
+            "packageManagerUsed": false
+        },
+        "rollback": {
+            "proofRefs": [{"kind": "evidence", "resourceId": "evidence:route-install-rollback", "role": "rollback_proof"}],
+            "status": "ready",
+            "metadataOnly": true,
+            "rollbackExecuted": false
+        },
+        "traceRefs": [],
+        "replayRefs": [],
+        "authority": {
+            "grantRedacted": true,
+            "rawAuthorityIdsStored": false,
+            "derivedRuntimeGrantRequired": true,
+            "approvalEvidenceIsAuthority": false
+        },
+        "idempotency": {
+            "fingerprint": "route-install-candidate",
+            "fingerprintAlgorithm": "sha256:test",
+            "keyRedacted": true,
+            "rawKeyStored": false
+        },
+        "sideEffectProof": {
+            "metadataOnly": true,
+            "installPerformed": false,
+            "activationPerformed": false,
+            "executionPerformed": false,
+            "dependencyRestorePerformed": false,
+            "packageManagerUsed": false,
+            "networkPolicy": "none",
+            "networkAccessPerformed": false,
+            "repoManagedSkillsTouched": false,
+            "physicalWorkspaceDirectoryCreated": false,
+            "rawCommandsStored": false,
+            "rawLogsStored": false,
+            "fileContentsStored": false,
+            "absolutePathsStored": false
+        },
+        "createdAt": DEFAULT_OPERATION_AT,
+        "updatedAt": DEFAULT_OPERATION_AT,
+        "revision": 1
+    })
+}
+
 fn synthetic_lifecycle_ref(key: &str) -> Value {
     json!({
         "kind": MODULE_LIFECYCLE_STATE_KIND,
@@ -4312,6 +4796,71 @@ fn route_kind_selectors() -> Vec<String> {
         .iter()
         .map(|kind| format!("kind:{kind}"))
         .collect()
+}
+
+fn deterministic_module_lifecycle_resource_id(
+    scope: &EngineResourceScope,
+    install_decision_resource_id: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(scope.kind().as_bytes());
+    hasher.update(b":");
+    hasher.update(scope.value().as_bytes());
+    hasher.update(b":");
+    hasher.update(install_decision_resource_id.as_bytes());
+    format!(
+        "{}:{}",
+        MODULE_LIFECYCLE_STATE_KIND,
+        hex::encode(hasher.finalize())
+    )
+}
+
+fn deterministic_module_runtime_resource_id(
+    scope: &EngineResourceScope,
+    lifecycle_resource_id: &str,
+    runtime_request_id: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(scope.kind().as_bytes());
+    hasher.update(b":");
+    hasher.update(scope.value().as_bytes());
+    hasher.update(b":");
+    hasher.update(lifecycle_resource_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(runtime_request_id.as_bytes());
+    format!(
+        "{}:{}",
+        MODULE_RUNTIME_STATE_KIND,
+        hex::encode(hasher.finalize())
+    )
+}
+
+fn future_time(minutes: i64) -> String {
+    (default_operation_at() + chrono::Duration::minutes(minutes)).to_rfc3339()
+}
+
+fn approval_invocation(
+    key: &str,
+    payload: Value,
+    idempotency: &str,
+    session_id: &str,
+) -> Invocation {
+    let context = CausalContext::new(
+        ActorId::new(format!("actor:{key}")).expect("actor id"),
+        ActorKind::Agent,
+        AuthorityGrantId::new("engine-system").expect("system grant"),
+        TraceId::new(format!("trace-{key}")).expect("trace id"),
+    )
+    .with_scope(crate::domains::approval::WRITE_SCOPE)
+    .with_session_id(session_id.to_owned())
+    .with_idempotency_key(format!("approval-{idempotency}-{key}"));
+    Invocation {
+        id: InvocationId::new(format!("invocation-{key}")).expect("invocation id"),
+        function_id: FunctionId::new("approval::request").expect("function id"),
+        delivery_mode: DeliveryMode::Sync,
+        payload,
+        causal_context: context,
+    }
 }
 
 fn operation_projection<'a>(overview: &'a Value, operation_name: &str) -> &'a Value {

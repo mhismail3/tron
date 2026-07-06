@@ -2,7 +2,7 @@
 
 Status: **foundational runtime route complete**
 
-Current foundation score: **97/100**
+Current foundation score: **99/100**
 
 This scorecard tracks the path from measurable modularity to governed dynamic
 replacement. It is intentionally narrower than "self-update everything": the
@@ -16,13 +16,14 @@ The current implementation can record candidates, route bindings, route
 activations, route events, and route rollbacks through the model-facing
 `capability::execute` path. The dispatcher can resolve an active scoped
 `git_status` route through the same path, require accepted shadow evidence,
-verify the candidate lifecycle/runtime refs, reject ambiguous multiple active
-routes in one scope, and route to a supervised module-runtime provider-safe
-adapter projection. The first route uses accepted shadow-trial evidence as the
-candidate projection source; it does not claim arbitrary live module-code
-execution. If the runtime envelope, lifecycle
+verify the candidate lifecycle/runtime refs at candidate-record and invocation
+time, reject ambiguous multiple active routes in one scope, and route to a
+supervised module-runtime provider-safe adapter projection. The first route uses
+accepted shadow-trial evidence as the candidate projection source; it is a
+supervised projection boundary, not arbitrary live module-code execution. If the runtime envelope, lifecycle
 authorization, version refs, scope, network policy, or projection shape are not
-safe, routing fails closed and does not fall back to a built-in success result.
+safe, candidate recording or routing fails closed and does not fall back to a
+built-in success result.
 Successful routed invocations report route state
 `active_route_module_adapter_projection`; rejected projections report
 `active_route_failed_closed`.
@@ -43,7 +44,7 @@ Provider-visible surface remains one tool: `capability::execute`.
 | Area | Weight | Status | Score | Acceptance |
 |---|---:|---|---:|---|
 | Runtime route model | 15 | passed | 15 | Active replacement routes are explicit, versioned, scoped, reversible, single-active per scope at lookup, and executed through the supervised module-runtime provider-safe projection boundary for `git_status`. |
-| Candidate module contract | 15 | partial | 13 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route proves a metadata-supervised read-only adapter projection sourced from accepted shadow evidence, not arbitrary live module-code execution. |
+| Candidate module contract | 15 | passed | 15 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route validates candidate lifecycle/runtime refs through the same supervised module-runtime projection boundary used at invocation, and regression coverage proves those refs can come from the real module lifecycle/runtime operation path. |
 | Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
@@ -63,6 +64,7 @@ capability::execute(git_status)
        active route -> reject multiple active routes in the same scope
                     -> verify route/binding/candidate refs
                     -> verify lifecycle/runtime refs and enabled state
+                       already checked when the candidate was recorded
                     -> project supervised module-runtime provider-safe output
                        from accepted shadow-trial evidence
                     -> emit route event
@@ -126,7 +128,7 @@ plan:
 - Run Tron through the full `git_status` replacement workflow from the app:
   inspect readiness, record the shadow request, record the shadow decision,
   record the shadow run, inspect shadow evidence, record candidate, approve,
-  activate, invoke, explain, disable, and roll back.
+	  activate, invoke, explain, disable, and roll back.
 - Use the failures from that workflow to decide which cockpit/session briefing
   polish is necessary for user comprehension.
 - Add the next adapter only after the first route proves operational in live

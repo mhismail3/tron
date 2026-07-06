@@ -1232,12 +1232,15 @@ Dynamic Replacement adds governed route records for the first read-only target,
 scoped route explicit, versioned, auditable, disableable, and rollbackable.
 Candidate and binding records revalidate the exact current accepted
 `capability_shadow_trial_evidence` resource/version before a route can activate.
-The dispatcher seam resolves an active scoped `git_status` route, verifies
-accepted shadow evidence plus lifecycle/runtime refs, projects supervised
-module-runtime provider-safe output, and emits route events. If the replacement
-runtime envelope, lifecycle authorization, version refs, scope, network policy,
-or projection shape are unsafe, routing fails closed and does not return a
-built-in success projection as a fallback.
+Candidate records also require exact lifecycle/runtime selectors and validate the
+referenced current module lifecycle/runtime records through the same supervised
+module-runtime provider-safe projection boundary used at invocation. The
+dispatcher seam resolves an active scoped `git_status` route, verifies accepted
+shadow evidence plus lifecycle/runtime refs, projects supervised module-runtime
+provider-safe output, and emits route events. If the replacement runtime
+envelope, lifecycle authorization, version refs, scope, network policy, or
+projection shape are unsafe, candidate recording or routing fails closed and does
+not return a built-in success projection as a fallback.
 Cockpit Visibility adds the system-visible pure-read
 `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
 It joins registry ownership metadata with scoped binding-policy, shadow-trial,
@@ -1413,7 +1416,7 @@ Current primitive operations:
 | `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. |
 | `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. |
 | `capability_shadow_trial_evidence_inspect` | Shadow Replacement Trial operation that inspects one scoped `capability_shadow_trial_evidence` through exact `resource:<id>` selector authorization and optional expected evidence version freshness, returning provider-safe comparison, rollback/disable/abort refs, and no-routing proof without raw commands, logs, paths, files, grant ids, authority ids, or `agent_state` inheritance. |
-| `capability_replacement_candidate_record` | Dynamic Replacement operation that records one scoped `capability_replacement_candidate` for the exact read-only `git_status` target, with candidate owner/module/runtime/lifecycle refs, schema/effect/risk evidence, exact current accepted shadow-evidence resource/version proof, exact authority constraints, rollback controls, safe audit refs, idempotency, `networkPolicy: none`, and no package-manager, network, deploy, or live module-adapter execution. |
+| `capability_replacement_candidate_record` | Dynamic Replacement operation that records one scoped `capability_replacement_candidate` for the exact read-only `git_status` target, with candidate owner/module/runtime/lifecycle refs, schema/effect/risk evidence, exact current accepted shadow-evidence resource/version proof, exact authority constraints, current lifecycle/runtime projection-boundary validation, rollback controls, safe audit refs, idempotency, `networkPolicy: none`, and no package-manager, network, deploy, or live module-adapter execution. |
 | `capability_replacement_candidate_list` | Dynamic Replacement operation that lists scoped replacement candidates as bounded provider-safe summaries after kind/schema/scope/current-version revalidation, with lifecycle state, candidate owner labels, operation target, truncation metadata, `networkPolicy: none`, and no routing side effects. |
 | `capability_replacement_candidate_inspect` | Dynamic Replacement operation that inspects one scoped replacement candidate through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded candidate contract and rollback evidence without raw paths, secrets, commands, logs, code, file contents, grant ids, authority ids, or module payloads. |
 | `capability_route_binding_record` | Dynamic Replacement operation that records one scoped `capability_route_binding` after exact candidate and shadow-evidence selector authority plus expected candidate/shadow-evidence version freshness, linking a validated `git_status` candidate to a route version with activation gates, rollback/disable requirements, idempotency, `networkPolicy: none`, and no dispatch-table mutation. |
@@ -2025,9 +2028,9 @@ refs, decision state, and audit history. `kernel_locked` and
 claims an adapter class; `adapter_replaceable` and `module_owned` replacement
 requests require rollback/disable metadata and remain proposals only. Route
 activation is currently limited to scoped `git_status`: it records activation,
-route-event, disable, and rollback evidence, verifies lifecycle/runtime refs,
-and routes through the supervised module-runtime provider-safe projection
-boundary. This plane never mutates dispatch tables, hot-swaps modules, installs
+route-event, disable, and rollback evidence, verifies lifecycle/runtime refs at
+candidate-record and invocation time, and routes through the supervised
+module-runtime provider-safe projection boundary. This plane never mutates dispatch tables, hot-swaps modules, installs
 or activates modules, restores dependencies, runs package managers, inherits
 `agent_state`, accesses networks, stores raw local material, exposes raw grant
 or authority ids, adds public `/engine` APIs, or adds fixed iOS panels.
