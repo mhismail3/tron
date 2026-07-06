@@ -124,6 +124,7 @@
 //! | `module_runtime_contract` | Module-runtime supervisor schema fields |
 //! | `module_validation_contract` | Module-validation request schema fields |
 //! | `operations` | Direct primitive operation implementations |
+//! | `pool` | Operation/catalog-function classification for agent-facing discovery |
 //! | `scheduler_contract` | Schedule-specific request schema fields |
 //!
 //! # INVARIANT: the model-facing surface is tiny
@@ -164,6 +165,7 @@ mod module_lifecycle_contract;
 mod module_runtime_contract;
 mod module_validation_contract;
 mod operations;
+pub(crate) mod pool;
 mod program_execution_contract;
 mod prompt_artifacts_contract;
 mod repository_tree_contract;

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use super::ok_result;
 use super::registry::{is_supported_operation, supported_operation_names};
 use crate::domains::capability::Deps;
+use crate::domains::capability::pool::{catalog_function_pool_metadata, operation_pool_metadata};
 use crate::domains::catalog_discovery::service;
 use crate::engine::Invocation;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
@@ -87,8 +88,9 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
         object.insert(
             "modelFacingGuidance".to_owned(),
             json!({
-                "catalogInspect": "Use functions[].id exactly as catalog_inspect kind=function id.",
-                "capabilityExecute": "When a function includes modelFacingInvocation, invoke that operation through capability::execute instead of using the catalog function id as the primitive operation.",
+                "catalogInspect": "Use functions[].id exactly as catalog_inspect kind=function id when inspecting engine substrate.",
+                "capabilityExecute": "For normal session work, invoke capability::execute operations. Catalog functions are engine substrate unless modelFacingInvocation points at an execute operation.",
+                "internalDiscovery": "Internal catalog functions are inspect-only by default. Request diagnostics or kernel-evolution context before using them to reason about engine internals.",
                 "supportedExecuteOperations": supported_operation_names()
             }),
         );
@@ -101,6 +103,7 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
             };
             let catalog_id = id.to_owned();
             if let Some(object) = function.as_object_mut() {
+                annotate_catalog_function_pool(object, &catalog_id);
                 if let Some(operation) = model_execute_operation_for_function_id(&catalog_id) {
                     object.insert(
                         "modelFacingInvocation".to_owned(),
@@ -108,7 +111,8 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
                             "tool": "capability::execute",
                             "operation": operation,
                             "arguments": {"operation": operation},
-                            "catalogInspectId": catalog_id
+                            "catalogInspectId": catalog_id,
+                            "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection())
                         }),
                     );
                 } else {
@@ -124,6 +128,7 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
         };
         let catalog_id = id.to_owned();
         if let Some(object) = discovery.as_object_mut() {
+            annotate_catalog_function_pool(object, &catalog_id);
             if let Some(operation) = model_execute_operation_for_function_id(&catalog_id) {
                 object.insert(
                     "modelFacingInvocation".to_owned(),
@@ -131,13 +136,24 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
                         "tool": "capability::execute",
                         "operation": operation,
                         "arguments": {"operation": operation},
-                        "catalogInspectId": catalog_id
+                        "catalogInspectId": catalog_id,
+                        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection())
                     }),
                 );
             } else {
                 mark_catalog_target_non_callable(object);
             }
         }
+    }
+}
+
+fn annotate_catalog_function_pool(object: &mut serde_json::Map<String, Value>, catalog_id: &str) {
+    if let Some(metadata) = catalog_function_pool_metadata(catalog_id) {
+        object.insert(
+            "capabilityPool".to_owned(),
+            serde_json::to_value(metadata.provider_projection())
+                .expect("capability pool projection serializes"),
+        );
     }
 }
 
@@ -236,10 +252,30 @@ mod tests {
             discovery["functions"][0]["modelFacingInvocation"]["operation"],
             "log_recent"
         );
+        assert_eq!(
+            discovery["functions"][0]["capabilityPool"]["surface"],
+            "catalog_function"
+        );
+        assert_eq!(
+            discovery["functions"][0]["modelFacingInvocation"]["capabilityPool"]["surface"],
+            "agent_operation"
+        );
+        assert_eq!(
+            discovery["functions"][0]["modelFacingInvocation"]["capabilityPool"]["audience"],
+            "agent_diagnostics"
+        );
         assert!(
             discovery["functions"][1]
                 .get("modelFacingInvocation")
                 .is_none()
+        );
+        assert_eq!(
+            discovery["functions"][1]["capabilityPool"]["audience"],
+            "session_work"
+        );
+        assert_eq!(
+            discovery["functions"][1]["capabilityPool"]["agentDefaultVisibility"],
+            "search_visible"
         );
         assert_eq!(discovery["functions"][1]["providerCallable"], false);
         assert!(

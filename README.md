@@ -101,6 +101,18 @@ Current living entry points:
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
+- `packages/agent/docs/engine-capability-pool-scorecard.md`: active
+  scorecard for the unified capability pool. It classifies both model-facing
+  `capability::execute` operations and engine catalog functions as
+  runtime-routable, producer-extensible, or kernel-evolution-only, with
+  agent-facing visibility guidance for normal session work versus diagnostics
+  and kernel evolution.
+- `packages/agent/docs/engine-capability-pool-inventory.tsv`:
+  machine-readable inventory covering every current `capability::execute`
+  operation and every startup-registered catalog function exactly once.
+- `packages/agent/docs/engine-capability-pool-evidence-manifest.md`:
+  companion evidence manifest for the capability-pool classifier, catalog
+  projection, and exact-coverage invariant tests.
 - `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
   scorecard for governed candidate, route, activation, event, rollback, and
   supervised module-runtime replacement-route milestones.
@@ -1297,6 +1309,17 @@ directly instead of inferring provider ownership from model id strings.
 `replay_manifest` is the read-only exception: it returns the current session
 replay manifest without creating a trace record, so the read does not mutate
 the manifest it exports.
+
+Capability discovery now reports a unified capability pool with two surfaces:
+`agent_operation` entries are the supported `capability::execute` operation
+values Tron can use for normal session work, while `catalog_function` entries
+are engine substrate functions used for transport, diagnostics, governance,
+and kernel evolution. Catalog projections annotate each function with an
+audience, default visibility, and replacement class; when a catalog function is
+also useful to the model, `modelFacingInvocation` points back to the supported
+`capability::execute` operation instead of asking the model to call an
+internal engine function. This keeps one model-facing tool while still making
+the internal engine/catalog substrate inspectable and classifiable.
 
 Agent backend observability is native to this primitive surface. Prompt runs,
 turns, provider requests, streaming, capability invocation waves, and primitive
