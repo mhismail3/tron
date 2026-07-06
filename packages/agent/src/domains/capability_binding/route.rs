@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
+    CreateResource, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceLocation,
     EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
 };
 use crate::shared::protocol::model_capabilities::CapabilityResult;
@@ -23,14 +23,16 @@ use super::records::{
 use super::resource_store::{
     current_payload, engine_error, ensure_capability_replacement_candidate,
     ensure_capability_route_activation, ensure_capability_route_binding,
-    ensure_capability_route_event, ensure_capability_route_rollback, ensure_scope,
-    inspect_resource_required, publish_lifecycle_event, worker_id,
+    ensure_capability_route_event, ensure_capability_route_rollback,
+    ensure_capability_shadow_trial_evidence, ensure_scope, inspect_resource_required,
+    publish_lifecycle_event, worker_id,
 };
 use super::validation::{
     DECISION_ID_MAX_BYTES, LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, MAX_REFS, REQUEST_ID_MAX_BYTES,
-    SUMMARY_MAX_BYTES, TOKEN_MAX_BYTES, bounded_provider_visible_token, bounded_text,
-    idempotency_key, invalid, optional_array, optional_string, optional_u64, required_ref,
-    required_string, resource_scope, target_operation_binding_metadata, validate_ref_array,
+    SUMMARY_MAX_BYTES, TOKEN_MAX_BYTES, authority_constraints, bounded_provider_visible_token,
+    bounded_text, idempotency_key, invalid, optional_array, optional_string, optional_u64,
+    required_ref, required_string, resource_scope, target_operation_binding_metadata,
+    validate_ref_array,
 };
 use super::{
     CAPABILITY_REPLACEMENT_CANDIDATE_KIND, CAPABILITY_REPLACEMENT_CANDIDATE_SCHEMA_ID,
@@ -75,8 +77,9 @@ pub(crate) async fn record_replacement_candidate_value_at(
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_route_write_authority(deps, invocation, "capability_replacement_candidate_record")
-        .await?;
+    let grant =
+        ensure_route_write_authority(deps, invocation, "capability_replacement_candidate_record")
+            .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let candidate_id = bounded_provider_visible_token(
@@ -91,7 +94,15 @@ pub(crate) async fn record_replacement_candidate_value_at(
         &["validated", "rejected", "disabled"],
     )?;
     let operation = route_target_metadata(payload)?;
-    let candidate = candidate_contract(payload)?;
+    let shadow_evidence = validated_shadow_evidence_from_payload(
+        deps,
+        Some(&grant),
+        &scope,
+        payload,
+        "capability_replacement_candidate_record",
+    )
+    .await?;
+    let candidate = candidate_contract(payload, shadow_evidence)?;
     let contract = contract_evidence(payload)?;
     let authority = route_authority(payload)?;
     let rollback = rollback_controls(payload)?;
@@ -282,6 +293,14 @@ pub(crate) async fn record_route_binding_value_at(
             "stale capability replacement candidate version {expected_candidate_version}"
         )));
     }
+    let shadow_evidence = validated_shadow_evidence_from_candidate(
+        deps,
+        Some(&grant),
+        &scope,
+        candidate_payload,
+        "capability_route_binding_record",
+    )
+    .await?;
     let route_version = bounded_provider_visible_token(
         "routeVersion",
         &required_string(payload, "routeVersion")?,
@@ -327,6 +346,7 @@ pub(crate) async fn record_route_binding_value_at(
         "binding": {
             "routeVersion": route_version,
             "candidate": version_ref(&candidate_inspection.resource, candidate_version, "replacement_candidate"),
+            "shadowEvidence": shadow_evidence,
             "targetOperation": TARGET_OPERATION,
             "scopeKind": scope.kind(),
             "scopeValueRedacted": true,
@@ -552,8 +572,12 @@ pub(crate) async fn active_route_for_git_status(
             .pointer("/binding/resourceId")
             .and_then(Value::as_str)
             .ok_or_else(|| invalid("active route is missing route binding ref"))?;
-        let candidate_ref = active_route_candidate_ref(deps, &scope, binding_ref).await?;
-        ensure_referenced_route_records(deps, &scope, binding_ref, &candidate_ref).await?;
+        let expected_binding_version = payload
+            .pointer("/binding/versionId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("active route is missing route binding version ref"))?;
+        ensure_referenced_route_records(deps, &scope, binding_ref, Some(expected_binding_version))
+            .await?;
         let route = ActiveRoute {
             activation_resource_id: inspection.resource.resource_id.clone(),
             activation_version_id: version.version_id.clone(),
@@ -586,23 +610,6 @@ pub(crate) async fn active_route_for_git_status(
         }
     }
     Ok(selected.map(|(_, route)| route))
-}
-
-async fn active_route_candidate_ref<'a>(
-    deps: &Deps,
-    scope: &EngineResourceScope,
-    binding_resource_id: &'a str,
-) -> Result<String, CapabilityError> {
-    let binding =
-        inspect_resource_required(deps, binding_resource_id, "capability route binding").await?;
-    ensure_capability_route_binding(&binding, "capability_route_lookup")?;
-    ensure_scope(&binding, scope, "capability_route_lookup")?;
-    let (_, binding_payload) = current_payload(&binding, "capability_route_lookup")?;
-    binding_payload
-        .pointer("/binding/candidate/resourceId")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| invalid("active route binding is missing candidate ref"))
 }
 
 pub(crate) async fn emit_routed_invocation_event(
@@ -764,12 +771,13 @@ async fn route_control_value_at(
             .unwrap_or_else(|| invocation.id.as_str().to_owned()),
         REQUEST_ID_MAX_BYTES,
     )?;
-    let candidate_resource_id = binding_payload
-        .pointer("/binding/candidate/resourceId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("route binding is missing candidate resource ref"))?;
-    ensure_referenced_route_records(deps, &scope, &binding_resource_id, candidate_resource_id)
-        .await?;
+    ensure_referenced_route_records(
+        deps,
+        &scope,
+        &binding_resource_id,
+        Some(&binding_version.version_id),
+    )
+    .await?;
     let audit_refs = safe_refs(payload, "auditRefs")?;
     let reason = bounded_text(
         "reason",
@@ -1269,12 +1277,28 @@ async fn ensure_referenced_route_records(
     deps: &Deps,
     scope: &EngineResourceScope,
     binding_resource_id: &str,
-    candidate_resource_id: &str,
+    expected_binding_version: Option<&str>,
 ) -> Result<(), CapabilityError> {
     let binding =
         inspect_resource_required(deps, binding_resource_id, "capability route binding").await?;
     ensure_capability_route_binding(&binding, "capability_route_lookup")?;
     ensure_scope(&binding, scope, "capability_route_lookup")?;
+    let (binding_version, binding_payload) = current_payload(&binding, "capability_route_lookup")?;
+    if let Some(expected_binding_version) = expected_binding_version
+        && expected_binding_version != binding_version.version_id
+    {
+        return Err(invalid(format!(
+            "stale capability route binding version {expected_binding_version}"
+        )));
+    }
+    let candidate_resource_id = binding_payload
+        .pointer("/binding/candidate/resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("active route binding is missing candidate ref"))?;
+    let expected_candidate_version = binding_payload
+        .pointer("/binding/candidate/versionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("active route binding is missing candidate version ref"))?;
     let candidate = inspect_resource_required(
         deps,
         candidate_resource_id,
@@ -1286,6 +1310,21 @@ async fn ensure_referenced_route_records(
     if candidate.resource.lifecycle != "validated" {
         return Err(invalid("active route candidate is no longer validated"));
     }
+    let (candidate_version, candidate_payload) =
+        current_payload(&candidate, "capability_route_lookup")?;
+    if expected_candidate_version != candidate_version.version_id {
+        return Err(invalid(format!(
+            "stale capability replacement candidate version {expected_candidate_version}"
+        )));
+    }
+    validated_shadow_evidence_from_candidate(
+        deps,
+        None,
+        scope,
+        candidate_payload,
+        "capability_route_lookup",
+    )
+    .await?;
     Ok(())
 }
 
@@ -1367,7 +1406,129 @@ fn route_operation_record(reason: &str) -> Value {
     })
 }
 
-fn candidate_contract(payload: &Value) -> Result<Value, CapabilityError> {
+struct ValidatedShadowEvidence {
+    version_ref: Value,
+}
+
+async fn validated_shadow_evidence_from_payload(
+    deps: &Deps,
+    grant: Option<&EngineGrant>,
+    scope: &EngineResourceScope,
+    payload: &Value,
+    operation: &str,
+) -> Result<ValidatedShadowEvidence, CapabilityError> {
+    let shadow_evidence_ref = required_shadow_evidence_ref(payload)?;
+    validated_shadow_evidence_ref(deps, grant, scope, &shadow_evidence_ref, operation).await
+}
+
+async fn validated_shadow_evidence_from_candidate(
+    deps: &Deps,
+    grant: Option<&EngineGrant>,
+    scope: &EngineResourceScope,
+    candidate_payload: &Value,
+    operation: &str,
+) -> Result<Value, CapabilityError> {
+    let Some(shadow_evidence_ref) = candidate_payload.pointer("/candidate/shadowEvidenceRef")
+    else {
+        return Err(invalid(
+            "capability replacement candidate is missing shadow evidence ref",
+        ));
+    };
+    validated_shadow_evidence_ref(deps, grant, scope, shadow_evidence_ref, operation)
+        .await
+        .map(|evidence| evidence.version_ref)
+}
+
+async fn validated_shadow_evidence_ref(
+    deps: &Deps,
+    grant: Option<&EngineGrant>,
+    scope: &EngineResourceScope,
+    shadow_evidence_ref: &Value,
+    operation: &str,
+) -> Result<ValidatedShadowEvidence, CapabilityError> {
+    if shadow_evidence_ref.get("kind").and_then(Value::as_str)
+        != Some(CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND)
+    {
+        return Err(invalid(
+            "shadowEvidenceRef must reference capability_shadow_trial_evidence",
+        ));
+    }
+    let resource_id = shadow_evidence_ref
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("shadowEvidenceRef requires resourceId"))?;
+    validate_route_resource_id(resource_id, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND)?;
+    if let Some(grant) = grant {
+        require_exact_resource_selector(grant, resource_id, operation)?;
+    }
+    let inspection =
+        inspect_resource_required(deps, resource_id, "capability shadow trial evidence").await?;
+    ensure_capability_shadow_trial_evidence(&inspection, operation)?;
+    ensure_scope(&inspection, scope, operation)?;
+    if inspection.resource.lifecycle != "accepted" {
+        return Err(invalid(
+            "capability route requires accepted shadow trial evidence",
+        ));
+    }
+    let (version, payload) = current_payload(&inspection, operation)?;
+    let expected_version = shadow_evidence_ref
+        .get("versionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("shadowEvidenceRef requires versionId"))?;
+    if expected_version != version.version_id {
+        return Err(invalid(format!(
+            "stale capability shadow trial evidence version {expected_version}"
+        )));
+    }
+    if payload
+        .pointer("/comparison/result")
+        .and_then(Value::as_str)
+        != Some("equivalent")
+    {
+        return Err(invalid(
+            "capability route requires equivalent shadow trial evidence",
+        ));
+    }
+    if payload
+        .pointer("/sideEffectProof/runtimeRoutingChanged")
+        .and_then(Value::as_bool)
+        != Some(false)
+    {
+        return Err(invalid(
+            "capability route shadow evidence must prove runtime routing was unchanged",
+        ));
+    }
+    Ok(ValidatedShadowEvidence {
+        version_ref: version_ref(&inspection.resource, version, "shadow_evidence"),
+    })
+}
+
+fn required_shadow_evidence_ref(payload: &Value) -> Result<Value, CapabilityError> {
+    let raw_ref = payload
+        .get("shadowEvidenceRef")
+        .ok_or_else(|| invalid("shadowEvidenceRef is required"))?;
+    let mut shadow_evidence_ref = required_ref(payload, "shadowEvidenceRef")?;
+    let version_id = raw_ref
+        .get("versionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("shadowEvidenceRef requires versionId"))?;
+    if let Some(object) = shadow_evidence_ref.as_object_mut() {
+        object.insert(
+            "versionId".to_owned(),
+            json!(bounded_provider_visible_token(
+                "shadowEvidenceRef.versionId",
+                version_id,
+                TOKEN_MAX_BYTES,
+            )?),
+        );
+    }
+    Ok(shadow_evidence_ref)
+}
+
+fn candidate_contract(
+    payload: &Value,
+    shadow_evidence: ValidatedShadowEvidence,
+) -> Result<Value, CapabilityError> {
     let label = bounded_text(
         "candidateLabel",
         &required_string(payload, "candidateLabel")?,
@@ -1381,21 +1542,13 @@ fn candidate_contract(payload: &Value) -> Result<Value, CapabilityError> {
     let module_ref = required_ref(payload, "moduleRef")?;
     let runtime_ref = required_ref(payload, "moduleRuntimeRef")?;
     let lifecycle_ref = required_ref(payload, "moduleLifecycleRef")?;
-    let shadow_evidence_ref = required_ref(payload, "shadowEvidenceRef")?;
-    if shadow_evidence_ref.get("kind").and_then(Value::as_str)
-        != Some(CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND)
-    {
-        return Err(invalid(
-            "shadowEvidenceRef must reference capability_shadow_trial_evidence",
-        ));
-    }
     Ok(json!({
         "label": label,
         "owner": owner,
         "moduleRef": module_ref,
         "moduleRuntimeRef": runtime_ref,
         "moduleLifecycleRef": lifecycle_ref,
-        "shadowEvidenceRef": shadow_evidence_ref,
+        "shadowEvidenceRef": shadow_evidence.version_ref,
         "operation": TARGET_OPERATION,
         "outputContract": "git_status_provider_safe_projection_v1",
         "executionMode": "supervised_module_runtime_adapter",
@@ -1422,27 +1575,36 @@ fn contract_evidence(payload: &Value) -> Result<Value, CapabilityError> {
 }
 
 fn route_authority(payload: &Value) -> Result<Value, CapabilityError> {
-    let Value::Object(map) = payload
-        .get("authorityConstraints")
-        .ok_or_else(|| invalid("authorityConstraints is required"))?
-    else {
-        return Err(invalid("authorityConstraints must be an object"));
-    };
-    let network = map
-        .get("networkPolicy")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("authorityConstraints.networkPolicy is required"))?;
-    if network != "none" {
+    let authority = authority_constraints(payload)?;
+    let resource_selectors = authority
+        .get("resourceSelectors")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("capability route authority requires exact resourceSelectors"))?;
+    if resource_selectors.is_empty() {
         return Err(invalid(
-            "capability route authority requires networkPolicy none",
+            "capability route authority requires exact resourceSelectors",
         ));
     }
+    for selector in resource_selectors {
+        let selector = selector
+            .as_str()
+            .ok_or_else(|| invalid("capability route authority requires string selectors"))?;
+        if !selector.starts_with("resource:") {
+            return Err(invalid(
+                "capability route authority requires resource-scoped exact selectors",
+            ));
+        }
+    }
     Ok(json!({
-        "networkPolicy": "none",
+        "networkPolicy": authority["networkPolicy"],
+        "authorityScopes": authority["authorityScopes"],
+        "resourceKinds": authority["resourceKinds"],
+        "resourceSelectors": authority["resourceSelectors"],
         "exactScopeRequired": true,
         "wildcardSelectorsAllowed": false,
         "agentStateInherited": false,
-        "rawGrantIdsStored": false
+        "rawGrantIdsStored": false,
+        "exactSelectorsRequired": true
     }))
 }
 

@@ -21,7 +21,8 @@ use super::{
     CAPABILITY_ROUTE_ACTIVATION_KIND, CAPABILITY_ROUTE_ACTIVATION_SCHEMA_ID,
     CAPABILITY_ROUTE_BINDING_KIND, CAPABILITY_ROUTE_BINDING_SCHEMA_ID, CAPABILITY_ROUTE_EVENT_KIND,
     CAPABILITY_ROUTE_EVENT_SCHEMA_ID, CAPABILITY_ROUTE_ROLLBACK_KIND,
-    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, Deps,
+    CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID, CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+    CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID, Deps,
 };
 
 pub(super) async fn inspect_resource_required(
@@ -176,6 +177,18 @@ pub(super) fn ensure_capability_route_rollback(
         operation,
         CAPABILITY_ROUTE_ROLLBACK_KIND,
         CAPABILITY_ROUTE_ROLLBACK_SCHEMA_ID,
+    )
+}
+
+pub(super) fn ensure_capability_shadow_trial_evidence(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    ensure_kind_schema(
+        inspection,
+        operation,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
+        CAPABILITY_SHADOW_TRIAL_EVIDENCE_SCHEMA_ID,
     )
 }
 

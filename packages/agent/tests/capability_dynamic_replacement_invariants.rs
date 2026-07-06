@@ -16,6 +16,7 @@ const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/re
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const GIT_OPERATION_PATH: &str = "packages/agent/src/domains/capability/operations/git.rs";
 const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs";
+const VALIDATION_PATH: &str = "packages/agent/src/domains/capability_binding/validation.rs";
 const RESOURCE_DEFINITIONS_PATH: &str =
     "packages/agent/src/engine/durability/resources/capability_binding_definitions.rs";
 const README_PATH: &str = "README.md";
@@ -176,6 +177,7 @@ fn dynamic_replacement_resources_are_durable_route_records() {
 fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
     let git = read_repo_file(GIT_OPERATION_PATH);
     let route = read_repo_file(ROUTE_PATH);
+    let validation = read_repo_file(VALIDATION_PATH);
 
     for required in ["active_route_for_git_status", "annotate_routed_git_status"] {
         assert!(
@@ -192,10 +194,31 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
         "runtimeRoutingChanged",
         "rollbackAvailable",
         "route_has_terminal_event",
+        "ensure_capability_shadow_trial_evidence",
+        "shadowEvidenceRef requires versionId",
+        "capability route requires accepted shadow trial evidence",
+        "capability route requires equivalent shadow trial evidence",
+        "capability route authority requires resource-scoped exact selectors",
+        "active route is missing route binding version ref",
+        "stale capability route binding version",
+        "active route binding is missing candidate version ref",
+        "stale capability replacement candidate version",
     ] {
         assert!(
             route.contains(required),
             "route implementation missing fail-closed/honesty marker {required}"
+        );
+    }
+
+    for required in [
+        "replacementTarget mismatch for",
+        "capability binding policy rejects agent_state inheritance",
+        "capability binding policy rejects agent_state resourceKinds",
+        "capability binding policy rejects wildcard resource selectors",
+    ] {
+        assert!(
+            validation.contains(required),
+            "binding validation missing route-safety marker {required}"
         );
     }
 }

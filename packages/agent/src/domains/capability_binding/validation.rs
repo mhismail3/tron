@@ -232,6 +232,13 @@ pub(super) fn target_operation_binding_metadata(
             metadata.ownership_class
         )));
     }
+    let supplied_replacement_target = replacement_target(payload)?;
+    if supplied_replacement_target != metadata.replacement_target {
+        return Err(invalid(format!(
+            "replacementTarget mismatch for {operation_name}: expected {}",
+            metadata.replacement_target
+        )));
+    }
     Ok(TargetOperationBindingMetadata {
         operation_name,
         family: metadata.family.to_owned(),
@@ -341,11 +348,33 @@ pub(super) fn authority_constraints(payload: &Value) -> Result<Value, Capability
             "capability binding policy requires authorityConstraints.networkPolicy none",
         ));
     }
+    if map
+        .get("agentStateInherited")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(invalid(
+            "capability binding policy rejects agent_state inheritance",
+        ));
+    }
     let authority_scopes = string_array(map, "authorityScopes")?;
     let resource_kinds = string_array(map, "resourceKinds")?;
+    if resource_kinds
+        .iter()
+        .any(|value| value.as_str() == Some("agent_state"))
+    {
+        return Err(invalid(
+            "capability binding policy rejects agent_state resourceKinds",
+        ));
+    }
     if let Some(Value::Array(selectors)) = map.get("resourceSelectors") {
         for selector in selectors {
-            if selector.as_str().is_some_and(is_broad_selector) {
+            let Some(selector) = selector.as_str() else {
+                return Err(invalid(
+                    "authorityConstraints.resourceSelectors entries must be strings",
+                ));
+            };
+            if is_broad_selector(selector) {
                 return Err(invalid(
                     "capability binding policy rejects wildcard resource selectors",
                 ));
@@ -353,6 +382,11 @@ pub(super) fn authority_constraints(payload: &Value) -> Result<Value, Capability
         }
     }
     let resource_selectors = string_array(map, "resourceSelectors")?;
+    if resource_selectors.is_empty() {
+        return Err(invalid(
+            "capability binding policy requires exact resourceSelectors",
+        ));
+    }
     Ok(json!({
         "networkPolicy": "none",
         "authorityScopes": authority_scopes,
@@ -360,7 +394,8 @@ pub(super) fn authority_constraints(payload: &Value) -> Result<Value, Capability
         "resourceSelectors": resource_selectors,
         "agentStateInherited": false,
         "rawGrantIdsStored": false,
-        "wildcardSelectorsAllowed": false
+        "wildcardSelectorsAllowed": false,
+        "exactSelectorsRequired": true
     }))
 }
 

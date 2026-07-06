@@ -40,7 +40,7 @@ use super::{
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
     EngineResourceVersioningMode, FunctionId, Invocation, InvocationId, RiskLevel, TraceId,
-    builtin_resource_type_definitions,
+    UpdateResource, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -557,27 +557,158 @@ impl RouteFixture {
         }
     }
 
-    async fn candidate(&self, key: &str) -> Value {
-        let invocation = self.write_invocation(key, route_candidate_payload(key));
-        record_replacement_candidate_value_at(
+    async fn candidate_invocation(&self, key: &str) -> Invocation {
+        let shadow_evidence = self.shadow_evidence(&format!("{key}-shadow")).await;
+        let shadow_evidence_id = shadow_evidence["capabilityShadowTrialEvidenceResourceId"]
+            .as_str()
+            .expect("shadow evidence id");
+        let shadow_evidence_version_id = shadow_evidence["capabilityShadowTrialEvidenceVersionId"]
+            .as_str()
+            .expect("shadow evidence version id");
+        let grant_id = self
+            .exact_write_grant(
+                &format!("{key}-shadow-evidence-exact"),
+                &[shadow_evidence_id],
+            )
+            .await;
+        invocation(
+            key,
+            route_candidate_payload(key, shadow_evidence_id, shadow_evidence_version_id),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        )
+    }
+
+    async fn shadow_evidence(&self, key: &str) -> Value {
+        let request = self.shadow_request(&format!("{key}-request")).await;
+        let decision = self
+            .shadow_decision(&format!("{key}-decision"), &request)
+            .await;
+        self.shadow_run(&format!("{key}-run"), &decision).await
+    }
+
+    async fn shadow_request(&self, key: &str) -> Value {
+        let invocation = self.write_invocation(key, shadow_request_payload(key));
+        record_capability_shadow_trial_request_value_at(
             &self.deps,
             &invocation,
             &invocation.payload,
             default_operation_at(),
         )
         .await
-        .expect("record route candidate")
+        .expect("record route shadow request")
+    }
+
+    async fn shadow_decision(&self, key: &str, request: &Value) -> Value {
+        let request_id = request["capabilityShadowTrialRequestResourceId"]
+            .as_str()
+            .expect("route shadow request id");
+        let request_version_id = request["capabilityShadowTrialRequestVersionId"]
+            .as_str()
+            .expect("route shadow request version id");
+        let grant_id = self
+            .exact_write_grant(&format!("{key}-shadow-request-exact"), &[request_id])
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityShadowTrialRequestResourceId": request_id,
+                "expectedCapabilityShadowTrialRequestVersionId": request_version_id,
+                "capabilityShadowTrialDecisionId": format!("{key}-shadow-decision"),
+                "decision": "approved",
+                "reason": "Route candidate shadow evidence approved.",
+                "decisionEvidence": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-shadow-decision",
+                    "role": "decision"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        record_capability_shadow_trial_decision_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record route shadow decision")
+    }
+
+    async fn shadow_run(&self, key: &str, decision: &Value) -> Value {
+        let decision_id = decision["capabilityShadowTrialDecisionResourceId"]
+            .as_str()
+            .expect("route shadow decision id");
+        let decision_version_id = decision["capabilityShadowTrialDecisionVersionId"]
+            .as_str()
+            .expect("route shadow decision version id");
+        let grant_id = self
+            .exact_write_grant(&format!("{key}-shadow-decision-exact"), &[decision_id])
+            .await;
+        let invocation = invocation(
+            key,
+            json!({
+                "capabilityShadowTrialDecisionResourceId": decision_id,
+                "expectedCapabilityShadowTrialDecisionVersionId": decision_version_id,
+                "capabilityShadowTrialRunId": format!("{key}-shadow-run"),
+                "capabilityShadowTrialEvidenceId": format!("{key}-shadow-evidence"),
+                "trialRunOutcome": "completed",
+                "builtInProjection": status_projection("clean"),
+                "candidateProjection": status_projection("clean"),
+                "auditRefs": [{
+                    "kind": "evidence",
+                    "resourceId": "evidence:route-shadow-run-audit",
+                    "role": "audit"
+                }]
+            }),
+            grant_id,
+            &[
+                READ_SCOPE,
+                WRITE_SCOPE,
+                RESOURCE_READ_SCOPE,
+                RESOURCE_WRITE_SCOPE,
+            ],
+            &self.session_id,
+        );
+        record_capability_shadow_trial_run_value_at(
+            &self.deps,
+            &invocation,
+            &invocation.payload,
+            default_operation_at(),
+        )
+        .await
+        .expect("record route shadow run")
     }
 
     async fn binding(&self, key: &str, candidate: &Value) -> Value {
         let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
             .as_str()
             .expect("candidate id");
+        let shadow_evidence_id =
+            candidate["replacementCandidate"]["candidate"]["shadowEvidenceRef"]["resourceId"]
+                .as_str()
+                .expect("candidate shadow evidence id");
         let candidate_version_id = candidate["capabilityReplacementCandidateVersionId"]
             .as_str()
             .expect("candidate version id");
         let grant_id = self
-            .exact_write_grant(&format!("{key}-candidate-exact"), &[candidate_id])
+            .exact_write_grant(
+                &format!("{key}-candidate-exact"),
+                &[candidate_id, shadow_evidence_id],
+            )
             .await;
         let invocation = invocation(
             key,
@@ -805,6 +936,40 @@ impl RouteFixture {
             "none",
         )
         .await
+    }
+
+    async fn append_resource_version(&self, key: &str, resource_id: &str, expected_version: &str) {
+        let inspection = self
+            .deps
+            .engine_host
+            .inspect_resource(resource_id)
+            .await
+            .expect("inspect route resource")
+            .expect("route resource exists");
+        let current_version = inspection
+            .versions
+            .iter()
+            .find(|version| version.version_id == expected_version)
+            .expect("expected route resource version");
+        let mut payload = current_version.payload.clone();
+        payload["revision"] =
+            json!(payload.get("revision").and_then(Value::as_u64).unwrap_or(1) + 1);
+        payload["updatedAt"] = json!("2026-06-27T12:01:00Z");
+        let update_invocation = self.write_invocation(key, json!({}));
+        self.deps
+            .engine_host
+            .update_resource(UpdateResource {
+                resource_id: resource_id.to_owned(),
+                expected_current_version_id: Some(expected_version.to_owned()),
+                lifecycle: Some(inspection.resource.lifecycle),
+                payload,
+                state: None,
+                locations: Vec::new(),
+                trace_id: update_invocation.causal_context.trace_id,
+                invocation_id: Some(update_invocation.id),
+            })
+            .await
+            .expect("append route resource version");
     }
 
     fn write_invocation(&self, key: &str, payload: Value) -> Invocation {
@@ -1150,7 +1315,15 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 async fn route_records_candidate_binding_activation_disable_and_rollback_for_git_status() {
     let fixture = RouteFixture::new("capability-route-flow").await;
 
-    let candidate = fixture.candidate("candidate").await;
+    let candidate_invocation = fixture.candidate_invocation("candidate").await;
+    let candidate = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record candidate");
     assert_eq!(candidate["status"], json!("validated"));
     assert_eq!(
         candidate["replacementCandidate"]["operation"]["name"],
@@ -1160,7 +1333,14 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         candidate["replacementCandidate"]["candidate"]["moduleAdapterInvokedByDispatcher"],
         json!(false)
     );
-    let replay = fixture.candidate("candidate").await;
+    let replay = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("replay candidate");
     assert_eq!(replay["idempotentReplay"], json!(true));
 
     let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
@@ -1196,6 +1376,10 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     assert_eq!(
         binding["routeBinding"]["binding"]["routeCanActivate"],
         json!(true)
+    );
+    assert_eq!(
+        binding["routeBinding"]["binding"]["shadowEvidence"]["kind"],
+        json!(CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND)
     );
 
     let binding_id = binding["capabilityRouteBindingResourceId"]
@@ -1316,6 +1500,229 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         .expect("route lookup after rollback")
         .is_none()
     );
+}
+
+#[tokio::test]
+async fn route_lookup_rejects_stale_binding_or_candidate_current_versions() {
+    let binding_fixture = RouteFixture::new("capability-route-stale-binding").await;
+    let candidate_invocation = binding_fixture
+        .candidate_invocation("binding-stale-candidate")
+        .await;
+    let candidate = record_replacement_candidate_value_at(
+        &binding_fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record candidate");
+    let binding = binding_fixture.binding("binding-stale", &candidate).await;
+    let binding_id = binding["capabilityRouteBindingResourceId"]
+        .as_str()
+        .expect("binding id");
+    let binding_version_id = binding["capabilityRouteBindingVersionId"]
+        .as_str()
+        .expect("binding version id");
+    let _activation = binding_fixture
+        .activation("binding-stale-activation", &binding)
+        .await;
+    binding_fixture
+        .append_resource_version("binding-stale-update", binding_id, binding_version_id)
+        .await;
+    let error = active_route_for_git_status(
+        &binding_fixture.deps,
+        &binding_fixture.read_invocation("binding-stale-lookup", json!({})),
+    )
+    .await
+    .expect_err("stale binding version rejects active route lookup")
+    .to_string();
+    assert!(
+        error.contains("stale capability route binding version"),
+        "{error}"
+    );
+
+    let candidate_fixture = RouteFixture::new("capability-route-stale-candidate").await;
+    let candidate_invocation = candidate_fixture
+        .candidate_invocation("candidate-stale-candidate")
+        .await;
+    let candidate = record_replacement_candidate_value_at(
+        &candidate_fixture.deps,
+        &candidate_invocation,
+        &candidate_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect("record candidate");
+    let candidate_id = candidate["capabilityReplacementCandidateResourceId"]
+        .as_str()
+        .expect("candidate id");
+    let candidate_version_id = candidate["capabilityReplacementCandidateVersionId"]
+        .as_str()
+        .expect("candidate version id");
+    let binding = candidate_fixture
+        .binding("candidate-stale-binding", &candidate)
+        .await;
+    let _activation = candidate_fixture
+        .activation("candidate-stale-activation", &binding)
+        .await;
+    candidate_fixture
+        .append_resource_version("candidate-stale-update", candidate_id, candidate_version_id)
+        .await;
+    let error = active_route_for_git_status(
+        &candidate_fixture.deps,
+        &candidate_fixture.read_invocation("candidate-stale-lookup", json!({})),
+    )
+    .await
+    .expect_err("stale candidate version rejects active route lookup")
+    .to_string();
+    assert!(
+        error.contains("stale capability replacement candidate version"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn route_candidate_rejects_fabricated_or_stale_shadow_evidence() {
+    let fixture = RouteFixture::new("capability-route-evidence-guards").await;
+    let fake_evidence_id = "capability_shadow_trial_evidence:missing-route-proof";
+    let grant_id = fixture
+        .exact_write_grant("fake-evidence-exact", &[fake_evidence_id])
+        .await;
+    let fake_invocation = invocation(
+        "fake-evidence-candidate",
+        route_candidate_payload("fake-evidence", fake_evidence_id, "missing-version"),
+        grant_id,
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &fake_invocation,
+        &fake_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("fake shadow evidence must be rejected")
+    .to_string();
+    assert!(
+        error.contains("missing capability shadow trial evidence"),
+        "{error}"
+    );
+
+    let shadow_evidence = fixture.shadow_evidence("stale-shadow").await;
+    let evidence_id = shadow_evidence["capabilityShadowTrialEvidenceResourceId"]
+        .as_str()
+        .expect("shadow evidence id");
+    let grant_id = fixture
+        .exact_write_grant("stale-evidence-exact", &[evidence_id])
+        .await;
+    let stale_invocation = invocation(
+        "stale-evidence-candidate",
+        route_candidate_payload("stale-evidence", evidence_id, "stale-version"),
+        grant_id,
+        &[
+            READ_SCOPE,
+            WRITE_SCOPE,
+            RESOURCE_READ_SCOPE,
+            RESOURCE_WRITE_SCOPE,
+        ],
+        &fixture.session_id,
+    );
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &stale_invocation,
+        &stale_invocation.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("stale shadow evidence must be rejected")
+    .to_string();
+    assert!(
+        error.contains("stale capability shadow trial evidence"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn route_candidate_rejects_target_and_authority_spoofing() {
+    let fixture = RouteFixture::new("capability-route-authority-guards").await;
+
+    let mut target_mismatch = fixture.candidate_invocation("target-mismatch").await;
+    target_mismatch.payload["replacementTarget"] = json!("different_future_adapter");
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &target_mismatch,
+        &target_mismatch.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("route candidate replacement target mismatch rejected")
+    .to_string();
+    assert!(
+        error.contains("replacementTarget mismatch for git_status"),
+        "{error}"
+    );
+
+    let mut wildcard_selector = fixture.candidate_invocation("wildcard-selector").await;
+    wildcard_selector.payload["authorityConstraints"]["resourceSelectors"] = json!(["resource:*"]);
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &wildcard_selector,
+        &wildcard_selector.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("route candidate wildcard selector rejected")
+    .to_string();
+    assert!(error.contains("wildcard resource selectors"), "{error}");
+
+    let mut broad_selector = fixture.candidate_invocation("broad-selector").await;
+    broad_selector.payload["authorityConstraints"]["resourceSelectors"] =
+        json!(["kind:git_status_shadow_projection"]);
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &broad_selector,
+        &broad_selector.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("route candidate non-resource selector rejected")
+    .to_string();
+    assert!(error.contains("resource-scoped exact selectors"), "{error}");
+
+    let mut agent_state_kind = fixture.candidate_invocation("agent-state-kind").await;
+    agent_state_kind.payload["authorityConstraints"]["resourceKinds"] = json!(["agent_state"]);
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &agent_state_kind,
+        &agent_state_kind.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("route candidate agent_state resource kind rejected")
+    .to_string();
+    assert!(
+        error.contains("rejects agent_state resourceKinds"),
+        "{error}"
+    );
+
+    let mut agent_state_inherited = fixture.candidate_invocation("agent-state-inherited").await;
+    agent_state_inherited.payload["authorityConstraints"]["agentStateInherited"] = json!(true);
+    let error = record_replacement_candidate_value_at(
+        &fixture.deps,
+        &agent_state_inherited,
+        &agent_state_inherited.payload,
+        default_operation_at(),
+    )
+    .await
+    .expect_err("route candidate agent_state inheritance rejected")
+    .to_string();
+    assert!(error.contains("rejects agent_state inheritance"), "{error}");
 }
 
 #[tokio::test]
@@ -2463,7 +2870,11 @@ fn status_projection(status: &str) -> Value {
     })
 }
 
-fn route_candidate_payload(key: &str) -> Value {
+fn route_candidate_payload(
+    key: &str,
+    shadow_evidence_resource_id: &str,
+    shadow_evidence_version_id: &str,
+) -> Value {
     json!({
         "capabilityReplacementCandidateId": format!("{key}-replacement-candidate"),
         "targetOperation": "git_status",
@@ -2490,7 +2901,8 @@ fn route_candidate_payload(key: &str) -> Value {
         },
         "shadowEvidenceRef": {
             "kind": CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND,
-            "resourceId": "capability_shadow_trial_evidence:git-status-shadow",
+            "resourceId": shadow_evidence_resource_id,
+            "versionId": shadow_evidence_version_id,
             "role": "shadow_evidence"
         },
         "contractEvidenceRefs": [{
