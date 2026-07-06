@@ -22,7 +22,7 @@ struct EngineCockpitDashboardBand: View {
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(3)
                     HStack(spacing: 8) {
-                        briefingMetric("Capabilities", "\(overview.functions.count)")
+                        briefingMetric(overview.invokableUnitLabel, "\(overview.invokableUnitCount)")
                         briefingMetric("Issues", "\(issueCount)")
                         briefingPhrase(verificationPhrase)
                     }
@@ -125,7 +125,7 @@ struct AgentCockpitMetricStrip: View {
     var body: some View {
         HStack(spacing: 8) {
             metric("Workers", value: "\(overview.workers.count)", icon: "cpu")
-            metric("Capabilities", value: "\(overview.functions.count)", icon: "curlybraces")
+            metric(overview.invokableUnitLabel, value: "\(overview.invokableUnitCount)", icon: "curlybraces")
             metric("Issues", value: "\(issueCount)", icon: "exclamationmark.triangle")
             metric("Capability check", value: verificationMetricValue, icon: "checkmark.shield")
         }

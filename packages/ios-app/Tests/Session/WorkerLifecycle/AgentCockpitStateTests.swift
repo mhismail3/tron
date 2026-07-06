@@ -83,6 +83,8 @@ struct AgentCockpitStateTests {
 
         #expect(overview.discovery.operationCount == 2)
         #expect(overview.modularityOperations.count == 2)
+        #expect(overview.invokableUnitCount == 2)
+        #expect(overview.invokableUnitLabel == "Operations")
         let git = overview.modularityOperations.first { $0.name == "git_status" }
         #expect(git?.ownerLabel == "Built-in Git adapter")
         #expect(git?.metadataSourceLabel == "Capability execute registry")
@@ -235,6 +237,8 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.title == "Verified")
         #expect(overview.discovery.missingSchemaCount == 0)
         #expect(overview.discovery.groups.first?.missingSchemaCount == 0)
+        #expect(overview.invokableUnitCount == 1)
+        #expect(overview.invokableUnitLabel == "Functions")
         #expect(overview.functions.first?.ownerWorker == "context_control")
         #expect(overview.functions.first?.effectClass == "PureRead")
         #expect(overview.functions.first?.riskLevel == "Low")

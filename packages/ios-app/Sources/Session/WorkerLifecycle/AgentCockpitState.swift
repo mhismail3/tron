@@ -242,6 +242,23 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var currentRevision: UInt64?
     var nextRevision: UInt64?
 
+    var invokableUnitCount: Int {
+        if let capabilityVisibility {
+            return capabilityVisibility.operationList.totalOperations
+        }
+        if !modularityOperations.isEmpty {
+            return modularityOperations.count
+        }
+        return functions.count
+    }
+
+    var invokableUnitLabel: String {
+        if capabilityVisibility != nil || !modularityOperations.isEmpty {
+            return "Operations"
+        }
+        return "Functions"
+    }
+
     static func empty(connectionState: ConnectionState) -> AgentCockpitOverview {
         AgentCockpitOverview(
             status: AgentCockpitProjection.status(

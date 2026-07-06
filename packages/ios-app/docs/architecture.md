@@ -462,7 +462,7 @@ It must not map fixed feature names into custom sheets.
 
 The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
 and sheet header are the core engine summary: connection state, visible
-capability count, issue count, and plain verification state from server-owned
+invokable operation count, issue count, and plain verification state from server-owned
 facts. The sheet opens on Capabilities, grouping visible operations into
 user-facing areas before drilling into server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
