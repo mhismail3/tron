@@ -307,18 +307,21 @@ The chat timeline owns only truthful local/session presentation state:
   iOS must not treat it as another delta.
   Legacy OpenAI replay blocks without an explicit `kind` field use the same
   reasoning-summary presentation based on persisted provider type.
-- Capability evidence uses `CapabilityEvidencePresentation` as the pure mapper
-  for one-line chat chips and sectioned detail sheets. Chips stay compact; the
-  detail sheet shows summary, target/input/result/error, and technical
-  provenance only when current invocation data supplies it.
+- Capability evidence uses `CapabilityEvidencePresentation` for one-line chat
+  chips and `CapabilityInvocationBriefPresentation` for detail sheets. Chips
+  stay compact; detail sheets read as a progressive briefing: what happened,
+  what needs attention, the concise request, the useful result, then evidence.
+  Full invocation refs and raw payloads are available only inside disclosure
+  rows so top-level sheets do not lead with raw IDs, grants, paths, or JSON.
 - Consecutive capability invocations are grouped only at the presentation
   layer by `CapabilityInvocationGrouping`: persisted events and reconstructed
   `ChatMessage` values remain one invocation per record, while the chat
   transcript renders adjacent multi-invocation runs as a single "Using/Used N
   capabilities" chip aligned with the normal left-edge assistant/tool-chip
   lane. Tapping the group opens `CapabilityInvocationGroupDetailSheet`, whose
-  rows drill into the existing single-invocation detail sheet without changing
-  event identity, cancellation, trace, or replay semantics.
+  rows put attention-worthy failures first and drill into the single-invocation
+  briefing without changing event identity, cancellation, trace, or replay
+  semantics.
 - Passive worker-runtime diagnostics stay out of the chat shell. A chat-level
   agent signal can return only for attention-worthy states such as approval
   required, degraded runtime, an active session-relevant worker, or a generated

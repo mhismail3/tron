@@ -8,12 +8,13 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
         let source = try source(pathComponents: ["Sources", "UI", "Capabilities", "CapabilityInvocationViews.swift"])
 
         XCTAssertTrue(source.contains("CapabilityEvidencePresentation(data: data)"))
-        XCTAssertTrue(source.contains("ForEach(evidence.sections)"))
-        XCTAssertTrue(source.contains("case .technical"))
+        XCTAssertTrue(source.contains("CapabilityInvocationBriefPresentation(data: data)"))
+        XCTAssertTrue(source.contains("CapabilityRowsDisclosure"))
         XCTAssertTrue(source.contains("CapabilityRawDisclosure"))
+        XCTAssertFalse(source.contains("ForEach(evidence.sections)"))
+        XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Target""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Action""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Runtime Details""#))
-        XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Request""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Advanced""#))
         XCTAssertFalse(source.contains("Approval state"))
     }

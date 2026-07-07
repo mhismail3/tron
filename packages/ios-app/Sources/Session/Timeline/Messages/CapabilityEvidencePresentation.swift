@@ -66,10 +66,12 @@ struct CapabilityEvidencePresentation: Equatable {
     ) -> String? {
         if data.status == .error {
             if let message = data.errorClassification?.message?.nilIfEmpty {
-                return message.truncated(to: 80)
+                return CapabilityInvocationBriefPresentation.safeTopLevelText(message, limit: 80)
             }
             if let preview = display.resultPreview?.nilIfEmpty {
-                return preview.lines.first?.trimmed.nilIfEmpty?.truncated(to: 80)
+                return preview.lines.first?.trimmed.nilIfEmpty.map {
+                    CapabilityInvocationBriefPresentation.safeTopLevelText($0, limit: 80)
+                }
             }
         }
 

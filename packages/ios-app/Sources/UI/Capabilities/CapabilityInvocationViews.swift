@@ -235,6 +235,21 @@ struct CapabilityInvocationGroupDetailSheet: View {
         TintedColors(accent: accent, colorScheme: colorScheme)
     }
 
+    private var failedInvocations: [CapabilityInvocationData] {
+        data.invocations.filter { $0.status == .error || $0.status == .unavailable }
+    }
+
+    private var activeInvocations: [CapabilityInvocationData] {
+        data.invocations.filter { $0.status == .running || $0.status == .generating }
+    }
+
+    private var completedInvocations: [CapabilityInvocationData] {
+        data.invocations.filter { invocation in
+            !(failedInvocations.contains(where: { $0.id == invocation.id }) ||
+              activeInvocations.contains(where: { $0.id == invocation.id }))
+        }
+    }
+
     var body: some View {
         CapabilityDetailSheetContainer(
             modelPrimitiveName: "Capabilities",
@@ -246,14 +261,32 @@ struct CapabilityInvocationGroupDetailSheet: View {
                     summarySection
                         .sheetSection()
 
-                    CapabilityDetailSection(title: "Invocations", accent: accent, tint: tint) {
-                        VStack(spacing: 10) {
-                            ForEach(data.invocations) { invocation in
-                                invocationRow(invocation)
-                            }
-                        }
+                    if !failedInvocations.isEmpty {
+                        invocationSection(
+                            title: "Needs attention",
+                            invocations: failedInvocations,
+                            sectionAccent: .tronError
+                        )
+                        .sheetSection()
                     }
-                    .sheetSection()
+
+                    if !activeInvocations.isEmpty {
+                        invocationSection(
+                            title: "Still running",
+                            invocations: activeInvocations,
+                            sectionAccent: .tronBlue
+                        )
+                        .sheetSection()
+                    }
+
+                    if !completedInvocations.isEmpty {
+                        invocationSection(
+                            title: failedInvocations.isEmpty ? "Invocations" : "Completed",
+                            invocations: completedInvocations,
+                            sectionAccent: accent
+                        )
+                        .sheetSection()
+                    }
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
@@ -265,21 +298,53 @@ struct CapabilityInvocationGroupDetailSheet: View {
     }
 
     private var summarySection: some View {
-        CapabilityDetailSection(title: "Summary", accent: accent, tint: tint) {
-            CapabilityReadableRows(
-                rows: [
-                    CapabilityDisplayRow(label: "Status", value: data.isActive ? "Running" : "Completed"),
-                    CapabilityDisplayRow(label: "Capabilities", value: "\(data.count)"),
-                    CapabilityDisplayRow(label: "Finished", value: "\(data.completedCount)"),
-                    CapabilityDisplayRow(label: "Failed", value: "\(data.failedCount)")
-                ],
-                tint: tint
-            )
+        CapabilityDetailSection(title: "What happened", accent: accent, tint: tint) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(groupNarrative)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(tint.body)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                CapabilityReadableRows(
+                    rows: [
+                        CapabilityDisplayRow(label: "Status", value: data.isActive ? "Running" : "Completed"),
+                        CapabilityDisplayRow(label: "Capabilities", value: "\(data.count)"),
+                        CapabilityDisplayRow(label: "Finished", value: "\(data.completedCount)"),
+                        CapabilityDisplayRow(label: "Failed", value: "\(data.failedCount)")
+                    ],
+                    tint: tint
+                )
+            }
+        }
+    }
+
+    private var groupNarrative: String {
+        if data.isActive {
+            return "Tron is using \(data.count) capabilities in this batch. Completed calls will stay inspectable as the rest finish."
+        }
+        if data.failedCount > 0 {
+            return "Tron used \(data.count) capabilities. \(data.failedCount) need attention and are listed first with safe failure details."
+        }
+        return "Tron used \(data.count) capabilities and all completed. Open any invocation for request, result, and evidence details."
+    }
+
+    private func invocationSection(
+        title: String,
+        invocations: [CapabilityInvocationData],
+        sectionAccent: Color
+    ) -> some View {
+        let sectionTint = TintedColors(accent: sectionAccent, colorScheme: colorScheme)
+        return CapabilityDetailSection(title: title, accent: sectionAccent, tint: sectionTint) {
+            VStack(spacing: 10) {
+                ForEach(invocations) { invocation in
+                    invocationRow(invocation)
+                }
+            }
         }
     }
 
     private func invocationRow(_ invocation: CapabilityInvocationData) -> some View {
-        let evidence = CapabilityEvidencePresentation(data: invocation)
+        let brief = CapabilityInvocationBriefPresentation(data: invocation)
         let rowAccent = CapabilityPresentation.statusColor(
             for: invocation.status,
             identity: invocation.identity,
@@ -295,12 +360,12 @@ struct CapabilityInvocationGroupDetailSheet: View {
                     .frame(width: 22, height: 22)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(evidence.title)
+                    Text(brief.title)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(1)
 
-                    if let qualifier = evidence.qualifier {
+                    if let qualifier = brief.subtitle {
                         Text(qualifier)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                             .foregroundStyle(.tronTextSecondary)
@@ -309,7 +374,7 @@ struct CapabilityInvocationGroupDetailSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(invocation.formattedDuration ?? evidence.statusLabel)
+                Text(invocation.formattedDuration ?? invocation.display.statusText)
                     .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)
@@ -323,7 +388,7 @@ struct CapabilityInvocationGroupDetailSheet: View {
         .buttonStyle(.plain)
         .background(Color.tronSurface.opacity(colorScheme == .light ? 0.78 : 0.58))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .accessibilityLabel("\(evidence.title), \(evidence.statusLabel)")
+        .accessibilityLabel("\(brief.title), \(invocation.display.statusText)")
     }
 }
 
@@ -334,6 +399,9 @@ struct CapabilityInvocationDetailSheet: View {
 
     private var display: CapabilityInvocationDisplayModel { data.display }
     private var evidence: CapabilityEvidencePresentation { CapabilityEvidencePresentation(data: data) }
+    private var brief: CapabilityInvocationBriefPresentation {
+        CapabilityInvocationBriefPresentation(data: data)
+    }
     private var accent: Color {
         CapabilityPresentation.statusColor(
             for: data.status,
@@ -351,10 +419,26 @@ struct CapabilityInvocationDetailSheet: View {
         ) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 20) {
-                    ForEach(evidence.sections) { section in
-                        evidenceSection(section)
+                    whatHappenedSection
+                        .sheetSection()
+
+                    if let issue = brief.issue {
+                        issueSection(issue)
                             .sheetSection()
                     }
+
+                    if !brief.resultRows.isEmpty || brief.resultBody != nil {
+                        resultSection
+                            .sheetSection()
+                    }
+
+                    if !brief.requestRows.isEmpty {
+                        rowsSection(title: "Request", rows: brief.requestRows, accent: accent)
+                            .sheetSection()
+                    }
+
+                    evidenceSection
+                        .sheetSection()
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
@@ -362,34 +446,130 @@ struct CapabilityInvocationDetailSheet: View {
         }
     }
 
-    @ViewBuilder
-    private func evidenceSection(_ section: CapabilityEvidencePresentation.Section) -> some View {
-        let sectionTint = TintedColors(accent: sectionAccent(section.kind), colorScheme: colorScheme)
-        CapabilityDetailSection(title: section.title, accent: sectionTint.accent, tint: sectionTint) {
+    private var whatHappenedSection: some View {
+        CapabilityDetailSection(title: "What happened", accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 12) {
-                if !section.rows.isEmpty {
-                    CapabilityReadableRows(rows: section.rows, tint: sectionTint)
+                Text(brief.narrative)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(tint.body)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                CapabilityBriefFactGrid(rows: brief.factRows, tint: tint)
+            }
+        }
+    }
+
+    private func issueSection(_ issue: CapabilityInvocationBriefPresentation.Issue) -> some View {
+        let issueTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
+        return CapabilityDetailSection(title: "Needs attention", accent: .tronError, tint: issueTint) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(issue.message)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(issueTint.body)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let nextStep = issue.nextStep {
+                    Text(nextStep)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                        .foregroundStyle(issueTint.accent)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if let body = section.body?.nilIfEmpty {
-                    if section.isDisclosure {
-                        CapabilityRawDisclosure(title: "Raw payload", text: body, tint: sectionTint)
-                    } else {
-                        CapabilityInvocationCodeBlock(text: body)
-                    }
+                if !issue.rows.isEmpty {
+                    CapabilityReadableRows(rows: issue.rows, tint: issueTint)
                 }
             }
         }
     }
 
-    private func sectionAccent(_ kind: CapabilityEvidencePresentation.SectionKind) -> Color {
-        switch kind {
-        case .summary, .target, .input, .result:
-            return accent
-        case .error:
-            return .tronError
-        case .technical:
-            return .tronSlate
+    private func rowsSection(title: String, rows: [CapabilityDisplayRow], accent: Color) -> some View {
+        let sectionTint = TintedColors(accent: accent, colorScheme: colorScheme)
+        return CapabilityDetailSection(title: title, accent: accent, tint: sectionTint) {
+            CapabilityReadableRows(rows: rows, tint: sectionTint)
+        }
+    }
+
+    private var resultSection: some View {
+        CapabilityDetailSection(title: "Result", accent: accent, tint: tint) {
+            VStack(alignment: .leading, spacing: 12) {
+                if !brief.resultRows.isEmpty {
+                    CapabilityReadableRows(rows: brief.resultRows, tint: tint)
+                }
+                if let body = brief.resultBody {
+                    CapabilityInvocationCodeBlock(text: body)
+                }
+            }
+        }
+    }
+
+    private var evidenceSection: some View {
+        let evidenceTint = TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        return CapabilityDetailSection(title: "Evidence", accent: .tronSlate, tint: evidenceTint) {
+            VStack(alignment: .leading, spacing: 12) {
+                if !brief.evidenceRows.isEmpty {
+                    CapabilityReadableRows(rows: brief.evidenceRows, tint: evidenceTint)
+                }
+
+                if !brief.technicalRows.isEmpty {
+                    CapabilityRowsDisclosure(title: "Technical refs", rows: brief.technicalRows, tint: evidenceTint)
+                }
+
+                if let rawPayload = brief.rawPayload {
+                    CapabilityRawDisclosure(title: "Raw payload", text: rawPayload, tint: evidenceTint)
+                }
+            }
+        }
+    }
+}
+
+private struct CapabilityRowsDisclosure: View {
+    let title: String
+    let rows: [CapabilityDisplayRow]
+    let tint: TintedColors
+
+    var body: some View {
+        DisclosureGroup {
+            CapabilityReadableRows(rows: rows, tint: tint)
+                .padding(.top, 8)
+        } label: {
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(tint.heading)
+        }
+    }
+}
+
+private struct CapabilityBriefFactGrid: View {
+    let rows: [CapabilityDisplayRow]
+    let tint: TintedColors
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(rows) { row in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.label)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(tint.subtle)
+                    Text(row.value)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                        .foregroundStyle(.tronTextPrimary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .background {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(tint.accent.opacity(0.08))
+                }
+            }
         }
     }
 }
