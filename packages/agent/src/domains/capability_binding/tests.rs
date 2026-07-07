@@ -3586,8 +3586,43 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     let names = super::cockpit_visibility::test_operation_names(&overview);
     assert!(names.contains("git_status"));
     assert!(names.contains("observe"));
+    for operation in overview["operations"].as_array().expect("operations") {
+        assert_eq!(
+            operation["capabilityPool"]["surface"],
+            json!("agent_operation")
+        );
+        assert!(
+            matches!(
+                operation["capabilityPool"]["replacementClass"]
+                    .as_str()
+                    .expect("replacement class"),
+                "runtime_routable" | "producer_extensible" | "kernel_evolution_only"
+            ),
+            "{operation}"
+        );
+    }
 
     let git_status = operation_projection(&overview, "git_status");
+    assert_eq!(
+        git_status["capabilityPool"]["surface"],
+        json!("agent_operation")
+    );
+    assert_eq!(
+        git_status["capabilityPool"]["audience"],
+        json!("session_work")
+    );
+    assert_eq!(
+        git_status["capabilityPool"]["replacementClass"],
+        json!("runtime_routable")
+    );
+    assert_eq!(
+        git_status["capabilityPool"]["agentDefaultVisibility"],
+        json!("default_visible")
+    );
+    assert_eq!(
+        git_status["capabilityPool"]["minimalityDecision"],
+        json!("module_candidate")
+    );
     assert_eq!(git_status["owner"]["label"], json!("Built-in Git adapter"));
     assert_eq!(
         git_status["owner"]["metadataSourceLabel"],
@@ -3628,6 +3663,14 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(git_status["rollback"]["abortAvailable"], json!(true));
 
     let observe = operation_projection(&overview, "observe");
+    assert_eq!(
+        observe["capabilityPool"]["replacementClass"],
+        json!("kernel_evolution_only")
+    );
+    assert_ne!(
+        observe["capabilityPool"]["agentDefaultVisibility"],
+        json!("default_visible")
+    );
     assert_eq!(observe["owner"]["label"], json!("Engine kernel"));
     assert_eq!(observe["status"]["kind"], json!("kernel_locked"));
     assert_eq!(observe["replacement"]["canReplace"], json!(false));
@@ -3642,6 +3685,10 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(observe["rollback"]["available"], json!(false));
 
     let goal_create = operation_projection(&overview, "goal_create");
+    assert_eq!(
+        goal_create["capabilityPool"]["replacementClass"],
+        json!("producer_extensible")
+    );
     assert_eq!(goal_create["status"]["kind"], json!("record_plane"));
     assert_eq!(goal_create["replacement"]["canExtend"], json!(true));
     assert_eq!(goal_create["replacement"]["canReplace"], json!(false));

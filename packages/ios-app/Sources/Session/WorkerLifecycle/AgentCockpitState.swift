@@ -53,6 +53,12 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var name: String
     var family: String
     var familyLabel: String
+    var capabilitySurface: String
+    var capabilityAudience: String
+    var capabilityReplacementClass: String
+    var capabilityDefaultVisibility: String
+    var capabilityMinimalityDecision: String
+    var capabilityEvolutionPath: String
     var ownerLabel: String
     var ownerDetail: String
     var metadataSourceLabel: String
@@ -638,10 +644,23 @@ enum AgentCockpitProjection {
 
     private static func operationRow(_ operation: CapabilityCockpitOperationDTO) -> AgentCockpitOperationRow {
         let route = operation.route ?? CapabilityCockpitRouteDTO()
+        let pool = operation.capabilityPool
+        let fallbackReplacementClass: String = {
+            if operation.replacement.canReplace { return "runtime_routable" }
+            if operation.replacement.canExtend { return "producer_extensible" }
+            return "kernel_evolution_only"
+        }()
+        let fallbackAudience = operation.status.locked ? "kernel_evolution" : "session_work"
         return AgentCockpitOperationRow(
             name: operation.name,
             family: operation.family,
             familyLabel: operation.familyLabel,
+            capabilitySurface: pool?.surface ?? "agent_operation",
+            capabilityAudience: pool?.audience ?? fallbackAudience,
+            capabilityReplacementClass: pool?.replacementClass ?? fallbackReplacementClass,
+            capabilityDefaultVisibility: pool?.agentDefaultVisibility ?? "inspect_only",
+            capabilityMinimalityDecision: pool?.minimalityDecision ?? "keep_core",
+            capabilityEvolutionPath: pool?.evolutionPath ?? "No evolution path has been published for this operation.",
             ownerLabel: operation.owner.label,
             ownerDetail: operation.owner.detail,
             metadataSourceLabel: operation.owner.metadataSourceLabel,

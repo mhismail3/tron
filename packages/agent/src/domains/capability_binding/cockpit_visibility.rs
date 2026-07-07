@@ -4,7 +4,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::domains::capability::{
-    OperationBindingMetadata, operation_binding_metadata, supported_operation_names,
+    OperationBindingMetadata, operation_binding_metadata,
+    pool::{CapabilityPoolMetadata, operation_pool_metadata},
+    supported_operation_names,
 };
 use crate::engine::{
     EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
@@ -226,6 +228,7 @@ struct OperationVisibility {
     name: String,
     family: String,
     family_label: String,
+    capability_pool: CapabilityPoolRoleProjection,
     owner: OwnerProjection,
     status: StatusProjection,
     replacement: ReplacementProjection,
@@ -234,6 +237,17 @@ struct OperationVisibility {
     shadow_trial: ShadowTrialProjection,
     route: RouteProjection,
     rollback: RollbackProjection,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilityPoolRoleProjection {
+    surface: &'static str,
+    audience: &'static str,
+    replacement_class: &'static str,
+    agent_default_visibility: &'static str,
+    minimality_decision: &'static str,
+    evolution_path: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -431,19 +445,26 @@ pub(crate) async fn cockpit_overview_value(
         .unwrap_or(DEFAULT_LIMIT)
         .clamp(1, MAX_LIMIT);
     let facts = collect_facts(deps, &scopes).await?;
-    let mut all_operations = supported_operation_names()
-        .iter()
-        .filter_map(|operation| {
-            operation_binding_metadata(operation).map(|metadata| {
-                let operation_facts = facts
-                    .facts
-                    .get::<str>(*operation)
-                    .cloned()
-                    .unwrap_or_default();
-                operation_visibility(metadata, operation_facts)
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut all_operations = Vec::new();
+    for operation in supported_operation_names() {
+        let metadata =
+            operation_binding_metadata(operation).ok_or_else(|| CapabilityError::Internal {
+                message: format!("missing capability binding metadata for operation {operation}"),
+            })?;
+        let pool = operation_pool_metadata(operation).ok_or_else(|| CapabilityError::Internal {
+            message: format!("missing capability pool metadata for operation {operation}"),
+        })?;
+        let operation_facts = facts
+            .facts
+            .get::<str>(*operation)
+            .cloned()
+            .unwrap_or_default();
+        all_operations.push(operation_visibility(
+            metadata,
+            capability_pool_role_projection(&pool),
+            operation_facts,
+        ));
+    }
     all_operations.sort_by(|left, right| {
         left.family
             .cmp(&right.family)
@@ -756,6 +777,7 @@ fn apply_route_resource(
 
 fn operation_visibility(
     metadata: OperationBindingMetadata,
+    capability_pool: CapabilityPoolRoleProjection,
     facts: OperationFacts,
 ) -> OperationVisibility {
     let replacement = replacement_projection(
@@ -770,6 +792,7 @@ fn operation_visibility(
         name: metadata.operation.to_owned(),
         family: metadata.family.to_owned(),
         family_label: family_label(metadata.family),
+        capability_pool,
         owner: owner_projection(
             metadata.family,
             metadata.current_owner,
@@ -782,6 +805,19 @@ fn operation_visibility(
         shadow_trial: shadow_projection(metadata.operation, &facts.shadow),
         route,
         rollback,
+    }
+}
+
+fn capability_pool_role_projection(
+    metadata: &CapabilityPoolMetadata<'_>,
+) -> CapabilityPoolRoleProjection {
+    CapabilityPoolRoleProjection {
+        surface: metadata.surface.as_str(),
+        audience: metadata.audience.as_str(),
+        replacement_class: metadata.replacement_class.as_str(),
+        agent_default_visibility: metadata.agent_default_visibility.as_str(),
+        minimality_decision: metadata.minimality_decision.as_str(),
+        evolution_path: metadata.evolution_path,
     }
 }
 

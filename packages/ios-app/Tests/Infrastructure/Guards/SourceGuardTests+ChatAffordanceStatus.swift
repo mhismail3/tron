@@ -78,6 +78,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift"),
             encoding: .utf8
         )
+        let cockpitOperationDetailViews = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift"),
+            encoding: .utf8
+        )
         #expect(cockpitViews.contains("struct AgentCockpitSheet"))
         #expect(cockpitSummaryViews.contains("struct EngineCockpitDashboardBand"))
         #expect(cockpitSummaryViews.contains("overview.invokableUnitLabel"))
@@ -92,9 +96,13 @@ extension SourceGuardTests {
         #expect(!cockpitSummaryViews.contains(#"Image(systemName: "chevron.right")"#))
         #expect(!cockpitDiscoveryViews.contains(#"Image(systemName: "chevron.right")"#))
         #expect(cockpitDiscoveryViews.contains("struct CapabilityGroupCard"))
+        #expect(!cockpitDiscoveryViews.contains("capabilityMapRevision(currentRevision)"))
+        #expect(!cockpitDiscoveryViews.contains("Capability map version"))
         #expect(cockpitDiscoveryViews.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"))
         #expect(cockpitDiscoveryViews.contains("private struct CapabilityOperationCard"))
         #expect(cockpitDiscoveryViews.contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"))
+        #expect(cockpitOperationDetailViews.contains(#"Text("Role")"#))
+        #expect(cockpitOperationDetailViews.contains("capabilityReplacementClassLabel"))
         #expect(!cockpitViews.contains("struct AgentStatusCapsuleView"))
         #expect(cockpitViews.contains(#"SheetTitle(title: "Engine Cockpit", color: .tronEmerald)"#))
         #expect(cockpitViews.contains("SheetDismissButton(color: .tronEmerald)"))

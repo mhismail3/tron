@@ -41,8 +41,13 @@ final class DashboardHitTargetUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Activity"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Core"].exists)
         XCTAssertFalse(app.buttons["Discovery"].exists)
-        XCTAssertTrue(app.staticTexts["Capability catalog verified"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Built-in engine operations"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Capabilities verified"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(NSPredicate(format: "label CONTAINS %@", "Built-in engine operations can be invoked directly"))
+                .firstMatch
+                .waitForExistence(timeout: 10)
+        )
         keepScreenshot(named: "engine-cockpit-capabilities")
 
         let coreEngineGroup = app.buttons["capability-group-core_engine"].firstMatch
@@ -56,32 +61,15 @@ final class DashboardHitTargetUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["IdempotentWrite"].exists)
         keepScreenshot(named: "engine-cockpit-capability-detail")
 
-        let operation = app.buttons["operation-row-auth::clear"].firstMatch
+        let operation = app.buttons["operation-row-capability_binding_decision_inspect"].firstMatch
         XCTAssertTrue(operation.waitForExistence(timeout: 10))
-        operation.tap()
+        operation.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         XCTAssertTrue(app.staticTexts["Operation Detail"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["How Tron Sees It"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Schema"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Provider-visible contract from the live capability catalog."].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Request"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Response"].waitForExistence(timeout: 10))
-        XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", #""additionalProperties" : false"#))
-                .firstMatch
-                .waitForExistence(timeout: 10),
-            "Operation detail should show the pretty-printed request schema body"
-        )
-        XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", #""providers""#))
-                .firstMatch
-                .waitForExistence(timeout: 10),
-            "Operation detail should show the pretty-printed response schema body"
-        )
-        XCTAssertTrue(app.staticTexts["Idempotent Write"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Tags"].waitForExistence(timeout: 10))
-        keepScreenshot(named: "engine-cockpit-operation-detail")
-
+        XCTAssertTrue(app.staticTexts["Role"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Kernel-evolution only"].waitForExistence(timeout: 10))
+        keepScreenshot(named: "engine-cockpit-operation-role-detail")
         app.buttons["Close"].tap()
+
         app.buttons["Close"].tap()
         app.buttons["Activity"].tap()
         XCTAssertTrue(app.staticTexts["No engine work"].waitForExistence(timeout: 10))

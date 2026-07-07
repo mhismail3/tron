@@ -1256,9 +1256,13 @@ not return a built-in success projection as a fallback.
 Cockpit Visibility adds the system-visible pure-read
 `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
 It joins registry ownership metadata with scoped binding-policy, shadow-trial,
-and dynamic route records so iOS can show total versus returned operations,
-operation-list and bounded resource-scan completeness, redacted operation owner
-and replacement target summaries, server-derived readiness/next-action labels,
+dynamic route records, and the Engine Capability Pool role classification so
+iOS can show one provider-visible operation count, total versus returned
+operations, operation-list and bounded resource-scan completeness, redacted
+operation owner and replacement target summaries, session-work versus
+diagnostics/governance/kernel-evolution role, runtime-routable versus
+producer-extensible versus kernel-evolution-only replacement class,
+server-derived readiness/next-action labels,
 built-in/module/locked status, replaceability, binding/shadow attempts, active
 routes, route events, routed invocations, failed-closed/disabled/rolled-back
 route state, bounded route-story cards for "What Changed" cockpit summaries,
@@ -1462,7 +1466,7 @@ Current primitive operations:
 | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
 | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
 | `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence, supervised adapter projection state, routed invocation results, fail-closed status, and rollback/disable history. |
-| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 188 `capability::execute` operations, joining registry ownership classes with current-session/workspace binding-policy and shadow-trial facts so iOS can display total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
+| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 188 `capability::execute` operations, joining registry ownership classes, Engine Capability Pool role classifications, and current-session/workspace binding-policy, shadow-trial, and route facts so iOS can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -2883,9 +2887,11 @@ packages/ios-app/Sources/
   count, and plain verification state such as verified, needs review,
   or unchecked. The cockpit sheet opens on
   Capabilities, grouping operations into user-facing areas with drill-down
-  operation owner/status, replacement eligibility, binding/shadow-trial
-  attempts, rollback/disable/abort availability, and request/response schema
-  bodies from the live capability map where present; capability map version and
+  operation owner/status, session-work/diagnostics/governance/kernel-evolution
+  role, runtime-routable/producer-extensible/kernel-evolution-only replacement
+  class, replacement eligibility, binding/shadow-trial attempts,
+  rollback/disable/abort availability, and request/response schema bodies from
+  the live capability map where present; capability map version and
   durable `catalog_discovery_report` resources are presented there as
   contextual capability-check evidence rather than top-level telemetry.
   Replacement-disclosure rows derive from

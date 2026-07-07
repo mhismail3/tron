@@ -10,6 +10,7 @@ struct CapabilityOperationDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     summary
+                    role
                     ownership
                     readiness
                     replacement
@@ -35,6 +36,28 @@ struct CapabilityOperationDetailSheet: View {
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)
         .accessibilityIdentifier("operation-detail-\(operation.id)")
+    }
+
+    private var role: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Role")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("Audience", AgentCockpitPresentation.capabilityAudienceLabel(operation.capabilityAudience))
+            detailRow("Replacement", AgentCockpitPresentation.capabilityReplacementClassLabel(operation.capabilityReplacementClass))
+            detailRow("Visibility", AgentCockpitPresentation.capabilityVisibilityLabel(operation.capabilityDefaultVisibility))
+            detailRow("Minimality", AgentCockpitPresentation.capabilityMinimalityLabel(operation.capabilityMinimalityDecision))
+            Text(roleNarrative)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(operation.capabilityEvolutionPath)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(roleTint, cornerRadius: 12, subtle: true, interactive: false)
     }
 
     private var summary: some View {
@@ -227,6 +250,33 @@ struct CapabilityOperationDetailSheet: View {
         }
     }
 
+    private var roleTint: Color {
+        switch AgentCockpitProjection.normalized(operation.capabilityReplacementClass) {
+        case "runtimeroutable":
+            return .tronInfo
+        case "producerextensible":
+            return .tronEmerald
+        case "kernelevolutiononly":
+            return .tronTextMuted
+        default:
+            return .tronEmerald
+        }
+    }
+
+    private var roleNarrative: String {
+        let audience = AgentCockpitPresentation.capabilityAudienceLabel(operation.capabilityAudience).lowercased()
+        switch AgentCockpitProjection.normalized(operation.capabilityReplacementClass) {
+        case "runtimeroutable":
+            return "This is \(audience). A governed module can become the runtime owner only after validation, shadow evidence, approval, activation, and rollback proof."
+        case "producerextensible":
+            return "This is \(audience). Modules may add producers or richer workflows, but server-owned custody and redaction remain the source of truth."
+        case "kernelevolutiononly":
+            return "This is \(audience). It can improve through source-level kernel evolution, review, validation, and integration; it is not a live runtime route."
+        default:
+            return "This operation has a server-owned role classification. Inspect evidence before inferring how it can evolve."
+        }
+    }
+
     private func detailRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
@@ -347,7 +397,7 @@ struct OperationDetailSheet: View {
                 Text("Schema")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
-                Text("Provider-visible contract from the live capability map.")
+                Text("Provider-visible contract from the live operation catalog.")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
             }

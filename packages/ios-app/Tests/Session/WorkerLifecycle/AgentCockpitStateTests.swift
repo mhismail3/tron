@@ -90,6 +90,11 @@ struct AgentCockpitStateTests {
         #expect(git?.metadataSourceLabel == "Capability execute registry")
         #expect(git?.projectionSourceLabel == "Capability binding cockpit projection")
         #expect(git?.statusKind == "built_in_adapter")
+        #expect(git?.capabilitySurface == "agent_operation")
+        #expect(git?.capabilityAudience == "session_work")
+        #expect(git?.capabilityReplacementClass == "runtime_routable")
+        #expect(git?.capabilityDefaultVisibility == "default_visible")
+        #expect(git?.capabilityMinimalityDecision == "module_candidate")
         #expect(git?.canReplace == true)
         #expect(git?.replacementTargetLabel == "Governed Git adapter")
         #expect(git?.readinessState == "needs_governance_review")
@@ -114,6 +119,9 @@ struct AgentCockpitStateTests {
 
         let observe = overview.modularityOperations.first { $0.name == "observe" }
         #expect(observe?.isLocked == true)
+        #expect(observe?.capabilityAudience == "kernel_evolution")
+        #expect(observe?.capabilityReplacementClass == "kernel_evolution_only")
+        #expect(observe?.capabilityDefaultVisibility == "inspect_only")
         #expect(observe?.canReplace == false)
         #expect(observe?.readinessNextActionLabel == "Observe only")
         #expect(observe?.rollbackAvailable == false)
@@ -352,7 +360,6 @@ struct AgentCockpitStateTests {
             AgentCockpitPresentation.verificationDetail(for: overview.discovery),
             AgentCockpitPresentation.verificationPhrase(for: overview.discovery.latestReport),
             AgentCockpitPresentation.verificationStatus(for: overview.discovery.latestReport),
-            AgentCockpitPresentation.capabilityMapRevision(overview.currentRevision) ?? "",
             AgentCockpitPresentation.workKindLabel(overview.moduleActivity?.resources.first?.kind ?? ""),
             AgentCockpitPresentation.workStateLine(
                 kind: overview.activity.first?.resourceKind ?? "",
@@ -363,7 +370,6 @@ struct AgentCockpitStateTests {
         #expect(AgentCockpitPresentation.hiddenTopLevelTerms(in: topLevelStrings).isEmpty)
         #expect(topLevelStrings.contains("Capabilities verified"))
         #expect(topLevelStrings.contains("Verified"))
-        #expect(topLevelStrings.contains("Capability map version 2"))
         #expect(topLevelStrings.contains("Runtime"))
     }
 

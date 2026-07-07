@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CapabilitiesSummaryCard: View {
     let overview: AgentCockpitDiscoveryOverview
-    let currentRevision: UInt64?
     let onVerify: () -> Void
 
     var body: some View {
@@ -37,11 +36,8 @@ struct CapabilitiesSummaryCard: View {
                 capabilityMetric("Workers", overview.workerCount)
                 capabilityMetric("Triggers", overview.triggerCount)
             }
-            if currentRevision != nil || overview.latestReport != nil {
+            if overview.latestReport != nil {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let version = AgentCockpitPresentation.capabilityMapRevision(currentRevision) {
-                        Text(version)
-                    }
                     if let checked = AgentCockpitPresentation.safeLastChecked(overview.latestReport) {
                         Text("Last checked \(checked)")
                     }
@@ -296,18 +292,26 @@ struct CapabilityGroupDetailSheet: View {
                             selectedOperation = operation
                         } label: {
                             CapabilityOperationCard(operation: operation)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel(operation.name)
+                                .accessibilityIdentifier("operation-row-\(operation.id)")
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("operation-row-\(operation.id)")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     ForEach(group.functions) { function in
                         Button {
                             selectedFunction = function
                         } label: {
                             CapabilityFunctionCard(function: function)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel(function.id)
+                                .accessibilityIdentifier("catalog-function-row-\(function.id)")
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("catalog-function-row-\(function.id)")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     if let latestReport {
                         CatalogVerificationRow(report: latestReport)

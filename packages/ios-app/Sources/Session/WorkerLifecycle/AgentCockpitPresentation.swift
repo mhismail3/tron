@@ -59,9 +59,62 @@ enum AgentCockpitPresentation {
         return "\(visibleOperations) operations are visible across \(overview.groups.count) capability areas."
     }
 
-    static func capabilityMapRevision(_ revision: UInt64?) -> String? {
-        guard let revision else { return nil }
-        return "Capability map version \(revision)"
+    static func capabilityAudienceLabel(_ value: String) -> String {
+        switch AgentCockpitProjection.normalized(value) {
+        case "sessionwork":
+            return "Session work"
+        case "agentdiagnostics":
+            return "Agent diagnostics"
+        case "governance":
+            return "Governance"
+        case "engineinternal":
+            return "Engine internal"
+        case "kernelevolution":
+            return "Kernel evolution"
+        default:
+            return displayLabel(value)
+        }
+    }
+
+    static func capabilityReplacementClassLabel(_ value: String) -> String {
+        switch AgentCockpitProjection.normalized(value) {
+        case "runtimeroutable":
+            return "Runtime-routable"
+        case "producerextensible":
+            return "Producer-extensible"
+        case "kernelevolutiononly":
+            return "Kernel-evolution only"
+        default:
+            return displayLabel(value)
+        }
+    }
+
+    static func capabilityVisibilityLabel(_ value: String) -> String {
+        switch AgentCockpitProjection.normalized(value) {
+        case "defaultvisible":
+            return "Default-visible"
+        case "searchvisible":
+            return "Search-visible"
+        case "inspectonly":
+            return "Inspect-only"
+        case "hiddenunlessevolutionmode":
+            return "Evolution-only"
+        default:
+            return displayLabel(value)
+        }
+    }
+
+    static func capabilityMinimalityLabel(_ value: String) -> String {
+        switch AgentCockpitProjection.normalized(value) {
+        case "keepcore":
+            return "Keep core"
+        case "keepgovernance":
+            return "Keep governance"
+        case "modulecandidate":
+            return "Module candidate"
+        default:
+            return displayLabel(value)
+        }
     }
 
     static func safeLastChecked(_ report: AgentCockpitDiscoveryReportRow?) -> String? {
@@ -112,6 +165,7 @@ enum AgentCockpitPresentation {
     static func hiddenTopLevelTerms(in values: [String]) -> [String] {
         let forbidden = [
             "catalog",
+            "capability map version",
             "audit detail",
             "resourceid",
             "resource id",

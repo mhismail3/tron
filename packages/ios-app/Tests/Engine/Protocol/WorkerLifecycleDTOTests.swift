@@ -416,6 +416,14 @@ struct WorkerLifecycleDTOTests {
               "name": "git_status",
               "family": "git",
               "familyLabel": "Git",
+              "capabilityPool": {
+                "surface": "agent_operation",
+                "audience": "session_work",
+                "replacementClass": "runtime_routable",
+                "agentDefaultVisibility": "default_visible",
+                "minimalityDecision": "module_candidate",
+                "evolutionPath": "candidate_validation_shadow_approval_activation_rollback"
+              },
               "owner": {
                 "label": "Built-in Git adapter",
                 "detail": "A built-in adapter owns execution today and can be proposed for governed replacement later.",
@@ -544,6 +552,9 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.operationList.truncated == true)
         #expect(overview.resourceScan.state == "bounded_degraded")
         #expect(overview.operations.first?.owner.metadataSourceLabel == "Capability execute registry")
+        #expect(overview.operations.first?.capabilityPool?.surface == "agent_operation")
+        #expect(overview.operations.first?.capabilityPool?.audience == "session_work")
+        #expect(overview.operations.first?.capabilityPool?.replacementClass == "runtime_routable")
         #expect(overview.operations.first?.replacement.target.label == "Governed Git adapter")
         #expect(overview.operations.first?.readiness.nextActionLabel == "Inspect decisions")
         #expect(overview.operations.first?.route?.state == "active")

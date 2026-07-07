@@ -229,6 +229,14 @@ extension AgentCockpitViewModelTests {
                     name: "git_status",
                     family: "git",
                     familyLabel: "Git",
+                    capabilityPool: CapabilityCockpitPoolDTO(
+                        surface: "agent_operation",
+                        audience: "session_work",
+                        replacementClass: "runtime_routable",
+                        agentDefaultVisibility: "default_visible",
+                        minimalityDecision: "module_candidate",
+                        evolutionPath: "candidate validation, shadow evidence, approval, activation, and rollback"
+                    ),
                     owner: CapabilityCockpitOwnerDTO(
                         label: "Built-in Git adapter",
                         detail: "A built-in adapter owns execution today and can be proposed for governed replacement later.",
@@ -317,6 +325,14 @@ extension AgentCockpitViewModelTests {
                     name: "observe",
                     family: "core",
                     familyLabel: "Core",
+                    capabilityPool: CapabilityCockpitPoolDTO(
+                        surface: "agent_operation",
+                        audience: "kernel_evolution",
+                        replacementClass: "kernel_evolution_only",
+                        agentDefaultVisibility: "inspect_only",
+                        minimalityDecision: "keep_core",
+                        evolutionPath: "source-level candidate change, validation, adversarial review, approved integration, and rollback evidence"
+                    ),
                     owner: CapabilityCockpitOwnerDTO(
                         label: "Engine kernel",
                         detail: "The engine kernel owns this operation and modules cannot take it over.",

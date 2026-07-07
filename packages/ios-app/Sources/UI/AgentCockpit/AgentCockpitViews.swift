@@ -174,8 +174,7 @@ struct AgentCockpitSheet: View {
     private var capabilitiesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             CapabilitiesSummaryCard(
-                overview: viewModel.overview.discovery,
-                currentRevision: viewModel.overview.currentRevision
+                overview: viewModel.overview.discovery
             ) {
                 Task {
                     await viewModel.verifyCatalogDiscovery(

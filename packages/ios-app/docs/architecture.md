@@ -467,14 +467,17 @@ facts. The sheet opens on Capabilities, grouping visible operations into
 user-facing areas before drilling into server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
 bounded resource-scan state, locked/built-in/module status, redacted
-replacement target, readiness/next-action labels,
+replacement target, server-owned capability-pool role, runtime-routable versus
+producer-extensible versus kernel-evolution-only replacement class,
+readiness/next-action labels,
 replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 active route state, route events, routed invocations,
 failed-closed/disabled/rolled-back route state, rollback/disable/abort
 availability, effect/risk, schema-health, worker, trigger, tags,
 request/response schema bodies, and safe verification details.
-Capability map version and recent `catalog_discovery_report` resources are rendered
-inside the cockpit as capability-check evidence, not as top-level telemetry.
+Capability map version and recent `catalog_discovery_report` resources are
+rendered only inside cockpit evidence/detail surfaces, not as top-level
+telemetry.
 Capability modularity rows come from `capability_binding::cockpit_overview`,
 which is a server-owned redacted projection over registry metadata plus scoped
 binding/shadow-trial/route records. iOS may shape display labels and grouping,
