@@ -16,7 +16,7 @@ enum ThinkingDisplayKind: String, Codable, Equatable {
     var title: String {
         switch self {
         case .thinking: "Thinking"
-        case .reasoningSummary: "Reasoning Summary"
+        case .reasoningSummary: "Thinking"
         }
     }
 }

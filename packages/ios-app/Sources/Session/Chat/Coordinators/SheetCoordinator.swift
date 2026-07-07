@@ -104,4 +104,9 @@ final class SheetCoordinator {
         present(.capabilityInvocationDetail(data))
     }
 
+    /// Show a grouped capability invocation detail sheet.
+    func showCapabilityInvocationGroupDetail(_ data: CapabilityInvocationGroupData) {
+        present(.capabilityInvocationGroupDetail(data))
+    }
+
 }

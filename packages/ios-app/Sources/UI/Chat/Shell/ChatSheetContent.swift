@@ -54,6 +54,9 @@ struct ChatSheetContent: View {
         case .capabilityInvocationDetail(let data):
             capabilityInvocationDetailSheet(snapshot: data)
 
+        case .capabilityInvocationGroupDetail(let data):
+            capabilityInvocationGroupDetailSheet(snapshot: data)
+
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
 
@@ -92,6 +95,18 @@ struct ChatSheetContent: View {
             return snapshot
         }()
         CapabilityInvocationDetailSheet(data: liveData)
+    }
+
+    @ViewBuilder
+    private func capabilityInvocationGroupDetailSheet(snapshot: CapabilityInvocationGroupData) -> some View {
+        let liveInvocations = snapshot.invocations.map { invocation -> CapabilityInvocationData in
+            if let index = MessageFinder.lastIndexOfCapabilityInvocation(id: invocation.id, in: viewModel.messages),
+               case .capabilityInvocation(let liveInvocation) = viewModel.messages[index].content {
+                return liveInvocation
+            }
+            return invocation
+        }
+        CapabilityInvocationGroupDetailSheet(data: CapabilityInvocationGroupData(invocations: liveInvocations))
     }
 
 }

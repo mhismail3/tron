@@ -298,8 +298,10 @@ The chat timeline owns only truthful local/session presentation state:
 - Thinking placeholder rendering is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.
-  Provider-authored reasoning summaries are rendered as reasoning summaries, not
-  raw append-only thinking, because providers may compress or rewrite them.
+  Provider-authored reasoning summaries keep their internal `reasoning_summary`
+  kind, but the chat label is the user-facing "Thinking" label. Completed
+  summaries render a static thinking icon; only actively streaming thinking
+  content uses the pulsing icon animation.
   Live `agent.thinking_delta` appends visible text, while `agent.thinking_end`
   is a server-authoritative full snapshot that replaces the accumulated draft;
   iOS must not treat it as another delta.
@@ -309,6 +311,14 @@ The chat timeline owns only truthful local/session presentation state:
   for one-line chat chips and sectioned detail sheets. Chips stay compact; the
   detail sheet shows summary, target/input/result/error, and technical
   provenance only when current invocation data supplies it.
+- Consecutive capability invocations are grouped only at the presentation
+  layer by `CapabilityInvocationGrouping`: persisted events and reconstructed
+  `ChatMessage` values remain one invocation per record, while the chat
+  transcript renders adjacent multi-invocation runs as a single "Using/Used N
+  capabilities" chip aligned with the normal left-edge assistant/tool-chip
+  lane. Tapping the group opens `CapabilityInvocationGroupDetailSheet`, whose
+  rows drill into the existing single-invocation detail sheet without changing
+  event identity, cancellation, trace, or replay semantics.
 - Passive worker-runtime diagnostics stay out of the chat shell. A chat-level
   agent signal can return only for attention-worthy states such as approval
   required, degraded runtime, an active session-relevant worker, or a generated

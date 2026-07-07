@@ -93,6 +93,7 @@ enum ChatSheet: Identifiable, Equatable {
 
     // Capability detail
     case capabilityInvocationDetail(CapabilityInvocationData)
+    case capabilityInvocationGroupDetail(CapabilityInvocationGroupData)
 
 
     var id: String {
@@ -105,6 +106,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "thinking"
         case .capabilityInvocationDetail(let data):
             return "capability-\(data.id)"
+        case .capabilityInvocationGroupDetail(let data):
+            return "capability-group-\(data.id)"
         case .providerErrorDetail:
             return "providerError"
         case .localErrorDetail(let data):
@@ -125,6 +128,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
             return content1 == content2
         case (.capabilityInvocationDetail(let data1), .capabilityInvocationDetail(let data2)):
+            return data1.id == data2.id
+        case (.capabilityInvocationGroupDetail(let data1), .capabilityInvocationGroupDetail(let data2)):
             return data1.id == data2.id
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2

@@ -124,6 +124,11 @@ final class AssistantMessagePayloadTests: XCTestCase {
 }
 
 final class ThinkingCompletePayloadTests: XCTestCase {
+    func testReasoningSummaryUsesThinkingDisplayTitle() {
+        XCTAssertEqual(ThinkingDisplayKind.thinking.title, "Thinking")
+        XCTAssertEqual(ThinkingDisplayKind.reasoningSummary.title, "Thinking")
+    }
+
     func testToDictionaryPersistsReasoningSummaryKind() {
         let payload = ThinkingCompletePayload(
             turnNumber: 7,

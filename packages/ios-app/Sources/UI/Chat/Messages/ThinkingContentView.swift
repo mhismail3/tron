@@ -58,7 +58,11 @@ struct ThinkingContentView: View {
                 // reasoning summaries whose text is not raw append-only thinking.
                 if isStreaming || kind == .reasoningSummary {
                     HStack(spacing: 6) {
-                        PulsingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
+                        if isStreaming {
+                            PulsingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
+                        } else {
+                            TronIconView(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
+                        }
                         Text(kind.title)
                             .font(TronTypography.caption)
                             .fontWeight(.medium)

@@ -78,6 +78,8 @@ extension ChatView {
             sheetCoordinator.showContextControl(actionResourceId: resourceId)
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
+        case .capabilityInvocationGroup(let data):
+            sheetCoordinator.showCapabilityInvocationGroupDetail(data)
         case .cancelCapabilityInvocation(let id):
             viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
         case .providerError(let data):
@@ -104,22 +106,12 @@ extension ChatView {
                                 .id("topAutoloadSentinel")
                         }
 
-                        ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                            MessageBubble(
-                                message: message,
-                                onTap: { action in handleBubbleTap(action) }
-                            )
-                            .id(message.id)
-                            .background(MessageViewportProbe(id: message.id))
-                            // Per-message entrance animation - fade in with slight upward movement
-                            // Visibility managed by AnimationCoordinator bottom-up cascade
-                            .opacity(messageIsVisible(at: index, total: viewModel.messages.count) ? 1 : 0)
-                            .offset(y: messageIsVisible(at: index, total: viewModel.messages.count) ? 0 : 6)
-                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
-                            .accessibilityIdentifier(
-                                index == viewModel.messages.count - 1
-                                    ? "chat-message-latest"
-                                    : "chat-message-row"
+                        let renderItems = CapabilityInvocationGrouping.renderItems(from: viewModel.messages)
+                        ForEach(Array(renderItems.enumerated()), id: \.element.id) { index, item in
+                            messageRenderItemView(
+                                item,
+                                index: index,
+                                total: renderItems.count
                             )
                         }
                         // Animate message insertions/removals ONLY after initial load.
@@ -341,6 +333,48 @@ extension ChatView {
                 total: total
             )
         )
+    }
+
+    @ViewBuilder
+    private func messageRenderItemView(
+        _ item: ChatMessageRenderItem,
+        index: Int,
+        total: Int
+    ) -> some View {
+        switch item {
+        case .message(let message):
+            MessageBubble(
+                message: message,
+                onTap: { action in handleBubbleTap(action) }
+            )
+            .id(message.id)
+            .background(MessageViewportProbe(id: message.id))
+            .opacity(messageIsVisible(at: index, total: total) ? 1 : 0)
+            .offset(y: messageIsVisible(at: index, total: total) ? 0 : 6)
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+            .accessibilityIdentifier(
+                index == total - 1
+                    ? "chat-message-latest"
+                    : "chat-message-row"
+            )
+
+        case .capabilityGroup(let group):
+            CapabilityInvocationGroupChip(
+                data: group.data,
+                onTap: { handleBubbleTap(.capabilityInvocationGroup(group.data)) }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(group.id)
+            .background(MessageViewportProbe(id: group.messages.first?.id ?? UUID()))
+            .opacity(messageIsVisible(at: index, total: total) ? 1 : 0)
+            .offset(y: messageIsVisible(at: index, total: total) ? 0 : 6)
+            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+            .accessibilityIdentifier(
+                index == total - 1
+                    ? "chat-message-latest"
+                    : "chat-message-row"
+            )
+        }
     }
 
     // MARK: - Earlier Message Autoload

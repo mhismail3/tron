@@ -67,6 +67,7 @@
 		166801F9C45DDB7A2B262B0B /* WorkspaceBrowserClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B519FE72D0317B7309D1FEB6 /* WorkspaceBrowserClient.swift */; };
 		16C1BB5FA46AFC9C879365B8 /* ChatSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78DD117A954F6AD2C4FA805 /* ChatSheetTests.swift */; };
 		1705A7C7E42FF9CE9CF06EBF /* AgentCockpitDiscoveryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D0C744E30481B0A821C4FF /* AgentCockpitDiscoveryViews.swift */; };
+		171A5CB5A75B1A6571CD22BE /* CapabilityInvocationGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDE89F4C386EE7A152C7909 /* CapabilityInvocationGroupingTests.swift */; };
 		172B9EA30FB993CA08B6C8FF /* CapabilityResultRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A212706A5CD5638C35A8084 /* CapabilityResultRenderers.swift */; };
 		17A99C787BFC381D65E2B301 /* SettingsClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E986B8915BF3723D51C96367 /* SettingsClientTests.swift */; };
 		1864719E1C2378BCEDBE4E3B /* SessionForkedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D8CF9B5C4F8C58DB1C1CDB2 /* SessionForkedPlugin.swift */; };
@@ -491,6 +492,7 @@
 		B0DC9DE4387D8F3F25B9027C /* CapabilityDetailSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EEEA695EF36C0465AE7492D /* CapabilityDetailSection.swift */; };
 		B0EB5C3AA65CB25D0F117ED0 /* CapabilitySharedComponentsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E09D48AD8820B7A4B2AF8B91 /* CapabilitySharedComponentsTests.swift */; };
 		B1692881E6C5CF340CD0BC24 /* CapabilityInvocationDetailViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD34424A94CB523A91E77C60 /* CapabilityInvocationDetailViewTests.swift */; };
+		B208AF6070579338DA2B50B8 /* CapabilityInvocationGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD76522B8CA7686095DF7D7 /* CapabilityInvocationGrouping.swift */; };
 		B2427258323B0EF0D97DE4DE /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E2BD88CA4C5DB0E2864FD8 /* AppConstants.swift */; };
 		B249A2488B25952BC353A780 /* SettingsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12A4B686B0F6D853EF93D614 /* SettingsCard.swift */; };
 		B31FAF135DE1D05CD952F4ED /* ModelFilteringServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EDE2809C7C585F51233F9F /* ModelFilteringServiceTests.swift */; };
@@ -825,6 +827,7 @@
 		1EB3CA80F424C5B48C08B09B /* UnifiedEventTransformerMapsAndCompactionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerMapsAndCompactionTests.swift; sourceTree = "<group>"; };
 		1EB97748148338044FE4B473 /* SettingsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSupport.swift; sourceTree = "<group>"; };
 		1FAFC05821C68520CB296246 /* GeneratedRuntimeSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedRuntimeSurfaceView.swift; sourceTree = "<group>"; };
+		1FDE89F4C386EE7A152C7909 /* CapabilityInvocationGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationGroupingTests.swift; sourceTree = "<group>"; };
 		20403FCE92591B0FEFC9ADA2 /* PairingProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingProbeTests.swift; sourceTree = "<group>"; };
 		208DD0F6E9476FF313FA08C4 /* MessagePayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagePayloads.swift; sourceTree = "<group>"; };
 		20AEA37FB7EB12792ED3CF26 /* OnboardingFlowLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowLayoutTests.swift; sourceTree = "<group>"; };
@@ -1187,6 +1190,7 @@
 		9A3FBEF8B98077F31A6D93A1 /* UIUpdateQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIUpdateQueue.swift; sourceTree = "<group>"; };
 		9AA7627122BA2B7C3174AB7B /* ChatTranscriptRevealPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptRevealPolicyTests.swift; sourceTree = "<group>"; };
 		9AC8CEC8A94FB8BFD955B902 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
+		9AD76522B8CA7686095DF7D7 /* CapabilityInvocationGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationGrouping.swift; sourceTree = "<group>"; };
 		9B4B4415424256E86596A7C3 /* EventDispatchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDispatchContext.swift; sourceTree = "<group>"; };
 		9B5C26B624A0B39788B4229D /* GeneratedUIRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedUIRendererTests.swift; sourceTree = "<group>"; };
 		9BC16BB52585DA035BC18EB9 /* ChatViewModelPaginationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelPaginationTests.swift; sourceTree = "<group>"; };
@@ -2716,6 +2720,7 @@
 			children = (
 				A2B245442B35E4208EB68E2D /* CapabilityEvidencePresentationTests.swift */,
 				2D28A3FE993E63C1388BACDF /* CapabilityInvocationDisplayModelTests.swift */,
+				1FDE89F4C386EE7A152C7909 /* CapabilityInvocationGroupingTests.swift */,
 				003B53B59A5793783CDC6648 /* LocalChatNotificationTests.swift */,
 			);
 			path = Messages;
@@ -3499,6 +3504,7 @@
 				8910B58AC51ED8B5C07FA9D0 /* CapabilityInvocationActionRows.swift */,
 				8291DA0AB836C736BD1A001D /* CapabilityInvocationDisplayModel.swift */,
 				62C6A3FA5347E434B9E5D8FD /* CapabilityInvocationDisplayModel+PresentationHelpers.swift */,
+				9AD76522B8CA7686095DF7D7 /* CapabilityInvocationGrouping.swift */,
 				0963F9AEAEB992C442D6AC67 /* CapabilityInvocationProgressModel.swift */,
 				3EEA161BEAAAE770740F7DDC /* CapabilityInvocationTypes.swift */,
 				D8B801ADA0D0D73BC3EE1724 /* CapabilityPresentation.swift */,
@@ -3770,6 +3776,7 @@
 				586CB7EF97B6C158A60F4F18 /* CapabilityInvocationDisplayModel.swift in Sources */,
 				AC342A18E316520665AD14E9 /* CapabilityInvocationEventProjection.swift in Sources */,
 				F2E51BD34C7B853548C48500 /* CapabilityInvocationGeneratingPlugin.swift in Sources */,
+				B208AF6070579338DA2B50B8 /* CapabilityInvocationGrouping.swift in Sources */,
 				49B096113CCFCBB00A93AD29 /* CapabilityInvocationOutputPlugin.swift in Sources */,
 				55BA646BBE148114518D45DA /* CapabilityInvocationPayloads.swift in Sources */,
 				DC9A0AE490D97A2EF462E318 /* CapabilityInvocationProgressModel.swift in Sources */,
@@ -4170,6 +4177,7 @@
 				B1692881E6C5CF340CD0BC24 /* CapabilityInvocationDetailViewTests.swift in Sources */,
 				7432DC5E33048422F536D24E /* CapabilityInvocationDisplayModelTests.swift in Sources */,
 				782F5CD2FAC8A4C3664F0878 /* CapabilityInvocationGeneratingPluginTests.swift in Sources */,
+				171A5CB5A75B1A6571CD22BE /* CapabilityInvocationGroupingTests.swift in Sources */,
 				06A4878414D486BEBB15F360 /* CapabilityInvocationOutputPluginTests.swift in Sources */,
 				F6F49006DBDC39D5E52B38FC /* CapabilityInvocationStartedPluginTests.swift in Sources */,
 				A8B84A104A247627F0F5700F /* CapabilityLifecyclePluginTests.swift in Sources */,
