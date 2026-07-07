@@ -165,7 +165,13 @@ fn extract_result_content_projects_catalog_execute_operation_matches() {
                     },
                     "agentUsage": {
                         "callable": true,
-                        "defaultUse": "diagnose_or_verify"
+                        "defaultUse": "diagnose_or_verify",
+                        "effect": {
+                            "mode": "read_only",
+                            "readOnlyInspectionSafe": true,
+                            "mutatesState": false,
+                            "readOnlyInstruction": "safe to call during read-only inspection"
+                        }
                     }
                 }]
             }
@@ -179,13 +185,15 @@ fn extract_result_content_projects_catalog_execute_operation_matches() {
     assert!(text.contains("trace_list"));
     assert!(text.contains("diagnose_or_verify"));
     assert!(text.contains("kernel_evolution_only"));
+    assert!(text.contains("readOnlyInspectionSafe"));
+    assert!(text.contains("safe to call during read-only inspection"));
 }
 
 #[test]
 fn extract_result_content_projects_capability_cockpit_overview_digest() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
-            "Capability cockpit overview returned 3 operation(s).",
+            "Capability cockpit overview returned 5 operation(s).",
         )]),
         Some(json!({
             "primitiveOperation": "capability_binding_cockpit_overview",
@@ -193,21 +201,21 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
             "capabilityBinding": {
                 "summary": {
                     "title": "Capability ownership visible",
-                    "detail": "3 capability::execute operations have server-owned modularity metadata; 3 are returned.",
-                    "totalOperations": 3,
-                    "returnedOperations": 3,
+                    "detail": "5 capability::execute operations have server-owned modularity metadata; 5 are returned.",
+                    "totalOperations": 5,
+                    "returnedOperations": 5,
                     "operationListComplete": true,
                     "operationListTruncated": false,
                     "kernelLocked": 1,
-                    "governanceLocked": 1,
+                    "governanceLocked": 3,
                     "recordPlane": 0,
                     "adapterReplaceable": 1,
                     "moduleOwned": 0
                 },
                 "operationList": {
                     "complete": true,
-                    "returnedOperations": 3,
-                    "totalOperations": 3,
+                    "returnedOperations": 5,
+                    "totalOperations": 5,
                     "truncated": false
                 },
                 "families": [{
@@ -235,6 +243,12 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
                             "arguments": {"operation": "git_status"},
                             "callable": true,
                             "defaultUse": "perform_session_work",
+                            "effect": {
+                                "mode": "read_only",
+                                "readOnlyInspectionSafe": true,
+                                "mutatesState": false,
+                                "readOnlyInstruction": "safe to call during read-only inspection"
+                            },
                             "authorityGrantId": "grant_must_not_project",
                             "preflight": {
                                 "agentStateInherited": false,
@@ -276,7 +290,13 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
                             "operation": "trace_list",
                             "arguments": {"operation": "trace_list"},
                             "callable": true,
-                            "defaultUse": "diagnose_or_verify"
+                            "defaultUse": "diagnose_or_verify",
+                            "effect": {
+                                "mode": "read_only",
+                                "readOnlyInspectionSafe": true,
+                                "mutatesState": false,
+                                "readOnlyInstruction": "safe to call during read-only inspection"
+                            }
                         }
                     },
                     {
@@ -296,7 +316,113 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
                             "operation": "capability_binding_cockpit_overview",
                             "arguments": {"operation": "capability_binding_cockpit_overview"},
                             "callable": true,
-                            "defaultUse": "governed_record_or_inspection"
+                            "defaultUse": "governed_record_or_inspection",
+                            "effect": {
+                                "mode": "read_only",
+                                "readOnlyInspectionSafe": true,
+                                "mutatesState": false,
+                                "readOnlyInstruction": "safe to call during read-only inspection"
+                            }
+                        }
+                    },
+                    {
+                        "name": "capability_binding_request_list",
+                        "family": "capability_binding",
+                        "familyLabel": "Capability Binding",
+                        "capabilityPool": {
+                            "surface": "agent_operation",
+                            "audience": "governance",
+                            "replacementClass": "kernel_evolution_only",
+                            "agentDefaultVisibility": "search_visible",
+                            "minimalityDecision": "keep_governance",
+                            "evolutionPath": "source_candidate_validation_adversarial_review_user_approved_integration"
+                        },
+                        "agentUsage": {
+                            "tool": "capability::execute",
+                            "operation": "capability_binding_request_list",
+                            "arguments": {"operation": "capability_binding_request_list"},
+                            "callable": true,
+                            "defaultUse": "governed_record_or_inspection",
+                            "effect": {
+                                "mode": "read_only",
+                                "readOnlyInspectionSafe": true,
+                                "mutatesState": false,
+                                "readOnlyInstruction": "safe to call during read-only inspection"
+                            },
+                            "preflight": {
+                                "agentStateInherited": false,
+                                "authorityScopes": ["capability_binding.read", "resource.read"],
+                                "networkPolicy": "none",
+                                "readOnlyInstruction": "safe to call during read-only inspection",
+                                "resourceSelectors": [
+                                    "kind:capability_binding_request"
+                                ],
+                                "authorityGrantId": "nested_grant_must_not_project"
+                            }
+                        }
+                    },
+                    {
+                        "name": "capability_shadow_trial_request_record",
+                        "family": "capability_binding",
+                        "familyLabel": "Capability Binding",
+                        "capabilityPool": {
+                            "surface": "agent_operation",
+                            "audience": "governance",
+                            "replacementClass": "kernel_evolution_only",
+                            "agentDefaultVisibility": "search_visible",
+                            "minimalityDecision": "keep_governance",
+                            "evolutionPath": "source_candidate_validation_adversarial_review_user_approved_integration"
+                        },
+                        "agentUsage": {
+                            "tool": "capability::execute",
+                            "operation": "capability_shadow_trial_request_record",
+                            "arguments": {"operation": "capability_shadow_trial_request_record"},
+                            "callable": true,
+                            "defaultUse": "governed_write_after_evidence_and_approval",
+                            "effect": {
+                                "mode": "metadata_write",
+                                "readOnlyInspectionSafe": false,
+                                "mutatesState": true,
+                                "readOnlyInstruction": "do not call during read-only inspection; inspect schema/catalog/list operations instead"
+                            },
+                            "preflight": {
+                                "agentStateInherited": false,
+                                "authorityScopes": ["capability_binding.read", "capability_binding.write", "resource.read", "resource.write"],
+                                "networkPolicy": "none",
+                                "readOnlyInstruction": "Do not call during read-only inspection; this records durable shadow-trial request metadata.",
+                                "resourceSelectors": [
+                                    "kind:capability_shadow_trial_request",
+                                    "kind:capability_shadow_trial_decision",
+                                    "kind:capability_shadow_trial_run",
+                                    "kind:capability_shadow_trial_evidence"
+                                ],
+                                "requiredPayloadFields": [
+                                    "operation",
+                                    "targetOperation",
+                                    "ownershipClass",
+                                    "bindingMode",
+                                    "candidateAdapter",
+                                    "authorityConstraints",
+                                    "contractEvidenceRefs",
+                                    "evidenceRefs",
+                                    "staleVersionGuard",
+                                    "rollbackRef",
+                                    "disableRef",
+                                    "abortRef",
+                                    "rationale",
+                                    "idempotencyKey"
+                                ],
+                                "example": {
+                                    "operation": "capability_shadow_trial_request_record",
+                                    "targetOperation": "git_status",
+                                    "bindingMode": "shadow",
+                                    "candidateAdapter": {
+                                        "adapterId": "candidate_git_status_adapter",
+                                        "executionMode": "metadata_only",
+                                        "networkPolicy": "none"
+                                    }
+                                }
+                            }
                         }
                     }
                 ]
@@ -313,8 +439,19 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
     assert!(text.contains("git_status"));
     assert!(text.contains("trace_list"));
     assert!(text.contains("capability_binding_cockpit_overview"));
+    assert!(text.contains("capability_binding_request_list"));
+    assert!(text.contains("capability_shadow_trial_request_record"));
     assert!(text.contains("runtime_routable"));
     assert!(text.contains("kernel_evolution_only"));
+    assert!(text.contains("operationDirectory"));
+    assert!(text.contains("requiredPayloadFields"));
+    assert!(text.contains("targetOperation"));
+    assert!(text.contains("capability_binding.read"));
+    assert!(text.contains("kind:capability_binding_request"));
+    assert!(text.contains("kind:capability_shadow_trial_request"));
+    assert!(text.contains("readOnlyInspectionSafe"));
+    assert!(text.contains("safe to call during read-only inspection"));
+    assert!(text.contains("do not call during read-only inspection"));
     assert!(!text.contains("authorityGrantId"));
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("nested_grant_must_not_project"));
@@ -396,6 +533,83 @@ fn extract_result_content_projects_schema_error_code_and_path() {
     assert!(text.contains("[redacted-path]"));
     assert!(!text.contains("/Users/example"));
     assert!(!text.contains("cat secret.txt"));
+}
+
+#[test]
+fn extract_result_content_redacts_authority_tokens_but_keeps_selector_guidance() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "capability_binding_request_list failed",
+        )]),
+        Some(json!({
+            "failure": {
+                "code": "ENGINE_POLICY_VIOLATION",
+                "category": "invalid_request",
+                "message": "authority grant 019f3b30-0be0-7802-a298-d8cda2c1c590 requires explicit kind:capability_binding_request selector for capability binding policy operations",
+                "origin": "engine",
+                "retryable": true,
+                "recoverable": true,
+                "suggestion": "Retry with kind:capability_binding_request",
+                "details": {
+                    "operation": "capability_binding_request_list",
+                    "required": "kind:capability_binding_request"
+                }
+            },
+            "modelPrimitiveName": "execute",
+            "providerInvocationId": "call_123"
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("ENGINE_POLICY_VIOLATION"));
+    assert!(text.contains("capability_binding_request_list"));
+    assert!(text.contains("requires explicit kind:capability_binding_request selector"));
+    assert!(text.contains("Retry with kind:capability_binding_request"));
+    assert!(text.contains("authority grant [redacted-authority] requires"));
+    assert!(!text.contains("019f3b30-0be0-7802-a298-d8cda2c1c590"));
+}
+
+#[test]
+fn extract_result_content_projects_capability_binding_records_for_agent_context() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Listed 1 capability binding request.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "capability_binding_request_list",
+            "status": "ok",
+            "capabilityBinding": {
+                "status": "ok",
+                "bindingRequests": [{
+                    "resourceId": "capability_binding_request:first",
+                    "versionId": "ver_binding_request_first",
+                    "targetOperation": "git_status",
+                    "ownershipClass": "adapter_replaceable",
+                    "replacementClass": "runtime_routable",
+                    "bindingMode": "shadow",
+                    "routeState": "candidate",
+                    "authorityGrantId": "grant_must_not_project"
+                }]
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("modelContextEvidence"));
+    assert!(text.contains("capability_binding_request_list"));
+    assert!(text.contains("bindingRequests"));
+    assert!(text.contains("capability_binding_request:first"));
+    assert!(text.contains("ver_binding_request_first"));
+    assert!(text.contains("git_status"));
+    assert!(text.contains("adapter_replaceable"));
+    assert!(text.contains("runtime_routable"));
+    assert!(text.contains("shadow"));
+    assert!(!text.contains("authorityGrantId"));
+    assert!(!text.contains("grant_must_not_project"));
 }
 
 #[test]

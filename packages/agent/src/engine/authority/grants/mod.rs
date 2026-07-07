@@ -22,6 +22,9 @@
 //! back to their package authority scopes and durable resource kinds before
 //! grant checks run, so the single provider primitive does not bypass package
 //! scope, resource-kind, or selector policy.
+//! INVARIANT: capability governance operations, including shadow-trial records,
+//! must advertise the same exact scopes and kind selectors that authorization
+//! enforces; cockpit preflight metadata is not a separate permission model.
 //! INVARIANT: optional inner-operation resource links such as
 //! `mediaResourceId`, `importHistoryResourceId`, and
 //! `updateDiagnosticResourceId` broaden grant checks only when their

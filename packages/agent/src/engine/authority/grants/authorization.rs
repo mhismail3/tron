@@ -993,6 +993,7 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             | "capability_binding_decision_inspect"
             | "capability_binding_policy_list"
             | "capability_binding_policy_inspect"
+            | "capability_shadow_trial_evidence_inspect"
             | "capability_replacement_candidate_list"
             | "capability_replacement_candidate_inspect"
             | "capability_route_binding_list"
@@ -1007,6 +1008,9 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
             "capability_binding_request_record"
             | "capability_binding_decision_record"
             | "capability_binding_policy_activate"
+            | "capability_shadow_trial_request_record"
+            | "capability_shadow_trial_decision_record"
+            | "capability_shadow_trial_run_record"
             | "capability_replacement_candidate_record"
             | "capability_route_binding_record"
             | "capability_route_activate"
@@ -1296,17 +1300,30 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some(
             "capability_binding_request_record"
             | "capability_binding_request_list"
-            | "capability_binding_request_inspect"
-            | "capability_binding_decision_record"
-            | "capability_binding_decision_list"
-            | "capability_binding_decision_inspect"
-            | "capability_binding_policy_activate"
-            | "capability_binding_policy_list"
-            | "capability_binding_policy_inspect",
+            | "capability_binding_request_inspect",
+        ) => vec!["capability_binding_request"],
+        Some("capability_binding_decision_record") => {
+            vec!["capability_binding_request", "capability_binding_decision"]
+        }
+        Some("capability_binding_decision_list" | "capability_binding_decision_inspect") => {
+            vec!["capability_binding_decision"]
+        }
+        Some("capability_binding_policy_activate") => {
+            vec!["capability_binding_decision", "capability_binding_policy"]
+        }
+        Some("capability_binding_policy_list" | "capability_binding_policy_inspect") => {
+            vec!["capability_binding_policy"]
+        }
+        Some(
+            "capability_shadow_trial_request_record"
+            | "capability_shadow_trial_decision_record"
+            | "capability_shadow_trial_run_record"
+            | "capability_shadow_trial_evidence_inspect",
         ) => vec![
-            "capability_binding_request",
-            "capability_binding_decision",
-            "capability_binding_policy",
+            "capability_shadow_trial_request",
+            "capability_shadow_trial_decision",
+            "capability_shadow_trial_run",
+            "capability_shadow_trial_evidence",
         ],
         Some(
             "capability_replacement_candidate_record"
@@ -1514,6 +1531,10 @@ fn is_capability_binding_invocation(invocation: &Invocation) -> bool {
                     | "capability_binding_policy_activate"
                     | "capability_binding_policy_list"
                     | "capability_binding_policy_inspect"
+                    | "capability_shadow_trial_request_record"
+                    | "capability_shadow_trial_decision_record"
+                    | "capability_shadow_trial_run_record"
+                    | "capability_shadow_trial_evidence_inspect"
                     | "capability_replacement_candidate_record"
                     | "capability_replacement_candidate_list"
                     | "capability_replacement_candidate_inspect"
@@ -2833,6 +2854,39 @@ mod tests {
             "{error}"
         );
 
+        for (operation, kind) in [
+            (
+                "capability_binding_request_list",
+                "capability_binding_request",
+            ),
+            (
+                "capability_binding_decision_list",
+                "capability_binding_decision",
+            ),
+            (
+                "capability_binding_policy_list",
+                "capability_binding_policy",
+            ),
+        ] {
+            let list_grant = test_grant(
+                &[
+                    "capability.execute",
+                    "capability_binding.read",
+                    "resource.read",
+                ],
+                &[kind],
+                &[&format!("kind:{kind}")],
+            );
+            authorize_with_grant(
+                &list_grant,
+                &function,
+                &test_invocation(json!({ "operation": operation })),
+            )
+            .unwrap_or_else(|error| {
+                panic!("{operation} should require only its own kind selector: {error}")
+            });
+        }
+
         let write_grant = test_grant(
             &[
                 "capability.execute",
@@ -2923,7 +2977,7 @@ mod tests {
         let error = authorize_with_grant(
             &wrong_kind,
             &function,
-            &test_invocation(json!({"operation": "capability_binding_request_list"})),
+            &test_invocation(json!({"operation": "capability_binding_policy_list"})),
         )
         .expect_err("missing capability binding policy kind denied")
         .to_string();
@@ -3005,6 +3059,92 @@ mod tests {
             };
             assert!(error.contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn capability_shadow_trials_require_explicit_authority_kinds_and_selectors() {
+        let function = test_execute_function();
+        let shadow_kinds = [
+            "capability_shadow_trial_request",
+            "capability_shadow_trial_decision",
+            "capability_shadow_trial_run",
+            "capability_shadow_trial_evidence",
+        ];
+        let shadow_selectors = [
+            "kind:capability_shadow_trial_request",
+            "kind:capability_shadow_trial_decision",
+            "kind:capability_shadow_trial_run",
+            "kind:capability_shadow_trial_evidence",
+        ];
+        let write_grant = test_grant(
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "capability_binding.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &shadow_kinds,
+            &shadow_selectors,
+        );
+        for operation in [
+            "capability_shadow_trial_request_record",
+            "capability_shadow_trial_decision_record",
+            "capability_shadow_trial_run_record",
+        ] {
+            authorize_with_grant(
+                &write_grant,
+                &function,
+                &test_invocation(json!({"operation": operation})),
+            )
+            .expect("shadow trial write operation accepts exact governance authority");
+        }
+
+        let read_grant = test_grant(
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "resource.read",
+            ],
+            &shadow_kinds,
+            &shadow_selectors,
+        );
+        authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({"operation": "capability_shadow_trial_evidence_inspect"})),
+        )
+        .expect("shadow trial evidence inspect accepts exact read authority");
+
+        let error = authorize_with_grant(
+            &read_grant,
+            &function,
+            &test_invocation(json!({"operation": "capability_shadow_trial_request_record"})),
+        )
+        .expect_err("shadow trial record needs write authority")
+        .to_string();
+        assert!(
+            error.contains("does not allow required authority capability_binding.write"),
+            "{error}"
+        );
+
+        let wildcard_selector = test_grant(
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "resource.read",
+            ],
+            &shadow_kinds,
+            &["*", "kind:capability_shadow_trial_request"],
+        );
+        let error = authorize_with_grant(
+            &wildcard_selector,
+            &function,
+            &test_invocation(json!({"operation": "capability_shadow_trial_evidence_inspect"})),
+        )
+        .expect_err("shadow trial wildcard selector must be denied")
+        .to_string();
+        assert!(error.contains("wildcard resource selectors"), "{error}");
     }
 
     #[test]

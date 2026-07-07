@@ -65,6 +65,7 @@ pub(super) async fn derive_capability_runtime_grant(
             | "module_dependency_policy_list"
             | "module_dependency_policy_inspect"
     );
+    let capability_binding_operation = is_capability_binding_operation(operation);
     let capability_route_operation = is_capability_route_operation(operation);
     let web_research_operation = matches!(
         operation,
@@ -134,6 +135,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_dependencies_operation
+        || capability_binding_operation
         || capability_route_operation
         || web_research_operation
         || module_lifecycle_operation
@@ -162,6 +164,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !module_validation_operation
         && !module_install_operation
         && !module_dependencies_operation
+        && !capability_binding_operation
         && !capability_route_operation
         && !web_research_operation
         && !module_lifecycle_operation
@@ -392,6 +395,18 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_authority_scopes.extend([
             "module_dependencies.read".to_owned(),
             "module_dependencies.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if is_capability_binding_read_operation(operation) {
+        allowed_authority_scopes.extend([
+            "capability_binding.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if is_capability_binding_write_operation(operation) {
+        allowed_authority_scopes.extend([
+            "capability_binding.read".to_owned(),
+            "capability_binding.write".to_owned(),
             "resource.read".to_owned(),
             "resource.write".to_owned(),
         ]);
@@ -631,6 +646,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || module_validation_operation
         || module_install_operation
         || module_dependencies_operation
+        || capability_binding_operation
         || capability_route_operation
         || web_research_operation
         || module_lifecycle_operation
@@ -766,6 +782,8 @@ pub(super) async fn derive_capability_runtime_grant(
             "module_dependency_decision".to_owned(),
             "module_dependency_policy".to_owned(),
         ]);
+    } else if capability_binding_operation {
+        allowed_resource_kinds.extend(capability_binding_resource_kinds(operation));
     } else if capability_route_operation {
         allowed_resource_kinds.extend(capability_route_resource_kinds());
     } else if matches!(
@@ -1137,6 +1155,55 @@ fn is_capability_route_operation(operation: &str) -> bool {
     is_capability_route_read_operation(operation) || is_capability_route_write_operation(operation)
 }
 
+fn is_capability_binding_operation(operation: &str) -> bool {
+    is_capability_binding_read_operation(operation)
+        || is_capability_binding_write_operation(operation)
+}
+
+fn is_capability_binding_read_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "capability_binding_request_list"
+            | "capability_binding_request_inspect"
+            | "capability_binding_decision_list"
+            | "capability_binding_decision_inspect"
+            | "capability_binding_policy_list"
+            | "capability_binding_policy_inspect"
+    )
+}
+
+fn is_capability_binding_write_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "capability_binding_request_record"
+            | "capability_binding_decision_record"
+            | "capability_binding_policy_activate"
+    )
+}
+
+fn capability_binding_resource_kinds(operation: &str) -> Vec<String> {
+    match operation {
+        "capability_binding_request_record"
+        | "capability_binding_request_list"
+        | "capability_binding_request_inspect" => vec!["capability_binding_request".to_owned()],
+        "capability_binding_decision_record" => vec![
+            "capability_binding_request".to_owned(),
+            "capability_binding_decision".to_owned(),
+        ],
+        "capability_binding_decision_list" | "capability_binding_decision_inspect" => {
+            vec!["capability_binding_decision".to_owned()]
+        }
+        "capability_binding_policy_activate" => vec![
+            "capability_binding_decision".to_owned(),
+            "capability_binding_policy".to_owned(),
+        ],
+        "capability_binding_policy_list" | "capability_binding_policy_inspect" => {
+            vec!["capability_binding_policy".to_owned()]
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn is_capability_route_read_operation(operation: &str) -> bool {
     matches!(
         operation,
@@ -1446,6 +1513,26 @@ fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'sta
         (
             &["module_dependency_policy_inspect"],
             "moduleDependencyPolicyResourceId",
+        ),
+        (
+            &["capability_binding_request_inspect"],
+            "capabilityBindingRequestResourceId",
+        ),
+        (
+            &["capability_binding_decision_record"],
+            "capabilityBindingRequestResourceId",
+        ),
+        (
+            &["capability_binding_decision_inspect"],
+            "capabilityBindingDecisionResourceId",
+        ),
+        (
+            &["capability_binding_policy_activate"],
+            "capabilityBindingDecisionResourceId",
+        ),
+        (
+            &["capability_binding_policy_inspect"],
+            "capabilityBindingPolicyResourceId",
         ),
         (
             &["capability_replacement_candidate_inspect"],

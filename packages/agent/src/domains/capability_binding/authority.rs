@@ -209,11 +209,7 @@ fn require_kind_selectors(grant: &EngineGrant, operation: &str) -> Result<(), Ca
             "{operation} rejects broad resource selector {selector}"
         )));
     }
-    for kind in [
-        CAPABILITY_BINDING_REQUEST_KIND,
-        CAPABILITY_BINDING_DECISION_KIND,
-        CAPABILITY_BINDING_POLICY_KIND,
-    ] {
+    for kind in capability_binding_kinds_for_operation(operation) {
         require_explicit_grant_item(&grant.allowed_resource_kinds, kind, operation)?;
         let selector = format!("kind:{kind}");
         if !grant
@@ -227,6 +223,33 @@ fn require_kind_selectors(grant: &EngineGrant, operation: &str) -> Result<(), Ca
         }
     }
     Ok(())
+}
+
+fn capability_binding_kinds_for_operation(operation: &str) -> &'static [&'static str] {
+    match operation {
+        "capability_binding_request_record"
+        | "capability_binding_request_list"
+        | "capability_binding_request_inspect" => &[CAPABILITY_BINDING_REQUEST_KIND],
+        "capability_binding_decision_record" => &[
+            CAPABILITY_BINDING_REQUEST_KIND,
+            CAPABILITY_BINDING_DECISION_KIND,
+        ],
+        "capability_binding_decision_list" | "capability_binding_decision_inspect" => {
+            &[CAPABILITY_BINDING_DECISION_KIND]
+        }
+        "capability_binding_policy_activate" => &[
+            CAPABILITY_BINDING_DECISION_KIND,
+            CAPABILITY_BINDING_POLICY_KIND,
+        ],
+        "capability_binding_policy_list" | "capability_binding_policy_inspect" => {
+            &[CAPABILITY_BINDING_POLICY_KIND]
+        }
+        _ => &[
+            CAPABILITY_BINDING_REQUEST_KIND,
+            CAPABILITY_BINDING_DECISION_KIND,
+            CAPABILITY_BINDING_POLICY_KIND,
+        ],
+    }
 }
 
 fn require_shadow_trial_kind_selectors(

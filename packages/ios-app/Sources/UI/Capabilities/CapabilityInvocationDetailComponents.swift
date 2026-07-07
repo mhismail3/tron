@@ -426,9 +426,16 @@ struct CapabilityRawDisclosure: View {
             CapabilityInvocationCodeBlock(text: text)
                 .padding(.top, 8)
         } label: {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(tint.heading)
+            HStack(spacing: 8) {
+                Image(systemName: "curlybraces.square")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(tint.heading)
         }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }

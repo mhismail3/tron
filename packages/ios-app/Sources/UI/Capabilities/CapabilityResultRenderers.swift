@@ -53,9 +53,7 @@ struct CapabilityInvocationCodeBlock: View {
             .foregroundStyle(.tronTextSecondary)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(10)
+            .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.tronSurface.opacity(0.7))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

@@ -252,6 +252,87 @@ async fn worker_package_inspect_runtime_grant_authorizes_only_resource_id_kind()
 }
 
 #[tokio::test]
+async fn capability_binding_list_runtime_grants_authorize_exact_record_kind_only() {
+    for (operation, expected_kind) in [
+        (
+            "capability_binding_request_list",
+            "capability_binding_request",
+        ),
+        (
+            "capability_binding_decision_list",
+            "capability_binding_decision",
+        ),
+        (
+            "capability_binding_policy_list",
+            "capability_binding_policy",
+        ),
+    ] {
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+            "operation": operation,
+            "limit": 10,
+            "idempotencyKey": format!("{operation}-runtime-grant")
+        }))
+        .await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+        assert_eq!(grant.network_policy, "none");
+        assert_eq!(
+            grant
+                .allowed_resource_kinds
+                .iter()
+                .filter(|kind| kind.starts_with("capability_"))
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![expected_kind.to_owned()],
+            "{operation} must derive only its own record kind"
+        );
+        assert!(
+            grant
+                .resource_selectors
+                .contains(&format!("kind:{expected_kind}")),
+            "{operation} grant missing exact kind selector: {:?}",
+            grant.resource_selectors
+        );
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&"agent_state".to_owned()),
+            "{operation} must not inherit agent_state authority"
+        );
+        for forbidden_kind in [
+            "capability_replacement_candidate",
+            "capability_route_binding",
+            "capability_route_activation",
+            "capability_route_event",
+            "capability_shadow_trial_request",
+            "capability_shadow_trial_decision",
+            "capability_shadow_trial_run",
+            "capability_shadow_trial_evidence",
+        ] {
+            assert!(
+                !grant
+                    .allowed_resource_kinds
+                    .contains(&forbidden_kind.to_owned()),
+                "{operation} must not inherit route/shadow kind {forbidden_kind}"
+            );
+        }
+        assert_invocation_scopes(
+            &invocation,
+            &[
+                "capability.execute",
+                "capability_binding.read",
+                "resource.read",
+            ],
+        );
+    }
+}
+
+#[tokio::test]
 async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "procedural_state_inspect",

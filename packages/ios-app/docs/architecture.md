@@ -311,8 +311,11 @@ The chat timeline owns only truthful local/session presentation state:
   chips and `CapabilityInvocationBriefPresentation` for detail sheets. Chips
   stay compact; detail sheets read as a progressive briefing: what happened,
   what needs attention, the concise request, the useful result, then evidence.
-  Full invocation refs and raw payloads are available only inside disclosure
-  rows so top-level sheets do not lead with raw IDs, grants, paths, or JSON.
+  Detail cards use the same liquid-glass progressive disclosure language as
+  Engine Cockpit: high-level narrative and compact metric strips first,
+  invocation list rows with dividers next, and full invocation refs/raw payloads
+  only inside disclosure rows so top-level sheets do not lead with raw IDs,
+  grants, paths, or JSON.
 - Consecutive capability invocations are grouped only at the presentation
   layer by `CapabilityInvocationGrouping`: persisted events and reconstructed
   `ChatMessage` values remain one invocation per record, while the chat

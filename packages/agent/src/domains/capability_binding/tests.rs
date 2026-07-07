@@ -1902,6 +1902,106 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 }
 
 #[tokio::test]
+async fn list_operations_accept_operation_scoped_read_grants() {
+    let fixture = Fixture::new("capability-binding-narrow-list-grants").await;
+    let request = fixture.binding_request("request").await;
+    let decision = fixture
+        .binding_decision("decision", &request, "approved")
+        .await;
+    fixture.binding_policy("policy", &decision).await;
+
+    let request_grant = derive_grant(
+        &fixture.deps,
+        "request-list-narrow",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[CAPABILITY_BINDING_REQUEST_KIND],
+        &["kind:capability_binding_request"],
+        "none",
+    )
+    .await;
+    let request_list = list_capability_binding_request_value(
+        &fixture.deps,
+        &invocation(
+            "list-requests-narrow",
+            json!({}),
+            request_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({}),
+    )
+    .await
+    .expect("request list accepts request-only grant");
+    assert_eq!(
+        request_list["bindingRequests"]
+            .as_array()
+            .expect("binding requests")
+            .len(),
+        1
+    );
+
+    let decision_grant = derive_grant(
+        &fixture.deps,
+        "decision-list-narrow",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[CAPABILITY_BINDING_DECISION_KIND],
+        &["kind:capability_binding_decision"],
+        "none",
+    )
+    .await;
+    let decision_list = list_capability_binding_decision_value(
+        &fixture.deps,
+        &invocation(
+            "list-decisions-narrow",
+            json!({}),
+            decision_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({}),
+    )
+    .await
+    .expect("decision list accepts decision-only grant");
+    assert_eq!(
+        decision_list["bindingDecisions"]
+            .as_array()
+            .expect("binding decisions")
+            .len(),
+        1
+    );
+
+    let policy_grant = derive_grant(
+        &fixture.deps,
+        "policy-list-narrow",
+        &[READ_SCOPE, RESOURCE_READ_SCOPE],
+        &[CAPABILITY_BINDING_POLICY_KIND],
+        &["kind:capability_binding_policy"],
+        "none",
+    )
+    .await;
+    let policy_list = list_capability_binding_policy_value(
+        &fixture.deps,
+        &invocation(
+            "list-policies-narrow",
+            json!({}),
+            policy_grant,
+            &[READ_SCOPE, RESOURCE_READ_SCOPE],
+            &fixture.session_id,
+        ),
+        &json!({}),
+    )
+    .await
+    .expect("policy list accepts policy-only grant");
+    assert_eq!(
+        policy_list["bindingPolicies"]
+            .as_array()
+            .expect("binding policies")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn route_records_candidate_binding_activation_disable_and_rollback_for_git_status() {
     let fixture = RouteFixture::new("capability-route-flow").await;
 

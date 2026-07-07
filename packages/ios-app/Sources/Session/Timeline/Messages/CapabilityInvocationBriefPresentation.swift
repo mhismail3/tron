@@ -46,7 +46,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         self.tone = tone
         self.headline = Self.headline(for: data.status, title: title, issue: issue)
         self.narrative = Self.narrative(for: data, title: title, issue: issue, resultBody: resultBody)
-        self.factRows = Self.factRows(from: data, display: display, subtitle: subtitle)
+        self.factRows = Self.factRows(from: data, display: display)
         self.requestRows = requestRows
         self.resultRows = resultRows
         self.resultBody = resultBody
@@ -139,9 +139,9 @@ struct CapabilityInvocationBriefPresentation: Equatable {
     ) -> String {
         if let issue {
             if let nextStep = issue.nextStep {
-                return "\(issue.message) \(nextStep)"
+                return "\(issue.title). \(nextStep)"
             }
-            return issue.message
+            return issue.title
         }
         switch data.status {
         case .generating, .running:
@@ -160,8 +160,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
 
     private static func factRows(
         from data: CapabilityInvocationData,
-        display: CapabilityInvocationDisplayModel,
-        subtitle: String?
+        display: CapabilityInvocationDisplayModel
     ) -> [CapabilityDisplayRow] {
         var rows = [
             CapabilityDisplayRow(label: "Status", value: display.statusText)
@@ -169,28 +168,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         if let duration = data.formattedDuration {
             rows.append(CapabilityDisplayRow(label: "Duration", value: duration))
         }
-        if let subtitle = subtitle?.nilIfEmpty,
-           shouldShowFactSummary(subtitle, data: data, display: display) {
-            rows.append(CapabilityDisplayRow(label: "Summary", value: subtitle))
-        }
         return rows
-    }
-
-    private static func shouldShowFactSummary(
-        _ value: String,
-        data: CapabilityInvocationData,
-        display: CapabilityInvocationDisplayModel
-    ) -> Bool {
-        let normalized = value.lowercased()
-        let operation = data.identity.operationName?.lowercased()
-        let target = display.targetId?.lowercased()
-        if normalized == operation || normalized == target {
-            return false
-        }
-        if normalized.contains("::") {
-            return false
-        }
-        return true
     }
 
     private static func requestRows(
@@ -302,20 +280,17 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         display: CapabilityInvocationDisplayModel
     ) -> [CapabilityDisplayRow] {
         var rows: [CapabilityDisplayRow] = []
-        if let operation = data.identity.operationName?.nilIfEmpty {
-            rows.append(CapabilityDisplayRow(label: "Operation", value: operation))
-        }
         if let status = display.technicalRows.first(where: { $0.label == "Engine status" })?.value.nilIfEmpty {
-            rows.append(CapabilityDisplayRow(label: "Engine status", value: status))
+            let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalized != "ok" {
+                rows.append(CapabilityDisplayRow(label: "Engine status", value: status))
+            }
         }
         if let trace = data.identity.traceId?.nilIfEmpty {
             rows.append(CapabilityDisplayRow(label: "Trace ref", value: compactRef(trace), isTechnical: true))
         }
         if let root = data.identity.rootInvocationId?.nilIfEmpty {
             rows.append(CapabilityDisplayRow(label: "Root ref", value: compactRef(root), isTechnical: true))
-        }
-        if let duration = data.serverFormattedDuration ?? data.formattedDuration {
-            rows.append(CapabilityDisplayRow(label: "Recorded duration", value: duration))
         }
         return rows
     }

@@ -77,7 +77,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                             "It can also export the current session replay manifest without side effects and inspect redacted memory status, record, query, and decision audit evidence. Context-control operations record/list/inspect bounded context snapshots, compact/clear action records, and epochs for the current session with exact session/resource selectors, durable preflight, timeline events, provider-safe projections, and `networkPolicy: none`; they never expose raw prompt bodies, hidden system/soul prompt text, hidden chain-of-thought, secrets, local paths, commands, logs, grant ids, authority ids, or raw file contents. Scheduler operations create explicit durable records and never execute feature work directly; media operations store blob refs and bounded metadata only, never raw audio bytes, and never send raw audio to providers without an explicit future resource authorization; import-history operations store bounded generic graph lineage refs only, keep render hints generic, and never store raw import payloads, repository trees, or native tree UI state; notification operations create durable inbox/read/badge/delivery evidence with live APNs transport disabled, while device token registration is trusted internal-only and never returns raw APNs tokens or full token hashes. ",
                             "Memory query/decision execute operations are read-only inspection of metadata evidence and never perform retrieval, embeddings, ranking, summarization, prompt inclusion, automatic retention, or raw memory body exposure. Tool-source, worker-package, and module-manifest operations never install, activate, trigger, inject prompts, learn behavior, launch, register, resolve dependencies, access networks, or execute proposed external tools, packages, or modules; procedural operations record/list/inspect metadata-only skills, rules, hooks, procedures, activation requests, and activation decisions without firing hooks, registering triggers, injecting prompts, learning behavior, restoring dependencies, touching repo-managed skills, or executing code; module-authoring operations record/list/inspect inert module proposal metadata without installing, activating, executing, restoring dependencies, touching repo-managed skills, creating module workspace directories, or exposing raw prompt/proposal bodies; module-validation operations record/list/inspect bounded module contract validation reports without running commands or module code, storing raw logs/commands/env/code/file contents, installing, activating, resolving dependencies, touching repo-managed skills, or accessing networks; module-install operations record/list/inspect metadata-only review requests and install-candidate/rejected decisions linked to passed validation reports, current approval freshness evidence, dependency policy refs, and rollback proof refs without installing, enabling, executing, restoring dependencies, running package managers, touching repo-managed skills, or accessing networks. ",
                             "Capability-binding operations record/list/inspect metadata-only binding requests, decisions, and policies for future shadow/extend/replace proposals with exact selectors, no wildcard authority, `networkPolicy: none`, stale-version guards, rollback/disable refs, provider-safe projections, and no dispatch mutation, module activation, hot-swap, package-manager, dependency restore, network, agent_state inheritance, raw grant ids, or raw authority ids; `capability_binding_cockpit_overview` returns the same read-only capability-pool and route-state projection used by native Engine Cockpit clients, including agent usage and preflight guidance, without changing routing or autonomy behavior; capability-shadow-trial operations record the governed `git_status` request/decision/run/evidence path, compare built-in and deterministic candidate provider-safe projections, require exact selectors, rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`, and never execute candidate modules; capability route operations record/activate/disable/rollback explicit scoped `git_status` route resources after candidate, shadow, approval, authority, and rollback evidence, annotate routed invocations with route events, route active invocations through the supervised module-runtime provider-safe projection boundary using accepted shadow-trial evidence, and fail closed without built-in success substitution when route records, lifecycle/runtime refs, scope, or projections are unsafe. Subagent lifecycle operations require explicit workerKind/modulePackId selection, summary-only handoff refs, exact subagent and module runtime authority, networkPolicy none, runtime/job association validation, and return merge proposals instead of silently mutating parent conversation state. ",
-                    "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Import-preview operations store refs, path metadata, counts, summaries, and fingerprints only; they never execute/apply imports, mutate Git, visualize repositories, or store raw import payloads, preview payloads, file contents, or blob bytes. Program-execution operations store runtime/language metadata, I/O refs or fingerprints, resource-limit policy, lifecycle evidence, and idempotency fingerprints only; they never store raw code, command strings, shell snippets, raw stdin/stdout/stderr, launch processes, install runtimes, perform network behavior, write files, or execute programs. Module program-execution operations require an enabled module lifecycle, delegate non-interactive process execution to the jobs domain under networkPolicy none, and return only bounded job/program/runtime/output refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata; they never return raw commands, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, or raw job_process/execution_output payloads. Prompt-artifact operations store explicit opt-in artifact metadata, content refs/fingerprints, retention state, lifecycle evidence, and idempotency fingerprints only; they never store raw prompt bodies, provider-visible raw prompt payloads, automatic prompt history, prompt injection, learned behavior, native snippet UI, or prompt-context inclusion. Update diagnostic operations store signed-release/provenance metadata only; they never perform live network checks, install, restart, deploy, register packages, or store production endpoint details/package bytes. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
+                    "Choose one operation per call. For read-only capability discovery, use catalog_search, catalog_inspect, list, inspect, status, trace, log, or overview operations. catalog_conformance is not a read-only inspection operation: it creates an idempotent durable catalog_discovery_report resource and should only be called when the task explicitly asks for a verification/conformance report. Catalog discovery operations never execute discovered capabilities. Import-preview operations store refs, path metadata, counts, summaries, and fingerprints only; they never execute/apply imports, mutate Git, visualize repositories, or store raw import payloads, preview payloads, file contents, or blob bytes. Program-execution operations store runtime/language metadata, I/O refs or fingerprints, resource-limit policy, lifecycle evidence, and idempotency fingerprints only; they never store raw code, command strings, shell snippets, raw stdin/stdout/stderr, launch processes, install runtimes, perform network behavior, write files, or execute programs. Module program-execution operations require an enabled module lifecycle, delegate non-interactive process execution to the jobs domain under networkPolicy none, and return only bounded job/program/runtime/output refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata; they never return raw commands, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, or raw job_process/execution_output payloads. Prompt-artifact operations store explicit opt-in artifact metadata, content refs/fingerprints, retention state, lifecycle evidence, and idempotency fingerprints only; they never store raw prompt bodies, provider-visible raw prompt payloads, automatic prompt history, prompt injection, learned behavior, native snippet UI, or prompt-context inclusion. Update diagnostic operations store signed-release/provenance metadata only; they never perform live network checks, install, restart, deploy, register packages, or store production endpoint details/package bytes. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
             }
@@ -92,7 +92,10 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": format!("One primitive operation: {}.", operation_list_text())
+            "description": format!(
+                "One primitive operation. For read-only inspection prefer search/list/inspect/status/trace/log/overview operations. catalog_conformance creates a durable catalog_discovery_report and is not read-only inspection. Supported operations: {}.",
+                operation_list_text()
+            )
         }),
     );
     insert_string(
@@ -611,7 +614,7 @@ fn execute_model_request_schema() -> serde_json::Value {
     insert_string(
         &mut properties,
         "text",
-        "Catalog search text for catalog_search or catalog_conformance.",
+        "Catalog search text for catalog_search, or explicit verification text for catalog_conformance. catalog_conformance writes a durable catalog_discovery_report and is not read-only inspection.",
     );
     insert_string(
         &mut properties,
@@ -777,6 +780,11 @@ mod tests {
             .expect("execute description");
         assert!(description.contains("Primitive host operation"));
         assert!(description.contains("Choose one operation per call"));
+        assert!(description.contains("For read-only capability discovery"));
+        assert!(
+            description.contains("catalog_conformance is not a read-only inspection operation")
+        );
+        assert!(description.contains("creates an idempotent durable catalog_discovery_report"));
         assert!(!description.contains("file_read"));
         assert!(!description.contains("file_write"));
 
@@ -791,6 +799,11 @@ mod tests {
         let operations = schema["properties"]["operation"]["description"]
             .as_str()
             .expect("operation description");
+        assert!(operations.contains("For read-only inspection prefer"));
+        assert!(
+            operations.contains("catalog_conformance creates a durable catalog_discovery_report")
+        );
+        assert!(operations.contains("is not read-only inspection"));
         for operation in crate::domains::capability::supported_operation_names() {
             assert!(operations.contains(operation), "missing {operation}");
         }
@@ -906,7 +919,7 @@ mod tests {
                 "missing capability binding schema field {field}"
             );
         }
-        assert!(description.contains("capability-binding operations"));
+        assert!(description.contains("Capability-binding operations"));
         assert!(description.contains("capability route operations"));
         assert!(description.contains(
             "supervised module-runtime provider-safe projection boundary using accepted shadow-trial evidence"

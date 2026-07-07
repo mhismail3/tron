@@ -2,9 +2,12 @@
 //!
 //! The turn runner stores full capability details for UI, audit, and replay,
 //! but providers only receive this bounded projection appended to result text.
-//! Keep the allowlists narrow: ids, lifecycle/status, refs, truncation metadata,
-//! and schema failure coordinates are useful to the model; raw content, local
-//! paths, commands, secrets, grant ids, and authority ids stay out of this
+//! Model-facing projections are agent-first: operation results should expose the
+//! exact bounded contract data the model needs to choose the next capability call
+//! before optimizing for UI readability. Keep the allowlists narrow: ids,
+//! lifecycle/status, refs, truncation metadata, preflight selectors, required
+//! fields, and schema failure coordinates are useful to the model; raw content,
+//! local paths, commands, secrets, grant ids, and authority ids stay out of this
 //! channel.
 
 use std::sync::LazyLock;
@@ -36,9 +39,10 @@ pub(super) fn extract_model_context_result_text(
     }
 }
 
-const MODEL_CONTEXT_EVIDENCE_MAX_CHARS: usize = 12_000;
+const MODEL_CONTEXT_EVIDENCE_MAX_CHARS: usize = 80_000;
 const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
 const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
+const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 256;
 const MODEL_CONTEXT_OBJECT_MAX_KEYS: usize = 80;
 
 pub(super) fn extract_result_content(
@@ -269,6 +273,17 @@ fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
                 .count(),
         }),
     );
+    projected.insert(
+        "agentUse".to_owned(),
+        json!({
+            "primaryUse": "Treat operationDirectory as the agent-facing capability map. Choose an operation, copy its capability::execute arguments, satisfy preflight authority/resource selectors and required payload fields, then call it directly.",
+            "normalWork": "Prefer audience=session_work and callable=true operations for user tasks.",
+            "diagnostics": "Use audience=agent_diagnostics operations to inspect traces, logs, catalog state, and verification evidence.",
+            "governance": "Use audience=governance operations only for binding, shadow, route, module, or policy workflows; follow preflight exactly.",
+            "kernelEvolution": "Kernel-evolution-only operations are inspectable and improvable through source-level review/integration, not runtime-routed.",
+            "fallbackRule": "Do not infer selectors, authority scopes, or required fields from names. Use the operation entry, catalog inspection, or schema before attempting a call."
+        }),
+    );
     if let Some(families) = cockpit.get("families").and_then(Value::as_array) {
         projected.insert(
             "families".to_owned(),
@@ -288,8 +303,8 @@ fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
         }
     }
     projected.insert(
-        "operationSamples".to_owned(),
-        Value::Array(sample_cockpit_operations(operations)),
+        "operationDirectory".to_owned(),
+        project_cockpit_operation_directory(operations),
     );
     Some(Value::Object(projected))
 }
@@ -343,39 +358,22 @@ fn project_cockpit_family(family: &Value) -> Value {
     Value::Object(projected)
 }
 
-fn sample_cockpit_operations(operations: &[Value]) -> Vec<Value> {
-    let sample_keys = [
-        ("audience", "session_work"),
-        ("audience", "agent_diagnostics"),
-        ("audience", "governance"),
-        ("audience", "kernel_evolution"),
-        ("replacementClass", "runtime_routable"),
-        ("replacementClass", "producer_extensible"),
-        ("replacementClass", "kernel_evolution_only"),
-    ];
-    let mut samples = Vec::new();
-    for (key, value) in sample_keys {
-        if let Some(operation) = operations.iter().find(|operation| {
-            operation
-                .get("capabilityPool")
-                .and_then(|pool| pool.get(key))
-                .and_then(Value::as_str)
-                == Some(value)
-        }) {
-            push_unique_cockpit_sample(&mut samples, operation);
-        }
-    }
-    samples
+fn project_cockpit_operation_directory(operations: &[Value]) -> Value {
+    json!({
+        "total": operations.len(),
+        "returned": operations.len().min(MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS),
+        "truncated": operations.len() > MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS,
+        "omitted": operations.len().saturating_sub(MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS),
+        "maxItems": MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS,
+        "operations": operations
+            .iter()
+            .take(MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS)
+            .map(project_cockpit_operation_for_agent)
+            .collect::<Vec<_>>()
+    })
 }
 
-fn push_unique_cockpit_sample(samples: &mut Vec<Value>, operation: &Value) {
-    let name = operation.get("name").and_then(Value::as_str);
-    if samples
-        .iter()
-        .any(|sample| sample.get("name").and_then(Value::as_str) == name)
-    {
-        return;
-    }
+fn project_cockpit_operation_for_agent(operation: &Value) -> Value {
     let mut projected = Map::new();
     for key in ["name", "family", "familyLabel"] {
         copy_key(&mut projected, operation, key);
@@ -401,7 +399,7 @@ fn push_unique_cockpit_sample(samples: &mut Vec<Value>, operation: &Value) {
     if let Some(status) = operation.get("status") {
         projected.insert("status".to_owned(), project_cockpit_status(status));
     }
-    samples.push(Value::Object(projected));
+    Value::Object(projected)
 }
 
 fn project_cockpit_pool(pool: &Value) -> Value {
@@ -428,6 +426,7 @@ fn project_cockpit_agent_usage(agent_usage: &Value) -> Value {
         "audience",
         "callable",
         "defaultUse",
+        "effect",
         "failureRecovery",
     ] {
         copy_key(&mut projected, agent_usage, key);
@@ -436,9 +435,14 @@ fn project_cockpit_agent_usage(agent_usage: &Value) -> Value {
         let mut projected_preflight = Map::new();
         for key in [
             "agentStateInherited",
+            "authority",
             "authorityScopes",
             "beforeCalling",
+            "evidence",
+            "example",
             "networkPolicy",
+            "readOnlyInstruction",
+            "requiredPayloadFields",
             "resourceSelectors",
         ] {
             copy_key(&mut projected_preflight, preflight, key);
@@ -785,6 +789,18 @@ fn safe_array_metadata_key(key: &str) -> bool {
             | "refs"
             | "traceRefs"
             | "replayRefs"
+            | "bindingRequests"
+            | "bindingDecisions"
+            | "bindingPolicies"
+            | "shadowTrialRequests"
+            | "shadowTrialDecisions"
+            | "shadowTrialRuns"
+            | "shadowTrialEvidence"
+            | "replacementCandidates"
+            | "routeBindings"
+            | "routeActivations"
+            | "routeEvents"
+            | "routeRollbacks"
     )
 }
 
@@ -838,6 +854,18 @@ fn safe_scalar_metadata_key(key: &str) -> bool {
             | "currentVersionId"
             | "versionId"
             | "expectedCurrentVersionId"
+            | "targetOperation"
+            | "sourceOperation"
+            | "ownershipClass"
+            | "replacementClass"
+            | "bindingMode"
+            | "routeState"
+            | "executionMode"
+            | "riskClass"
+            | "reviewStatus"
+            | "approvalStatus"
+            | "validationStatus"
+            | "verificationStatus"
     ) || safe_id_like_metadata_key(&lower)
 }
 
@@ -933,8 +961,17 @@ fn redact_model_context_string(text: &str) -> String {
         Regex::new(r#"(^|[\s"'=:,\[])(\.\.(?:/|\\)[^\s"',}\]]*)"#)
             .expect("valid relative path redaction regex")
     });
+    static AUTHORITY_REFERENCES: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"\b(authority grant|authorityGrantId|authority id|authorityId|grant id)\s*[:=]?\s+[A-Za-z0-9:_-]{8,}",
+        )
+        .expect("valid authority reference redaction regex")
+    });
 
     let redacted = redact_sensitive_content(text);
+    let redacted = AUTHORITY_REFERENCES
+        .replace_all(&redacted, "${1} [redacted-authority]")
+        .to_string();
     let redacted = ABSOLUTE_PATHS
         .replace_all(&redacted, "${1}[redacted-path]")
         .to_string();

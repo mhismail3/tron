@@ -185,10 +185,9 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     let Some(query) = payload.get("text").and_then(Value::as_str) else {
         return;
     };
-    let query = normalize_operation_query(query);
-    if query.len() < 3 {
+    let Some(query) = OperationSearchQuery::from_text(query) else {
         return;
-    }
+    };
     let limit = payload
         .get("limit")
         .and_then(Value::as_u64)
@@ -218,7 +217,9 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
         object.insert(
             "executeOperationSearch".to_owned(),
             json!({
-                "query": query,
+                "query": query.display,
+                "canonicalQuery": query.canonical,
+                "terms": query.terms,
                 "totalMatches": total,
                 "returnedMatches": matches.len(),
                 "truncated": total > matches.len(),
@@ -229,16 +230,61 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     }
 }
 
-fn normalize_operation_query(query: &str) -> String {
-    query
+#[derive(Clone, Debug)]
+struct OperationSearchQuery {
+    display: String,
+    canonical: String,
+    terms: Vec<String>,
+}
+
+impl OperationSearchQuery {
+    fn from_text(query: &str) -> Option<Self> {
+        let display = query.trim().to_owned();
+        let canonical = canonical_operation_search_text(&display);
+        if canonical.len() < 3 || canonical == "capability_execute" {
+            return None;
+        }
+        let terms = canonical
+            .split('_')
+            .filter(|term| term.len() >= 3)
+            .filter(|term| {
+                !matches!(
+                    *term,
+                    "capability" | "capabilities" | "execute" | "operation" | "operations"
+                )
+            })
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        Some(Self {
+            display,
+            canonical,
+            terms,
+        })
+    }
+}
+
+fn canonical_operation_search_text(query: &str) -> String {
+    let query = query
         .trim()
         .strip_prefix("execute::")
         .unwrap_or_else(|| query.trim())
         .replace("::", "_")
-        .to_ascii_lowercase()
+        .to_ascii_lowercase();
+    let mut canonical = String::with_capacity(query.len());
+    let mut previous_separator = false;
+    for ch in query.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            canonical.push(ch);
+            previous_separator = false;
+        } else if !previous_separator {
+            canonical.push('_');
+            previous_separator = true;
+        }
+    }
+    canonical.trim_matches('_').to_owned()
 }
 
-fn operation_match_projection(operation: &str, query: &str) -> Option<Value> {
+fn operation_match_projection(operation: &str, query: &OperationSearchQuery) -> Option<Value> {
     let operation_key = operation.to_ascii_lowercase();
     let catalog_key = direct_catalog_function_id_for_execute_operation(operation)
         .map(str::to_owned)
@@ -246,17 +292,23 @@ fn operation_match_projection(operation: &str, query: &str) -> Option<Value> {
         .replace("::", "_")
         .to_ascii_lowercase();
     let has_direct_catalog_key = !catalog_key.is_empty();
-    let match_kind = if operation_key == query || (has_direct_catalog_key && catalog_key == query) {
+    let match_kind = if operation_key == query.canonical
+        || (has_direct_catalog_key && catalog_key == query.canonical)
+        || query.canonical.contains(&operation_key)
+        || (has_direct_catalog_key && query.canonical.contains(&catalog_key))
+    {
         "exact"
-    } else if operation_key.starts_with(query)
-        || (has_direct_catalog_key && catalog_key.starts_with(query))
+    } else if operation_key.starts_with(&query.canonical)
+        || (has_direct_catalog_key && catalog_key.starts_with(&query.canonical))
     {
         "prefix"
-    } else if query.len() >= 5
-        && (operation_key.contains(query)
-            || (has_direct_catalog_key && catalog_key.contains(query)))
+    } else if query.canonical.len() >= 5
+        && (operation_key.contains(&query.canonical)
+            || (has_direct_catalog_key && catalog_key.contains(&query.canonical)))
     {
         "contains"
+    } else if terms_match_operation(&query.terms, &operation_key, &catalog_key) {
+        "terms"
     } else {
         return None;
     };
@@ -275,8 +327,18 @@ fn match_rank(match_kind: &str) -> usize {
         "exact" => 0,
         "prefix" => 1,
         "contains" => 2,
+        "terms" => 3,
         _ => 3,
     }
+}
+
+fn terms_match_operation(terms: &[String], operation_key: &str, catalog_key: &str) -> bool {
+    if terms.len() < 2 {
+        return false;
+    }
+    terms
+        .iter()
+        .all(|term| operation_key.split('_').any(|part| part == term) || catalog_key.contains(term))
 }
 
 fn annotate_catalog_function_pool(object: &mut serde_json::Map<String, Value>, catalog_id: &str) {
@@ -525,6 +587,116 @@ mod tests {
         assert_eq!(
             discovery["executeOperationSearch"]["totalMatches"],
             matches.len()
+        );
+    }
+
+    #[test]
+    fn catalog_search_adds_multiple_exact_execute_operation_matches() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "capability_binding_request_list capability_binding_decision_list capability_binding_policy_list", "limit": 10}),
+        );
+
+        let operations = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            operations,
+            vec![
+                "capability_binding_decision_list",
+                "capability_binding_policy_list",
+                "capability_binding_request_list",
+            ]
+        );
+        assert!(
+            discovery["executeOperationMatches"]
+                .as_array()
+                .expect("operation matches")
+                .iter()
+                .all(|value| value["matchKind"] == "exact")
+        );
+        assert_eq!(
+            discovery["executeOperationSearch"]["canonicalQuery"]
+                .as_str()
+                .expect("canonical query"),
+            "capability_binding_request_list_capability_binding_decision_list_capability_binding_policy_list"
+        );
+        assert!(
+            discovery["executeOperationSearch"]["terms"]
+                .as_array()
+                .expect("terms")
+                .iter()
+                .any(|term| term == "request")
+        );
+    }
+
+    #[test]
+    fn catalog_search_advertises_write_operations_as_not_read_only_safe() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "capability_shadow_trial_request_record", "limit": 10}),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        assert_eq!(
+            matches[0]["operation"],
+            "capability_shadow_trial_request_record"
+        );
+        assert_eq!(matches[0]["matchKind"], "exact");
+        assert_eq!(matches[0]["agentUsage"]["effect"]["mode"], "metadata_write");
+        assert_eq!(
+            matches[0]["agentUsage"]["effect"]["readOnlyInspectionSafe"],
+            false
+        );
+        assert_eq!(matches[0]["agentUsage"]["effect"]["mutatesState"], true);
+        assert!(
+            matches[0]["agentUsage"]["effect"]["readOnlyInstruction"]
+                .as_str()
+                .expect("effect instruction")
+                .contains("do not call during read-only inspection")
+        );
+        assert!(
+            matches[0]["agentUsage"]["preflight"]["readOnlyInstruction"]
+                .as_str()
+                .expect("preflight instruction")
+                .contains("Do not call during read-only inspection")
+        );
+    }
+
+    #[test]
+    fn catalog_search_advertises_conformance_as_report_write() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "catalog_conformance", "limit": 10}),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        assert_eq!(matches[0]["operation"], "catalog_conformance");
+        assert_eq!(matches[0]["matchKind"], "exact");
+        assert_eq!(matches[0]["agentUsage"]["effect"]["mode"], "metadata_write");
+        assert_eq!(
+            matches[0]["agentUsage"]["effect"]["readOnlyInspectionSafe"],
+            false
+        );
+        assert_eq!(matches[0]["agentUsage"]["effect"]["writesResource"], true);
+        assert!(
+            matches[0]["agentUsage"]["effect"]["readOnlyInstruction"]
+                .as_str()
+                .expect("effect instruction")
+                .contains("do not call during read-only inspection")
         );
     }
 

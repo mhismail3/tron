@@ -6,6 +6,9 @@
 //! explicit so agents can find session-useful operations by default, inspect
 //! internal substrate when needed, and understand which parts can evolve by
 //! runtime routing, producer extension, or source-level kernel evolution.
+//! The model-facing projection is agent-first: it advertises exact invocation
+//! payloads, authority selectors, and read-only-vs-write effect contracts before
+//! any UI-oriented wording.
 
 use std::borrow::Cow;
 
@@ -209,7 +212,8 @@ pub(crate) fn operation_agent_usage_projection(operation: &str) -> Option<Value>
         "audience": operation_pool_metadata(binding.operation)
             .map(|metadata| metadata.audience.as_str())
             .unwrap_or("session_work"),
-        "defaultUse": default_use_for_operation(binding.family, binding.ownership_class),
+        "defaultUse": default_use_for_operation(binding.operation, binding.family, binding.ownership_class),
+        "effect": operation_effect_projection(binding.operation, binding.family, binding.ownership_class),
         "preflight": preflight_guidance_for_operation(binding.operation, binding.family, binding.ownership_class),
         "failureRecovery": failure_recovery_for_operation(binding.family, binding.ownership_class),
     }))
@@ -373,7 +377,17 @@ fn next_action_for_ownership(class: &str) -> &'static str {
     }
 }
 
-fn default_use_for_operation(family: &str, ownership_class: &str) -> &'static str {
+fn default_use_for_operation(operation: &str, family: &str, ownership_class: &str) -> &'static str {
+    if !operation_is_read_only_safe(operation) {
+        return match ownership_class {
+            "governance_locked" => "governed_write_after_evidence_and_approval",
+            "record_plane" => "record_after_evidence_and_idempotency",
+            "adapter_replaceable" | "module_owned" => {
+                "perform_work_only_when_user_task_requires_effect"
+            }
+            _ => "effectful_operation_not_for_read_only_inspection",
+        };
+    }
     match ownership_class {
         "kernel_locked" if matches!(family, "catalog_discovery" | "trace" | "logs" | "core") => {
             "diagnose_or_verify"
@@ -385,6 +399,118 @@ fn default_use_for_operation(family: &str, ownership_class: &str) -> &'static st
         "module_owned" => "perform_governed_module_work",
         _ => "inspect_before_use",
     }
+}
+
+fn operation_effect_projection(operation: &str, family: &str, ownership_class: &str) -> Value {
+    let read_only = operation_is_read_only_safe(operation);
+    let mode = if read_only {
+        "read_only"
+    } else if operation_starts_work(operation) {
+        "starts_work"
+    } else if operation_writes_metadata(operation) {
+        "metadata_write"
+    } else {
+        "state_change"
+    };
+    json!({
+        "mode": mode,
+        "readOnlyInspectionSafe": read_only,
+        "mutatesState": !read_only,
+        "writesResource": !read_only && (operation_writes_metadata(operation) || matches!(ownership_class, "record_plane" | "governance_locked")),
+        "startsWork": operation_starts_work(operation),
+        "readOnlyInstruction": if read_only {
+            "safe to call during read-only inspection"
+        } else {
+            "do not call during read-only inspection; inspect schema/catalog/list operations instead"
+        },
+        "requiresPriorEvidence": !read_only && matches!(ownership_class, "record_plane" | "governance_locked"),
+        "family": family
+    })
+}
+
+fn operation_is_read_only_safe(operation: &str) -> bool {
+    matches!(
+        operation,
+        "observe"
+            | "state_get"
+            | "state_list"
+            | "filesystem_read"
+            | "filesystem_list"
+            | "filesystem_find"
+            | "filesystem_glob"
+            | "filesystem_search_text"
+            | "filesystem_diff"
+            | "git_status"
+            | "git_diff"
+            | "git_branch_inventory"
+            | "job_status"
+            | "job_list"
+            | "job_log"
+            | "trace_list"
+            | "trace_get"
+            | "log_recent"
+            | "replay_manifest"
+            | "catalog_search"
+            | "catalog_inspect"
+            | "memory_status"
+            | "memory_list"
+            | "memory_inspect"
+            | "memory_query_list"
+            | "memory_query_inspect"
+            | "memory_decision_list"
+            | "memory_decision_inspect"
+            | "context_control_action_list"
+            | "context_control_action_inspect"
+            | "context_survivor_list"
+            | "context_exclusion_list"
+            | "context_policy_snapshot"
+            | "subagent_status"
+            | "subagent_result"
+            | "subagent_task_list"
+            | "subagent_task_inspect"
+            | "capability_binding_cockpit_overview"
+    ) || operation.ends_with("_list")
+        || operation.ends_with("_inspect")
+        || operation.ends_with("_status")
+}
+
+fn operation_writes_metadata(operation: &str) -> bool {
+    operation.ends_with("_record")
+        || matches!(
+            operation,
+            "state_set"
+                | "catalog_conformance"
+                | "context_control_snapshot"
+                | "context_control_compact"
+                | "context_control_clear"
+                | "context_survivor_disable"
+                | "context_exclusion_disable"
+                | "media_create"
+                | "media_archive"
+                | "module_lifecycle_request"
+                | "module_lifecycle_decision"
+                | "module_runtime_cancel"
+                | "module_dependency_policy_activate"
+                | "capability_binding_policy_activate"
+                | "capability_route_activate"
+                | "capability_route_disable"
+                | "capability_route_rollback"
+                | "procedural_definition_record"
+                | "procedural_activation_request_record"
+                | "procedural_activation_decision_record"
+        )
+}
+
+fn operation_starts_work(operation: &str) -> bool {
+    matches!(
+        operation,
+        "process_run"
+            | "job_start"
+            | "subagent_launch"
+            | "module_runtime_request"
+            | "module_program_execution_start"
+            | "schedule_fire_due"
+    )
 }
 
 fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_class: &str) -> Value {
@@ -432,6 +558,7 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
                     "networkPolicy": "none"
                 }
             },
+            "readOnlyInstruction": "Do not call during read-only inspection; this records durable shadow-trial request metadata.",
             "beforeCalling": "Inspect capability_binding_cockpit_overview or catalog_inspect for git_status, copy the server-owned owner/class metadata exactly, inspect the operation schema for exact field names, and provide bounded evidence refs only."
         });
     }
@@ -454,6 +581,11 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
             "resourceSelectors": capability_binding_kind_selectors_for_operation(operation),
             "networkPolicy": "none",
             "agentStateInherited": false,
+            "readOnlyInstruction": if operation_is_read_only_safe(operation) {
+                "safe to call during read-only inspection"
+            } else {
+                "do not call during read-only inspection; use list/inspect/search/overview operations instead"
+            },
             "beforeCalling": "Use exact kind/resource selectors. Do not use wildcard selectors, opaque authority tokens, local paths, commands, logs, or code bodies."
         });
     }
@@ -485,6 +617,30 @@ fn capability_binding_kind_selectors_for_operation(operation: &str) -> Vec<&'sta
             "kind:capability_route_event",
             "kind:capability_route_rollback",
         ];
+    }
+    match operation {
+        "capability_binding_request_record"
+        | "capability_binding_request_list"
+        | "capability_binding_request_inspect" => return vec!["kind:capability_binding_request"],
+        "capability_binding_decision_record" => {
+            return vec![
+                "kind:capability_binding_request",
+                "kind:capability_binding_decision",
+            ];
+        }
+        "capability_binding_decision_list" | "capability_binding_decision_inspect" => {
+            return vec!["kind:capability_binding_decision"];
+        }
+        "capability_binding_policy_activate" => {
+            return vec![
+                "kind:capability_binding_decision",
+                "kind:capability_binding_policy",
+            ];
+        }
+        "capability_binding_policy_list" | "capability_binding_policy_inspect" => {
+            return vec!["kind:capability_binding_policy"];
+        }
+        _ => {}
     }
     vec![
         "kind:capability_binding_request",
@@ -918,6 +1074,90 @@ mod tests {
                     row.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn capability_binding_agent_usage_advertises_operation_specific_selectors() {
+        for (operation, expected_selectors) in [
+            (
+                "capability_binding_request_list",
+                vec!["kind:capability_binding_request"],
+            ),
+            (
+                "capability_binding_decision_list",
+                vec!["kind:capability_binding_decision"],
+            ),
+            (
+                "capability_binding_policy_list",
+                vec!["kind:capability_binding_policy"],
+            ),
+        ] {
+            let usage = operation_agent_usage_projection(operation)
+                .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
+            let selectors = usage["preflight"]["resourceSelectors"]
+                .as_array()
+                .expect("resource selectors")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                selectors, expected_selectors,
+                "{operation} selectors drifted"
+            );
+            assert_eq!(usage["preflight"]["networkPolicy"], "none");
+            assert_eq!(usage["preflight"]["agentStateInherited"], false);
+            let scopes = usage["preflight"]["authorityScopes"]
+                .as_array()
+                .expect("authority scopes")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            assert!(scopes.contains(&"capability_binding.read"));
+            assert!(scopes.contains(&"resource.read"));
+            assert!(!scopes.contains(&"capability_binding.write"));
+            assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
+            assert_eq!(usage["effect"]["mutatesState"], false);
+        }
+    }
+
+    #[test]
+    fn write_operations_advertise_not_safe_for_read_only_inspection() {
+        for operation in [
+            "capability_shadow_trial_request_record",
+            "capability_replacement_candidate_record",
+            "capability_route_activate",
+            "catalog_conformance",
+            "git_commit",
+            "process_run",
+        ] {
+            let usage = operation_agent_usage_projection(operation)
+                .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
+            assert_eq!(
+                usage["effect"]["readOnlyInspectionSafe"], false,
+                "{operation} must not look read-only safe"
+            );
+            assert_eq!(usage["effect"]["mutatesState"], true);
+            assert!(
+                usage["effect"]["readOnlyInstruction"]
+                    .as_str()
+                    .expect("read-only instruction")
+                    .contains("do not call during read-only inspection")
+            );
+            assert!(
+                usage["defaultUse"]
+                    .as_str()
+                    .expect("default use")
+                    .contains("inspection")
+                    || usage["defaultUse"]
+                        .as_str()
+                        .expect("default use")
+                        .contains("approval")
+                    || usage["defaultUse"]
+                        .as_str()
+                        .expect("default use")
+                        .contains("requires_effect")
+            );
         }
     }
 

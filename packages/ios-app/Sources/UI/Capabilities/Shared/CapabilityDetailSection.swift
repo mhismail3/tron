@@ -2,8 +2,9 @@ import SwiftUI
 
 // MARK: - Capability Detail Section
 
-/// Solid detail container with the section header outside.
-/// Reusable across capability detail sheets where payload readability matters.
+/// Liquid-glass detail container with the section header outside.
+/// Reusable across capability detail sheets where high-signal cards can
+/// progressively reveal payload and evidence detail.
 struct CapabilityDetailSection<Trailing: View, Content: View>: View {
     let title: String
     var accent: Color = .tronSlate
@@ -28,14 +29,7 @@ struct CapabilityDetailSection<Trailing: View, Content: View>: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.tronSurface.opacity(0.86))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(accent.opacity(0.16), lineWidth: 1)
-                    }
-            }
+            .sectionFill(accent, cornerRadius: 12, subtle: true, interactive: false)
         }
     }
 }

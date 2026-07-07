@@ -283,7 +283,7 @@ struct CapabilityInvocationGroupDetailSheet: View {
                         invocationSection(
                             title: failedInvocations.isEmpty ? "Invocations" : "Completed",
                             invocations: completedInvocations,
-                            sectionAccent: accent
+                            sectionAccent: .tronSuccess
                         )
                         .sheetSection()
                     }
@@ -305,10 +305,9 @@ struct CapabilityInvocationGroupDetailSheet: View {
                     .foregroundStyle(tint.body)
                     .fixedSize(horizontal: false, vertical: true)
 
-                CapabilityReadableRows(
+                CapabilityMetricStrip(
                     rows: [
-                        CapabilityDisplayRow(label: "Status", value: data.isActive ? "Running" : "Completed"),
-                        CapabilityDisplayRow(label: "Capabilities", value: "\(data.count)"),
+                        CapabilityDisplayRow(label: "Used", value: "\(data.count)"),
                         CapabilityDisplayRow(label: "Finished", value: "\(data.completedCount)"),
                         CapabilityDisplayRow(label: "Failed", value: "\(data.failedCount)")
                     ],
@@ -333,13 +332,28 @@ struct CapabilityInvocationGroupDetailSheet: View {
         invocations: [CapabilityInvocationData],
         sectionAccent: Color
     ) -> some View {
-        let sectionTint = TintedColors(accent: sectionAccent, colorScheme: colorScheme)
-        return CapabilityDetailSection(title: title, accent: sectionAccent, tint: sectionTint) {
-            VStack(spacing: 10) {
-                ForEach(invocations) { invocation in
-                    invocationRow(invocation)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(TintedColors(accent: sectionAccent, colorScheme: colorScheme).heading)
+                Spacer()
+                Text("\(invocations.count)")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .countBadge(sectionAccent)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(invocations.indices, id: \.self) { index in
+                    if index > 0 {
+                        Divider()
+                            .overlay(sectionAccent.opacity(colorScheme == .light ? 0.18 : 0.20))
+                            .padding(.leading, 44)
+                    }
+                    invocationRow(invocations[index])
                 }
             }
+            .sectionFill(sectionAccent, cornerRadius: 12, subtle: true, interactive: false)
         }
     }
 
@@ -383,11 +397,9 @@ struct CapabilityInvocationGroupDetailSheet: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Color.tronSurface.opacity(colorScheme == .light ? 0.78 : 0.58))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityLabel("\(brief.title), \(invocation.display.statusText)")
     }
 }
@@ -454,7 +466,7 @@ struct CapabilityInvocationDetailSheet: View {
                     .foregroundStyle(tint.body)
                     .fixedSize(horizontal: false, vertical: true)
 
-                CapabilityBriefFactGrid(rows: brief.factRows, tint: tint)
+                CapabilityMetricStrip(rows: brief.factRows, tint: tint)
             }
         }
     }
@@ -469,14 +481,15 @@ struct CapabilityInvocationDetailSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let nextStep = issue.nextStep {
-                    Text(nextStep)
+                    Label(nextStep, systemImage: "arrow.triangle.2.circlepath")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                         .foregroundStyle(issueTint.accent)
+                        .labelStyle(.titleAndIcon)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if !issue.rows.isEmpty {
-                    CapabilityReadableRows(rows: issue.rows, tint: issueTint)
+                    CapabilityMetricStrip(rows: issue.rows, tint: issueTint)
                 }
             }
         }
@@ -485,7 +498,7 @@ struct CapabilityInvocationDetailSheet: View {
     private func rowsSection(title: String, rows: [CapabilityDisplayRow], accent: Color) -> some View {
         let sectionTint = TintedColors(accent: accent, colorScheme: colorScheme)
         return CapabilityDetailSection(title: title, accent: accent, tint: sectionTint) {
-            CapabilityReadableRows(rows: rows, tint: sectionTint)
+            CapabilityInlineRows(rows: rows, tint: sectionTint)
         }
     }
 
@@ -493,7 +506,7 @@ struct CapabilityInvocationDetailSheet: View {
         CapabilityDetailSection(title: "Result", accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 12) {
                 if !brief.resultRows.isEmpty {
-                    CapabilityReadableRows(rows: brief.resultRows, tint: tint)
+                    CapabilityMetricStrip(rows: brief.resultRows, tint: tint)
                 }
                 if let body = brief.resultBody {
                     CapabilityInvocationCodeBlock(text: body)
@@ -507,7 +520,7 @@ struct CapabilityInvocationDetailSheet: View {
         return CapabilityDetailSection(title: "Evidence", accent: .tronSlate, tint: evidenceTint) {
             VStack(alignment: .leading, spacing: 12) {
                 if !brief.evidenceRows.isEmpty {
-                    CapabilityReadableRows(rows: brief.evidenceRows, tint: evidenceTint)
+                    CapabilityInlineRows(rows: brief.evidenceRows, tint: evidenceTint)
                 }
 
                 if !brief.technicalRows.isEmpty {
@@ -529,48 +542,103 @@ private struct CapabilityRowsDisclosure: View {
 
     var body: some View {
         DisclosureGroup {
-            CapabilityReadableRows(rows: rows, tint: tint)
+            CapabilityInlineRows(rows: rows, tint: tint)
                 .padding(.top, 8)
         } label: {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(tint.heading)
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(tint.heading)
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct CapabilityMetricStrip: View {
+    let rows: [CapabilityDisplayRow]
+    let tint: TintedColors
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(rows.indices, id: \.self) { index in
+                if index > 0 {
+                    Divider()
+                        .overlay(tint.accent.opacity(0.18))
+                        .padding(.vertical, 2)
+                }
+                CapabilityMetricStripItem(row: rows[index], tint: tint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+    }
+}
+
+private struct CapabilityMetricStripItem: View {
+    let row: CapabilityDisplayRow
+    let tint: TintedColors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(row.label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(tint.subtle)
+                .lineLimit(1)
+            Text(row.value)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .minimumScaleFactor(0.82)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 10)
+        .padding(.leading, 10)
+    }
+}
+
+private struct CapabilityInlineRows: View {
+    let rows: [CapabilityDisplayRow]
+    let tint: TintedColors
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(rows.indices, id: \.self) { index in
+                if index > 0 {
+                    Divider()
+                        .overlay(tint.accent.opacity(0.14))
+                }
+                CapabilityInlineRow(row: rows[index], tint: tint)
+            }
         }
     }
 }
 
-private struct CapabilityBriefFactGrid: View {
-    let rows: [CapabilityDisplayRow]
+private struct CapabilityInlineRow: View {
+    let row: CapabilityDisplayRow
     let tint: TintedColors
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8)
-    ]
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            ForEach(rows) { row in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(row.label)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(tint.subtle)
-                    Text(row.value)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.82)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .background {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(tint.accent.opacity(0.08))
-                }
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(row.label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(tint.subtle)
+            Text(row.value)
+                .font(row.isTechnical ? TronTypography.code(size: TronTypography.sizeCaption, weight: .regular) : TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .foregroundStyle(row.isTechnical ? tint.body : .tronTextPrimary)
+                .lineLimit(row.isTechnical ? 3 : 4)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 9)
     }
 }
 

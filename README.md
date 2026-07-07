@@ -1522,7 +1522,7 @@ Current primitive operations:
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments, generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation, and provider guidance carries a bounded canonical supported-execute-operation list with total/returned/truncated/omitted metadata. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution; model-facing aliases such as `log_recent`, `execute::log_recent`, or any supported execute operation name are normalized to the appropriate catalog/execute schema for inspection only. |
-| `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
+| `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks; this is verification-report evidence, not passive read-only inspection. |
 
 File access goes through the hardened `filesystem_*` operation package.
 
