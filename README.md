@@ -97,7 +97,7 @@ Current living entry points:
   kernel-locked, governance-locked, record-plane, adapter-replaceable,
   module-owned, or deferred so future modular replacement work is measurable.
 - `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 188-row inventory for the capability modularity scorecard.
+  machine-readable 189-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
@@ -1206,7 +1206,7 @@ Capability modularity is tracked in
 machine-readable inventory in
 `packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
 in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 188
+`capability_modularity_scorecard_invariants` test locks the current 189
 operation baseline, registry/dispatch parity, and the ownership classes used for
 future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 `adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
@@ -1252,7 +1252,7 @@ shadow evidence plus lifecycle/runtime refs, projects supervised module-runtime
 provider-safe output, and emits route events. If the replacement runtime
 envelope, lifecycle authorization, version refs, scope, network policy, or
 projection shape are unsafe, candidate recording or routing fails closed and does
-not return a built-in success projection as a fallback.
+not substitute a built-in success projection for the unsafe route.
 Cockpit Visibility adds the system-visible pure-read
 `capability_binding::cockpit_overview` projection for Engine Cockpit clients.
 It joins registry ownership metadata with scoped binding-policy, shadow-trial,
@@ -1451,6 +1451,7 @@ Current primitive operations:
 | `capability_binding_policy_activate` | Capability Binding Policy operation that records one active scoped `capability_binding_policy` resource from an approved decision after exact decision selector authority and expected decision version freshness, carrying rollback/disable refs and active metadata policy evidence only; it does not route execution, mutate dispatch, hot-swap, install, activate, execute, restore dependencies, run package managers, or access networks. |
 | `capability_binding_policy_list` | Capability Binding Policy operation that lists scoped `capability_binding_policy` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with active policy metadata, request/decision linkage, `networkPolicy: none`, and no runtime side effects. |
 | `capability_binding_policy_inspect` | Capability Binding Policy operation that inspects one scoped `capability_binding_policy` through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning approved metadata policy evidence, activation proof, rollback/disable refs, and audit history without raw paths, secrets, commands, logs, file contents, raw grant ids, raw authority ids, `agent_state`, or debug payloads. |
+| `capability_binding_cockpit_overview` | Provider-visible read-only operation that returns the same bounded Engine Cockpit projection as the system-visible `capability_binding::cockpit_overview` function, including operation-pool role, replacement class, agent usage/preflight guidance, route/binding/shadow state, operation-list completeness, and redacted verification context for all current `capability::execute` operations; provider replay appends a bounded model-context digest with coverage counts, family summaries, and representative operation samples so the agent can verify discoverability without reading raw audit payloads, mutating routing, invoking modules, running package managers, using network, or exposing raw resource ids, paths, commands, logs, grants, authority ids, trace ids, invocation ids, or token-like material. |
 | `capability_shadow_trial_request_record` | Shadow Replacement Trial operation that records one scoped `capability_shadow_trial_request` for the exact `git_status` target, with authoritative built-in owner/class metadata, deterministic metadata-only candidate adapter description, exact selector authority constraints, stale guards, rollback/disable/abort refs, idempotency, `networkPolicy: none`, and no routing or candidate execution. |
 | `capability_shadow_trial_decision_record` | Shadow Replacement Trial operation that records an approved/rejected/disabled/aborted `capability_shadow_trial_decision` after exact request selector authority and expected request version freshness, preserving request metadata and run-gate evidence without dispatch mutation, hot-swap, module activation/execution, package-manager, dependency, or network behavior. |
 | `capability_shadow_trial_run_record` | Shadow Replacement Trial operation that records a metadata-only `capability_shadow_trial_run` plus evidence resource after exact approved-decision selector authority and expected decision version freshness, comparing bounded built-in and deterministic candidate `git_status` projections or recording disabled/aborted controls without executing candidate modules or changing live routing. |
@@ -1466,7 +1467,7 @@ Current primitive operations:
 | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
 | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
 | `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence, supervised adapter projection state, routed invocation results, fail-closed status, and rollback/disable history. |
-| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all 188 `capability::execute` operations, joining registry ownership classes, Engine Capability Pool role classifications, and current-session/workspace binding-policy, shadow-trial, and route facts so iOS can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
+| `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all current `capability::execute` operations, joining registry ownership classes, Engine Capability Pool role classifications, agent usage guidance, and current-session/workspace binding-policy, shadow-trial, and route facts so native clients can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
 | `module_lifecycle_list` | Slice 23E accepted operation that lists scoped `module_lifecycle_state` resources as bounded provider-safe summaries after stored kind/schema/scope/current-version revalidation, with runtime authorization metadata, rollback metadata, truncation metadata, `networkPolicy: none`, and no install, activation, execution, dependency restoration, package-manager, network, or workspace side effects. |
@@ -1519,7 +1520,7 @@ Current primitive operations:
 | `memory_decision_list` | Accepted Slice 24D operation that lists redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
 | `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
-| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, and model-facing `capability::execute` operation aliases without invoking catalog targets; non-callable metadata targets are marked as such and provider guidance carries a bounded canonical supported-execute-operation list with total/returned/truncated/omitted metadata. |
+| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments, generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation, and provider guidance carries a bounded canonical supported-execute-operation list with total/returned/truncated/omitted metadata. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution; model-facing aliases such as `log_recent`, `execute::log_recent`, or any supported execute operation name are normalized to the appropriate catalog/execute schema for inspection only. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
@@ -2325,15 +2326,22 @@ agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
 snapshot through the same single tool. Diagnostic capability results replay
-bounded model-context evidence for catalog, trace, recent-log, safe
-metadata-record/list/inspect operations, module/procedural/prompt/program/
-repository-tree/import/web/media/memory/state reads, and schema failures so the
-agent sees actionable ids, lifecycle/status, refs, truncation metadata, and
-error paths instead of count-only summaries, while raw commands, output, logs,
-local paths, code, file contents, secrets, grant ids, authority ids, and hidden
-reasoning stay out of provider context. Failure projections omit `actual`
-detail payloads, and metadata projections deny authority-bearing id/version/ref
-suffixes while retaining non-sensitive resource/version refs. Catalog discovery
+bounded model-context evidence for catalog, capability-binding cockpit
+overview, trace, recent-log, safe metadata-record/list/inspect operations,
+module/procedural/prompt/program/repository-tree/import/web/media/memory/state
+reads, and schema failures so the agent sees actionable ids, lifecycle/status,
+refs, truncation metadata, and error paths instead of count-only summaries.
+Cockpit overview evidence includes operation-list completeness,
+missing-classification/missing-agent-guidance counts, family summaries, and
+representative operation samples; catalog search evidence includes direct
+execute-operation matches when the query names or prefixes a supported
+operation, while generic `capability::execute` schema searches remain catalog
+schema lookups instead of broad operation expansions. Raw commands, output,
+logs, local paths, code, file contents,
+secrets, grant ids, authority ids, and hidden reasoning stay out of provider
+context. Failure projections omit `actual` detail payloads, and metadata
+projections deny authority-bearing id/version/ref suffixes while retaining
+non-sensitive resource/version refs. Catalog discovery
 reads current
 catalog/resource truth, supplies a bounded canonical execute operation registry
 with total/returned/truncated/omitted metadata to model guidance, marks
@@ -2848,7 +2856,7 @@ packages/ios-app/Sources/
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session
-  titles before prompt fallbacks, and show untitled rows as `New Session`,
+  titles before prompt-derived labels, and show untitled rows as `New Session`,
   server-backed new-session workspace selection with configured/recent
   shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
   inline folder creation, prompt input with clearable

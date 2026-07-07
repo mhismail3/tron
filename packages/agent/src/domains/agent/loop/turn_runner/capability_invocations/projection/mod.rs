@@ -98,6 +98,7 @@ fn model_context_evidence(details: Option<&Value>) -> Option<String> {
         .and_then(Value::as_str)
         .or_else(|| details.get("operation").and_then(Value::as_str))?;
     let projected = match operation {
+        "capability_binding_cockpit_overview" => project_capability_cockpit_evidence(details),
         "catalog_search" | "catalog_inspect" => project_catalog_evidence(details),
         "log_recent" => project_log_evidence(details),
         "trace_list" | "trace_get" => project_trace_evidence(details),
@@ -155,6 +156,27 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
             );
         }
     }
+    if let Some(matches) = discovery
+        .get("executeOperationMatches")
+        .and_then(Value::as_array)
+    {
+        projected.insert(
+            "executeOperationMatches".to_owned(),
+            Value::Array(
+                matches
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_execute_operation_match)
+                    .collect(),
+            ),
+        );
+        if matches.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+            projected.insert(
+                "executeOperationMatchesOmitted".to_owned(),
+                json!(matches.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            );
+        }
+    }
     Some(Value::Object(projected))
 }
 
@@ -200,6 +222,269 @@ fn project_catalog_function(function: &Value) -> Value {
         "modelFacingInvocation",
     ] {
         copy_key(&mut projected, function, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_execute_operation_match(operation: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "operation",
+        "tool",
+        "arguments",
+        "matchKind",
+        "capabilityPool",
+        "agentUsage",
+    ] {
+        copy_key(&mut projected, operation, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
+    let cockpit = details.get("capabilityBinding")?;
+    let operations = cockpit
+        .get("operations")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    if let Some(summary) = cockpit.get("summary") {
+        projected.insert("summary".to_owned(), project_cockpit_summary(summary));
+    }
+    copy_key(&mut projected, cockpit, "operationList");
+    projected.insert(
+        "coverage".to_owned(),
+        json!({
+            "operationsReturned": operations.len(),
+            "missingCapabilityPool": operations
+                .iter()
+                .filter(|operation| operation.get("capabilityPool").is_none())
+                .count(),
+            "missingAgentUsage": operations
+                .iter()
+                .filter(|operation| operation.get("agentUsage").is_none())
+                .count(),
+        }),
+    );
+    if let Some(families) = cockpit.get("families").and_then(Value::as_array) {
+        projected.insert(
+            "families".to_owned(),
+            Value::Array(
+                families
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_cockpit_family)
+                    .collect(),
+            ),
+        );
+        if families.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+            projected.insert(
+                "familiesOmitted".to_owned(),
+                json!(families.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            );
+        }
+    }
+    projected.insert(
+        "operationSamples".to_owned(),
+        Value::Array(sample_cockpit_operations(operations)),
+    );
+    Some(Value::Object(projected))
+}
+
+fn project_cockpit_summary(summary: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "title",
+        "detail",
+        "totalOperations",
+        "returnedOperations",
+        "operationListComplete",
+        "operationListTruncated",
+        "resourceScanComplete",
+        "resourceScanTruncated",
+        "kernelLocked",
+        "governanceLocked",
+        "recordPlane",
+        "adapterReplaceable",
+        "moduleOwned",
+        "deferred",
+        "activeRoutes",
+        "routeCandidates",
+        "routeEvents",
+        "failedClosedRoutes",
+        "rollbackAvailable",
+    ] {
+        copy_key(&mut projected, summary, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_family(family: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "family",
+        "label",
+        "operations",
+        "kernelLocked",
+        "governanceLocked",
+        "recordPlane",
+        "adapterReplaceable",
+        "moduleOwned",
+        "deferred",
+        "bindingActivity",
+        "routeActivity",
+        "shadowActivity",
+    ] {
+        copy_key(&mut projected, family, key);
+    }
+    Value::Object(projected)
+}
+
+fn sample_cockpit_operations(operations: &[Value]) -> Vec<Value> {
+    let sample_keys = [
+        ("audience", "session_work"),
+        ("audience", "agent_diagnostics"),
+        ("audience", "governance"),
+        ("audience", "kernel_evolution"),
+        ("replacementClass", "runtime_routable"),
+        ("replacementClass", "producer_extensible"),
+        ("replacementClass", "kernel_evolution_only"),
+    ];
+    let mut samples = Vec::new();
+    for (key, value) in sample_keys {
+        if let Some(operation) = operations.iter().find(|operation| {
+            operation
+                .get("capabilityPool")
+                .and_then(|pool| pool.get(key))
+                .and_then(Value::as_str)
+                == Some(value)
+        }) {
+            push_unique_cockpit_sample(&mut samples, operation);
+        }
+    }
+    samples
+}
+
+fn push_unique_cockpit_sample(samples: &mut Vec<Value>, operation: &Value) {
+    let name = operation.get("name").and_then(Value::as_str);
+    if samples
+        .iter()
+        .any(|sample| sample.get("name").and_then(Value::as_str) == name)
+    {
+        return;
+    }
+    let mut projected = Map::new();
+    for key in ["name", "family", "familyLabel"] {
+        copy_key(&mut projected, operation, key);
+    }
+    if let Some(pool) = operation.get("capabilityPool") {
+        projected.insert("capabilityPool".to_owned(), project_cockpit_pool(pool));
+    }
+    if let Some(agent_usage) = operation.get("agentUsage") {
+        projected.insert(
+            "agentUsage".to_owned(),
+            project_cockpit_agent_usage(agent_usage),
+        );
+    }
+    if let Some(readiness) = operation.get("readiness") {
+        projected.insert("readiness".to_owned(), project_cockpit_readiness(readiness));
+    }
+    if let Some(replacement) = operation.get("replacement") {
+        projected.insert(
+            "replacement".to_owned(),
+            project_cockpit_replacement(replacement),
+        );
+    }
+    if let Some(status) = operation.get("status") {
+        projected.insert("status".to_owned(), project_cockpit_status(status));
+    }
+    samples.push(Value::Object(projected));
+}
+
+fn project_cockpit_pool(pool: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "surface",
+        "audience",
+        "replacementClass",
+        "agentDefaultVisibility",
+        "minimalityDecision",
+        "evolutionPath",
+    ] {
+        copy_key(&mut projected, pool, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_agent_usage(agent_usage: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "tool",
+        "operation",
+        "arguments",
+        "audience",
+        "callable",
+        "defaultUse",
+        "failureRecovery",
+    ] {
+        copy_key(&mut projected, agent_usage, key);
+    }
+    if let Some(preflight) = agent_usage.get("preflight") {
+        let mut projected_preflight = Map::new();
+        for key in [
+            "agentStateInherited",
+            "authorityScopes",
+            "beforeCalling",
+            "networkPolicy",
+            "resourceSelectors",
+        ] {
+            copy_key(&mut projected_preflight, preflight, key);
+        }
+        if !projected_preflight.is_empty() {
+            projected.insert("preflight".to_owned(), Value::Object(projected_preflight));
+        }
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_readiness(readiness: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in ["state", "label", "nextActionLabel", "nextActionDetail"] {
+        copy_key(&mut projected, readiness, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_replacement(replacement: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "label",
+        "canExtend",
+        "canReplace",
+        "canShadow",
+        "governanceBoundary",
+    ] {
+        copy_key(&mut projected, replacement, key);
+    }
+    if let Some(target) = replacement.get("target") {
+        let mut projected_target = Map::new();
+        for key in ["label", "detail"] {
+            copy_key(&mut projected_target, target, key);
+        }
+        if !projected_target.is_empty() {
+            projected.insert("target".to_owned(), Value::Object(projected_target));
+        }
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_status(status: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in ["kind", "label", "locked", "builtIn", "moduleOwned"] {
+        copy_key(&mut projected, status, key);
     }
     Value::Object(projected)
 }

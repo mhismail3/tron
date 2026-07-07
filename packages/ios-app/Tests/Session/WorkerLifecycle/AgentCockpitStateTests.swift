@@ -200,6 +200,76 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.groups.first?.missingSchemaCount == 1)
     }
 
+    @Test("Projection keeps internal catalog schema gaps out of operation cockpit status")
+    func projectionKeepsInternalCatalogSchemaGapsOutOfOperationCockpitStatus() {
+        let snapshot = CatalogWatchSnapshotDTO(
+            changes: [],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "internal.catalog::probe",
+                        "ownerWorker": "internal.catalog",
+                        "description": "Internal catalog probe",
+                        "visibility": "System",
+                        "effectClass": "PureRead",
+                        "riskLevel": "Low",
+                        "health": "Healthy",
+                        "tags": ["internal"]
+                    ])
+                ],
+                workers: [],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 2,
+            nextRevision: 3,
+            hasMore: false
+        )
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: snapshot,
+            resources: [],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            capabilityVisibility: AgentCockpitViewModelTests.capabilityCockpitOverview(),
+            connectionState: .connected
+        )
+
+        #expect(overview.status.kind == .idle)
+        #expect(overview.discovery.title == "Verified")
+        #expect(overview.discovery.missingSchemaCount == 0)
+        #expect(overview.discovery.catalogDecodeIssueCount == 0)
+        #expect(overview.discovery.groups.allSatisfy { $0.missingSchemaCount == 0 })
+        #expect(overview.invokableUnitLabel == "Operations")
+        #expect(overview.invokableUnitCount == 2)
+    }
+
+    @Test("Projection treats missing operation pool classification as a cockpit issue")
+    func projectionTreatsMissingOperationPoolClassificationAsIssue() {
+        var visibility = AgentCockpitViewModelTests.capabilityCockpitOverview()
+        visibility.operations[0].capabilityPool = nil
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            capabilityVisibility: visibility,
+            connectionState: .connected
+        )
+
+        #expect(overview.status.kind == .degraded)
+        #expect(overview.status.title == "Operations Need Review")
+        #expect(overview.status.detail.contains("missing capability-pool classification"))
+        let git = overview.modularityOperations.first { $0.name == "git_status" }
+        #expect(git?.capabilityAudience == "unknown")
+        #expect(git?.capabilityReplacementClass == "unknown")
+        #expect(git?.capabilityEvolutionPath == "Capability-pool classification is missing from the server projection.")
+    }
+
     @Test("Projection treats server snake-case schema evidence as complete")
     func projectionTreatsServerSnakeCaseSchemaEvidenceAsComplete() {
         let snapshot = CatalogWatchSnapshotDTO(
@@ -332,8 +402,8 @@ struct AgentCockpitStateTests {
         )
 
         #expect(overview.status.kind == .degraded)
-        #expect(overview.status.title == "Capabilities Need Review")
-        #expect(overview.discovery.title == "Capabilities Need Review")
+        #expect(overview.status.title == "Operations Need Review")
+        #expect(overview.discovery.title == "Operations Need Review")
         #expect(overview.discovery.catalogDecodeIssueCount == 1)
         #expect(overview.discovery.reports.first?.lifecycle == "passed")
     }
@@ -368,7 +438,7 @@ struct AgentCockpitStateTests {
         ]
 
         #expect(AgentCockpitPresentation.hiddenTopLevelTerms(in: topLevelStrings).isEmpty)
-        #expect(topLevelStrings.contains("Capabilities verified"))
+        #expect(topLevelStrings.contains("Operations verified"))
         #expect(topLevelStrings.contains("Verified"))
         #expect(topLevelStrings.contains("Runtime"))
     }

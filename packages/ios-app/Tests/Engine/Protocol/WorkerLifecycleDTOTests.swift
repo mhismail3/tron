@@ -424,6 +424,19 @@ struct WorkerLifecycleDTOTests {
                 "minimalityDecision": "module_candidate",
                 "evolutionPath": "candidate_validation_shadow_approval_activation_rollback"
               },
+              "agentUsage": {
+                "callable": true,
+                "tool": "capability::execute",
+                "operation": "git_status",
+                "defaultUse": "perform_session_work",
+                "failureRecovery": "Inspect schema, authority requirements, and recent trace evidence before retrying the adapter operation.",
+                "preflight": {
+                  "networkPolicy": "none_unless_schema_requires_otherwise",
+                  "beforeCalling": "Put operation-specific fields at the top level of the capability::execute payload.",
+                  "authority": "exact_operation_selectors_plus_route_authority",
+                  "evidence": "shadow_activation_route_event_and_rollback_evidence_required"
+                }
+              },
               "owner": {
                 "label": "Built-in Git adapter",
                 "detail": "A built-in adapter owns execution today and can be proposed for governed replacement later.",
@@ -555,6 +568,8 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.operations.first?.capabilityPool?.surface == "agent_operation")
         #expect(overview.operations.first?.capabilityPool?.audience == "session_work")
         #expect(overview.operations.first?.capabilityPool?.replacementClass == "runtime_routable")
+        #expect(overview.operations.first?.agentUsage?.operation == "git_status")
+        #expect(overview.operations.first?.agentUsage?.preflight?.networkPolicy == "none_unless_schema_requires_otherwise")
         #expect(overview.operations.first?.replacement.target.label == "Governed Git adapter")
         #expect(overview.operations.first?.readiness.nextActionLabel == "Inspect decisions")
         #expect(overview.operations.first?.route?.state == "active")

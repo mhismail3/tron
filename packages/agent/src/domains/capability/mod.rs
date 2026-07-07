@@ -80,6 +80,13 @@
 //! rollback/disable refs, and audit refs, while proving no `capability::execute`
 //! dispatch, runtime routing, hot-swap, module activation, package-manager,
 //! dependency, or network behavior occurs.
+//! `capability_binding_cockpit_overview` exposes the same read-only Engine
+//! Cockpit projection used by native clients so the agent can inspect operation
+//! ownership, replacement class, route state, and exact preflight guidance. The
+//! full projection remains durable UI/audit data, while the turn runner appends
+//! a bounded provider-visible digest with coverage counts, family summaries, and
+//! representative operation samples so the agent can verify the pool without
+//! guessing or calling internal catalog functions directly.
 //! Capability-shadow-trial operations are an even narrower metadata-only path:
 //! they record request/decision/run/evidence resources for the selected
 //! read-only `git_status` target, compare bounded built-in and deterministic

@@ -105,6 +105,7 @@ struct CapabilityCockpitOperationDTO: Codable, Equatable, Identifiable, Sendable
     var family: String
     var familyLabel: String
     var capabilityPool: CapabilityCockpitPoolDTO? = nil
+    var agentUsage: CapabilityCockpitAgentUsageDTO? = nil
     var owner: CapabilityCockpitOwnerDTO
     var status: CapabilityCockpitStatusDTO
     var replacement: CapabilityCockpitReplacementDTO
@@ -124,6 +125,25 @@ struct CapabilityCockpitPoolDTO: Codable, Equatable, Sendable {
     var agentDefaultVisibility: String
     var minimalityDecision: String
     var evolutionPath: String
+}
+
+struct CapabilityCockpitAgentUsageDTO: Codable, Equatable, Sendable {
+    var callable: Bool
+    var tool: String?
+    var operation: String?
+    var defaultUse: String?
+    var failureRecovery: String?
+    var preflight: CapabilityCockpitAgentPreflightDTO?
+}
+
+struct CapabilityCockpitAgentPreflightDTO: Codable, Equatable, Sendable {
+    var authority: String?
+    var evidence: String?
+    var networkPolicy: String?
+    var beforeCalling: String?
+    var authorityScopes: [String]?
+    var resourceSelectors: [String]?
+    var requiredPayloadFields: [String]?
 }
 
 struct CapabilityCockpitOwnerDTO: Codable, Equatable, Sendable {

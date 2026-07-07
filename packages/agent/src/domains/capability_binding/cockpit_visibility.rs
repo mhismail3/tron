@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::domains::capability::{
     OperationBindingMetadata, operation_binding_metadata,
-    pool::{CapabilityPoolMetadata, operation_pool_metadata},
+    pool::{CapabilityPoolMetadata, operation_agent_usage_projection, operation_pool_metadata},
     supported_operation_names,
 };
 use crate::engine::{
@@ -26,8 +26,7 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_RUN_KIND, Deps,
 };
 
-const DEFAULT_LIMIT: usize = 188;
-const MAX_LIMIT: usize = 200;
+const MAX_LIMIT: usize = 256;
 const MAX_RESOURCES_PER_KIND_SCOPE: usize = 100;
 
 const BINDING_KINDS: &[&str] = &[
@@ -229,6 +228,7 @@ struct OperationVisibility {
     family: String,
     family_label: String,
     capability_pool: CapabilityPoolRoleProjection,
+    agent_usage: Value,
     owner: OwnerProjection,
     status: StatusProjection,
     replacement: ReplacementProjection,
@@ -442,7 +442,7 @@ pub(crate) async fn cockpit_overview_value(
         .get("limit")
         .and_then(Value::as_u64)
         .map(|value| value as usize)
-        .unwrap_or(DEFAULT_LIMIT)
+        .unwrap_or_else(|| supported_operation_names().len())
         .clamp(1, MAX_LIMIT);
     let facts = collect_facts(deps, &scopes).await?;
     let mut all_operations = Vec::new();
@@ -793,6 +793,12 @@ fn operation_visibility(
         family: metadata.family.to_owned(),
         family_label: family_label(metadata.family),
         capability_pool,
+        agent_usage: operation_agent_usage_projection(metadata.operation).unwrap_or_else(|| {
+            serde_json::json!({
+                "callable": false,
+                "reason": "Operation usage metadata is unavailable."
+            })
+        }),
         owner: owner_projection(
             metadata.family,
             metadata.current_owner,
@@ -1001,7 +1007,7 @@ fn readiness_projection(
         (
             "route_failed_closed",
             "Route failed closed",
-            "A routed replacement attempt failed closed; the server did not report a built-in success fallback as the replacement result.",
+            "A routed replacement attempt failed closed; the server did not report built-in success as the replacement result.",
             "Inspect route event",
             "Review route events, runtime refs, and rollback evidence before another activation attempt.",
         )
@@ -1200,7 +1206,7 @@ fn route_projection(facts: &RouteFacts) -> RouteProjection {
             "failed_closed",
             "Failed closed",
             format!(
-                "{} route event{} failed closed; no built-in success fallback was projected as the replacement result.",
+                "{} route event{} failed closed; no built-in success was projected as the replacement result.",
                 facts.failed_closed,
                 plural(facts.failed_closed)
             ),

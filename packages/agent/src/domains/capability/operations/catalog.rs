@@ -3,7 +3,10 @@ use serde_json::{Value, json};
 use super::ok_result;
 use super::registry::{is_supported_operation, supported_operation_names};
 use crate::domains::capability::Deps;
-use crate::domains::capability::pool::{catalog_function_pool_metadata, operation_pool_metadata};
+use crate::domains::capability::pool::{
+    catalog_function_agent_usage_projection, catalog_function_pool_metadata,
+    operation_agent_usage_projection, operation_pool_metadata,
+};
 use crate::domains::catalog_discovery::service;
 use crate::engine::Invocation;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
@@ -16,12 +19,24 @@ pub(super) async fn catalog_search(
     let mut discovery =
         service::search_catalog_value(&deps.engine_host, invocation, &invocation.payload).await?;
     annotate_model_facing_invocation(&mut discovery);
+    annotate_execute_operation_matches(&mut discovery, &invocation.payload);
     let visible = discovery
         .pointer("/summary/functions/visible")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let operation_matches = discovery
+        .get("executeOperationMatches")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let content = if operation_matches == 0 {
+        format!("Catalog search returned {visible} visible functions.")
+    } else {
+        format!(
+            "Catalog search returned {visible} visible functions and {operation_matches} execute operation match(es)."
+        )
+    };
     Ok(ok_result(
-        format!("Catalog search returned {visible} visible functions."),
+        content,
         json!({
             "primitiveOperation": "catalog_search",
             "status": "ok",
@@ -90,6 +105,7 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
             json!({
                 "catalogInspect": "Use functions[].id exactly as catalog_inspect kind=function id when inspecting engine substrate.",
                 "capabilityExecute": "For normal session work, invoke capability::execute operations. Catalog functions are engine substrate unless modelFacingInvocation points at an execute operation.",
+                "operationSearch": "If executeOperationMatches is present, use those operation names directly with capability::execute. They are provider-visible operations, not separate catalog functions.",
                 "internalDiscovery": "Internal catalog functions are inspect-only by default. Request diagnostics or kernel-evolution context before using them to reason about engine internals.",
                 "supportedExecuteOperations": supported_operation_names()
             }),
@@ -112,11 +128,20 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
                             "operation": operation,
                             "arguments": {"operation": operation},
                             "catalogInspectId": catalog_id,
-                            "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection())
+                            "capabilityPool": operation_pool_metadata(&operation).map(|metadata| metadata.provider_projection()),
+                            "agentUsage": operation_agent_usage_projection(&operation)
                         }),
+                    );
+                    object.insert(
+                        "agentUsage".to_owned(),
+                        catalog_function_agent_usage_projection(&catalog_id, Some(&operation)),
                     );
                 } else {
                     mark_catalog_target_non_callable(object);
+                    object.insert(
+                        "agentUsage".to_owned(),
+                        catalog_function_agent_usage_projection(&catalog_id, None),
+                    );
                 }
             }
         }
@@ -137,13 +162,120 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
                         "operation": operation,
                         "arguments": {"operation": operation},
                         "catalogInspectId": catalog_id,
-                        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection())
+                        "capabilityPool": operation_pool_metadata(&operation).map(|metadata| metadata.provider_projection()),
+                        "agentUsage": operation_agent_usage_projection(&operation)
                     }),
+                );
+                object.insert(
+                    "agentUsage".to_owned(),
+                    catalog_function_agent_usage_projection(&catalog_id, Some(&operation)),
                 );
             } else {
                 mark_catalog_target_non_callable(object);
+                object.insert(
+                    "agentUsage".to_owned(),
+                    catalog_function_agent_usage_projection(&catalog_id, None),
+                );
             }
         }
+    }
+}
+
+fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
+    let Some(query) = payload.get("text").and_then(Value::as_str) else {
+        return;
+    };
+    let query = normalize_operation_query(query);
+    if query.len() < 3 {
+        return;
+    }
+    let limit = payload
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|limit| limit as usize)
+        .unwrap_or(20)
+        .clamp(1, 50);
+    let mut matches = supported_operation_names()
+        .iter()
+        .filter_map(|operation| operation_match_projection(operation, &query))
+        .collect::<Vec<_>>();
+    matches.sort_by(|left, right| {
+        match_rank(left["matchKind"].as_str().unwrap_or_default())
+            .cmp(&match_rank(right["matchKind"].as_str().unwrap_or_default()))
+            .then_with(|| {
+                left["operation"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .cmp(right["operation"].as_str().unwrap_or_default())
+            })
+    });
+    let total = matches.len();
+    if total == 0 {
+        return;
+    }
+    matches.truncate(limit);
+    if let Some(object) = discovery.as_object_mut() {
+        object.insert(
+            "executeOperationSearch".to_owned(),
+            json!({
+                "query": query,
+                "totalMatches": total,
+                "returnedMatches": matches.len(),
+                "truncated": total > matches.len(),
+                "omitted": total.saturating_sub(matches.len()),
+            }),
+        );
+        object.insert("executeOperationMatches".to_owned(), Value::Array(matches));
+    }
+}
+
+fn normalize_operation_query(query: &str) -> String {
+    query
+        .trim()
+        .strip_prefix("execute::")
+        .unwrap_or_else(|| query.trim())
+        .replace("::", "_")
+        .to_ascii_lowercase()
+}
+
+fn operation_match_projection(operation: &str, query: &str) -> Option<Value> {
+    let operation_key = operation.to_ascii_lowercase();
+    let catalog_key = direct_catalog_function_id_for_execute_operation(operation)
+        .map(str::to_owned)
+        .unwrap_or_default()
+        .replace("::", "_")
+        .to_ascii_lowercase();
+    let has_direct_catalog_key = !catalog_key.is_empty();
+    let match_kind = if operation_key == query || (has_direct_catalog_key && catalog_key == query) {
+        "exact"
+    } else if operation_key.starts_with(query)
+        || (has_direct_catalog_key && catalog_key.starts_with(query))
+    {
+        "prefix"
+    } else if query.len() >= 5
+        && (operation_key.contains(query)
+            || (has_direct_catalog_key && catalog_key.contains(query)))
+    {
+        "contains"
+    } else {
+        return None;
+    };
+    Some(json!({
+        "operation": operation,
+        "tool": "capability::execute",
+        "arguments": {"operation": operation},
+        "matchKind": match_kind,
+        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection()),
+        "agentUsage": operation_agent_usage_projection(operation)
+    }))
+}
+
+fn match_rank(match_kind: &str) -> usize {
+    match match_kind {
+        "exact" => 0,
+        "prefix" => 1,
+        "contains" => 2,
+        _ => 3,
     }
 }
 
@@ -168,7 +300,20 @@ fn mark_catalog_target_non_callable(object: &mut serde_json::Map<String, Value>)
     );
 }
 
-fn model_execute_operation_for_function_id(id: &str) -> Option<&'static str> {
+fn model_execute_operation_for_function_id(id: &str) -> Option<String> {
+    if let Some(operation) = direct_model_execute_operation_for_function_id(id) {
+        return Some(operation.to_owned());
+    }
+    let (namespace, name) = id.split_once("::")?;
+    let candidate = format!("{namespace}_{name}");
+    if is_supported_operation(&candidate) {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn direct_model_execute_operation_for_function_id(id: &str) -> Option<&'static str> {
     match id {
         "logs::recent" => Some("log_recent"),
         "catalog_discovery::search" => Some("catalog_search"),
@@ -179,15 +324,42 @@ fn model_execute_operation_for_function_id(id: &str) -> Option<&'static str> {
     }
 }
 
-fn catalog_function_id_for_model_alias(id: &str) -> Option<&'static str> {
+fn catalog_function_id_for_model_alias(id: &str) -> Option<String> {
     let alias = id.strip_prefix("execute::").unwrap_or(id);
     match alias {
+        "log_recent" => Some("logs::recent".to_owned()),
+        "catalog_search" => Some("catalog_discovery::search".to_owned()),
+        "catalog_inspect" => Some("catalog_discovery::inspect".to_owned()),
+        "catalog_conformance" => Some("catalog_discovery::conformance_report".to_owned()),
+        "job_log" => Some("jobs::log".to_owned()),
+        operation if is_supported_operation(operation) => {
+            Some(catalog_function_id_for_execute_operation(operation))
+        }
+        _ => None,
+    }
+}
+
+fn catalog_function_id_for_execute_operation(operation: &str) -> String {
+    direct_catalog_function_id_for_execute_operation(operation)
+        .unwrap_or("capability::execute")
+        .to_owned()
+}
+
+fn direct_catalog_function_id_for_execute_operation(operation: &str) -> Option<&'static str> {
+    match operation {
         "log_recent" => Some("logs::recent"),
         "catalog_search" => Some("catalog_discovery::search"),
         "catalog_inspect" => Some("catalog_discovery::inspect"),
         "catalog_conformance" => Some("catalog_discovery::conformance_report"),
         "job_log" => Some("jobs::log"),
-        operation if is_supported_operation(operation) => Some("capability::execute"),
+        "git_status" => Some("git::status"),
+        "git_diff" => Some("git::diff"),
+        "git_stage" => Some("git::stage"),
+        "git_unstage" => Some("git::unstage"),
+        "git_commit" => Some("git::commit"),
+        "git_branch_start" => Some("git::branch_start"),
+        "git_branch_inventory" => Some("git::branch_inventory"),
+        "capability_binding_cockpit_overview" => Some("capability_binding::cockpit_overview"),
         _ => None,
     }
 }
@@ -227,6 +399,17 @@ mod tests {
     }
 
     #[test]
+    fn catalog_inspect_normalizes_direct_catalog_operation_aliases() {
+        let (payload, alias) = normalize_catalog_inspect_payload(&json!({
+            "kind": "function",
+            "id": "git_status"
+        }));
+
+        assert_eq!(payload["id"], "git::status");
+        assert_eq!(alias.as_deref(), Some("git_status"));
+    }
+
+    #[test]
     fn catalog_inspect_normalizes_other_execute_operation_aliases_to_execute_schema() {
         let (payload, alias) = normalize_catalog_inspect_payload(&json!({
             "kind": "function",
@@ -242,6 +425,8 @@ mod tests {
         let mut discovery = json!({
             "functions": [
                 {"id": "logs::recent"},
+                {"id": "git::status"},
+                {"id": "capability_binding::cockpit_overview"},
                 {"id": "capability::execute"}
             ]
         });
@@ -251,6 +436,19 @@ mod tests {
         assert_eq!(
             discovery["functions"][0]["modelFacingInvocation"]["operation"],
             "log_recent"
+        );
+        assert_eq!(
+            discovery["functions"][1]["modelFacingInvocation"]["operation"],
+            "git_status"
+        );
+        assert_eq!(discovery["functions"][1]["agentUsage"]["callable"], true);
+        assert_eq!(
+            discovery["functions"][2]["modelFacingInvocation"]["operation"],
+            "capability_binding_cockpit_overview"
+        );
+        assert_eq!(
+            discovery["functions"][2]["agentUsage"]["preflight"]["resourceSelectors"][0],
+            "kind:capability_binding_request"
         );
         assert_eq!(
             discovery["functions"][0]["capabilityPool"]["surface"],
@@ -265,24 +463,28 @@ mod tests {
             "agent_diagnostics"
         );
         assert!(
-            discovery["functions"][1]
+            discovery["functions"][3]
                 .get("modelFacingInvocation")
                 .is_none()
         );
         assert_eq!(
-            discovery["functions"][1]["capabilityPool"]["audience"],
+            discovery["functions"][3]["capabilityPool"]["audience"],
             "session_work"
         );
         assert_eq!(
-            discovery["functions"][1]["capabilityPool"]["agentDefaultVisibility"],
+            discovery["functions"][3]["capabilityPool"]["agentDefaultVisibility"],
             "search_visible"
         );
-        assert_eq!(discovery["functions"][1]["providerCallable"], false);
+        assert_eq!(discovery["functions"][3]["providerCallable"], false);
         assert!(
-            discovery["functions"][1]["providerCallableReason"]
+            discovery["functions"][3]["providerCallableReason"]
                 .as_str()
                 .unwrap_or_default()
                 .contains("capability::execute")
+        );
+        assert_eq!(
+            discovery["functions"][3]["agentUsage"]["defaultUse"],
+            "inspect_only"
         );
         assert_eq!(
             discovery["modelFacingGuidance"]["supportedExecuteOperations"]
@@ -293,5 +495,113 @@ mod tests {
                 .collect::<Vec<_>>(),
             supported_operation_names().to_vec()
         );
+    }
+
+    #[test]
+    fn catalog_search_adds_exact_execute_operation_matches() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "trace_list", "limit": 10}),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        assert_eq!(matches[0]["operation"], "trace_list");
+        assert_eq!(matches[0]["matchKind"], "exact");
+        assert_eq!(matches[0]["tool"], "capability::execute");
+        assert_eq!(matches[0]["arguments"]["operation"], "trace_list");
+        assert_eq!(
+            matches[0]["capabilityPool"]["audience"],
+            "agent_diagnostics"
+        );
+        assert_eq!(
+            matches[0]["capabilityPool"]["replacementClass"],
+            "kernel_evolution_only"
+        );
+        assert_eq!(matches[0]["agentUsage"]["callable"], true);
+        assert_eq!(
+            discovery["executeOperationSearch"]["totalMatches"],
+            matches.len()
+        );
+    }
+
+    #[test]
+    fn catalog_search_adds_prefix_execute_operation_matches() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "capability_binding_request", "limit": 20}),
+        );
+
+        let operations = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert!(operations.contains(&"capability_binding_request_record"));
+        assert!(operations.contains(&"capability_binding_request_list"));
+        assert!(operations.contains(&"capability_binding_request_inspect"));
+        assert!(
+            discovery["executeOperationMatches"]
+                .as_array()
+                .expect("operation matches")
+                .iter()
+                .all(|value| value["matchKind"] == "prefix")
+        );
+    }
+
+    #[test]
+    fn catalog_search_maps_catalog_style_text_to_execute_operation_match() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(&mut discovery, &json!({"text": "git::status"}));
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        assert_eq!(matches[0]["operation"], "git_status");
+        assert_eq!(matches[0]["matchKind"], "exact");
+        assert_eq!(matches[0]["capabilityPool"]["audience"], "session_work");
+        assert_eq!(
+            matches[0]["capabilityPool"]["replacementClass"],
+            "runtime_routable"
+        );
+    }
+
+    #[test]
+    fn catalog_search_does_not_expand_generic_execute_catalog_function() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "capability::execute", "limit": 50}),
+        );
+
+        assert!(
+            discovery.get("executeOperationMatches").is_none(),
+            "generic capability::execute schema must not become operation matches"
+        );
+        assert!(discovery.get("executeOperationSearch").is_none());
+    }
+
+    #[test]
+    fn catalog_search_does_not_expand_normalized_generic_execute_query() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "capability_execute", "limit": 50}),
+        );
+
+        assert!(
+            discovery.get("executeOperationMatches").is_none(),
+            "normalized generic execute query must not become operation matches"
+        );
+        assert!(discovery.get("executeOperationSearch").is_none());
     }
 }

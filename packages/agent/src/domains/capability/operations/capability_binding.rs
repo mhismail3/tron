@@ -215,6 +215,29 @@ pub(super) async fn capability_binding_policy_inspect(
     ))
 }
 
+pub(super) async fn capability_binding_cockpit_overview(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let binding_deps = crate::domains::capability_binding::Deps {
+        engine_host: deps.engine_host.clone(),
+    };
+    let details = crate::domains::capability_binding::service::cockpit_overview_value(
+        &binding_deps,
+        invocation,
+    )
+    .await?;
+    let total = details
+        .pointer("/summary/totalOperations")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Ok(result(
+        &format!("Capability cockpit overview returned {total} operation(s)."),
+        "capability_binding_cockpit_overview",
+        details,
+    ))
+}
+
 pub(super) async fn capability_shadow_trial_request_record(
     invocation: &Invocation,
     deps: &Deps,

@@ -59,8 +59,8 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 | Fact | Evidence |
 |---|---|
-| Registry count | 188 entries in `SUPPORTED_OPERATION_NAMES`. |
-| Dispatch parity | 188 static dispatch arms in `execute_operation`; no missing or extra names. |
+| Registry count | 189 entries in `SUPPORTED_OPERATION_NAMES`. |
+| Dispatch parity | 189 static dispatch arms in `execute_operation`; no missing or extra names. |
 | Provider surface | One model-facing tool, `capability::execute`. |
 | Machine inventory | `packages/agent/docs/capability-modularity-inventory.tsv` lists every operation exactly once. |
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |
@@ -68,7 +68,7 @@ This manifest records the evidence reviewed for the capability modularity scorec
 | Capability binding policy | `capability_binding_request`, `capability_binding_decision`, and `capability_binding_policy` resources record metadata-only replacement governance with exact selectors, idempotency, stale-version guards, rollback/disable refs, and provider-safe projections. |
 | Shadow replacement trial | `capability_shadow_trial_request`, `capability_shadow_trial_decision`, `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` resources record a governed metadata-only `git_status` trial with exact selectors, stale evidence rejection, rollback/disable/abort refs, provider-safe projections, and no dispatch mutation. |
 | Governed route records | `capability_replacement_candidate`, `capability_route_binding`, `capability_route_activation`, `capability_route_event`, and `capability_route_rollback` resources record scoped `git_status` route state, activation, routed-invocation, disable, and rollback evidence with exact selectors, stale-version guards, rollback/disable refs, provider-safe projections, and no package-manager/network/deploy behavior. |
-| Cockpit visibility | `capability_binding::cockpit_overview` projects registry ownership plus scoped binding/shadow-trial/route state for Engine Cockpit as bounded redacted metadata, including total/returned operation counts, list/scan completeness, redacted replacement-target summaries, active route state, route events, routed invocations, failed-closed/disabled/rolled-back state, terminal controls, and server-derived readiness labels, with no raw IDs/material and no local UI fabrication. |
+| Cockpit visibility | `capability_binding::cockpit_overview` and provider-visible `capability_binding_cockpit_overview` project registry ownership plus scoped binding/shadow-trial/route state for Engine Cockpit as bounded redacted metadata, including total/returned operation counts, list/scan completeness, operation-pool role/replacement classification, agent usage/preflight guidance, redacted replacement-target summaries, active route state, route events, routed invocations, failed-closed/disabled/rolled-back state, terminal controls, and server-derived readiness labels, with no raw IDs/material and no local UI fabrication. |
 | Adapter seam hardening | Adapter-replaceable families and the compaction strategy seam now name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites in source docs, inventory metadata, scorecard prose, and static tests. |
 | Runtime behavior | The `git_status` dispatcher now checks scoped active route records; when none exists it uses the built-in provider-safe projection, and when a validated route exists it invokes the supervised module-runtime provider-safe adapter projection and fails closed if that projection is rejected. It does not mutate the dispatch table, hot-swap modules, install, activate packages, run package managers, restore dependencies, access networks, or deploy. |
 

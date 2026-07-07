@@ -59,6 +59,12 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var capabilityDefaultVisibility: String
     var capabilityMinimalityDecision: String
     var capabilityEvolutionPath: String
+    var agentUsageCallable: Bool
+    var agentUsageTool: String
+    var agentUsageOperation: String
+    var agentUsageDefaultUse: String
+    var agentUsagePreflight: String
+    var agentUsageRecovery: String
     var ownerLabel: String
     var ownerDetail: String
     var metadataSourceLabel: String
@@ -272,7 +278,8 @@ struct AgentCockpitOverview: Equatable, Sendable {
                 workers: [],
                 functions: [],
                 packages: [],
-                catalogDecodeIssues: []
+                catalogDecodeIssues: [],
+                hasOperationProjection: false
             ),
             workers: [],
             functions: [],
@@ -324,6 +331,9 @@ enum AgentCockpitProjection {
                 if lhs.family == rhs.family { return lhs.name < rhs.name }
                 return lhs.family < rhs.family
             } ?? []
+        let operationClassificationIssues = capabilityVisibility?.operations
+            .filter { $0.capabilityPool == nil }
+            .count ?? 0
         let triggers = triggerResult.definitions.map(triggerRow)
             .sorted { $0.id < $1.id }
         let triggerTypes = triggerTypeResult.definitions
@@ -356,7 +366,9 @@ enum AgentCockpitProjection {
                 workers: workers,
                 functions: functions,
                 packages: packages,
-                catalogDecodeIssues: catalogDecodeIssues
+                catalogDecodeIssues: catalogDecodeIssues,
+                hasOperationProjection: capabilityVisibility != nil && !modularityOperations.isEmpty,
+                operationClassificationIssues: operationClassificationIssues
             ),
             workers: workers,
             functions: functions,
@@ -399,7 +411,9 @@ enum AgentCockpitProjection {
         workers: [AgentCockpitWorkerRow],
         functions: [AgentCockpitFunctionRow],
         packages: [AgentCockpitPackageRow],
-        catalogDecodeIssues: [CatalogDefinitionDecodeIssue]
+        catalogDecodeIssues: [CatalogDefinitionDecodeIssue],
+        hasOperationProjection: Bool = false,
+        operationClassificationIssues: Int = 0
     ) -> AgentCockpitStatusSummary {
         if !connectionState.isConnected {
             switch connectionState {
@@ -436,11 +450,19 @@ enum AgentCockpitProjection {
             }
         }
 
-        if !catalogDecodeIssues.isEmpty {
+        if !hasOperationProjection, !catalogDecodeIssues.isEmpty {
             return .init(
                 kind: .degraded,
-                title: "Capabilities Need Review",
+                title: "Operations Need Review",
                 detail: catalogDecodeIssueDetail(catalogDecodeIssues.count),
+                systemImage: "exclamationmark.triangle"
+            )
+        }
+        if operationClassificationIssues > 0 {
+            return .init(
+                kind: .degraded,
+                title: "Operations Need Review",
+                detail: "\(operationClassificationIssues) operations are missing capability-pool classification",
                 systemImage: "exclamationmark.triangle"
             )
         }
@@ -453,7 +475,7 @@ enum AgentCockpitProjection {
             )
         }
         if workers.contains(where: { normalized($0.lifecycle) == "degraded" })
-            || functions.contains(where: { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) || !$0.schemaComplete }) {
+            || (!hasOperationProjection && functions.contains { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) || !$0.schemaComplete }) {
             return .init(
                 kind: .degraded,
                 title: "Degraded",
@@ -645,22 +667,22 @@ enum AgentCockpitProjection {
     private static func operationRow(_ operation: CapabilityCockpitOperationDTO) -> AgentCockpitOperationRow {
         let route = operation.route ?? CapabilityCockpitRouteDTO()
         let pool = operation.capabilityPool
-        let fallbackReplacementClass: String = {
-            if operation.replacement.canReplace { return "runtime_routable" }
-            if operation.replacement.canExtend { return "producer_extensible" }
-            return "kernel_evolution_only"
-        }()
-        let fallbackAudience = operation.status.locked ? "kernel_evolution" : "session_work"
         return AgentCockpitOperationRow(
             name: operation.name,
             family: operation.family,
             familyLabel: operation.familyLabel,
-            capabilitySurface: pool?.surface ?? "agent_operation",
-            capabilityAudience: pool?.audience ?? fallbackAudience,
-            capabilityReplacementClass: pool?.replacementClass ?? fallbackReplacementClass,
+            capabilitySurface: pool?.surface ?? "unknown",
+            capabilityAudience: pool?.audience ?? "unknown",
+            capabilityReplacementClass: pool?.replacementClass ?? "unknown",
             capabilityDefaultVisibility: pool?.agentDefaultVisibility ?? "inspect_only",
-            capabilityMinimalityDecision: pool?.minimalityDecision ?? "keep_core",
-            capabilityEvolutionPath: pool?.evolutionPath ?? "No evolution path has been published for this operation.",
+            capabilityMinimalityDecision: pool?.minimalityDecision ?? "unknown",
+            capabilityEvolutionPath: pool?.evolutionPath ?? "Capability-pool classification is missing from the server projection.",
+            agentUsageCallable: operation.agentUsage?.callable ?? true,
+            agentUsageTool: operation.agentUsage?.tool ?? "capability::execute",
+            agentUsageOperation: operation.agentUsage?.operation ?? operation.name,
+            agentUsageDefaultUse: operation.agentUsage?.defaultUse ?? "inspect_before_use",
+            agentUsagePreflight: preflightSummary(operation.agentUsage?.preflight),
+            agentUsageRecovery: operation.agentUsage?.failureRecovery ?? "Inspect capability evidence before retrying.",
             ownerLabel: operation.owner.label,
             ownerDetail: operation.owner.detail,
             metadataSourceLabel: operation.owner.metadataSourceLabel,
@@ -750,6 +772,34 @@ enum AgentCockpitProjection {
                 word.prefix(1).uppercased() + word.dropFirst().lowercased()
             }
             .joined(separator: " ")
+    }
+
+    private static func preflightSummary(_ preflight: CapabilityCockpitAgentPreflightDTO?) -> String {
+        guard let preflight else {
+            return "No preflight guidance published."
+        }
+        var parts: [String] = []
+        if let beforeCalling = preflight.beforeCalling, !beforeCalling.isEmpty {
+            parts.append(beforeCalling)
+        }
+        if let networkPolicy = preflight.networkPolicy, !networkPolicy.isEmpty {
+            parts.append("Network policy: \(displayLabel(networkPolicy)).")
+        }
+        if let scopes = preflight.authorityScopes, !scopes.isEmpty {
+            parts.append("Authority scopes: \(scopes.prefix(4).joined(separator: ", ")).")
+        } else if let authority = preflight.authority, !authority.isEmpty {
+            parts.append("Authority: \(displayLabel(authority)).")
+        }
+        if let selectors = preflight.resourceSelectors, !selectors.isEmpty {
+            parts.append("Selectors: \(selectors.prefix(4).joined(separator: ", ")).")
+        }
+        if let fields = preflight.requiredPayloadFields, !fields.isEmpty {
+            parts.append("Payload fields: \(fields.prefix(6).joined(separator: ", ")).")
+        }
+        if let evidence = preflight.evidence, !evidence.isEmpty {
+            parts.append("Evidence: \(displayLabel(evidence)).")
+        }
+        return parts.joined(separator: " ")
     }
 
     private static func formattedJSON(_ value: AnyCodable?) -> String? {

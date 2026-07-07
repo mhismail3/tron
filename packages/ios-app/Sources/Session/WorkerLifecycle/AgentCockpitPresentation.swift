@@ -29,11 +29,11 @@ enum AgentCockpitPresentation {
     static func verificationTitle(for overview: AgentCockpitDiscoveryOverview) -> String {
         switch overview.title {
         case "Verified":
-            return "Capabilities verified"
-        case "No Catalog", "No Capabilities":
-            return "No capabilities published"
-        case "Catalog Degraded", "Capabilities Need Review":
-            return "Capabilities need review"
+            return "Operations verified"
+        case "No Catalog", "No Capabilities", "No Operations":
+            return "No operations published"
+        case "Catalog Degraded", "Operations Need Review":
+            return "Operations need review"
         case "Report Failed":
             return "Verification needs review"
         default:

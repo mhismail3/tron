@@ -69,7 +69,7 @@ struct CapabilitiesSummaryCard: View {
         switch overview.title {
         case "Verified":
             return .tronSuccess
-        case "Catalog Degraded", "Capabilities Need Review", "Schema Gaps", "Attention", "Report Failed", "Verification Needs Review":
+        case "Catalog Degraded", "Operations Need Review", "Schema Gaps", "Attention", "Report Failed", "Verification Needs Review":
             return .tronWarning
         default:
             return .tronInfo

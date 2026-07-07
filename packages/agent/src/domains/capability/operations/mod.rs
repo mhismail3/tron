@@ -165,11 +165,12 @@ pub(crate) async fn execute_value(
             result_value(result)
         }
         Err(error) => {
+            let provider_error = redact_provider_visible_error(error);
             complete_trace_record(
                 &mut trace_record,
                 invocation,
-                &error_capability_result(error.to_string(), json!({"status": "failed"})),
-                Some(&error),
+                &error_capability_result(provider_error.to_string(), json!({"status": "failed"})),
+                Some(&provider_error),
                 start.elapsed(),
             );
             deps.event_store
@@ -186,10 +187,99 @@ pub(crate) async fn execute_value(
                 duration_ms = trace_record.duration_ms.unwrap_or_default(),
                 session_id = trace_record.session_id.as_deref().unwrap_or("none"),
                 turn = trace_record.turn.unwrap_or_default(),
-                error = %error,
+                error = %provider_error,
                 "primitive execute operation failed"
             );
-            Err(error)
+            Err(provider_error)
         }
+    }
+}
+
+fn redact_provider_visible_error(error: CapabilityError) -> CapabilityError {
+    match error {
+        CapabilityError::InvalidParams { message } => CapabilityError::InvalidParams {
+            message: redact_authority_material(&message),
+        },
+        CapabilityError::NotFound { code, message } => CapabilityError::NotFound {
+            code,
+            message: redact_authority_material(&message),
+        },
+        CapabilityError::Internal { message } => CapabilityError::Internal {
+            message: redact_authority_material(&message),
+        },
+        CapabilityError::NotAvailable { message } => CapabilityError::NotAvailable {
+            message: redact_authority_material(&message),
+        },
+        CapabilityError::Custom {
+            code,
+            message,
+            details,
+        } => CapabilityError::Custom {
+            code,
+            message: redact_authority_material(&message),
+            details: details.map(redact_authority_material_in_value),
+        },
+    }
+}
+
+fn redact_authority_material_in_value(value: Value) -> Value {
+    match value {
+        Value::String(value) => Value::String(redact_authority_material(&value)),
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(redact_authority_material_in_value)
+                .collect(),
+        ),
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, redact_authority_material_in_value(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn redact_authority_material(message: &str) -> String {
+    redact_token_after_marker(
+        &redact_token_after_marker(message, "authority grant "),
+        "authorityGrantId ",
+    )
+}
+
+fn redact_token_after_marker(message: &str, marker: &str) -> String {
+    let mut output = String::with_capacity(message.len());
+    let mut remaining = message;
+    while let Some(index) = remaining.find(marker) {
+        let (before, after_before) = remaining.split_at(index);
+        output.push_str(before);
+        output.push_str(marker);
+        output.push_str("<redacted>");
+        let after_marker = &after_before[marker.len()..];
+        let consumed = after_marker
+            .char_indices()
+            .find_map(|(idx, ch)| ch.is_whitespace().then_some(idx))
+            .unwrap_or(after_marker.len());
+        remaining = &after_marker[consumed..];
+    }
+    output.push_str(remaining);
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execute_error_redaction_removes_authority_grant_tokens() {
+        let error = CapabilityError::InvalidParams {
+            message: "authority grant authority_grant_019f3a requires explicit kind selector"
+                .to_owned(),
+        };
+        let redacted = redact_provider_visible_error(error).to_string();
+
+        assert!(redacted.contains("authority grant <redacted> requires"));
+        assert!(!redacted.contains("authority_grant_019f3a"));
     }
 }

@@ -16,6 +16,7 @@
 //! `capability_binding_decision_list`, `capability_binding_decision_inspect`,
 //! `capability_binding_policy_activate`, `capability_binding_policy_list`, and
 //! `capability_binding_policy_inspect`, plus
+//! `capability_binding_cockpit_overview`, plus
 //! `capability_shadow_trial_request_record`,
 //! `capability_shadow_trial_decision_record`,
 //! `capability_shadow_trial_run_record`, and
@@ -23,8 +24,14 @@
 //! `capability_replacement_candidate_*`, `capability_route_binding_*`,
 //! `capability_route_activate`, `capability_route_disable`,
 //! `capability_route_rollback`, and `capability_route_event_*`. Native cockpit
-//! clients also get one read-only `capability_binding::cockpit_overview` projection that
-//! summarizes total/returned operations, list and bounded resource-scan
+//! clients also get one read-only `capability_binding::cockpit_overview`
+//! projection; `capability_binding_cockpit_overview` delegates to the same
+//! server-owned projection so native UI and model-facing capability inspection
+//! share one source of truth. The durable projection can include the complete
+//! operation set for UI/audit, while provider replay receives only a bounded
+//! digest with coverage counts, family summaries, and representative operation
+//! samples. The projection summarizes total/returned operations, list and
+//! bounded resource-scan
 //! completeness, redacted operation ownership, replacement target, readiness,
 //! and scoped binding/shadow-trial/route state without exposing raw resource
 //! ids. The `capability_binding` domain owns the projection, not the operations

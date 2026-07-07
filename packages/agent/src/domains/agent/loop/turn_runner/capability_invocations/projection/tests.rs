@@ -142,6 +142,185 @@ fn extract_result_content_projects_catalog_operation_truncation_metadata() {
 }
 
 #[test]
+fn extract_result_content_projects_catalog_execute_operation_matches() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Catalog search returned 1 visible functions and 1 execute operation match(es).",
+        )]),
+        Some(json!({
+            "primitiveOperation": "catalog_search",
+            "status": "ok",
+            "catalogDiscovery": {
+                "summary": {"functions": {"visible": 1}},
+                "functions": [],
+                "executeOperationMatches": [{
+                    "operation": "trace_list",
+                    "tool": "capability::execute",
+                    "arguments": {"operation": "trace_list"},
+                    "matchKind": "exact",
+                    "capabilityPool": {
+                        "surface": "agent_operation",
+                        "audience": "agent_diagnostics",
+                        "replacementClass": "kernel_evolution_only"
+                    },
+                    "agentUsage": {
+                        "callable": true,
+                        "defaultUse": "diagnose_or_verify"
+                    }
+                }]
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("executeOperationMatches"));
+    assert!(text.contains("trace_list"));
+    assert!(text.contains("diagnose_or_verify"));
+    assert!(text.contains("kernel_evolution_only"));
+}
+
+#[test]
+fn extract_result_content_projects_capability_cockpit_overview_digest() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Capability cockpit overview returned 3 operation(s).",
+        )]),
+        Some(json!({
+            "primitiveOperation": "capability_binding_cockpit_overview",
+            "status": "ok",
+            "capabilityBinding": {
+                "summary": {
+                    "title": "Capability ownership visible",
+                    "detail": "3 capability::execute operations have server-owned modularity metadata; 3 are returned.",
+                    "totalOperations": 3,
+                    "returnedOperations": 3,
+                    "operationListComplete": true,
+                    "operationListTruncated": false,
+                    "kernelLocked": 1,
+                    "governanceLocked": 1,
+                    "recordPlane": 0,
+                    "adapterReplaceable": 1,
+                    "moduleOwned": 0
+                },
+                "operationList": {
+                    "complete": true,
+                    "returnedOperations": 3,
+                    "totalOperations": 3,
+                    "truncated": false
+                },
+                "families": [{
+                    "family": "git",
+                    "label": "Git",
+                    "operations": 1,
+                    "adapterReplaceable": 1
+                }],
+                "operations": [
+                    {
+                        "name": "git_status",
+                        "family": "git",
+                        "familyLabel": "Git",
+                        "capabilityPool": {
+                            "surface": "agent_operation",
+                            "audience": "session_work",
+                            "replacementClass": "runtime_routable",
+                            "agentDefaultVisibility": "default_visible",
+                            "minimalityDecision": "module_candidate",
+                            "evolutionPath": "candidate_validation_shadow_approval_activation_route_event_rollback"
+                        },
+                        "agentUsage": {
+                            "tool": "capability::execute",
+                            "operation": "git_status",
+                            "arguments": {"operation": "git_status"},
+                            "callable": true,
+                            "defaultUse": "perform_session_work",
+                            "authorityGrantId": "grant_must_not_project",
+                            "preflight": {
+                                "agentStateInherited": false,
+                                "authorityScopes": ["git.read"],
+                                "networkPolicy": "none",
+                                "resourceSelectors": ["workspace:trusted"],
+                                "authorityGrantId": "nested_grant_must_not_project"
+                            }
+                        },
+                        "readiness": {"state": "proposal_possible", "label": "Proposal possible"},
+                        "replacement": {
+                            "label": "Shadow or replace after review",
+                            "canExtend": true,
+                            "canReplace": true,
+                            "canShadow": true
+                        },
+                        "status": {
+                            "kind": "built_in_adapter",
+                            "label": "Built-in adapter",
+                            "locked": false,
+                            "builtIn": true,
+                            "moduleOwned": false
+                        }
+                    },
+                    {
+                        "name": "trace_list",
+                        "family": "trace",
+                        "familyLabel": "Trace",
+                        "capabilityPool": {
+                            "surface": "agent_operation",
+                            "audience": "agent_diagnostics",
+                            "replacementClass": "kernel_evolution_only",
+                            "agentDefaultVisibility": "search_visible",
+                            "minimalityDecision": "keep_core",
+                            "evolutionPath": "source_candidate_validation_adversarial_review_user_approved_integration"
+                        },
+                        "agentUsage": {
+                            "tool": "capability::execute",
+                            "operation": "trace_list",
+                            "arguments": {"operation": "trace_list"},
+                            "callable": true,
+                            "defaultUse": "diagnose_or_verify"
+                        }
+                    },
+                    {
+                        "name": "capability_binding_cockpit_overview",
+                        "family": "capability_binding",
+                        "familyLabel": "Capability Binding",
+                        "capabilityPool": {
+                            "surface": "agent_operation",
+                            "audience": "governance",
+                            "replacementClass": "kernel_evolution_only",
+                            "agentDefaultVisibility": "search_visible",
+                            "minimalityDecision": "keep_governance",
+                            "evolutionPath": "source_candidate_validation_adversarial_review_user_approved_integration"
+                        },
+                        "agentUsage": {
+                            "tool": "capability::execute",
+                            "operation": "capability_binding_cockpit_overview",
+                            "arguments": {"operation": "capability_binding_cockpit_overview"},
+                            "callable": true,
+                            "defaultUse": "governed_record_or_inspection"
+                        }
+                    }
+                ]
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("Capability ownership visible"));
+    assert!(text.contains("\"missingCapabilityPool\": 0"));
+    assert!(text.contains("\"missingAgentUsage\": 0"));
+    assert!(text.contains("git_status"));
+    assert!(text.contains("trace_list"));
+    assert!(text.contains("capability_binding_cockpit_overview"));
+    assert!(text.contains("runtime_routable"));
+    assert!(text.contains("kernel_evolution_only"));
+    assert!(!text.contains("authorityGrantId"));
+    assert!(!text.contains("grant_must_not_project"));
+    assert!(!text.contains("nested_grant_must_not_project"));
+}
+
+#[test]
 fn extract_result_content_projects_metadata_ids_without_raw_payload() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(

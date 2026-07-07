@@ -10,6 +10,7 @@
 use std::borrow::Cow;
 
 use serde::Serialize;
+use serde_json::{Value, json};
 
 use super::operation_binding_metadata;
 
@@ -198,6 +199,44 @@ pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolM
     })
 }
 
+pub(crate) fn operation_agent_usage_projection(operation: &str) -> Option<Value> {
+    let binding = operation_binding_metadata(operation)?;
+    Some(json!({
+        "callable": true,
+        "tool": "capability::execute",
+        "operation": binding.operation,
+        "arguments": {"operation": binding.operation},
+        "audience": operation_pool_metadata(binding.operation)
+            .map(|metadata| metadata.audience.as_str())
+            .unwrap_or("session_work"),
+        "defaultUse": default_use_for_operation(binding.family, binding.ownership_class),
+        "preflight": preflight_guidance_for_operation(binding.operation, binding.family, binding.ownership_class),
+        "failureRecovery": failure_recovery_for_operation(binding.family, binding.ownership_class),
+    }))
+}
+
+pub(crate) fn catalog_function_agent_usage_projection(
+    id: &str,
+    callable_operation: Option<&str>,
+) -> Value {
+    match callable_operation {
+        Some(operation) => operation_agent_usage_projection(operation).unwrap_or_else(|| {
+            json!({
+                "callable": false,
+                "defaultUse": "inspect_only",
+                "catalogInspectId": id,
+                "reason": "No supported capability::execute operation is registered for this catalog function."
+            })
+        }),
+        None => json!({
+            "callable": false,
+            "defaultUse": "inspect_only",
+            "catalogInspectId": id,
+            "reason": "This is engine catalog substrate. Inspect it for diagnostics or kernel-evolution context, then use a supported capability::execute operation for session work."
+        }),
+    }
+}
+
 pub(crate) fn catalog_function_pool_metadata(id: &str) -> Option<CapabilityPoolMetadata<'_>> {
     let namespace = id.split_once("::")?.0;
     let family = catalog_family(namespace);
@@ -331,6 +370,144 @@ fn next_action_for_ownership(class: &str) -> &'static str {
         "module_owned" => "use_as_template_for_governed_module_version_replacement",
         "governance_locked" => "preserve_as_replacement_trust_pipeline",
         _ => "source_level_evolution_only",
+    }
+}
+
+fn default_use_for_operation(family: &str, ownership_class: &str) -> &'static str {
+    match ownership_class {
+        "kernel_locked" if matches!(family, "catalog_discovery" | "trace" | "logs" | "core") => {
+            "diagnose_or_verify"
+        }
+        "kernel_locked" => "kernel_evolution_inspection",
+        "governance_locked" => "governed_record_or_inspection",
+        "record_plane" => "record_or_inspect_custody",
+        "adapter_replaceable" => "perform_session_work",
+        "module_owned" => "perform_governed_module_work",
+        _ => "inspect_before_use",
+    }
+}
+
+fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_class: &str) -> Value {
+    if operation == "capability_shadow_trial_request_record" {
+        return json!({
+            "authorityScopes": [
+                "capability_binding.read",
+                "capability_binding.write",
+                "resource.read",
+                "resource.write"
+            ],
+            "resourceSelectors": [
+                "kind:capability_shadow_trial_request",
+                "kind:capability_shadow_trial_decision",
+                "kind:capability_shadow_trial_run",
+                "kind:capability_shadow_trial_evidence"
+            ],
+            "networkPolicy": "none",
+            "agentStateInherited": false,
+            "requiredPayloadFields": [
+                "operation",
+                "title",
+                "targetOperation",
+                "ownershipClass",
+                "bindingMode",
+                "candidateAdapter",
+                "authorityConstraints",
+                "contractEvidenceRefs",
+                "evidenceRefs",
+                "staleVersionGuard",
+                "rollbackRef",
+                "disableRef",
+                "abortRef",
+                "rationale",
+                "idempotencyKey"
+            ],
+            "example": {
+                "operation": "capability_shadow_trial_request_record",
+                "targetOperation": "git_status",
+                "bindingMode": "shadow",
+                "candidateAdapter": {
+                    "adapterId": "candidate_git_status_adapter",
+                    "adapterVersion": "metadata-v1",
+                    "executionMode": "metadata_only",
+                    "networkPolicy": "none"
+                }
+            },
+            "beforeCalling": "Inspect capability_binding_cockpit_overview or catalog_inspect for git_status, copy the server-owned owner/class metadata exactly, inspect the operation schema for exact field names, and provide bounded evidence refs only."
+        });
+    }
+
+    if operation.starts_with("capability_binding_")
+        || operation.starts_with("capability_shadow_trial_")
+        || operation.starts_with("capability_replacement_")
+        || operation.starts_with("capability_route_")
+    {
+        let write = operation.ends_with("_record")
+            || operation.ends_with("_activate")
+            || operation.ends_with("_disable")
+            || operation.ends_with("_rollback");
+        let mut scopes = vec!["capability_binding.read", "resource.read"];
+        if write {
+            scopes.extend(["capability_binding.write", "resource.write"]);
+        }
+        return json!({
+            "authorityScopes": scopes,
+            "resourceSelectors": capability_binding_kind_selectors_for_operation(operation),
+            "networkPolicy": "none",
+            "agentStateInherited": false,
+            "beforeCalling": "Use exact kind/resource selectors. Do not use wildcard selectors, opaque authority tokens, local paths, commands, logs, or code bodies."
+        });
+    }
+
+    json!({
+        "authority": authority_boundary_for_ownership(ownership_class),
+        "evidence": evidence_boundary_for_ownership(ownership_class),
+        "networkPolicy": if matches!(family, "web") { "declared_by_operation" } else { "none_unless_schema_requires_otherwise" },
+        "beforeCalling": "Put operation-specific fields at the top level of the capability::execute payload and inspect the operation schema when required fields are unclear."
+    })
+}
+
+fn capability_binding_kind_selectors_for_operation(operation: &str) -> Vec<&'static str> {
+    if operation.starts_with("capability_shadow_trial_") {
+        return vec![
+            "kind:capability_shadow_trial_request",
+            "kind:capability_shadow_trial_decision",
+            "kind:capability_shadow_trial_run",
+            "kind:capability_shadow_trial_evidence",
+        ];
+    }
+    if operation.starts_with("capability_route_")
+        || operation.starts_with("capability_replacement_")
+    {
+        return vec![
+            "kind:capability_replacement_candidate",
+            "kind:capability_route_binding",
+            "kind:capability_route_activation",
+            "kind:capability_route_event",
+            "kind:capability_route_rollback",
+        ];
+    }
+    vec![
+        "kind:capability_binding_request",
+        "kind:capability_binding_decision",
+        "kind:capability_binding_policy",
+    ]
+}
+
+fn failure_recovery_for_operation(family: &str, ownership_class: &str) -> &'static str {
+    match (family, ownership_class) {
+        ("capability_binding", _) => {
+            "Inspect cockpit overview and the relevant binding/shadow/route list before retrying with exact selectors and expected versions."
+        }
+        (_, "governance_locked") => {
+            "List or inspect the governing records first, then retry with exact resource selectors and stale-version guards."
+        }
+        (_, "record_plane") => {
+            "List or inspect durable records first, then retry with exact refs, stable idempotency keys, and bounded evidence."
+        }
+        (_, "adapter_replaceable") => {
+            "Inspect schema, authority requirements, and recent trace evidence before retrying the adapter operation."
+        }
+        _ => "Use catalog_inspect or trace/log operations to diagnose before retrying.",
     }
 }
 

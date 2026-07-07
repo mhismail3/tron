@@ -11,6 +11,7 @@ struct CapabilityOperationDetailSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     summary
                     role
+                    agentUse
                     ownership
                     readiness
                     replacement
@@ -58,6 +59,28 @@ struct CapabilityOperationDetailSheet: View {
         }
         .padding(13)
         .sectionFill(roleTint, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private var agentUse: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Agent Use")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            detailRow("Callable", operation.agentUsageCallable ? "Yes" : "Inspect only")
+            detailRow("Tool", operation.agentUsageTool)
+            detailRow("Operation", operation.agentUsageOperation)
+            detailRow("Use", AgentCockpitPresentation.displayLabel(operation.agentUsageDefaultUse))
+            Text(operation.agentUsagePreflight)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(operation.agentUsageRecovery)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(13)
+        .sectionFill(.tronInfo, cornerRadius: 12, subtle: true, interactive: false)
     }
 
     private var summary: some View {

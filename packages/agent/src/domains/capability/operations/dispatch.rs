@@ -279,6 +279,9 @@ pub(super) async fn execute_operation(
         "capability_binding_policy_inspect" => {
             capability_binding_policy_inspect(invocation, deps).await?
         }
+        "capability_binding_cockpit_overview" => {
+            capability_binding_cockpit_overview(invocation, deps).await?
+        }
         "capability_shadow_trial_request_record" => {
             capability_shadow_trial_request_record(invocation, deps, operation_at).await?
         }

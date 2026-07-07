@@ -146,6 +146,7 @@ capability_binding_decision_inspect	capability_binding	domains::capability::oper
 capability_binding_policy_activate	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	binding_policy_governance_pipeline	3	3	3	3	3	0	0	2	3	none
 capability_binding_policy_list	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	binding_policy_governance_pipeline	3	3	3	3	3	0	0	2	3	none
 capability_binding_policy_inspect	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	binding_policy_governance_pipeline	3	3	3	3	3	0	0	2	3	none
+capability_binding_cockpit_overview	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	binding_policy_governance_pipeline	3	3	3	3	3	0	0	3	3	none
 capability_shadow_trial_request_record	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	shadow_trial_governance_pipeline	3	3	3	3	3	0	0	2	3	none
 capability_shadow_trial_decision_record	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	shadow_trial_governance_pipeline	3	3	3	3	3	0	0	2	3	none
 capability_shadow_trial_run_record	capability_binding	domains::capability::operations::capability_binding + domains::capability_binding	governance_locked	shadow_trial_governance_pipeline	3	3	3	3	3	0	0	2	3	none

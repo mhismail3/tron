@@ -152,6 +152,7 @@ pub(crate) const SUPPORTED_OPERATION_NAMES: &[&str] = &[
     "capability_binding_policy_activate",
     "capability_binding_policy_list",
     "capability_binding_policy_inspect",
+    "capability_binding_cockpit_overview",
     "capability_shadow_trial_request_record",
     "capability_shadow_trial_decision_record",
     "capability_shadow_trial_run_record",

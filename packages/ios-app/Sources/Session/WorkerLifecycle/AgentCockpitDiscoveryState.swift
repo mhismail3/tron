@@ -35,7 +35,7 @@ struct AgentCockpitCapabilityGroupRow: Equatable, Identifiable, Sendable {
     }
 
     var workerTriggerExplanation: String? {
-        guard functionCount > 0, workerCount == 0, triggerCount == 0 else { return nil }
+        guard operationCount > 0 || functionCount > 0, workerCount == 0, triggerCount == 0 else { return nil }
         return "These are built-in engine operations. Worker and trigger counts appear when a module publishes autonomous runtime owners."
     }
 }
@@ -68,8 +68,8 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
 
     static let empty = AgentCockpitDiscoveryOverview(
-        title: "No Capabilities",
-        detail: "No capabilities are available",
+        title: "No Operations",
+        detail: "No operations are available",
         systemImage: "questionmark.folder",
         functionCount: 0,
         operationCount: 0,
@@ -101,8 +101,12 @@ extension AgentCockpitProjection {
     ) -> AgentCockpitDiscoveryOverview {
         let reportRows = reports.compactMap(discoveryReportRow)
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+        let hasOperationProjection = capabilityVisibility != nil && !modularityOperations.isEmpty
         let degraded = functions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count
         let missingSchemas = functions.filter { !$0.schemaComplete }.count
+        let topLevelDegraded = hasOperationProjection ? 0 : degraded
+        let topLevelMissingSchemas = hasOperationProjection ? 0 : missingSchemas
+        let topLevelCatalogDecodeIssues = hasOperationProjection ? 0 : catalogDecodeIssues.count
         let namespaceIds = Set(functions.map { namespace(for: $0.id) })
         let families = namespaceIds.map { namespace in
             capabilityFamily(namespace: namespace, workers: workers, functions: functions, triggers: triggers)
@@ -118,7 +122,8 @@ extension AgentCockpitProjection {
             workers: workers,
             functions: functions,
             modularityOperations: modularityOperations,
-            triggers: triggers
+            triggers: triggers,
+            hasOperationProjection: hasOperationProjection
         )
 
         let latestReport = reportRows.first
@@ -126,17 +131,17 @@ extension AgentCockpitProjection {
         let title: String
         let detail: String
         let image: String
-        if !catalogDecodeIssues.isEmpty {
-            title = "Capabilities Need Review"
-            detail = catalogDecodeIssueDetail(catalogDecodeIssues.count)
+        if topLevelCatalogDecodeIssues > 0 {
+            title = "Operations Need Review"
+            detail = catalogDecodeIssueDetail(topLevelCatalogDecodeIssues)
             image = "exclamationmark.triangle"
-        } else if missingSchemas > 0 {
+        } else if topLevelMissingSchemas > 0 {
             title = "Schema Gaps"
-            detail = "\(missingSchemas) of \(functions.count) functions need schema evidence"
+            detail = "\(topLevelMissingSchemas) of \(functions.count) catalog definitions need schema evidence"
             image = "doc.badge.gearshape"
-        } else if degraded > 0 {
+        } else if topLevelDegraded > 0 {
             title = "Attention"
-            detail = "\(degraded) functions are degraded, unhealthy, or unknown"
+            detail = "\(topLevelDegraded) catalog definitions are degraded, unhealthy, or unknown"
             image = "waveform.path.ecg"
         } else if normalizedLatest == "passed" {
             title = "Verified"
@@ -147,8 +152,8 @@ extension AgentCockpitProjection {
             detail = latestReport?.updatedAt ?? "Latest report needs review"
             image = "exclamationmark.shield"
         } else if functions.isEmpty && workers.isEmpty && modularityOperations.isEmpty {
-            title = "No Capabilities"
-            detail = "No capabilities are available"
+            title = "No Operations"
+            detail = "No operations are available"
             image = "questionmark.folder"
         } else {
             title = "Unverified"
@@ -167,9 +172,9 @@ extension AgentCockpitProjection {
             triggerCount: triggers.count,
             triggerTypeCount: triggerTypes.count,
             namespaceCount: namespaceIds.count,
-            degradedFunctionCount: degraded,
-            missingSchemaCount: missingSchemas,
-            catalogDecodeIssueCount: catalogDecodeIssues.count,
+            degradedFunctionCount: topLevelDegraded,
+            missingSchemaCount: topLevelMissingSchemas,
+            catalogDecodeIssueCount: topLevelCatalogDecodeIssues,
             latestReport: latestReport,
             reports: reportRows,
             families: families,
@@ -182,7 +187,8 @@ extension AgentCockpitProjection {
         workers: [AgentCockpitWorkerRow],
         functions: [AgentCockpitFunctionRow],
         modularityOperations: [AgentCockpitOperationRow],
-        triggers: [AgentCockpitTriggerRow]
+        triggers: [AgentCockpitTriggerRow],
+        hasOperationProjection: Bool
     ) -> [AgentCockpitCapabilityGroupRow] {
         var claimedNamespaces = Set<String>()
         var claimedFamilies = Set<String>()
@@ -191,6 +197,7 @@ extension AgentCockpitProjection {
             let namespaceSet = Set(groupFunctions.map { namespace(for: $0.id) })
             claimedNamespaces.formUnion(namespaceSet)
             let groupOperations = modularityOperations.filter { definition.operationFamilies.contains($0.family) }
+            let showsOperationProjection = hasOperationProjection || !groupOperations.isEmpty
             let familySet = Set(groupOperations.map(\.family))
             claimedFamilies.formUnion(familySet)
             let groupWorkers = workers.filter { worker in
@@ -214,8 +221,8 @@ extension AgentCockpitProjection {
                 functionCount: groupFunctions.count,
                 workerCount: groupWorkers.count,
                 triggerCount: groupTriggers.count,
-                degradedCount: groupFunctions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count,
-                missingSchemaCount: groupFunctions.filter { !$0.schemaComplete }.count,
+                degradedCount: showsOperationProjection ? 0 : groupFunctions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count,
+                missingSchemaCount: showsOperationProjection ? 0 : groupFunctions.filter { !$0.schemaComplete }.count,
                 namespaces: Array(namespaceSet).sorted(),
                 families: Array(familySet).sorted(),
                 operations: groupOperations.sorted { $0.name < $1.name },
@@ -229,6 +236,7 @@ extension AgentCockpitProjection {
         if !otherFunctions.isEmpty || !otherOperations.isEmpty {
             let otherNamespaces = Set(otherFunctions.map { namespace(for: $0.id) })
             let otherFamilies = Set(otherOperations.map(\.family))
+            let showsOperationProjection = hasOperationProjection || !otherOperations.isEmpty
             let otherWorkers = workers.filter { worker in
                 otherNamespaces.contains(worker.id)
                     || worker.namespaceClaims.contains { otherNamespaces.contains($0) }
@@ -246,8 +254,8 @@ extension AgentCockpitProjection {
                     functionCount: otherFunctions.count,
                     workerCount: otherWorkers.count,
                     triggerCount: otherTriggers.count,
-                    degradedCount: otherFunctions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count,
-                    missingSchemaCount: otherFunctions.filter { !$0.schemaComplete }.count,
+                    degradedCount: showsOperationProjection ? 0 : otherFunctions.filter { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }.count,
+                    missingSchemaCount: showsOperationProjection ? 0 : otherFunctions.filter { !$0.schemaComplete }.count,
                     namespaces: Array(otherNamespaces).sorted(),
                     families: Array(otherFamilies).sorted(),
                     operations: otherOperations.sorted { $0.name < $1.name },

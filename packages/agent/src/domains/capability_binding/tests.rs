@@ -2497,7 +2497,7 @@ async fn capability_execute_dispatch_controls_full_route_lifecycle() {
 }
 
 #[tokio::test]
-async fn active_route_rejects_unsafe_adapter_projection_without_builtin_fallback() {
+async fn active_route_rejects_unsafe_adapter_projection_without_builtin_success_substitution() {
     let fixture = RouteFixture::new("capability-route-fail-closed").await;
 
     let candidate_invocation = fixture.candidate_invocation("candidate").await;
@@ -2529,7 +2529,7 @@ async fn active_route_rejects_unsafe_adapter_projection_without_builtin_fallback
 }
 
 #[tokio::test]
-async fn active_route_rejects_stale_runtime_ref_without_builtin_fallback() {
+async fn active_route_rejects_stale_runtime_ref_without_builtin_success_substitution() {
     let (fixture, active) = activated_route_fixture("capability-route-stale-runtime").await;
     let runtime_id = active.module_runtime_ref["resourceId"]
         .as_str()
@@ -2546,7 +2546,7 @@ async fn active_route_rejects_stale_runtime_ref_without_builtin_fallback() {
 }
 
 #[tokio::test]
-async fn active_route_rejects_stale_lifecycle_ref_without_builtin_fallback() {
+async fn active_route_rejects_stale_lifecycle_ref_without_builtin_success_substitution() {
     let (fixture, active) = activated_route_fixture("capability-route-stale-lifecycle").await;
     let lifecycle_id = active.module_lifecycle_ref["resourceId"]
         .as_str()
@@ -2563,7 +2563,7 @@ async fn active_route_rejects_stale_lifecycle_ref_without_builtin_fallback() {
 }
 
 #[tokio::test]
-async fn active_route_rejects_disabled_lifecycle_without_builtin_fallback() {
+async fn active_route_rejects_disabled_lifecycle_without_builtin_success_substitution() {
     let (fixture, active) = activated_route_fixture("capability-route-disabled-lifecycle").await;
     let lifecycle_id = active.module_lifecycle_ref["resourceId"]
         .as_str()
@@ -2577,7 +2577,7 @@ async fn active_route_rejects_disabled_lifecycle_without_builtin_fallback() {
 }
 
 #[tokio::test]
-async fn active_route_rejects_cancelled_runtime_without_builtin_fallback() {
+async fn active_route_rejects_cancelled_runtime_without_builtin_success_substitution() {
     let (fixture, active) = activated_route_fixture("capability-route-cancelled-runtime").await;
     let runtime_id = active.module_runtime_ref["resourceId"]
         .as_str()
@@ -3569,12 +3569,25 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         overview["schemaVersion"],
         json!(super::contract::COCKPIT_VISIBILITY_SCHEMA_VERSION)
     );
-    assert_eq!(overview["summary"]["totalOperations"], json!(188));
-    assert_eq!(overview["summary"]["returnedOperations"], json!(188));
+    let supported_operations = crate::domains::capability::supported_operation_names().len();
+    assert_eq!(
+        overview["summary"]["totalOperations"],
+        json!(supported_operations)
+    );
+    assert_eq!(
+        overview["summary"]["returnedOperations"],
+        json!(supported_operations)
+    );
     assert_eq!(overview["summary"]["operationListComplete"], json!(true));
     assert_eq!(overview["summary"]["resourceScanComplete"], json!(true));
-    assert_eq!(overview["operationList"]["totalOperations"], json!(188));
-    assert_eq!(overview["operationList"]["returnedOperations"], json!(188));
+    assert_eq!(
+        overview["operationList"]["totalOperations"],
+        json!(supported_operations)
+    );
+    assert_eq!(
+        overview["operationList"]["returnedOperations"],
+        json!(supported_operations)
+    );
     assert_eq!(overview["operationList"]["truncated"], json!(false));
     assert_eq!(overview["resourceScan"]["complete"], json!(true));
     assert_eq!(overview["resourceScan"]["truncated"], json!(false));
@@ -3590,6 +3603,11 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
         assert_eq!(
             operation["capabilityPool"]["surface"],
             json!("agent_operation")
+        );
+        assert_eq!(operation["agentUsage"]["callable"], json!(true));
+        assert_eq!(
+            operation["agentUsage"]["tool"],
+            json!("capability::execute")
         );
         assert!(
             matches!(
@@ -3622,6 +3640,11 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(
         git_status["capabilityPool"]["minimalityDecision"],
         json!("module_candidate")
+    );
+    assert_eq!(git_status["agentUsage"]["operation"], json!("git_status"));
+    assert_eq!(
+        git_status["agentUsage"]["defaultUse"],
+        json!("perform_session_work")
     );
     assert_eq!(git_status["owner"]["label"], json!("Built-in Git adapter"));
     assert_eq!(
@@ -3865,11 +3888,18 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     )
     .await
     .expect("limited cockpit overview");
-    assert_eq!(limited["summary"]["totalOperations"], json!(188));
+    let supported_operations = crate::domains::capability::supported_operation_names().len();
+    assert_eq!(
+        limited["summary"]["totalOperations"],
+        json!(supported_operations)
+    );
     assert_eq!(limited["summary"]["returnedOperations"], json!(1));
     assert_eq!(limited["summary"]["operationListComplete"], json!(false));
     assert_eq!(limited["summary"]["operationListTruncated"], json!(true));
-    assert_eq!(limited["operationList"]["totalOperations"], json!(188));
+    assert_eq!(
+        limited["operationList"]["totalOperations"],
+        json!(supported_operations)
+    );
     assert_eq!(limited["operationList"]["returnedOperations"], json!(1));
     assert_eq!(limited["operationList"]["requestedLimit"], json!(1));
     assert_eq!(limited["operationList"]["state"], json!("truncated"));
@@ -3884,8 +3914,14 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
     )
     .await
     .expect("bounded scan cockpit overview");
-    assert_eq!(full["summary"]["totalOperations"], json!(188));
-    assert_eq!(full["summary"]["returnedOperations"], json!(188));
+    assert_eq!(
+        full["summary"]["totalOperations"],
+        json!(supported_operations)
+    );
+    assert_eq!(
+        full["summary"]["returnedOperations"],
+        json!(supported_operations)
+    );
     assert_eq!(full["summary"]["resourceScanComplete"], json!(false));
     assert_eq!(full["summary"]["resourceScanTruncated"], json!(true));
     assert_eq!(full["resourceScan"]["complete"], json!(false));
