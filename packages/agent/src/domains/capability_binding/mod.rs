@@ -29,15 +29,17 @@
 //! server-owned projection so native UI and model-facing capability inspection
 //! share one source of truth. The projection accepts an exact `targetOperation`
 //! filter so agents can inspect one operation's role, readiness, safe read-only
-//! path, and unavailable surfaces without scanning the whole operation pool. The
-//! durable projection can include the complete operation set for UI/audit, while
-//! provider replay receives only a bounded digest with coverage counts, family
-//! summaries, and representative operation samples. The projection summarizes
-//! total/returned operations, list and bounded resource-scan
-//! completeness, redacted operation ownership, replacement target, readiness,
-//! and scoped binding/shadow-trial/route state without exposing raw resource
-//! ids. The `capability_binding` domain owns the projection, not the operations
-//! being described.
+//! path, unavailable surfaces, and any exact follow-up evidence-inspect payloads
+//! without scanning the whole operation pool. The durable projection can include
+//! the complete operation set for UI/audit, while provider replay receives only
+//! a bounded digest with coverage counts, family summaries, and representative
+//! operation samples. The projection summarizes total/returned operations, list
+//! and bounded resource-scan completeness, redacted operation ownership,
+//! replacement target, readiness, and scoped binding/shadow-trial/route state.
+//! Broad overview rows do not expose raw resource ids; targeted rows may expose
+//! bounded exact shadow-evidence inspect payloads when that is the only
+//! deterministic next step for the agent. The `capability_binding` domain owns
+//! the projection, not the operations being described.
 //!
 //! ## Submodules
 //!

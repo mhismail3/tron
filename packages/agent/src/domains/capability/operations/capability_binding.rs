@@ -228,6 +228,7 @@ pub(super) async fn capability_binding_cockpit_overview(
     )
     .await?;
     let content = cockpit_overview_content(&details);
+    let details = cockpit_overview_result_details(details);
     Ok(result(
         &content,
         "capability_binding_cockpit_overview",
@@ -613,8 +614,34 @@ fn cockpit_overview_content(details: &Value) -> String {
         .pointer("/operationList/targetOperation")
         .and_then(Value::as_str);
     if let Some(target_operation) = target_operation {
+        let operation = details.pointer("/operations/0");
+        let shadow_runs = operation
+            .and_then(|operation| operation.pointer("/shadowTrial/runs"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let evidence_refs = operation
+            .and_then(|operation| operation.pointer("/shadowTrial/evidenceRefs"))
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        let active_routes = operation
+            .and_then(|operation| operation.pointer("/route/activeRoutes"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let candidates = operation
+            .and_then(|operation| operation.pointer("/route/candidates"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let bindings = operation
+            .and_then(|operation| operation.pointer("/route/bindings"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if evidence_refs > 0 {
+            return format!(
+                "Targeted cockpit for {target_operation}: {evidence_refs} exact shadow evidence inspect payload(s), {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), and {active_routes} active route(s). Use returned capability_shadow_trial_evidence_inspect payloads for exact evidence."
+            );
+        }
         return format!(
-            "Capability cockpit overview returned 1 targeted operation for {target_operation} ({total} total operation(s) available)."
+            "Targeted cockpit for {target_operation}: no scoped shadow evidence refs, {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), and {active_routes} active route(s). If counts are zero, stop and report no current-scope evidence. Do not inspect evidence schemas without an exact evidence resource id, and do not inspect the target adapter schema unless the task requires invoking the adapter effect."
         );
     }
     if returned < total {
@@ -623,9 +650,62 @@ fn cockpit_overview_content(details: &Value) -> String {
     format!("Capability cockpit overview returned {total} operation(s).")
 }
 
+fn cockpit_overview_result_details(details: Value) -> Value {
+    if details
+        .pointer("/operationList/targetOperation")
+        .and_then(Value::as_str)
+        .is_none()
+    {
+        return details;
+    }
+    let operation = details
+        .pointer("/operations/0")
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "schemaVersion": details.get("schemaVersion").cloned().unwrap_or(Value::Null),
+        "operation": details.get("operation").cloned().unwrap_or(Value::String("capability_binding_cockpit_overview".to_owned())),
+        "summary": {
+            "totalOperations": details.pointer("/summary/totalOperations").cloned().unwrap_or(Value::Null),
+            "returnedOperations": details.pointer("/summary/returnedOperations").cloned().unwrap_or(Value::Null),
+            "title": details.pointer("/summary/title").cloned().unwrap_or(Value::Null),
+            "detail": details.pointer("/summary/detail").cloned().unwrap_or(Value::Null),
+            "shadowRequests": details.pointer("/summary/shadowRequests").cloned().unwrap_or(Value::Null),
+            "shadowRuns": details.pointer("/summary/shadowRuns").cloned().unwrap_or(Value::Null),
+            "routeCandidates": details.pointer("/summary/routeCandidates").cloned().unwrap_or(Value::Null),
+            "activeRoutes": details.pointer("/summary/activeRoutes").cloned().unwrap_or(Value::Null),
+            "routeEvents": details.pointer("/summary/routeEvents").cloned().unwrap_or(Value::Null),
+            "failedClosedRoutes": details.pointer("/summary/failedClosedRoutes").cloned().unwrap_or(Value::Null),
+            "routeRollbacks": details.pointer("/summary/routeRollbacks").cloned().unwrap_or(Value::Null),
+            "rollbackAvailable": details.pointer("/summary/rollbackAvailable").cloned().unwrap_or(Value::Null),
+        },
+        "operationList": details.get("operationList").cloned().unwrap_or(Value::Null),
+        "resourceScan": details.get("resourceScan").cloned().unwrap_or(Value::Null),
+        "operations": [operation.clone()],
+        "target": {
+            "name": operation.get("name").cloned().unwrap_or(Value::Null),
+            "family": operation.get("family").cloned().unwrap_or(Value::Null),
+            "familyLabel": operation.get("familyLabel").cloned().unwrap_or(Value::Null),
+            "capabilityPool": operation.get("capabilityPool").cloned().unwrap_or(Value::Null),
+            "agentUsage": operation.get("agentUsage").cloned().unwrap_or(Value::Null),
+            "owner": operation.get("owner").cloned().unwrap_or(Value::Null),
+            "status": operation.get("status").cloned().unwrap_or(Value::Null),
+            "replacement": operation.get("replacement").cloned().unwrap_or(Value::Null),
+            "readiness": operation.get("readiness").cloned().unwrap_or(Value::Null),
+            "binding": operation.get("binding").cloned().unwrap_or(Value::Null),
+            "shadowTrial": operation.get("shadowTrial").cloned().unwrap_or(Value::Null),
+            "route": operation.get("route").cloned().unwrap_or(Value::Null),
+            "rollback": operation.get("rollback").cloned().unwrap_or(Value::Null),
+            "agentPath": operation.get("agentPath").cloned().unwrap_or(Value::Null),
+        },
+        "scope": details.get("scope").cloned().unwrap_or(Value::Null),
+        "projection": details.get("projection").cloned().unwrap_or(Value::Null),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::cockpit_overview_content;
+    use super::{cockpit_overview_content, cockpit_overview_result_details};
     use serde_json::json;
 
     #[test]
@@ -638,12 +718,23 @@ mod tests {
             "operationList": {
                 "filterApplied": true,
                 "targetOperation": "git_status"
-            }
+            },
+            "operations": [{
+                "shadowTrial": {
+                    "runs": 0,
+                    "evidenceRefs": []
+                },
+                "route": {
+                    "candidates": 0,
+                    "bindings": 0,
+                    "activeRoutes": 0
+                }
+            }]
         });
 
         assert_eq!(
             cockpit_overview_content(&details),
-            "Capability cockpit overview returned 1 targeted operation for git_status (189 total operation(s) available)."
+            "Targeted cockpit for git_status: no scoped shadow evidence refs, 0 shadow run(s), 0 candidate(s), 0 route binding(s), and 0 active route(s). If counts are zero, stop and report no current-scope evidence. Do not inspect evidence schemas without an exact evidence resource id, and do not inspect the target adapter schema unless the task requires invoking the adapter effect."
         );
     }
 
@@ -663,5 +754,71 @@ mod tests {
             cockpit_overview_content(&details),
             "Capability cockpit overview returned 25 of 189 operation(s)."
         );
+    }
+
+    #[test]
+    fn cockpit_overview_result_details_compacts_targeted_projection() {
+        let details = json!({
+            "schemaVersion": "tron.capability_binding.cockpit_visibility.v1",
+            "operation": "capability_binding_cockpit_overview",
+            "summary": {
+                "totalOperations": 189,
+                "returnedOperations": 1,
+                "shadowRuns": 0,
+                "routeCandidates": 0,
+                "activeRoutes": 0
+            },
+            "operationList": {
+                "targetOperation": "git_status",
+                "filterApplied": true
+            },
+            "resourceScan": {
+                "complete": true
+            },
+            "families": [{"family": "core"}],
+            "routeStories": [{"operation": "git_status"}],
+            "operations": [{
+                "name": "git_status",
+                "family": "git",
+                "familyLabel": "Source control",
+                "capabilityPool": {"audience": "session_work"},
+                "agentUsage": {"effect": {"mode": "read_only"}},
+                "owner": {"label": "Git"},
+                "status": {"label": "Built-in"},
+                "replacement": {"canReplace": true},
+                "readiness": {"state": "idle"},
+                "binding": {"requested": 0},
+                "shadowTrial": {
+                    "runs": 0,
+                    "evidenceInspectReady": false,
+                    "evidenceRefs": []
+                },
+                "route": {"activeRoutes": 0},
+                "rollback": {"available": false},
+                "agentPath": {"purpose": "Agent-native path"}
+            }],
+            "scope": {"exactScopeRequired": true},
+            "projection": {"boundedItems": true}
+        });
+
+        let compact = cockpit_overview_result_details(details);
+
+        assert!(compact.get("families").is_none());
+        assert!(compact.get("routeStories").is_none());
+        assert_eq!(
+            compact["operations"].as_array().expect("operations").len(),
+            1
+        );
+        assert_eq!(compact["operations"][0]["name"], "git_status");
+        assert_eq!(compact["target"]["name"], "git_status");
+        assert_eq!(
+            compact["target"]["shadowTrial"]["evidenceInspectReady"],
+            false
+        );
+        assert_eq!(
+            compact["target"]["agentPath"]["purpose"],
+            "Agent-native path"
+        );
+        assert_eq!(compact["operationList"]["targetOperation"], "git_status");
     }
 }

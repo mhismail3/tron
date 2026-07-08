@@ -1,6 +1,6 @@
 # Engine Capability Pool Evidence Manifest
 
-Status: **accepted**
+Status: **passed**
 
 ## Reviewed Source
 
@@ -42,6 +42,7 @@ Status: **accepted**
 - tracked ignored-file scan
 - no managed `packages/agent/skills`
 - independent adversarial review verdict: `slice accepted`
+- retained scorecard closeout result: passed, 100/100
 
 ## Caveats
 

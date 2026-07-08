@@ -288,6 +288,45 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
 
 fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
     match (operation, field) {
+        ("capability_shadow_trial_decision_record", "capabilityShadowTrialRequestResourceId") => {
+            json!({
+                "type": "string",
+                "description": "Exact capability_shadow_trial_request resource id returned by capability_shadow_trial_request_record."
+            })
+        }
+        (
+            "capability_shadow_trial_decision_record",
+            "expectedCapabilityShadowTrialRequestVersionId",
+        ) => json!({
+            "type": "string",
+            "description": "Exact current request version id returned with the capability shadow trial request; stale versions are rejected."
+        }),
+        ("capability_shadow_trial_decision_record", "decision") => json!({
+            "type": "string",
+            "enum": ["approved", "rejected", "denied", "disabled", "aborted"],
+            "description": "Governance decision for the metadata-only shadow trial. Approved becomes approved_trial; rejected/denied require denialEvidence."
+        }),
+        ("capability_shadow_trial_decision_record", "reason") => json!({
+            "type": "string",
+            "description": "Bounded provider-safe decision rationale. Secrets, commands, paths, prompts, grant ids, and authority ids are rejected."
+        }),
+        ("capability_shadow_trial_run_record", "capabilityShadowTrialDecisionResourceId") => {
+            json!({
+                "type": "string",
+                "description": "Exact capability_shadow_trial_decision resource id returned by capability_shadow_trial_decision_record."
+            })
+        }
+        (
+            "capability_shadow_trial_run_record",
+            "expectedCapabilityShadowTrialDecisionVersionId",
+        ) => json!({
+            "type": "string",
+            "description": "Exact current decision version id returned with the approved shadow trial decision; stale versions are rejected."
+        }),
+        ("capability_shadow_trial_run_record", "builtInProjection")
+        | ("capability_shadow_trial_run_record", "candidateProjection") => {
+            shadow_git_status_projection_schema(field)
+        }
         ("repository_tree_snapshot", "repositoryRef") => json!({
             "type": "object",
             "description": "Required bounded repository reference; copy the complete repositoryTreeSnapshotInput.repositoryRef object from git_status when available, including kind. Passing only .id is invalid."
@@ -321,11 +360,93 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
     }
 }
 
+fn shadow_git_status_projection_schema(field: &str) -> Value {
+    json!({
+        "type": "object",
+        "description": format!(
+            "{field} is a bounded provider-safe git_status projection for a metadata-only shadow comparison; never include raw commands, raw paths, logs, file contents, grants, or authority ids."
+        ),
+        "required": [
+            "operation",
+            "status",
+            "headState",
+            "indexState",
+            "worktreeState",
+            "evidenceRef"
+        ],
+        "properties": {
+            "operation": {"const": "git_status"},
+            "status": {"type": "string", "enum": ["clean", "dirty", "unavailable", "unknown"]},
+            "headState": {"type": "string", "enum": ["known", "unknown"]},
+            "indexState": {"type": "string", "enum": ["known", "unknown"]},
+            "worktreeState": {"type": "string", "enum": ["clean", "dirty", "unknown"]},
+            "truncation": {"type": "string", "enum": ["none", "bounded", "truncated", "unknown"]},
+            "evidenceRef": {
+                "type": "object",
+                "description": "Concrete bounded evidence ref for this shadow projection; placeholder evidence:none is rejected.",
+                "required": ["kind", "resourceId", "role"],
+                "properties": {
+                    "kind": {"type": "string"},
+                    "resourceId": {"type": "string"},
+                    "role": {"type": "string"}
+                }
+            }
+        }
+    })
+}
+
 fn add_operation_specific_optional_fields(
     operation: &str,
     properties: &mut serde_json::Map<String, Value>,
 ) {
     let optional_fields: Vec<(&str, Value)> = match operation {
+        "capability_binding_cockpit_overview" => vec![(
+            "targetOperation",
+            json!({
+                "type": "string",
+                "description": "Optional exact provider-visible operation name. When set, returns one compact cockpit row with role, replacement, binding, shadow, route, rollback, and scoped evidence facts for that operation."
+            }),
+        )],
+        "capability_shadow_trial_decision_record" => vec![
+            (
+                "capabilityShadowTrialDecisionId",
+                json!({"type": "string", "description": "Optional bounded caller-visible decision id for idempotent resource identity."}),
+            ),
+            (
+                "decisionEvidence",
+                json!({"type": "array", "description": "Optional bounded refs supporting the decision. Use concrete provider-safe evidence refs only."}),
+            ),
+            (
+                "denialEvidence",
+                json!({"type": "array", "description": "Required when decision is rejected or denied; bounded provider-safe denial evidence refs."}),
+            ),
+            (
+                "idempotencyKey",
+                json!({"type": "string", "description": "Optional stable bounded idempotency key when not supplied by invocation context."}),
+            ),
+        ],
+        "capability_shadow_trial_run_record" => vec![
+            (
+                "capabilityShadowTrialRunId",
+                json!({"type": "string", "description": "Optional bounded caller-visible run id for idempotent resource identity."}),
+            ),
+            (
+                "capabilityShadowTrialEvidenceId",
+                json!({"type": "string", "description": "Optional bounded caller-visible evidence id for the shadow evidence resource."}),
+            ),
+            (
+                "trialRunOutcome",
+                json!({"type": "string", "enum": ["completed", "aborted", "disabled"], "description": "Optional run outcome; omitted defaults to completed. Completed runs require builtInProjection and candidateProjection."}),
+            ),
+            (
+                "auditRefs",
+                json!({"type": "array", "description": "Optional bounded audit refs for the metadata-only run."}),
+            ),
+            (
+                "idempotencyKey",
+                json!({"type": "string", "description": "Optional stable bounded idempotency key when not supplied by invocation context."}),
+            ),
+        ],
         "repository_tree_snapshot" => vec![
             (
                 "snapshotId",
@@ -587,6 +708,38 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         "capability_binding_policy_inspect" => {
             vec!["operation", "capabilityBindingPolicyResourceId"]
         }
+        "capability_shadow_trial_request_record" => vec![
+            "operation",
+            "title",
+            "targetOperation",
+            "currentBuiltInOwner",
+            "ownershipClass",
+            "bindingMode",
+            "candidateAdapter",
+            "authorityConstraints",
+            "contractEvidenceRefs",
+            "evidenceRefs",
+            "staleVersionGuard",
+            "rollbackRef",
+            "disableRef",
+            "abortRef",
+            "rationale",
+            "idempotencyKey",
+        ],
+        "capability_shadow_trial_decision_record" => vec![
+            "operation",
+            "capabilityShadowTrialRequestResourceId",
+            "expectedCapabilityShadowTrialRequestVersionId",
+            "decision",
+            "reason",
+        ],
+        "capability_shadow_trial_run_record" => vec![
+            "operation",
+            "capabilityShadowTrialDecisionResourceId",
+            "expectedCapabilityShadowTrialDecisionVersionId",
+            "builtInProjection",
+            "candidateProjection",
+        ],
         "capability_shadow_trial_evidence_inspect" => {
             vec!["operation", "capabilityShadowTrialEvidenceResourceId"]
         }
@@ -771,11 +924,14 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             }),
         );
         if let Some(plan) = operation_search_plan_projection(&query) {
+            object.insert("agentNextStep".to_owned(), readiness_plan_next_step(&plan));
             object.insert("agentSearchPlan".to_owned(), plan);
         } else if let Some(plan) = trace_evidence_plan_projection(&query) {
             object.insert("agentSearchPlan".to_owned(), plan);
-        }
-        if let Some(next_step) = preferred_execute_schema_next_step(&matches) {
+            if let Some(next_step) = preferred_execute_schema_next_step(&matches) {
+                object.insert("agentNextStep".to_owned(), next_step);
+            }
+        } else if let Some(next_step) = preferred_execute_schema_next_step(&matches) {
             object.insert("agentNextStep".to_owned(), next_step);
         }
         object.insert("executeOperationMatches".to_owned(), Value::Array(matches));
@@ -790,6 +946,16 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             );
         }
     }
+}
+
+fn readiness_plan_next_step(plan: &Value) -> Value {
+    json!({
+        "priority": "follow_agent_search_plan_primary_inspection",
+        "reason": "For replacement or shadow readiness, first inspect the exact targeted cockpit row. It is read-only and tells whether evidence exists; do not infer unsupported shadow list operations.",
+        "primaryInspection": plan["primaryInspection"],
+        "thenFollow": "agentSearchPlan.readOnlySequence",
+        "completionRule": plan["completionRule"]
+    })
 }
 
 fn looks_like_unsupported_operation_candidate(query: &OperationSearchQuery) -> bool {
@@ -1219,18 +1385,11 @@ fn operation_search_plan_projection(query: &OperationSearchQuery) -> Option<Valu
         return None;
     }
 
-    let mut followups = vec![
-        recovery_alternative(
-            "catalog_inspect",
-            json!({"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000}),
-            "Inspect the exact request schema before invoking the target operation.",
-        ),
-        recovery_alternative(
-            "capability_binding_cockpit_overview",
-            json!({"operation": "capability_binding_cockpit_overview", "targetOperation": target}),
-            "Inspect this operation's role, replacement class, binding, shadow, route, rollback, and scoped evidence counts without invoking the adapter.",
-        ),
-    ];
+    let mut followups = vec![recovery_alternative(
+        "capability_binding_cockpit_overview",
+        json!({"operation": "capability_binding_cockpit_overview", "targetOperation": target}),
+        "Inspect this operation's role, replacement class, binding, shadow, route, rollback, and scoped evidence counts without invoking the adapter.",
+    )];
     if query_terms.contains("replacement") || query_terms.contains("candidate") {
         followups.push(recovery_alternative(
             "capability_replacement_candidate_list",
@@ -1271,6 +1430,27 @@ fn operation_search_plan_projection(query: &OperationSearchQuery) -> Option<Valu
             ),
         ]);
     }
+    let contextual_write_operations = if query_terms.contains("shadow")
+        || query_terms.contains("trial")
+        || query_terms.contains("evidence")
+    {
+        vec![
+            contextual_write_operation(
+                "capability_shadow_trial_request_record",
+                "recording a governed metadata-only shadow request after explicit task, approval, and candidate evidence",
+            ),
+            contextual_write_operation(
+                "capability_shadow_trial_decision_record",
+                "recording a governance decision for an exact shadow request resource and version",
+            ),
+            contextual_write_operation(
+                "capability_shadow_trial_run_record",
+                "recording a metadata-only shadow run for an approved decision with bounded built-in and candidate projections",
+            ),
+        ]
+    } else {
+        Vec::new()
+    };
 
     Some(json!({
         "purpose": "Deterministic read-only plan for a capability readiness query with one exact target operation.",
@@ -1283,17 +1463,69 @@ fn operation_search_plan_projection(query: &OperationSearchQuery) -> Option<Valu
             "reason": "Returns one exact operation row with readiness, route, binding, shadow, rollback, and evidence facts."
         },
         "readOnlySequence": followups,
+        "adapterInvocationSchemaInspection": {
+            "tool": "capability::execute",
+            "operation": "catalog_inspect",
+            "arguments": {"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000},
+            "readOnlyInspectionSafe": true,
+            "useOnlyWhen": "Only inspect the target adapter schema when the task explicitly needs to invoke the adapter effect. Do not use this as replacement, shadow, route, or evidence proof.",
+            "notPartOfReadinessCompletion": true
+        },
         "doNotCall": [
             {"operation": target, "reason": "Do not invoke the adapter just to inspect replacement readiness; call it only when the task needs the adapter effect."},
             {"operation": "capability_shadow_trial_request_list", "reason": "No provider-visible list operation exists for shadow trial requests; use targeted cockpit counts and exact evidence inspect only when an evidence ref exists."},
             {"operation": "capability_shadow_trial_run_list", "reason": "No provider-visible list operation exists for shadow trial runs; use route events and exact evidence refs instead."}
         ],
-        "completionRule": "If targeted cockpit counts and scoped list operations are empty, report that no current-scope evidence is recorded instead of searching for unsupported list operations.",
-        "finalAnswerWhen": "After the targeted cockpit overview and listed read-only sequence show zero candidates, routes, bindings, events, or exact shadow evidence refs, stop and answer from those facts.",
+        "completionRule": "If the targeted cockpit row has zero shadowTrial.evidenceRefs, zero shadowTrial.runs, zero route.bindings, and zero route.routeEvents, stop and report that no current-scope shadow or route evidence is recorded.",
+        "finalAnswerWhen": "After the targeted cockpit overview shows no exact shadow evidence refs and the listed read-only operations show no candidates, routes, bindings, or events, stop and answer from those facts.",
+        "terminalZeroEvidencePath": {
+            "state": "answer_now_no_current_scope_evidence",
+            "afterOperation": "capability_binding_cockpit_overview",
+            "condition": "targeted cockpit row returns zero shadowTrial.evidenceRefs, shadowTrial.runs, route.bindings, active routes, and route.routeEvents",
+            "answerGuidance": "Say no scoped shadow or route evidence is recorded for the target operation. Do not inspect evidence schemas without an exact evidence resource id."
+        },
+        "contextualWriteOperations": contextual_write_operations,
+        "evidenceInspectAvailability": {
+            "callableNow": false,
+            "becomesCallableWhen": "targeted cockpit, route-event, or resource output returns an exact provider-safe evidence inspect payload",
+            "notActionableReason": "No exact capabilityShadowTrialEvidenceResourceId is known from search alone; targeted cockpit returns exact inspect payloads only when evidence exists.",
+            "doNotInspectSchemasFromSearch": true
+        },
         "doNotInspect": [
-            {"operation": "capability_shadow_trial_evidence_inspect", "reason": "Only inspect shadow evidence when an exact capabilityShadowTrialEvidenceResourceId is already present in cockpit, route-event, or resource output."}
+            {"operation": "evidence inspection", "reason": "Do not call until evidenceInspectAvailability.callableNow is true because targeted cockpit returned an exact inspect payload."},
+            {"operation": "evidence schema inspection", "reason": "Do not inspect evidence schemas in the zero-evidence path; schema inspection does not create evidence."}
         ]
     }))
+}
+
+fn contextual_write_operation(operation: &str, use_only_when: &str) -> Value {
+    let required_payload_fields = operation_required_payload_fields(operation);
+    let mut agent_usage = operation_agent_usage_projection(operation).unwrap_or_else(|| {
+        json!({
+            "callable": true,
+            "tool": "capability::execute",
+            "operation": operation,
+            "arguments": {"operation": operation}
+        })
+    });
+    if let Some(preflight) = agent_usage
+        .get_mut("preflight")
+        .and_then(Value::as_object_mut)
+    {
+        preflight.insert(
+            "requiredPayloadFields".to_owned(),
+            Value::Array(required_payload_fields.clone()),
+        );
+    }
+    json!({
+        "operation": operation,
+        "tool": "capability::execute",
+        "schemaInspection": execute_schema_inspection_step(operation),
+        "requiredPayloadFields": required_payload_fields,
+        "readOnlyInspectionSafe": false,
+        "useOnlyWhen": use_only_when,
+        "agentUsage": agent_usage
+    })
 }
 
 fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value> {
@@ -1345,14 +1577,10 @@ fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value>
 }
 
 fn operation_search_plan_supported_operations(query: &OperationSearchQuery) -> Vec<&'static str> {
-    let Some((target, query_terms)) = operation_search_plan_target(query) else {
+    let Some((_target, query_terms)) = operation_search_plan_target(query) else {
         return Vec::new();
     };
-    let mut operations = vec![
-        target,
-        "catalog_inspect",
-        "capability_binding_cockpit_overview",
-    ];
+    let mut operations = vec!["capability_binding_cockpit_overview"];
     if query_terms.contains("replacement") || query_terms.contains("candidate") {
         operations.push("capability_replacement_candidate_list");
     }
@@ -1368,12 +1596,6 @@ fn operation_search_plan_supported_operations(query: &OperationSearchQuery) -> V
             "capability_binding_decision_list",
             "capability_binding_policy_list",
         ]);
-    }
-    if query_terms.contains("shadow")
-        || query_terms.contains("trial")
-        || query_terms.contains("evidence")
-    {
-        operations.push("capability_shadow_trial_evidence_inspect");
     }
     operations
 }
@@ -1410,8 +1632,10 @@ fn operation_search_plan_target(
                 | "readiness"
                 | "rollback"
                 | "candidate"
+                | "shadow"
+                | "trial"
         )
-    });
+    }) && !query_terms.contains("trace");
     asks_binding_or_route_readiness.then_some((target, query_terms))
 }
 
@@ -1646,6 +1870,171 @@ mod tests {
         assert_eq!(
             discovery["agentUsage"]["effect"]["readOnlyInspectionSafe"],
             true
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_cockpit_target_operation_optional_field() {
+        let discovery = execute_operation_inspect_projection(
+            "capability_binding_cockpit_overview",
+            "execute::capability_binding_cockpit_overview",
+        );
+
+        assert_eq!(
+            discovery["schema"]["requiredPayloadFields"],
+            json!(["operation"])
+        );
+        assert_eq!(discovery["inputSchema"]["required"], json!(["operation"]));
+        assert_eq!(
+            discovery["inputSchema"]["properties"]["targetOperation"]["type"],
+            "string"
+        );
+        assert!(
+            discovery["inputSchema"]["properties"]["targetOperation"]["description"]
+                .as_str()
+                .expect("targetOperation description")
+                .contains("one compact cockpit row")
+        );
+        assert_eq!(
+            discovery["modelFacingInvocation"]["arguments"]["operation"],
+            "capability_binding_cockpit_overview"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_shadow_trial_request_required_fields() {
+        let request = execute_operation_inspect_projection(
+            "capability_shadow_trial_request_record",
+            "execute::capability_shadow_trial_request_record",
+        );
+
+        assert_eq!(
+            request["schema"]["requiredPayloadFields"],
+            json!([
+                "operation",
+                "title",
+                "targetOperation",
+                "currentBuiltInOwner",
+                "ownershipClass",
+                "bindingMode",
+                "candidateAdapter",
+                "authorityConstraints",
+                "contractEvidenceRefs",
+                "evidenceRefs",
+                "staleVersionGuard",
+                "rollbackRef",
+                "disableRef",
+                "abortRef",
+                "rationale",
+                "idempotencyKey"
+            ])
+        );
+        assert_eq!(
+            request["inputSchema"]["required"],
+            request["schema"]["requiredPayloadFields"]
+        );
+        assert_eq!(
+            request["inputSchema"]["properties"]["currentBuiltInOwner"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_shadow_trial_record_required_fields() {
+        let decision = execute_operation_inspect_projection(
+            "capability_shadow_trial_decision_record",
+            "execute::capability_shadow_trial_decision_record",
+        );
+        assert_eq!(decision["kind"], "execute_operation");
+        assert_eq!(
+            decision["schema"]["requiredPayloadFields"],
+            json!([
+                "operation",
+                "capabilityShadowTrialRequestResourceId",
+                "expectedCapabilityShadowTrialRequestVersionId",
+                "decision",
+                "reason"
+            ])
+        );
+        assert_eq!(
+            decision["inputSchema"]["required"],
+            json!([
+                "operation",
+                "capabilityShadowTrialRequestResourceId",
+                "expectedCapabilityShadowTrialRequestVersionId",
+                "decision",
+                "reason"
+            ])
+        );
+        assert_eq!(
+            decision["inputSchema"]["properties"]["capabilityShadowTrialRequestResourceId"]["type"],
+            "string"
+        );
+        assert_eq!(
+            decision["inputSchema"]["properties"]["expectedCapabilityShadowTrialRequestVersionId"]
+                ["type"],
+            "string"
+        );
+
+        let run = execute_operation_inspect_projection(
+            "capability_shadow_trial_run_record",
+            "execute::capability_shadow_trial_run_record",
+        );
+        assert_eq!(run["kind"], "execute_operation");
+        assert_eq!(
+            run["schema"]["requiredPayloadFields"],
+            json!([
+                "operation",
+                "capabilityShadowTrialDecisionResourceId",
+                "expectedCapabilityShadowTrialDecisionVersionId",
+                "builtInProjection",
+                "candidateProjection"
+            ])
+        );
+        assert_eq!(
+            run["inputSchema"]["required"],
+            json!([
+                "operation",
+                "capabilityShadowTrialDecisionResourceId",
+                "expectedCapabilityShadowTrialDecisionVersionId",
+                "builtInProjection",
+                "candidateProjection"
+            ])
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["capabilityShadowTrialDecisionResourceId"]["type"],
+            "string"
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["expectedCapabilityShadowTrialDecisionVersionId"]["type"],
+            "string"
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["builtInProjection"]["type"],
+            "object"
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["builtInProjection"]["required"],
+            json!([
+                "operation",
+                "status",
+                "headState",
+                "indexState",
+                "worktreeState",
+                "evidenceRef"
+            ])
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["builtInProjection"]["properties"]["operation"]["const"],
+            "git_status"
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["candidateProjection"]["type"],
+            "object"
+        );
+        assert_eq!(
+            run["inputSchema"]["properties"]["trialRunOutcome"]["enum"],
+            json!(["completed", "aborted", "disabled"])
         );
     }
 
@@ -2358,18 +2747,28 @@ mod tests {
             .filter_map(|value| value["operation"].as_str())
             .collect::<Vec<_>>();
         for expected in [
-            "git_status",
             "capability_binding_cockpit_overview",
             "capability_replacement_candidate_list",
             "capability_route_binding_list",
             "capability_route_event_list",
-            "capability_shadow_trial_evidence_inspect",
         ] {
             assert!(
                 operations.contains(&expected),
                 "multi-intent search should include {expected}: {operations:?}"
             );
         }
+        assert!(
+            !operations.contains(&"git_status"),
+            "target adapter invocation is not readiness evidence and must stay conditional"
+        );
+        assert!(
+            !operations.contains(&"catalog_inspect"),
+            "schema inspection is not readiness evidence and must stay conditional"
+        );
+        assert!(
+            !operations.contains(&"capability_shadow_trial_evidence_inspect"),
+            "evidence inspect needs an exact evidence id and must not appear as an immediately actionable match"
+        );
         assert!(
             discovery["executeOperationMatches"]
                 .as_array()
@@ -2387,11 +2786,44 @@ mod tests {
             discovery["agentSearchPlan"]["primaryInspection"]["arguments"]["targetOperation"],
             json!("git_status")
         );
+        let readiness_sequence = discovery["agentSearchPlan"]["readOnlySequence"]
+            .as_array()
+            .expect("read-only readiness sequence");
+        assert!(
+            readiness_sequence
+                .iter()
+                .all(|entry| entry["operation"] != "catalog_inspect"),
+            "replacement readiness must not treat adapter schema inspection as evidence"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["adapterInvocationSchemaInspection"]["arguments"]["id"],
+            "execute::git_status"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["adapterInvocationSchemaInspection"]["notPartOfReadinessCompletion"],
+            json!(true)
+        );
+        assert!(
+            discovery["agentSearchPlan"]["adapterInvocationSchemaInspection"]["useOnlyWhen"]
+                .as_str()
+                .expect("adapter schema guidance")
+                .contains("explicitly needs to invoke")
+        );
         assert!(
             discovery["agentSearchPlan"]["completionRule"]
                 .as_str()
                 .expect("completion rule")
-                .contains("no current-scope evidence is recorded")
+                .contains("stop and report")
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["terminalZeroEvidencePath"]["state"],
+            "answer_now_no_current_scope_evidence"
+        );
+        assert!(
+            discovery["agentSearchPlan"]["terminalZeroEvidencePath"]["answerGuidance"]
+                .as_str()
+                .expect("zero evidence answer guidance")
+                .contains("Do not inspect evidence schemas")
         );
         assert!(
             discovery["agentSearchPlan"]["finalAnswerWhen"]
@@ -2400,8 +2832,20 @@ mod tests {
                 .contains("stop and answer")
         );
         assert_eq!(
+            discovery["agentSearchPlan"]["evidenceInspectAvailability"]["callableNow"],
+            json!(false)
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["evidenceInspectAvailability"]["doNotInspectSchemasFromSearch"],
+            json!(true)
+        );
+        assert_eq!(
             discovery["agentSearchPlan"]["doNotInspect"][0]["operation"],
-            "capability_shadow_trial_evidence_inspect"
+            "evidence inspection"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["doNotInspect"][1]["operation"],
+            "evidence schema inspection"
         );
         let do_not_call = discovery["agentSearchPlan"]["doNotCall"]
             .as_array()
@@ -2416,6 +2860,54 @@ mod tests {
                 .iter()
                 .any(|entry| entry["operation"] == "capability_shadow_trial_request_list")
         );
+        assert_eq!(
+            discovery["agentNextStep"]["priority"],
+            "follow_agent_search_plan_primary_inspection"
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["primaryInspection"]["operation"],
+            "capability_binding_cockpit_overview"
+        );
+        let contextual_write_operations = discovery["agentSearchPlan"]["contextualWriteOperations"]
+            .as_array()
+            .expect("contextual write operations");
+        let contextual_names = contextual_write_operations
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contextual_names,
+            vec![
+                "capability_shadow_trial_request_record",
+                "capability_shadow_trial_decision_record",
+                "capability_shadow_trial_run_record",
+            ]
+        );
+        assert!(
+            contextual_write_operations
+                .iter()
+                .all(|value| value["readOnlyInspectionSafe"] == false)
+        );
+        assert!(
+            contextual_write_operations[0]["requiredPayloadFields"]
+                .as_array()
+                .expect("shadow request required fields")
+                .iter()
+                .any(|field| field.as_str() == Some("currentBuiltInOwner"))
+        );
+        assert!(
+            contextual_write_operations[0]["agentUsage"]["preflight"]["requiredPayloadFields"]
+                .as_array()
+                .expect("shadow request preflight fields")
+                .iter()
+                .any(|field| field.as_str() == Some("currentBuiltInOwner"))
+        );
+        assert!(contextual_write_operations.iter().all(|value| {
+            value["schemaInspection"]["arguments"]["id"]
+                .as_str()
+                .expect("schema inspection id")
+                .starts_with("execute::capability_shadow_trial_")
+        }));
     }
 
     #[test]

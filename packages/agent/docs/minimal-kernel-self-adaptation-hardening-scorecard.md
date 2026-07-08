@@ -48,16 +48,16 @@ source-backed:
 
 ## Weighted Scorecard
 
-| Area | Weight | Status | Score | Acceptance |
-|---|---:|---|---:|---|
-| Minimal kernel map | 18 | passed | 18 | Authority, transport, event log, resource custody, redaction, trace/replay/catalog, module governance, context policy, and route resolution are named as irreducible kernel/governance substrate. |
-| Replacement proof contract | 18 | passed | 18 | Candidate, shadow, binding, activation, route-event, runtime projection, stale-version, provider-safety, and rollback proofs are explicit and current-version guarded. |
-| Context policy contract | 14 | passed | 14 | Survivor/exclusion records and policy snapshots are server-owned, bounded, fail-closed, and required for future compaction summarizer replacement. |
-| Fail-closed route behavior | 12 | passed | 12 | Unsafe, stale, ambiguous, disabled, or missing-proof routes do not return built-in success as the replacement result. |
-| Visibility and explanation | 12 | passed | 12 | Engine Cockpit derives route stories, operation state, failed adaptations, terminal controls, and drill-downs from server-owned route/binding facts. |
-| Minimality guard | 10 | passed | 10 | No new model-facing tool, runtime plane, package/deploy behavior, or broad module hot-swap is introduced by the capstone. |
-| Static proof coverage | 10 | passed | 10 | Static invariants pin this capstone to the modularity and dynamic replacement scorecards plus the core source files that enforce them. |
-| Honest boundary | 6 | passed | 6 | The foundation proves the first scoped read-only `git_status` route and the replacement contract; it does not claim full autonomous self-update across all operations. |
+| ID | Area | Weight | Status | Score | Acceptance |
+|---|---|---:|---|---:|---|
+| MKS-0 | Minimal kernel map | 18 | passed | 18 | Authority, transport, event log, resource custody, redaction, trace/replay/catalog, module governance, context policy, and route resolution are named as irreducible kernel/governance substrate. |
+| MKS-1 | Replacement proof contract | 18 | passed | 18 | Candidate, shadow, binding, activation, route-event, runtime projection, stale-version, provider-safety, and rollback proofs are explicit and current-version guarded. |
+| MKS-2 | Context policy contract | 14 | passed | 14 | Survivor/exclusion records and policy snapshots are server-owned, bounded, fail-closed, and required for future compaction summarizer replacement. |
+| MKS-3 | Fail-closed route behavior | 12 | passed | 12 | Unsafe, stale, ambiguous, disabled, or missing-proof routes do not return built-in success as the replacement result. |
+| MKS-4 | Visibility and explanation | 12 | passed | 12 | Engine Cockpit derives route stories, operation state, failed adaptations, terminal controls, and drill-downs from server-owned route/binding facts. |
+| MKS-5 | Minimality guard | 10 | passed | 10 | No new model-facing tool, runtime plane, package/deploy behavior, or broad module hot-swap is introduced by the capstone. |
+| MKS-6 | Static proof coverage | 10 | passed | 10 | Static invariants pin this capstone to the modularity and dynamic replacement scorecards plus the core source files that enforce them. |
+| MKS-7 | Honest boundary | 6 | passed | 6 | The foundation proves the first scoped read-only `git_status` route and the replacement contract; it does not claim full autonomous self-update across all operations. |
 
 ## Minimal Kernel Map
 

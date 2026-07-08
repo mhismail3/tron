@@ -28,6 +28,7 @@ use super::{
 
 const MAX_LIMIT: usize = 256;
 const MAX_RESOURCES_PER_KIND_SCOPE: usize = 100;
+const MAX_SHADOW_EVIDENCE_REFS: usize = 5;
 
 const BINDING_KINDS: &[&str] = &[
     CAPABILITY_BINDING_REQUEST_KIND,
@@ -85,6 +86,15 @@ struct ShadowFacts {
     abort_available: bool,
     latest_state: Option<String>,
     last_updated_at: Option<String>,
+    evidence_refs: Vec<ShadowEvidenceRef>,
+}
+
+#[derive(Clone, Debug)]
+struct ShadowEvidenceRef {
+    resource_id: String,
+    version_id: Option<String>,
+    state: String,
+    updated_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -249,6 +259,7 @@ struct AgentPathProjection {
     primary_inspection: AgentPathStep,
     read_only_sequence: Vec<AgentPathStep>,
     unavailable_surfaces: Vec<UnavailableSurfaceProjection>,
+    completion: AgentPathCompletionProjection,
     adapter_execution_guidance: String,
     evidence_guidance: String,
 }
@@ -269,6 +280,24 @@ struct UnavailableSurfaceProjection {
     operation: String,
     reason: String,
     alternative: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathCompletionProjection {
+    state: String,
+    action: String,
+    reason: String,
+    stop_when: String,
+    final_answer_guidance: String,
+    do_not_inspect: Vec<AgentPathDoNotInspectProjection>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathDoNotInspectProjection {
+    operation: String,
+    reason: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -358,8 +387,23 @@ struct ShadowTrialProjection {
     disabled: usize,
     latest_state: Option<String>,
     last_updated_at: Option<String>,
+    evidence_refs: Vec<ShadowEvidenceRefProjection>,
+    evidence_inspect_ready: bool,
     available_for_this_operation: bool,
     detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShadowEvidenceRefProjection {
+    label: String,
+    resource_id: String,
+    version_id: Option<String>,
+    state: String,
+    updated_at: Option<String>,
+    inspect_operation: &'static str,
+    inspect_payload: Value,
+    reason: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -505,10 +549,14 @@ pub(crate) async fn cockpit_overview_value(
             .get::<str>(*operation)
             .cloned()
             .unwrap_or_default();
+        let include_shadow_evidence_refs = target_operation
+            .as_deref()
+            .is_some_and(|target| target == *operation);
         all_operations.push(operation_visibility(
             metadata,
             capability_pool_role_projection(&pool),
             operation_facts,
+            include_shadow_evidence_refs,
         ));
     }
     all_operations.sort_by(|left, right| {
@@ -537,6 +585,9 @@ pub(crate) async fn cockpit_overview_value(
     );
     let resource_scan = resource_scan_projection(facts.scan);
     let operations = visible_operations;
+    let raw_resource_ids_returned = operations
+        .iter()
+        .any(|operation| !operation.shadow_trial.evidence_refs.is_empty());
     let route_stories = route_stories(&all_operations);
     let projection = CockpitProjection {
         schema_version: contract::COCKPIT_VISIBILITY_SCHEMA_VERSION,
@@ -569,7 +620,7 @@ pub(crate) async fn cockpit_overview_value(
             hot_swap_performed: false,
             module_activated: false,
             module_executed: false,
-            raw_resource_ids_returned: false,
+            raw_resource_ids_returned,
             raw_local_paths_returned: false,
             raw_env_values_returned: false,
             raw_secrets_returned: false,
@@ -744,6 +795,14 @@ fn apply_shadow_resource(
             }
         }
         CAPABILITY_SHADOW_TRIAL_EVIDENCE_KIND => {
+            if facts.shadow.evidence_refs.len() < MAX_SHADOW_EVIDENCE_REFS {
+                facts.shadow.evidence_refs.push(ShadowEvidenceRef {
+                    resource_id: resource.resource_id.clone(),
+                    version_id: Some(_version.version_id.clone()),
+                    state: state.clone(),
+                    updated_at: Some(updated_at.clone()),
+                });
+            }
             if bool_at(payload, "/resultControls/rollbackAvailable") {
                 facts.shadow.rollback_available = true;
             }
@@ -839,6 +898,7 @@ fn operation_visibility(
     metadata: OperationBindingMetadata,
     capability_pool: CapabilityPoolRoleProjection,
     facts: OperationFacts,
+    include_shadow_evidence_refs: bool,
 ) -> OperationVisibility {
     let replacement = replacement_projection(
         metadata.family,
@@ -848,7 +908,11 @@ fn operation_visibility(
     let rollback = rollback_projection(metadata.ownership_class, &facts);
     let readiness = readiness_projection(metadata.ownership_class, &facts, &replacement);
     let binding = binding_projection(&facts.binding);
-    let shadow_trial = shadow_projection(metadata.operation, &facts.shadow);
+    let shadow_trial = shadow_projection(
+        metadata.operation,
+        &facts.shadow,
+        include_shadow_evidence_refs,
+    );
     let route = route_projection(&facts.route);
     let agent_path = agent_path_projection(
         metadata.operation,
@@ -994,14 +1058,26 @@ fn agent_path_projection(
             UnavailableSurfaceProjection {
                 operation: "capability_shadow_trial_request_list".to_owned(),
                 reason: "No provider-visible list operation exists for shadow trial requests in this slice.".to_owned(),
-                alternative: "Use capability_binding_cockpit_overview targetOperation plus capability_shadow_trial_evidence_inspect when an exact evidence resource id is known.".to_owned(),
+                alternative: "Use capability_binding_cockpit_overview with targetOperation. When scoped shadow evidence exists, the targeted cockpit row returns exact capability_shadow_trial_evidence_inspect payloads.".to_owned(),
             },
             UnavailableSurfaceProjection {
                 operation: "capability_shadow_trial_run_list".to_owned(),
                 reason: "No provider-visible list operation exists for shadow trial runs in this slice.".to_owned(),
-                alternative: "Use cockpit shadowTrial counts and route events; inspect exact evidence refs only when present.".to_owned(),
+                alternative: "Use cockpit shadowTrial counts and route events; inspect exact evidence refs from the targeted cockpit row only when present.".to_owned(),
             },
         ]);
+    }
+
+    if !shadow_trial.evidence_refs.is_empty() {
+        for reference in &shadow_trial.evidence_refs {
+            read_only_sequence.push(AgentPathStep {
+                label: reference.label.clone(),
+                operation: reference.inspect_operation.to_owned(),
+                payload: reference.inspect_payload.clone(),
+                read_only_inspection_safe: true,
+                reason: reference.reason.to_owned(),
+            });
+        }
     }
 
     let adapter_execution_guidance = if operation == "git_status" {
@@ -1017,10 +1093,11 @@ fn agent_path_projection(
             .to_owned()
     } else {
         format!(
-            "Current readiness is {}. If counts are zero, say no scoped evidence is recorded instead of searching for unsupported list operations.",
+            "Current readiness is {}. If counts are zero, say no scoped evidence is recorded instead of searching for unsupported list operations or inspecting evidence schemas.",
             readiness.label
         )
     };
+    let completion = agent_path_completion_projection(readiness, shadow_trial, route);
 
     AgentPathProjection {
         purpose: "Agent-native read-only path from operation discovery to readiness evidence."
@@ -1028,8 +1105,63 @@ fn agent_path_projection(
         primary_inspection: primary,
         read_only_sequence,
         unavailable_surfaces,
+        completion,
         adapter_execution_guidance,
         evidence_guidance,
+    }
+}
+
+fn agent_path_completion_projection(
+    readiness: &ReadinessProjection,
+    shadow_trial: &ShadowTrialProjection,
+    route: &RouteProjection,
+) -> AgentPathCompletionProjection {
+    let has_shadow_evidence = !shadow_trial.evidence_refs.is_empty() || shadow_trial.runs > 0;
+    let has_route_evidence =
+        route.route_events > 0 || route.active_routes > 0 || route.bindings > 0;
+    if has_shadow_evidence || has_route_evidence {
+        AgentPathCompletionProjection {
+            state: "continue_with_returned_evidence_refs".to_owned(),
+            action: "inspect_returned_refs_only".to_owned(),
+            reason: "The targeted cockpit row returned scoped evidence or route activity.".to_owned(),
+            stop_when: "After inspecting the exact refs returned by this row and any listed read-only route operations."
+                .to_owned(),
+            final_answer_guidance: "Answer from targeted cockpit facts, exact evidence refs, route events, and provider-safe trace/resource projections."
+                .to_owned(),
+            do_not_inspect: vec![AgentPathDoNotInspectProjection {
+                operation: "unsupported_shadow_trial_list_operations".to_owned(),
+                reason:
+                    "Use exact refs returned by the targeted cockpit row; do not invent list operations."
+                        .to_owned(),
+            }],
+        }
+    } else {
+        AgentPathCompletionProjection {
+            state: "answer_now_no_current_scope_evidence".to_owned(),
+            action: "stop_after_targeted_cockpit".to_owned(),
+            reason: format!(
+                "The targeted cockpit row is {} and returned zero shadow evidence refs, zero shadow runs, zero route bindings, and zero route events.",
+                readiness.label
+            ),
+            stop_when: "When the targeted cockpit row has zero shadowTrial.evidenceRefs, shadowTrial.runs, route.bindings, active routes, and route.routeEvents."
+                .to_owned(),
+            final_answer_guidance: "State that no current-scope shadow or route evidence is recorded for this operation, and do not inspect evidence schemas without an exact evidence resource id."
+                .to_owned(),
+            do_not_inspect: vec![
+                AgentPathDoNotInspectProjection {
+                    operation: "capability_shadow_trial_evidence_inspect".to_owned(),
+                    reason: "No exact capabilityShadowTrialEvidenceResourceId was returned, so schema inspection cannot produce evidence."
+                        .to_owned(),
+                },
+                AgentPathDoNotInspectProjection {
+                    operation:
+                        "catalog_inspect execute::capability_shadow_trial_evidence_inspect"
+                            .to_owned(),
+                    reason: "Inspecting the evidence operation schema is unnecessary when the targeted cockpit row already proves that no scoped evidence refs exist."
+                        .to_owned(),
+                },
+            ],
+        }
     }
 }
 
@@ -1365,7 +1497,11 @@ fn binding_projection(facts: &BindingFacts) -> BindingProjection {
     }
 }
 
-fn shadow_projection(operation: &str, facts: &ShadowFacts) -> ShadowTrialProjection {
+fn shadow_projection(
+    operation: &str,
+    facts: &ShadowFacts,
+    include_evidence_refs: bool,
+) -> ShadowTrialProjection {
     let detail = if facts.runs > 0 {
         format!(
             "{} metadata-only shadow run{} recorded; candidate execution and routing stayed disabled.",
@@ -1390,6 +1526,17 @@ fn shadow_projection(operation: &str, facts: &ShadowFacts) -> ShadowTrialProject
     } else {
         "No shadow trial is available for this operation in the current slice.".to_owned()
     };
+    let evidence_refs = if include_evidence_refs {
+        facts
+            .evidence_refs
+            .iter()
+            .enumerate()
+            .map(|(index, reference)| shadow_evidence_ref_projection(index, reference))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let evidence_inspect_ready = !evidence_refs.is_empty();
     ShadowTrialProjection {
         requested: facts.requested,
         approved: facts.approved,
@@ -1401,8 +1548,34 @@ fn shadow_projection(operation: &str, facts: &ShadowFacts) -> ShadowTrialProject
         disabled: facts.disabled,
         latest_state: facts.latest_state.clone(),
         last_updated_at: facts.last_updated_at.clone(),
+        evidence_refs,
+        evidence_inspect_ready,
         available_for_this_operation: operation == "git_status",
         detail,
+    }
+}
+
+fn shadow_evidence_ref_projection(
+    index: usize,
+    reference: &ShadowEvidenceRef,
+) -> ShadowEvidenceRefProjection {
+    let mut inspect_payload = serde_json::json!({
+        "operation": "capability_shadow_trial_evidence_inspect",
+        "capabilityShadowTrialEvidenceResourceId": reference.resource_id
+    });
+    if let Some(version_id) = reference.version_id.as_deref() {
+        inspect_payload["expectedCapabilityShadowTrialEvidenceVersionId"] =
+            Value::String(version_id.to_owned());
+    }
+    ShadowEvidenceRefProjection {
+        label: format!("Inspect shadow evidence {}", index + 1),
+        resource_id: reference.resource_id.clone(),
+        version_id: reference.version_id.clone(),
+        state: reference.state.clone(),
+        updated_at: reference.updated_at.clone(),
+        inspect_operation: "capability_shadow_trial_evidence_inspect",
+        inspect_payload,
+        reason: "Exact provider-safe shadow evidence ref from the targeted cockpit row; inspect it instead of guessing unsupported shadow-trial list operations.",
     }
 }
 

@@ -1,6 +1,8 @@
 # Engine Capability Pool And Kernel Evolution Scorecard
 
-Status: **accepted**
+Status: **passed**
+
+Current score: **100/100**
 
 This scorecard closes the semantic gap between model-facing
 `capability::execute` operations and engine/catalog functions. Tron now has one
@@ -58,15 +60,15 @@ diagnostic bridges such as catalog-discovery functions or the
 
 | ID | Check | Weight | Status | Evidence |
 |---|---|---:|---|---|
-| ECP-1 | Execute operation coverage | 15 | accepted | Every `SUPPORTED_OPERATION_NAMES` entry has one `agent_operation` inventory row. |
-| ECP-2 | Catalog function coverage | 15 | accepted | Every startup-registered catalog function has one `catalog_function` inventory row. |
-| ECP-3 | Surface distinction | 10 | accepted | Discovery annotations explain when to invoke `capability::execute` versus inspect catalog substrate. |
-| ECP-4 | Replacement classification | 15 | accepted | Every row is classified as `runtime_routable`, `producer_extensible`, or `kernel_evolution_only`. |
-| ECP-5 | Minimality closure | 10 | accepted | Every row records whether it stays core/governance/transport or is a module candidate. |
-| ECP-6 | Kernel evolution path | 10 | accepted | Kernel/governance rows name source-level validation and adversarial review as their improvement path. |
-| ECP-7 | Agent discovery ergonomics | 10 | accepted | Provider-visible catalog guidance separates session-useful operations from internal/evolution substrate. |
-| ECP-8 | UI language alignment | 10 | accepted | Cockpit top-level counts use operation language and drill into substrate only as needed. |
-| ECP-9 | Static gates | 5 | accepted | Focused Rust tests, docs drift checks, personal-info guard, whitespace check, and no managed skills guard. |
+| ECP-0 | Execute operation coverage | 15 | passed | Every `SUPPORTED_OPERATION_NAMES` entry has one `agent_operation` inventory row. |
+| ECP-1 | Catalog function coverage | 15 | passed | Every startup-registered catalog function has one `catalog_function` inventory row. |
+| ECP-2 | Surface distinction | 10 | passed | Discovery annotations explain when to invoke `capability::execute` versus inspect catalog substrate. |
+| ECP-3 | Replacement classification | 15 | passed | Every row is classified as `runtime_routable`, `producer_extensible`, or `kernel_evolution_only`. |
+| ECP-4 | Minimality closure | 10 | passed | Every row records whether it stays core/governance/transport or is a module candidate. |
+| ECP-5 | Kernel evolution path | 10 | passed | Kernel/governance rows name source-level validation and adversarial review as their improvement path. |
+| ECP-6 | Agent discovery ergonomics | 10 | passed | Provider-visible catalog guidance separates session-useful operations from internal/evolution substrate. |
+| ECP-7 | UI language alignment | 10 | passed | Cockpit top-level counts use operation language and drill into substrate only as needed. |
+| ECP-8 | Static gates | 5 | passed | Focused Rust tests, docs drift checks, personal-info guard, whitespace check, and no managed skills guard. |
 
 ## Kernel Evolution Protocol
 

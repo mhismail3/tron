@@ -3778,6 +3778,17 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     assert_eq!(git_status["shadowTrial"]["runs"], json!(1));
     assert_eq!(git_status["shadowTrial"]["passed"], json!(1));
     assert_eq!(
+        git_status["shadowTrial"]["evidenceInspectReady"],
+        json!(false)
+    );
+    assert_eq!(
+        git_status["shadowTrial"]["evidenceRefs"]
+            .as_array()
+            .expect("broad overview evidence refs")
+            .len(),
+        0
+    );
+    assert_eq!(
         git_status["shadowTrial"]["availableForThisOperation"],
         json!(true)
     );
@@ -3831,6 +3842,73 @@ async fn cockpit_overview_projects_operation_ownership_binding_shadow_and_rollba
     let other_git_status = operation_projection(&other_scope, "git_status");
     assert_eq!(other_git_status["binding"]["requested"], json!(0));
     assert_eq!(other_git_status["shadowTrial"]["requested"], json!(0));
+
+    let evidence_id = shadow_run["capabilityShadowTrialEvidenceResourceId"]
+        .as_str()
+        .expect("shadow evidence id");
+    let evidence_version_id = shadow_run["capabilityShadowTrialEvidenceVersionId"]
+        .as_str()
+        .expect("shadow evidence version id");
+    let targeted = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation(
+            "cockpit-targeted-git-status",
+            json!({
+                "operation": "capability_binding_cockpit_overview",
+                "targetOperation": "git_status"
+            }),
+        ),
+    )
+    .await
+    .expect("targeted cockpit overview");
+    assert_eq!(targeted["summary"]["returnedOperations"], json!(1));
+    assert_eq!(
+        targeted["projection"]["rawResourceIdsReturned"],
+        json!(true)
+    );
+    let targeted_git_status = operation_projection(&targeted, "git_status");
+    assert_eq!(
+        targeted_git_status["shadowTrial"]["evidenceInspectReady"],
+        json!(true)
+    );
+    let evidence_refs = targeted_git_status["shadowTrial"]["evidenceRefs"]
+        .as_array()
+        .expect("targeted evidence refs");
+    assert_eq!(evidence_refs.len(), 1);
+    assert_eq!(evidence_refs[0]["resourceId"], json!(evidence_id));
+    assert_eq!(evidence_refs[0]["versionId"], json!(evidence_version_id));
+    assert_eq!(
+        evidence_refs[0]["inspectOperation"],
+        json!("capability_shadow_trial_evidence_inspect")
+    );
+    assert_eq!(
+        evidence_refs[0]["inspectPayload"]["capabilityShadowTrialEvidenceResourceId"],
+        json!(evidence_id)
+    );
+    assert_eq!(
+        evidence_refs[0]["inspectPayload"]["expectedCapabilityShadowTrialEvidenceVersionId"],
+        json!(evidence_version_id)
+    );
+    let has_exact_inspect_step = targeted_git_status["agentPath"]["readOnlySequence"]
+        .as_array()
+        .expect("read only sequence")
+        .iter()
+        .any(|step| {
+            step["operation"] == json!("capability_shadow_trial_evidence_inspect")
+                && step["payload"]["capabilityShadowTrialEvidenceResourceId"] == json!(evidence_id)
+        });
+    assert!(
+        has_exact_inspect_step,
+        "targeted cockpit row should give the agent the exact evidence inspect step"
+    );
+    assert_eq!(
+        targeted_git_status["agentPath"]["completion"]["state"],
+        json!("continue_with_returned_evidence_refs")
+    );
+    assert_eq!(
+        targeted_git_status["agentPath"]["completion"]["action"],
+        json!("inspect_returned_refs_only")
+    );
 }
 
 #[tokio::test]
@@ -4096,6 +4174,31 @@ async fn cockpit_overview_filters_exact_operation_and_returns_agent_native_path(
             .expect("adapter guidance")
             .contains("Do not call git_status just to prove replacement readiness")
     );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["state"],
+        json!("answer_now_no_current_scope_evidence")
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["action"],
+        json!("stop_after_targeted_cockpit")
+    );
+    assert!(
+        git_status["agentPath"]["completion"]["finalAnswerGuidance"]
+            .as_str()
+            .expect("final answer guidance")
+            .contains("do not inspect evidence schemas")
+    );
+    let blocked_inspections = git_status["agentPath"]["completion"]["doNotInspect"]
+        .as_array()
+        .expect("blocked inspections");
+    assert!(
+        blocked_inspections
+            .iter()
+            .any(|entry| entry["operation"] == "capability_shadow_trial_evidence_inspect")
+    );
+    assert!(blocked_inspections.iter().any(|entry| {
+        entry["operation"] == "catalog_inspect execute::capability_shadow_trial_evidence_inspect"
+    }));
     let unavailable = git_status["agentPath"]["unavailableSurfaces"]
         .as_array()
         .expect("unavailable surfaces");

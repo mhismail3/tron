@@ -49,7 +49,8 @@ autonomous self-update across every operation.
 | Routed invocation evidence is durable. | `emit_routed_invocation_event` records a `capability_route_event` resource with route version, activation refs, trace/replay refs, idempotency, and side-effect proof. |
 | Active routes use a supervised module-runtime projection boundary. | `git_status` dispatch calls `execute_routed_git_status` when `active_route_for_git_status` returns a route; route execution calls `module_runtime::service::project_provider_safe_adapter_output`, requires exact lifecycle/runtime version refs, lifecycle runtime authorization, `networkPolicy: none`, supervised-envelope proof, accepted shadow-trial evidence as the projection source, `liveModuleCodeExecuted: false`, and a bounded `git_status` projection. |
 | Active routes fail closed instead of silently falling back. | A rejected supervised projection emits a `failed_closed` `capability_route_event` and returns an errored `git_status route failed closed` result with `moduleAdapterInvoked: true`, `builtInProjectionUsed: false`, and no built-in success projection. Stale referenced route records emit a `failed_closed` lookup event before returning the stale-record error. |
-| Cockpit visibility reflects route truth without local fabrication. | `capability_binding::cockpit_overview` now scans candidate, binding, activation, route-event, and rollback resources; projects active route count, route-event count, routed invocations, failed-closed/disabled/rolled-back state, rollback records, terminal controls, safe state labels, and bounded `routeStories`; and iOS renders those server-owned route facts in "What Changed" cards, operation cards, and drill-down details without raw ids. |
+| Cockpit visibility reflects route truth without local fabrication. | `capability_binding::cockpit_overview` now scans candidate, binding, activation, route-event, rollback, and scoped shadow-evidence resources; projects active route count, route-event count, routed invocations, failed-closed/disabled/rolled-back state, rollback records, terminal controls, safe state labels, and bounded `routeStories`; broad overview rows omit raw refs, while targeted operation rows can return bounded exact shadow-evidence inspect payloads so Tron can inspect evidence without guessing unsupported list operations. The provider-visible `capability_binding_cockpit_overview` wrapper keeps broad UI projections intact but compacts exact `targetOperation` responses into a model-facing packet with one target row, agent path, counts, scoped evidence refs, and projection proof so provider replay is not dominated by UI inventory JSON. |
+| Shadow-trial schemas are exact enough for model-native use. | `catalog_inspect` now names the required top-level fields for `capability_shadow_trial_decision_record` and `capability_shadow_trial_run_record`, including request/decision resource refs, expected current version ids, decision enum, rationale, and bounded `git_status` built-in/candidate projections. `catalog_search` exposes those metadata-write operations as contextual future steps in shadow-readiness plans without listing them as read-only recommendations. |
 | Minimal-engine guardrails hold. | Route records forbid package-manager, network, deploy, dependency restore, dispatch-table mutation, raw paths/commands/logs/code/file contents, raw grant IDs, raw authority IDs, and repo-managed skills. |
 
 ## Validation Commands
@@ -76,6 +77,37 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 scripts/personal-info-guard.sh
 git diff --check
 git diff --cached --check
+```
+
+Latest focused validation result:
+
+```text
+cargo test --manifest-path packages/agent/Cargo.toml cockpit_overview_projects_operation_ownership_binding_shadow_and_rollback_without_raw_leakage -- --nocapture
+result: passed; the broad cockpit row returned no shadow-evidence refs, and the targeted git_status row returned the exact capability_shadow_trial_evidence_inspect payload.
+
+cargo test --manifest-path packages/agent/Cargo.toml catalog_inspect_projects_shadow_trial_record_required_fields -- --nocapture
+result: passed; shadow-trial decision/run schemas expose exact required resource/version/projection fields.
+
+cargo test --manifest-path packages/agent/Cargo.toml catalog_search_returns_agent_readiness_plan_for_multi_intent_queries -- --nocapture
+result: passed; replacement readiness search starts at targeted cockpit, keeps contextual shadow write schemas out of read-only matches, and preserves unsupported-list recovery guidance.
+
+cargo test --manifest-path packages/agent/Cargo.toml cockpit_overview_content_names_targeted_operation -- --nocapture
+result: passed; targeted cockpit content reports scoped evidence/count state and tells the agent not to search unsupported shadow list operations.
+
+cargo test --manifest-path packages/agent/Cargo.toml cockpit_overview_result_details_compacts_targeted_projection -- --nocapture
+result: passed; targeted execute details omit heavy UI families/route stories/full operation arrays while preserving the exact target row, agent path, and projection policy.
+
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+result: passed.
+
+cargo check --manifest-path packages/agent/Cargo.toml
+result: passed.
+
+cargo test --manifest-path packages/agent/Cargo.toml --test capability_dynamic_replacement_invariants -- --nocapture
+result: passed; 6 passed, 0 failed.
+
+cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
+result: passed; 9 passed, 0 failed.
 ```
 
 ## Practical Live-Test Boundary

@@ -44,17 +44,17 @@ Provider-visible surface remains one tool: `capability::execute`.
 
 ## Weighted Scorecard
 
-| Area | Weight | Status | Score | Acceptance |
-|---|---:|---|---:|---|
-| Runtime route model | 15 | passed | 15 | Active replacement routes are explicit, versioned, scoped, reversible, single-active per scope at lookup, and executed through the supervised module-runtime provider-safe projection boundary for `git_status`. |
-| Candidate module contract | 15 | passed | 15 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route validates candidate lifecycle/runtime refs through the same supervised module-runtime projection boundary used at invocation, and regression coverage proves those refs can come from the real module lifecycle/runtime operation path. |
-| Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
-| Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
-| Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
-| Agent workflow | 10 | passed | 10 | Tron can inspect gaps, propose replacements, run shadow trials, inspect evidence, request approval, activate, invoke, explain, disable, and roll back the first route through durable `capability::execute` operations. Broader live stress workflows should now test model ergonomics and breadth rather than unblock foundation. |
-| Cockpit/session visibility | 10 | passed | 10 | Engine Cockpit derives route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, terminal controls, and bounded high-level route-story cards from server-owned catalog/binding/route facts. Route-story cards tap through to operation detail without exposing raw IDs or local-only truth. |
-| Tests/stress harness | 8 | passed | 8 | Backend lifecycle tests, dispatcher-level `capability::execute` route coverage, and static invariants prove the first route. Simulator/live Tron stress tests are the next practical product validation layer, not another foundation scorecard. |
-| Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
+| ID | Area | Weight | Status | Score | Acceptance |
+|---|---|---:|---|---:|---|
+| CDR-0 | Runtime route model | 15 | passed | 15 | Active replacement routes are explicit, versioned, scoped, reversible, single-active per scope at lookup, and executed through the supervised module-runtime provider-safe projection boundary for `git_status`. |
+| CDR-1 | Candidate module contract | 15 | passed | 15 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route validates candidate lifecycle/runtime refs through the same supervised module-runtime projection boundary used at invocation, and regression coverage proves those refs can come from the real module lifecycle/runtime operation path. |
+| CDR-2 | Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
+| CDR-3 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
+| CDR-4 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
+| CDR-5 | Agent workflow | 10 | passed | 10 | Tron can inspect gaps, propose replacements, run shadow trials, inspect evidence, request approval, activate, invoke, explain, disable, and roll back the first route through durable `capability::execute` operations. Broader live stress workflows should now test model ergonomics and breadth rather than unblock foundation. |
+| CDR-6 | Cockpit/session visibility | 10 | passed | 10 | Engine Cockpit derives route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, terminal controls, and bounded high-level route-story cards from server-owned catalog/binding/route facts. Route-story cards tap through to operation detail without exposing raw IDs or local-only truth. |
+| CDR-7 | Tests/stress harness | 8 | passed | 8 | Backend lifecycle tests, dispatcher-level `capability::execute` route coverage, and static invariants prove the first route. Simulator/live Tron stress tests are the next practical product validation layer, not another foundation scorecard. |
+| CDR-8 | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
 
 ## Runtime Route Model
 
@@ -115,7 +115,9 @@ the provider-safe projection is unsafe.
    constraints, and current owner.
 3. Record a replacement candidate rationale with lifecycle/runtime refs,
    rollback controls, and provider-safe contract evidence.
-4. Run the shadow trial and inspect shadow evidence.
+4. Run the shadow trial, then use targeted `capability_binding_cockpit_overview`
+   to retrieve the exact bounded `capability_shadow_trial_evidence_inspect`
+   payload before inspecting shadow evidence.
 5. Request user approval for route activation.
 6. Activate the scoped route when approved.
 7. Invoke the operation and inspect route events.
