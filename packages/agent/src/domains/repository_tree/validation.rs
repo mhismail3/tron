@@ -162,6 +162,25 @@ pub(super) fn reject_raw_repository_tree_fields(payload: &Value) -> Result<(), C
     Ok(())
 }
 
+pub(super) fn reject_unknown_fields(
+    payload: &Value,
+    operation: &str,
+    allowed: &[&str],
+) -> Result<(), CapabilityError> {
+    let Value::Object(fields) = payload else {
+        return Err(invalid(format!("{operation} payload must be an object")));
+    };
+    for field in fields.keys() {
+        if !allowed.iter().any(|allowed| allowed == field) {
+            return Err(invalid(format!(
+                "{operation} does not accept `{field}`; supported top-level fields are {}",
+                allowed.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn idempotency_key(
     invocation: &Invocation,
     payload: &Value,

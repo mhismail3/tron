@@ -8,6 +8,9 @@
 //! list/inspect projections, fingerprinted idempotency evidence, and lifecycle
 //! events. Provider-visible projections stay byte-bounded while preserving
 //! UTF-8 character boundaries.
+//! `git_status` exposes copyable provider-safe refs for the common snapshot
+//! path, and repository-tree operations reject unsupported top-level payload
+//! fields so agents must use the exact published contract.
 //!
 //! ## Submodules
 //!

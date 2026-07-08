@@ -282,6 +282,31 @@ async fn record_list_inspect_repository_tree_schema_lifecycle_and_projection() {
 #[tokio::test]
 async fn repository_tree_validation_rejects_raw_contents_unsafe_paths_and_secret_like_tokens() {
     let fixture = Fixture::new("repository-tree-validation").await;
+    let unknown_snapshot_field = fixture
+        .record_error(
+            "unknown-snapshot-field",
+            with_extra(tree_payload(), "repositoryTreeRefId", json!("wrong-alias")),
+        )
+        .await;
+    assert!(
+        unknown_snapshot_field.contains("repository_tree_snapshot does not accept"),
+        "{unknown_snapshot_field}"
+    );
+
+    let list_invocation = fixture.read_invocation(
+        "unknown-list-field",
+        json!({"repositoryTreeRefId": "wrong-alias"}),
+    );
+    let unknown_list_field =
+        list_repository_tree_value(&fixture.deps, &list_invocation, &list_invocation.payload)
+            .await
+            .expect_err("list should reject unsupported fields")
+            .to_string();
+    assert!(
+        unknown_list_field.contains("repository_tree_list does not accept"),
+        "{unknown_list_field}"
+    );
+
     let raw = fixture
         .record_error(
             "raw-tree",

@@ -34,16 +34,16 @@ pub(super) async fn catalog_search(
         .get("executeOperationSearch")
         .and_then(|search| search.get("totalMatches"))
         .and_then(Value::as_u64);
-    let content = if operation_matches == 0 && operation_search_total == Some(0) {
+    let content = if operation_matches > 0 {
         format!(
-            "Catalog search returned {visible} visible functions and 0 execute operation matches."
+            "Catalog search returned {operation_matches} provider-visible execute operation match(es) and {visible} diagnostic catalog function match(es)."
         )
-    } else if operation_matches == 0 {
-        format!("Catalog search returned {visible} visible functions.")
+    } else if operation_search_total == Some(0) {
+        format!(
+            "Catalog search found 0 provider-visible execute operation matches and {visible} diagnostic catalog function match(es)."
+        )
     } else {
-        format!(
-            "Catalog search returned {visible} visible functions and {operation_matches} execute operation match(es)."
-        )
+        format!("Catalog search returned {visible} diagnostic catalog function match(es).")
     };
     Ok(ok_result(
         content,
@@ -77,7 +77,8 @@ pub(super) async fn catalog_inspect(
             .unwrap_or_else(|| "operation".to_owned());
         return Ok(ok_result(
             format!(
-                "Catalog {kind} inspected: {id}. Required top-level payload fields: {required_fields}."
+                "Catalog {kind} inspected: {id}. Required top-level payload fields: {required_fields}.{}",
+                execute_operation_invocation_guidance(&operation)
             ),
             json!({
                 "primitiveOperation": "catalog_inspect",
@@ -140,12 +141,17 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
             "arguments": {"operation": operation}
         })
     });
-    let required_payload_fields = agent_usage
-        .pointer("/preflight/requiredPayloadFields")
-        .and_then(Value::as_array)
-        .filter(|fields| !fields.is_empty())
-        .cloned()
-        .unwrap_or_else(|| operation_required_payload_fields(operation));
+    let operation_required_payload_fields = operation_required_payload_fields(operation);
+    let required_payload_fields = if operation_required_payload_fields.len() > 1 {
+        operation_required_payload_fields
+    } else {
+        agent_usage
+            .pointer("/preflight/requiredPayloadFields")
+            .and_then(Value::as_array)
+            .filter(|fields| !fields.is_empty())
+            .cloned()
+            .unwrap_or(operation_required_payload_fields)
+    };
     let required_payload_field_names = required_payload_fields
         .iter()
         .filter_map(Value::as_str)
@@ -206,6 +212,15 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
     projection
 }
 
+fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
+    match operation {
+        "repository_tree_snapshot" => {
+            " Copy complete repositoryRef/rootRef/headRef objects, including kind, from git_status details.git.repository.repositoryTreeSnapshotInput; passing only .id values is invalid."
+        }
+        _ => "",
+    }
+}
+
 fn operation_contextual_pool_projection(operation: &str, mut projection: Value) -> Value {
     let usage = operation_agent_usage_projection(operation);
     if let Some(object) = projection.as_object_mut() {
@@ -252,20 +267,155 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
         }
         properties.insert(
             (*field).to_owned(),
-            json!({
-                "type": "string",
-                "description": "Operation-specific top-level payload field required before invoking this capability."
-            }),
+            execute_operation_field_schema(operation, field),
         );
     }
 
+    add_operation_specific_optional_fields(operation, &mut properties);
+    let additional_properties = !matches!(
+        operation,
+        "repository_tree_snapshot" | "repository_tree_list" | "repository_tree_inspect"
+    );
     json!({
         "type": "object",
         "required": required_fields,
         "properties": properties,
-        "additionalProperties": true,
+        "additionalProperties": additional_properties,
         "payloadPlacement": "top_level_capability_execute_payload",
         "schemaCompleteness": "operation_specific_contract"
+    })
+}
+
+fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
+    match (operation, field) {
+        ("repository_tree_snapshot", "repositoryRef") => json!({
+            "type": "object",
+            "description": "Required bounded repository reference; copy the complete repositoryTreeSnapshotInput.repositoryRef object from git_status when available, including kind. Passing only .id is invalid."
+        }),
+        ("repository_tree_snapshot", "rootRef") => json!({
+            "type": "object",
+            "description": "Required bounded workspace/repository-root reference; copy the complete repositoryTreeSnapshotInput.rootRef object from git_status when available, including kind. Passing only .id is invalid."
+        }),
+        ("repository_tree_snapshot", "treeObjectRef") => json!({
+            "type": "string",
+            "description": "Required bounded tree object token; copy repositoryTreeSnapshotInput.treeObjectRef from git_status when available. Never pass raw tree contents."
+        }),
+        ("repository_tree_snapshot", "idempotencyKey") => json!({
+            "type": "string",
+            "description": "Required stable bounded idempotency key for this metadata-only snapshot write."
+        }),
+        ("repository_tree_inspect", "repositoryTreeResourceId") => json!({
+            "type": "string",
+            "description": "Exact repository_tree_snapshot resource id returned by repository_tree_snapshot or repository_tree_list."
+        }),
+        ("repository_tree_list", "repositoryRefId") => json!({
+            "type": "string",
+            "description": "Optional bounded repository ref id filter; unsupported aliases are rejected."
+        }),
+        (_, field) => json!({
+            "type": "string",
+            "description": format!(
+                "Operation-specific top-level payload field `{field}` required before invoking this capability."
+            )
+        }),
+    }
+}
+
+fn add_operation_specific_optional_fields(
+    operation: &str,
+    properties: &mut serde_json::Map<String, Value>,
+) {
+    let optional_fields: Vec<(&str, Value)> = match operation {
+        "repository_tree_snapshot" => vec![
+            (
+                "snapshotId",
+                json!({"type": "string", "description": "Optional caller-visible snapshot id for idempotent resource identity."}),
+            ),
+            (
+                "headRef",
+                json!({"type": "object", "description": "Optional bounded commit/head reference; copy the complete repositoryTreeSnapshotInput.headRef object from git_status when available, including kind."}),
+            ),
+            (
+                "snapshotLabel",
+                json!({"type": "string", "description": "Optional bounded short label for the repository tree snapshot."}),
+            ),
+            (
+                "snapshotSummary",
+                json!({"type": "string", "description": "Optional bounded summary for the repository tree snapshot."}),
+            ),
+            (
+                "pathEntries",
+                json!({"type": "array", "description": "Optional bounded normalized relative path metadata only; never raw file contents."}),
+            ),
+            (
+                "sourceRefs",
+                json!({"type": "array", "description": "Optional bounded source refs for provider-safe custody evidence."}),
+            ),
+            (
+                "evidenceRefs",
+                json!({"type": "array", "description": "Optional bounded evidence refs for trace/resource proof."}),
+            ),
+            (
+                "reason",
+                json!({"type": "string", "description": "Optional bounded reason for the custody snapshot."}),
+            ),
+            ("networkPolicy", network_policy_none_schema()),
+            (
+                "maxAgeDays",
+                json!({"type": "integer", "description": "Optional retention limit in days."}),
+            ),
+            (
+                "totalEntries",
+                json!({"type": "integer", "description": "Optional bounded aggregate tree entry count."}),
+            ),
+            (
+                "fileCount",
+                json!({"type": "integer", "description": "Optional bounded aggregate file count."}),
+            ),
+            (
+                "directoryCount",
+                json!({"type": "integer", "description": "Optional bounded aggregate directory count."}),
+            ),
+            (
+                "symlinkCount",
+                json!({"type": "integer", "description": "Optional bounded aggregate symlink count."}),
+            ),
+            (
+                "submoduleCount",
+                json!({"type": "integer", "description": "Optional bounded aggregate submodule count."}),
+            ),
+            (
+                "maxDepth",
+                json!({"type": "integer", "description": "Optional bounded maximum path depth."}),
+            ),
+        ],
+        "repository_tree_list" => vec![
+            (
+                "limit",
+                json!({"type": "integer", "description": "Optional bounded result limit."}),
+            ),
+            (
+                "includeArchived",
+                json!({"type": "boolean", "description": "Optional archived snapshot inclusion flag."}),
+            ),
+            (
+                "repositoryRefId",
+                json!({"type": "string", "description": "Optional bounded repository ref id filter; unsupported aliases are rejected."}),
+            ),
+            ("networkPolicy", network_policy_none_schema()),
+        ],
+        "repository_tree_inspect" => vec![("networkPolicy", network_policy_none_schema())],
+        _ => Vec::new(),
+    };
+    for (field, schema) in optional_fields {
+        properties.entry(field.to_owned()).or_insert(schema);
+    }
+}
+
+fn network_policy_none_schema() -> Value {
+    json!({
+        "const": "none",
+        "description": "Optional explicit no-network policy proof; only `none` is accepted."
     })
 }
 
@@ -307,6 +457,10 @@ fn execute_operation_output_schema(operation: &str) -> Value {
                                     "properties": {
                                         "branch": {"type": ["string", "null"]},
                                         "detachedHead": {"type": "boolean"},
+                                        "headOid": {"type": ["string", "null"]},
+                                        "headTreeOid": {"type": ["string", "null"]},
+                                        "treeObjectRef": {"type": ["string", "null"], "description": "Provider-safe bounded tree object token for repository_tree_snapshot."},
+                                        "repositoryTreeSnapshotInput": {"type": "object", "description": "Copyable provider-safe refs for repository_tree_snapshot."},
                                         "hasUpstream": {"type": "boolean"},
                                         "ahead": {"type": ["integer", "null"]},
                                         "behind": {"type": ["integer", "null"]},
@@ -379,6 +533,51 @@ fn normalize_catalog_inspect_payload(payload: &Value) -> (Value, Option<String>)
 
 fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
     let fields = match operation {
+        "repository_tree_snapshot" => vec![
+            "operation",
+            "repositoryRef",
+            "rootRef",
+            "treeObjectRef",
+            "idempotencyKey",
+        ],
+        "goal_inspect" => vec!["operation", "goalResourceId"],
+        "question_inspect" => vec!["operation", "questionResourceId"],
+        "memory_inspect" => vec!["operation", "recordResourceId"],
+        "memory_query_inspect" => vec!["operation", "queryResourceId"],
+        "memory_decision_inspect" => vec!["operation", "decisionResourceId"],
+        "context_control_action_inspect" => vec!["operation", "contextControlActionResourceId"],
+        "media_inspect" => vec!["operation", "mediaResourceId"],
+        "import_history_inspect" => vec!["operation", "importHistoryResourceId"],
+        "repository_tree_inspect" => vec!["operation", "repositoryTreeResourceId"],
+        "import_preview_inspect" => vec!["operation", "importPreviewResourceId"],
+        "program_execution_inspect" => vec!["operation", "programExecutionResourceId"],
+        "prompt_artifact_inspect" => vec!["operation", "promptArtifactResourceId"],
+        "update_diagnostic_inspect" => vec!["operation", "updateDiagnosticResourceId"],
+        "device_inspect" => vec!["operation", "deviceRegistrationResourceId"],
+        "notification_inspect" => vec!["operation", "notificationResourceId"],
+        "procedural_state_inspect" => vec!["operation", "proceduralRecordResourceId"],
+        "procedural_activation_request_inspect" => {
+            vec!["operation", "proceduralActivationRequestResourceId"]
+        }
+        "procedural_activation_decision_inspect" => {
+            vec!["operation", "proceduralActivationDecisionResourceId"]
+        }
+        "schedule_inspect" => vec!["operation", "scheduleResourceId"],
+        "tool_source_inspect" => vec!["operation", "toolSourceResourceId"],
+        "subagent_task_inspect" => vec!["operation", "subagentTaskResourceId"],
+        "worker_package_inspect" => vec!["operation", "workerPackageResourceId"],
+        "module_inspect" => vec!["operation", "moduleManifestResourceId"],
+        "module_proposal_inspect" => vec!["operation", "moduleProposalResourceId"],
+        "module_validation_inspect" => vec!["operation", "moduleValidationReportResourceId"],
+        "module_install_request_inspect" => vec!["operation", "moduleInstallRequestResourceId"],
+        "module_install_decision_inspect" => vec!["operation", "moduleInstallDecisionResourceId"],
+        "module_dependency_request_inspect" => {
+            vec!["operation", "moduleDependencyRequestResourceId"]
+        }
+        "module_dependency_decision_inspect" => {
+            vec!["operation", "moduleDependencyDecisionResourceId"]
+        }
+        "module_dependency_policy_inspect" => vec!["operation", "moduleDependencyPolicyResourceId"],
         "capability_binding_request_inspect" => {
             vec!["operation", "capabilityBindingRequestResourceId"]
         }
@@ -398,7 +597,12 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
             vec!["operation", "capabilityRouteBindingResourceId"]
         }
         "capability_route_event_inspect" => vec!["operation", "capabilityRouteEventResourceId"],
-        operation if operation.ends_with("_inspect") => vec!["operation", "<exactResourceIdField>"],
+        "module_lifecycle_inspect" => vec!["operation", "moduleLifecycleResourceId"],
+        "module_runtime_inspect" => vec!["operation", "moduleRuntimeResourceId"],
+        "web_source_inspect" => vec!["operation", "webSourceResourceId"],
+        "web_research_request_inspect" => vec!["operation", "webResearchRequestResourceId"],
+        "web_research_review_inspect" => vec!["operation", "webResearchReviewResourceId"],
+        "web_research_source_inspect" => vec!["operation", "webResearchSourceResourceId"],
         _ => vec!["operation"],
     };
     fields
@@ -1443,6 +1647,156 @@ mod tests {
             discovery["agentUsage"]["effect"]["readOnlyInspectionSafe"],
             true
         );
+    }
+
+    #[test]
+    fn catalog_inspect_uses_exact_repository_tree_inspect_resource_field() {
+        let discovery = execute_operation_inspect_projection(
+            "repository_tree_inspect",
+            "execute::repository_tree_inspect",
+        );
+
+        assert_eq!(
+            discovery["schema"]["requiredPayloadFields"],
+            json!(["operation", "repositoryTreeResourceId"])
+        );
+        assert_eq!(
+            discovery["inputSchema"]["required"],
+            json!(["operation", "repositoryTreeResourceId"])
+        );
+        assert_eq!(
+            discovery["inputSchema"]["properties"]["repositoryTreeResourceId"]["type"],
+            "string"
+        );
+        assert!(
+            !discovery.to_string().contains("<exactResourceIdField>"),
+            "model-facing schema must never require the agent to infer inspect resource field names"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_exposes_exact_repository_tree_snapshot_contract() {
+        let discovery = execute_operation_inspect_projection(
+            "repository_tree_snapshot",
+            "execute::repository_tree_snapshot",
+        );
+
+        assert_eq!(
+            discovery["schema"]["requiredPayloadFields"],
+            json!([
+                "operation",
+                "repositoryRef",
+                "rootRef",
+                "treeObjectRef",
+                "idempotencyKey"
+            ])
+        );
+        assert_eq!(
+            discovery["inputSchema"]["additionalProperties"],
+            json!(false)
+        );
+        assert_eq!(
+            discovery["inputSchema"]["properties"]["repositoryRef"]["type"],
+            "object"
+        );
+        assert!(
+            discovery["inputSchema"]["properties"]["repositoryRef"]["description"]
+                .as_str()
+                .expect("repository ref description")
+                .contains("including kind")
+        );
+        assert_eq!(
+            discovery["inputSchema"]["properties"]["rootRef"]["type"],
+            "object"
+        );
+        assert!(
+            discovery["inputSchema"]["properties"]["rootRef"]["description"]
+                .as_str()
+                .expect("root ref description")
+                .contains("Passing only .id is invalid")
+        );
+        assert!(
+            discovery["inputSchema"]["properties"]["headRef"]["description"]
+                .as_str()
+                .expect("head ref description")
+                .contains("including kind")
+        );
+        assert!(
+            discovery["inputSchema"]["properties"]["treeObjectRef"]["description"]
+                .as_str()
+                .expect("tree object description")
+                .contains("repositoryTreeSnapshotInput.treeObjectRef")
+        );
+        assert!(
+            discovery["inputSchema"]["properties"]["pathEntries"]["description"]
+                .as_str()
+                .expect("path entry description")
+                .contains("never raw file contents")
+        );
+        let guidance = execute_operation_invocation_guidance("repository_tree_snapshot");
+        assert!(guidance.contains("Copy complete repositoryRef/rootRef/headRef objects"));
+        assert!(guidance.contains("including kind"));
+        assert!(guidance.contains("passing only .id values is invalid"));
+    }
+
+    #[test]
+    fn catalog_inspect_exposes_exact_repository_tree_list_contract() {
+        let discovery = execute_operation_inspect_projection(
+            "repository_tree_list",
+            "execute::repository_tree_list",
+        );
+
+        assert_eq!(
+            discovery["schema"]["requiredPayloadFields"],
+            json!(["operation"])
+        );
+        assert_eq!(
+            discovery["inputSchema"]["additionalProperties"],
+            json!(false)
+        );
+        assert_eq!(
+            discovery["inputSchema"]["properties"]["repositoryRefId"]["description"],
+            "Optional bounded repository ref id filter; unsupported aliases are rejected."
+        );
+        assert_eq!(
+            discovery["inputSchema"]["properties"]["networkPolicy"]["const"],
+            "none"
+        );
+        assert!(
+            !discovery.to_string().contains("repositoryTreeRefId"),
+            "catalog must not suggest unsupported repository tree aliases"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_has_no_placeholder_fields_for_supported_inspect_operations() {
+        for operation in supported_operation_names()
+            .iter()
+            .copied()
+            .filter(|operation| operation.ends_with("_inspect"))
+        {
+            let discovery =
+                execute_operation_inspect_projection(operation, &format!("execute::{operation}"));
+            let rendered = discovery.to_string();
+            assert!(
+                !rendered.contains("<exactResourceIdField>"),
+                "{operation} exposed a placeholder resource id field"
+            );
+
+            let required = discovery["schema"]["requiredPayloadFields"]
+                .as_array()
+                .expect("required payload fields");
+            if operation != "catalog_inspect" {
+                assert!(
+                    required.iter().any(|field| {
+                        field.as_str().is_some_and(|field| {
+                            field != "operation" && field.ends_with("ResourceId")
+                        })
+                    }),
+                    "{operation} should advertise its exact resource id field"
+                );
+            }
+        }
     }
 
     #[test]

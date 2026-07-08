@@ -115,8 +115,10 @@
 //! aliases return operation-specific call contracts, preflight guidance, and
 //! required top-level payload fields in both normalized `inputSchema` /
 //! `outputSchema` slots and the operation-specific schema block instead of the
-//! generic `capability::execute` wrapper. Runtime-routable operations keep their
-//! capability-pool classification, but operation inspection also includes a
+//! generic `capability::execute` wrapper. Inspect operations must expose their
+//! exact resource-id field names; placeholder fields are rejected because they
+//! force the model to infer hidden request syntax. Runtime-routable operations
+//! keep their capability-pool classification, but operation inspection also includes a
 //! `currentInvocation` boundary so normal read-only/session calls are not
 //! confused with explicit replacement, shadow, route, disable, or rollback
 //! workflows.

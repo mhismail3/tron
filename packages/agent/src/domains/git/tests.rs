@@ -44,6 +44,24 @@ async fn status_reports_clean_repo() {
     assert_eq!(value["repository"]["detachedHead"], false);
     assert!(value["repository"]["headOid"].as_str().unwrap().len() >= 40);
     assert!(value["repository"]["headTreeOid"].as_str().unwrap().len() >= 40);
+    assert!(
+        value["repository"]["treeObjectRef"]
+            .as_str()
+            .unwrap()
+            .starts_with("git_tree:")
+    );
+    assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["treeObjectRef"],
+        value["repository"]["treeObjectRef"]
+    );
+    assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["contentFree"],
+        true
+    );
+    assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["rawRepositoryContentsIncluded"],
+        false
+    );
     assert!(value["repository"]["indexTreeOid"].as_str().unwrap().len() >= 40);
     assert_eq!(value["repository"]["hasUpstream"], false);
     assert!(value["repository"]["upstream"].is_null());

@@ -80,7 +80,7 @@ fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
         text.to_owned(),
         json!({
             "primitiveOperation": operation,
-            "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
+            "status": "ok",
             "repositoryTree": details
         }),
     )

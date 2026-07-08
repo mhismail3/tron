@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::engine::{Invocation, RUNTIME_METADATA_WORKING_DIRECTORY};
 use crate::shared::server::context::run_blocking_task;
@@ -1284,6 +1285,11 @@ pub(super) fn repository_value(target: &ResolvedTarget, repository: &RepositoryF
         "detachedHead": repository.detached_head,
         "headOid": repository.head_oid,
         "headTreeOid": repository.head_tree_oid,
+        "treeObjectRef": repository
+            .head_tree_oid
+            .as_ref()
+            .map(|tree| format!("git_tree:{tree}")),
+        "repositoryTreeSnapshotInput": repository_tree_snapshot_input(repository),
         "indexTreeOid": repository.index_tree_oid,
         "indexTreeTruncated": repository.index_tree_truncated,
         "indexTreeOidUnavailable": repository.index_tree_oid_unavailable,
@@ -1292,6 +1298,49 @@ pub(super) fn repository_value(target: &ResolvedTarget, repository: &RepositoryF
         "ahead": repository.ahead,
         "behind": repository.behind
     })
+}
+
+fn repository_tree_snapshot_input(repository: &RepositoryFacts) -> Value {
+    let repository_id = format!(
+        "git_repository:{}",
+        short_sha256_hex(repository.worktree_relative_path.as_bytes())
+    );
+    let root_id = format!(
+        "git_root:{}",
+        short_sha256_hex(repository.worktree_relative_path.as_bytes())
+    );
+    json!({
+        "repositoryRef": {
+            "kind": "git_repository",
+            "id": repository_id,
+            "role": "repository"
+        },
+        "rootRef": {
+            "kind": "git_root",
+            "id": root_id,
+            "role": "root"
+        },
+        "headRef": repository.head_oid.as_ref().map(|head| json!({
+            "kind": "git_commit",
+            "id": format!("git_commit:{head}"),
+            "role": "head"
+        })),
+        "treeObjectRef": repository
+            .head_tree_oid
+            .as_ref()
+            .map(|tree| format!("git_tree:{tree}")),
+        "pathEntrySource": "git_status_provider_safe_projection",
+        "contentFree": true,
+        "rawRepositoryContentsIncluded": false
+    })
+}
+
+fn short_sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub(super) fn path_value(target: &ResolvedTarget) -> Value {

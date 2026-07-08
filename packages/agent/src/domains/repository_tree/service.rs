@@ -28,6 +28,33 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_raw_repository_tree_fields(payload)?;
+    reject_unknown_fields(
+        payload,
+        "repository_tree_snapshot",
+        &[
+            "operation",
+            "snapshotId",
+            "repositoryRef",
+            "rootRef",
+            "treeObjectRef",
+            "headRef",
+            "snapshotLabel",
+            "snapshotSummary",
+            "pathEntries",
+            "totalEntries",
+            "fileCount",
+            "directoryCount",
+            "symlinkCount",
+            "submoduleCount",
+            "maxDepth",
+            "sourceRefs",
+            "evidenceRefs",
+            "maxAgeDays",
+            "idempotencyKey",
+            "networkPolicy",
+            "reason",
+        ],
+    )?;
     ensure_write_authority(deps, invocation, "repository_tree_snapshot").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
@@ -159,6 +186,17 @@ pub(crate) async fn list_repository_tree_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reject_unknown_fields(
+        payload,
+        "repository_tree_list",
+        &[
+            "operation",
+            "limit",
+            "includeArchived",
+            "repositoryRefId",
+            "networkPolicy",
+        ],
+    )?;
     let _grant = inspect_read_grant(deps, invocation, "repository_tree_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
@@ -236,6 +274,11 @@ pub(crate) async fn inspect_repository_tree_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reject_unknown_fields(
+        payload,
+        "repository_tree_inspect",
+        &["operation", "repositoryTreeResourceId", "networkPolicy"],
+    )?;
     let _grant = inspect_read_grant(deps, invocation, "repository_tree_inspect").await?;
     let resource_id = required_string(payload, "repositoryTreeResourceId")?;
     validate_repository_tree_resource_id(&resource_id)?;

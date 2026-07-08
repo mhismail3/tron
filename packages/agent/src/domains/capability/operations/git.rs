@@ -158,10 +158,52 @@ fn git_status_content(status: &str, result: &Value) -> String {
         .pointer("/evidence/statusTruncated")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let snapshot_refs = git_status_snapshot_refs_content(result);
 
     format!(
-        "git_status {status}: {path} on {branch} {dirty} (staged {staged}, unstaged {unstaged}, untracked {untracked}, conflicted {conflicted}; porcelain {porcelain}; refs {refs}; truncated {truncated})"
+        "git_status {status}: {path} on {branch} {dirty} (staged {staged}, unstaged {unstaged}, untracked {untracked}, conflicted {conflicted}; porcelain {porcelain}; refs {refs}; truncated {truncated}){snapshot_refs}"
     )
+}
+
+fn git_status_snapshot_refs_content(result: &Value) -> String {
+    let Some(snapshot_input) = result
+        .pointer("/repository/repositoryTreeSnapshotInput")
+        .and_then(Value::as_object)
+    else {
+        return String::new();
+    };
+    let repository_ref = snapshot_input.get("repositoryRef");
+    let root_ref = snapshot_input.get("rootRef");
+    let tree_object_ref = snapshot_input
+        .get("treeObjectRef")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            result
+                .pointer("/repository/treeObjectRef")
+                .and_then(Value::as_str)
+        });
+    let head_ref = snapshot_input.get("headRef");
+    let (Some(repository_ref), Some(root_ref), Some(tree_object_ref)) =
+        (repository_ref, root_ref, tree_object_ref)
+    else {
+        return String::new();
+    };
+    let Some(repository_ref_json) = safe_compact_json(repository_ref) else {
+        return String::new();
+    };
+    let Some(root_ref_json) = safe_compact_json(root_ref) else {
+        return String::new();
+    };
+    let head_ref_json = head_ref
+        .and_then(safe_compact_json)
+        .unwrap_or_else(|| "none".to_owned());
+    format!(
+        "; repository_tree_snapshot input: copy complete ref objects from details.git.repository.repositoryTreeSnapshotInput; repositoryRef={repository_ref_json}, rootRef={root_ref_json}, treeObjectRef={tree_object_ref}, headRef={head_ref_json}; do not pass only .id values"
+    )
+}
+
+fn safe_compact_json(value: &Value) -> Option<String> {
+    serde_json::to_string(value).ok()
 }
 
 fn git_branch_label(result: &Value) -> String {
@@ -201,7 +243,32 @@ mod tests {
                 "status": "ok",
                 "operation": "status",
                 "path": {"relativePath": "."},
-                "repository": {"branch": "main", "detachedHead": false},
+                "repository": {
+                    "branch": "main",
+                    "detachedHead": false,
+                    "treeObjectRef": "git_tree:abc123",
+                    "repositoryTreeSnapshotInput": {
+                        "repositoryRef": {
+                            "kind": "git_repository",
+                            "id": "git_repository:repo",
+                            "role": "repository"
+                        },
+                        "rootRef": {
+                            "kind": "git_root",
+                            "id": "git_root:root",
+                            "role": "root"
+                        },
+                        "headRef": {
+                            "kind": "git_commit",
+                            "id": "git_commit:head",
+                            "role": "head"
+                        },
+                        "treeObjectRef": "git_tree:abc123",
+                        "pathEntrySource": "git_status_provider_safe_projection",
+                        "contentFree": true,
+                        "rawRepositoryContentsIncluded": false
+                    }
+                },
                 "dirty": false,
                 "summary": {
                     "stagedCount": 0,
@@ -228,5 +295,12 @@ mod tests {
         assert!(text.contains("staged 0, unstaged 0, untracked 0, conflicted 0"));
         assert!(text.contains("porcelain empty"));
         assert!(text.contains("truncated false"));
+        assert!(text.contains("repository_tree_snapshot input"));
+        assert!(text.contains(
+            r#"repositoryRef={"id":"git_repository:repo","kind":"git_repository","role":"repository"}"#
+        ));
+        assert!(text.contains(r#"rootRef={"id":"git_root:root","kind":"git_root","role":"root"}"#));
+        assert!(text.contains("treeObjectRef=git_tree:abc123"));
+        assert!(text.contains("do not pass only .id values"));
     }
 }

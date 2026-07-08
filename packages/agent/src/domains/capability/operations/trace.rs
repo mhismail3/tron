@@ -1,5 +1,6 @@
 //! Agent trace primitive execute operations.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::sync::LazyLock;
@@ -63,18 +64,67 @@ pub(super) fn trace_list(
         .into_iter()
         .map(|record| provider_safe_trace_record(&record.record_json))
         .collect::<Vec<_>>();
+    let status_summary = trace_status_summary(&records);
     Ok(ok_result(
-        format!(
-            "Trace records: {}. {TRACE_PROJECTION_BOUNDARY_CONTENT}",
-            records.len()
-        ),
+        trace_list_content(records.len(), &status_summary),
         json!({
             "primitiveOperation": "trace_list",
             "status": "ok",
             "projectionBoundary": trace_projection_boundary(),
+            "statusSummary": status_summary,
             "records": records
         }),
     ))
+}
+
+fn trace_list_content(record_count: usize, status_summary: &Value) -> String {
+    let in_progress = status_summary
+        .get("inProgressCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let ok_count = status_summary
+        .pointer("/completedStatusCounts/ok")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let failed_count = status_summary
+        .pointer("/completedStatusCounts/failed")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    format!(
+        "Trace records: {record_count}. Completed trace statuses: ok {ok_count}, failed {failed_count}. In-progress records: {in_progress}; the current trace_list call may appear as running until this call completes. {TRACE_PROJECTION_BOUNDARY_CONTENT}"
+    )
+}
+
+fn trace_status_summary(records: &[Value]) -> Value {
+    let mut completed_status_counts = BTreeMap::<String, u64>::new();
+    let mut in_progress_count = 0_u64;
+    for record in records {
+        let status = record
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let completed = record
+            .get("completedAt")
+            .is_some_and(|value| !value.is_null());
+        if completed {
+            *completed_status_counts
+                .entry(status.to_owned())
+                .or_insert(0) += 1;
+        } else {
+            in_progress_count += 1;
+        }
+    }
+    let completed_status_values_only_ok_failed = completed_status_counts
+        .keys()
+        .all(|status| status == "ok" || status == "failed");
+    json!({
+        "totalRecords": records.len(),
+        "completedStatusCounts": completed_status_counts,
+        "completedStatusValuesOnlyOkFailed": completed_status_values_only_ok_failed,
+        "inProgressCount": in_progress_count,
+        "currentTraceListMayAppearRunning": true,
+        "answerGuidance": "When asked whether trace status values are only ok/failed, answer about completed trace records separately from in-progress records. The current trace_list invocation can appear running until this call is complete."
+    })
 }
 
 pub(super) fn trace_get(
@@ -361,19 +411,12 @@ pub(super) fn complete_trace_record(
     let completed_at = Utc::now().to_rfc3339();
     let duration_ms = duration.as_millis().try_into().unwrap_or(i64::MAX);
     let result_value = serde_json::to_value(result).unwrap_or_else(|_| Value::Null);
-    let status = result
-        .details
-        .as_ref()
-        .and_then(|details| details.get("status"))
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| {
-            if result.is_error == Some(true) || error.is_some() {
-                "failed"
-            } else {
-                "ok"
-            }
-        })
-        .to_owned();
+    let status = if result.is_error == Some(true) || error.is_some() {
+        "failed"
+    } else {
+        "ok"
+    }
+    .to_owned();
     let model_id = trace_model_id(&record.record_json);
     let files = if error.is_some() || result.is_error == Some(true) {
         Vec::new()
@@ -669,6 +712,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn trace_completion_status_ignores_resource_lifecycle_status_details() {
+        use crate::engine::{
+            ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, FunctionId,
+            InvocationId, TraceId,
+        };
+
+        let grant_id = AuthorityGrantId::new("grant-trace-status-test").expect("grant id");
+        let context = CausalContext::new(
+            ActorId::new("agent:trace-status-test").expect("actor id"),
+            ActorKind::Agent,
+            grant_id,
+            TraceId::new("trace-status-test").expect("trace id"),
+        )
+        .with_session_id("sess-trace-status-test");
+        let invocation = Invocation {
+            id: InvocationId::new("invocation-trace-status-test").expect("invocation id"),
+            function_id: FunctionId::new("capability::execute").expect("function id"),
+            delivery_mode: DeliveryMode::Sync,
+            payload: json!({"operation": "repository_tree_snapshot"}),
+            causal_context: context,
+        };
+        let mut record = AgentTraceRecord {
+            id: "trace-record-status-test".to_owned(),
+            trace_id: "trace-status-test".to_owned(),
+            invocation_id: "invocation-trace-status-test".to_owned(),
+            parent_invocation_id: None,
+            provider_invocation_id: None,
+            session_id: Some("sess-trace-status-test".to_owned()),
+            workspace_id: None,
+            turn: None,
+            model_primitive_name: "execute".to_owned(),
+            operation: "repository_tree_snapshot".to_owned(),
+            status: "running".to_owned(),
+            timestamp: "2026-07-08T00:00:00Z".to_owned(),
+            completed_at: None,
+            duration_ms: None,
+            record_json: json!({
+                "metadata": {
+                    TRON_TRACE_METADATA_KEY: {
+                        "operation": "repository_tree_snapshot",
+                        "status": "running",
+                        "modelId": "gpt-test"
+                    }
+                },
+                "files": []
+            }),
+        };
+        let result = ok_result(
+            "Repository tree snapshot recorded.".to_owned(),
+            json!({
+                "primitiveOperation": "repository_tree_snapshot",
+                "status": "active"
+            }),
+        );
+
+        complete_trace_record(
+            &mut record,
+            &invocation,
+            &result,
+            None,
+            Duration::from_millis(12),
+        );
+
+        assert_eq!(record.status, "ok");
+        assert_eq!(
+            record.record_json["metadata"][TRON_TRACE_METADATA_KEY]["status"],
+            "ok"
+        );
+    }
+
+    #[test]
     fn provider_safe_trace_record_excludes_internal_authority_and_raw_payloads() {
         let record = json!({
             "id": "trace_record_1",
@@ -806,6 +920,40 @@ mod tests {
                 .expect("trace get use")
                 .contains("trace_list")
         );
+    }
+
+    #[test]
+    fn trace_status_summary_separates_completed_from_current_running_trace() {
+        let records = vec![
+            json!({
+                "status": "ok",
+                "completedAt": "2026-07-08T03:27:05Z"
+            }),
+            json!({
+                "status": "failed",
+                "completedAt": "2026-07-08T03:27:06Z"
+            }),
+            json!({
+                "status": "running",
+                "completedAt": null
+            }),
+        ];
+
+        let summary = trace_status_summary(&records);
+        let content = trace_list_content(records.len(), &summary);
+
+        assert_eq!(summary["completedStatusCounts"]["ok"], 1);
+        assert_eq!(summary["completedStatusCounts"]["failed"], 1);
+        assert_eq!(summary["completedStatusValuesOnlyOkFailed"], true);
+        assert_eq!(summary["inProgressCount"], 1);
+        assert!(
+            summary["answerGuidance"]
+                .as_str()
+                .expect("answer guidance")
+                .contains("completed trace records separately")
+        );
+        assert!(content.contains("Completed trace statuses: ok 1, failed 1"));
+        assert!(content.contains("current trace_list call may appear as running"));
     }
 
     #[test]
