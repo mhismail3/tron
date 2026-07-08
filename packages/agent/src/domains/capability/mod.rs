@@ -113,6 +113,9 @@
 //! calls; read-only searches must return only operations whose agent-usage
 //! metadata proves they are inspection-safe and non-mutating, so broad resource
 //! discovery queries cannot steer the model into write or record operations.
+//! `namespacePrefix` also matches capability-pool family/owner metadata, not
+//! just literal operation-name prefixes, so family searches surface sibling
+//! operations such as context policy lists even when names differ.
 //! `catalog_inspect` accepts
 //! `execute::<supported_operation>` and supported-operation ids directly; those
 //! aliases return operation-specific call contracts, preflight guidance, and

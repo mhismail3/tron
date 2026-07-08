@@ -1103,6 +1103,14 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     for operation in &trace_operations {
         promote_or_insert_trace_operation_match(&mut matches, operation);
     }
+    if let Some(namespace_prefix) = catalog_search_namespace_prefix(payload) {
+        for operation in supported_operation_names()
+            .iter()
+            .filter(|operation| operation_matches_namespace_prefix(operation, &namespace_prefix))
+        {
+            promote_or_insert_namespace_operation_match(&mut matches, operation);
+        }
+    }
     if !plan_operations.is_empty() || !trace_operations.is_empty() {
         let allowed = plan_operations
             .iter()
@@ -1177,6 +1185,16 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
                 unsupported_operation_recovery_projection(&query),
             );
         }
+    }
+}
+
+fn catalog_search_namespace_prefix(payload: &Value) -> Option<String> {
+    let prefix = payload.get("namespacePrefix")?.as_str()?;
+    let prefix = canonical_operation_search_text(prefix);
+    if prefix.len() >= 3 {
+        Some(prefix)
+    } else {
+        None
     }
 }
 
@@ -1453,6 +1471,20 @@ fn trace_operation_match_projection(operation: &str) -> Value {
     })
 }
 
+fn namespace_operation_match_projection(operation: &str) -> Value {
+    json!({
+        "operation": operation,
+        "tool": "capability::execute",
+        "arguments": {"operation": operation},
+        "catalogInspectId": format!("execute::{operation}"),
+        "schemaInspection": execute_schema_inspection_step(operation),
+        "matchKind": "namespace",
+        "score": 240,
+        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection()),
+        "agentUsage": operation_agent_usage_projection(operation)
+    })
+}
+
 fn execute_schema_inspection_step(operation: &str) -> Value {
     json!({
         "operation": "catalog_inspect",
@@ -1495,17 +1527,37 @@ fn promote_or_insert_trace_operation_match(matches: &mut Vec<Value>, operation: 
     }
 }
 
+fn promote_or_insert_namespace_operation_match(matches: &mut Vec<Value>, operation: &str) {
+    if matches
+        .iter()
+        .any(|entry| entry["operation"].as_str() == Some(operation))
+    {
+        return;
+    }
+    matches.push(namespace_operation_match_projection(operation));
+}
+
 fn match_rank(match_kind: &str) -> usize {
     match match_kind {
         "exact" => 0,
         "prefix" => 1,
-        "trace_plan" => 2,
-        "plan" => 3,
-        "contains" => 4,
-        "terms" => 5,
-        "intent" => 6,
+        "namespace" => 2,
+        "trace_plan" => 3,
+        "plan" => 4,
+        "contains" => 5,
+        "terms" => 6,
+        "intent" => 7,
         _ => 5,
     }
+}
+
+fn operation_matches_namespace_prefix(operation: &str, namespace_prefix: &str) -> bool {
+    let operation_key = operation.to_ascii_lowercase();
+    operation_key.starts_with(namespace_prefix)
+        || operation_pool_metadata(operation).is_some_and(|metadata| {
+            canonical_operation_search_text(metadata.family.as_ref()) == namespace_prefix
+                || canonical_operation_search_text(metadata.owner.as_ref()) == namespace_prefix
+        })
 }
 
 fn terms_match_operation(terms: &[String], operation_key: &str, catalog_key: &str) -> bool {
@@ -2827,6 +2879,63 @@ mod tests {
         assert!(!operations.contains(&"repository_tree_snapshot"));
         assert!(operations.contains(&"import_preview_list"));
         assert!(operations.contains(&"repository_tree_list"));
+    }
+
+    #[test]
+    fn catalog_search_namespace_prefix_uses_capability_pool_family() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "effectClass": "pure_read",
+                "limit": 50,
+                "namespacePrefix": "context_control",
+                "text": "context_control"
+            }),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        let operations = matches
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        for expected in [
+            "context_control_action_list",
+            "context_control_action_inspect",
+            "context_survivor_list",
+            "context_exclusion_list",
+        ] {
+            assert!(
+                operations.contains(&expected),
+                "namespace family search should include {expected}: {operations:?}"
+            );
+        }
+        for mutating in [
+            "context_control_snapshot",
+            "context_control_compact",
+            "context_control_clear",
+            "context_policy_snapshot",
+            "context_survivor_record",
+            "context_exclusion_record",
+        ] {
+            assert!(
+                !operations.contains(&mutating),
+                "pure_read namespace search must exclude mutating operation {mutating}: {operations:?}"
+            );
+        }
+        assert!(matches.iter().all(|value| {
+            value["agentUsage"]["effect"]["readOnlyInspectionSafe"] == true
+                && value["agentUsage"]["effect"]["mutatesState"] == false
+        }));
+        assert!(
+            matches
+                .iter()
+                .any(|value| value["matchKind"] == "namespace"),
+            "family-owned operations without the context_control prefix should be namespace matches"
+        );
     }
 
     #[test]

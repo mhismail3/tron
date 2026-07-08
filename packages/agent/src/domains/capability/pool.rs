@@ -463,7 +463,6 @@ fn operation_is_read_only_safe(operation: &str) -> bool {
             | "context_control_action_inspect"
             | "context_survivor_list"
             | "context_exclusion_list"
-            | "context_policy_snapshot"
             | "subagent_status"
             | "subagent_result"
             | "subagent_task_list"
@@ -483,6 +482,7 @@ fn operation_writes_metadata(operation: &str) -> bool {
                 | "context_control_snapshot"
                 | "context_control_compact"
                 | "context_control_clear"
+                | "context_policy_snapshot"
                 | "context_survivor_disable"
                 | "context_exclusion_disable"
                 | "media_create"
@@ -1166,6 +1166,7 @@ mod tests {
             "capability_replacement_candidate_record",
             "capability_route_activate",
             "catalog_conformance",
+            "context_policy_snapshot",
             "git_commit",
             "process_run",
         ] {
@@ -1195,6 +1196,10 @@ mod tests {
                         .as_str()
                         .expect("default use")
                         .contains("requires_effect")
+                    || usage["defaultUse"]
+                        .as_str()
+                        .expect("default use")
+                        .contains("evidence")
             );
         }
     }
