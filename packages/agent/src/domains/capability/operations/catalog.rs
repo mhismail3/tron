@@ -1131,13 +1131,19 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
                 .is_some_and(|operation| allowed.contains(operation))
         });
     }
+    let mut effect_excluded_matches = Vec::new();
     if catalog_search_requests_read_only(payload) {
-        matches.retain(|entry| {
+        let (included, excluded): (Vec<_>, Vec<_>) = matches.into_iter().partition(|entry| {
             entry
                 .get("operation")
                 .and_then(Value::as_str)
                 .is_some_and(operation_is_read_only_inspection_safe)
         });
+        matches = included;
+        effect_excluded_matches = excluded
+            .into_iter()
+            .map(effect_class_exclusion_projection)
+            .collect::<Vec<_>>();
     }
     matches.sort_by(|left, right| {
         match_rank(left["matchKind"].as_str().unwrap_or_default())
@@ -1157,6 +1163,8 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     });
     let total = matches.len();
     matches.truncate(limit);
+    let effect_excluded_total = effect_excluded_matches.len();
+    effect_excluded_matches.truncate(20);
     if let Some(object) = discovery.as_object_mut() {
         object.insert(
             "executeOperationSearch".to_owned(),
@@ -1168,8 +1176,15 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
                 "returnedMatches": matches.len(),
                 "truncated": total > matches.len(),
                 "omitted": total.saturating_sub(matches.len()),
+                "effectClassExcludedMatches": effect_excluded_total,
             }),
         );
+        if !effect_excluded_matches.is_empty() {
+            object.insert(
+                "effectClassExcludedOperationMatches".to_owned(),
+                Value::Array(effect_excluded_matches),
+            );
+        }
         if let Some(plan) = operation_search_plan_projection(&query) {
             object.insert("agentNextStep".to_owned(), readiness_plan_next_step(&plan));
             object.insert("agentSearchPlan".to_owned(), plan);
@@ -1182,7 +1197,10 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             object.insert("agentNextStep".to_owned(), next_step);
         }
         object.insert("executeOperationMatches".to_owned(), Value::Array(matches));
-        if total == 0 && looks_like_unsupported_operation_candidate(&query) {
+        if total == 0
+            && effect_excluded_total == 0
+            && looks_like_unsupported_operation_candidate(&query)
+        {
             object.insert(
                 "unsupportedOperationCandidate".to_owned(),
                 Value::Bool(true),
@@ -1193,6 +1211,22 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             );
         }
     }
+}
+
+fn effect_class_exclusion_projection(mut entry: Value) -> Value {
+    if let Some(object) = entry.as_object_mut() {
+        object.insert(
+            "excludedByEffectClass".to_owned(),
+            Value::String("pure_read".to_owned()),
+        );
+        object.insert(
+            "exclusionReason".to_owned(),
+            Value::String(
+                "Supported operation exists but is not read-only inspection safe; inspect its schema only when the task explicitly allows write-like evidence or state changes, and do not invoke it during pure-read discovery.".to_owned(),
+            ),
+        );
+    }
+    entry
 }
 
 fn catalog_search_namespace_prefix(payload: &Value) -> Option<String> {
@@ -2946,6 +2980,18 @@ mod tests {
                 .any(|value| value["matchKind"] == "namespace"),
             "family-owned operations without the context_control prefix should be namespace matches"
         );
+        let excluded_operations = discovery["effectClassExcludedOperationMatches"]
+            .as_array()
+            .expect("effect-class exclusions")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert!(excluded_operations.contains(&"context_policy_snapshot"));
+        assert!(excluded_operations.contains(&"context_control_snapshot"));
+        assert_eq!(
+            discovery["executeOperationSearch"]["effectClassExcludedMatches"],
+            json!(excluded_operations.len())
+        );
     }
 
     #[test]
@@ -2973,6 +3019,44 @@ mod tests {
                 .as_str()
                 .expect("effect instruction")
                 .contains("do not call during read-only inspection")
+        );
+    }
+
+    #[test]
+    fn catalog_search_read_only_reports_supported_mutating_matches_as_excluded() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "effectClass": "read_only",
+                "limit": 10,
+                "text": "context_policy_snapshot"
+            }),
+        );
+
+        assert_eq!(
+            discovery["executeOperationSearch"]["totalMatches"],
+            json!(0)
+        );
+        assert_eq!(
+            discovery["executeOperationSearch"]["effectClassExcludedMatches"],
+            json!(1)
+        );
+        assert!(discovery.get("unsupportedOperationCandidate").is_none());
+        let excluded = discovery["effectClassExcludedOperationMatches"]
+            .as_array()
+            .expect("excluded operations");
+        assert_eq!(excluded[0]["operation"], "context_policy_snapshot");
+        assert_eq!(
+            excluded[0]["agentUsage"]["effect"]["readOnlyInspectionSafe"],
+            false
+        );
+        assert!(
+            excluded[0]["exclusionReason"]
+                .as_str()
+                .expect("exclusion reason")
+                .contains("Supported operation exists")
         );
     }
 

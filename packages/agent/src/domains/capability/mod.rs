@@ -113,6 +113,10 @@
 //! calls; read-only searches must return only operations whose agent-usage
 //! metadata proves they are inspection-safe and non-mutating, so broad resource
 //! discovery queries cannot steer the model into write or record operations.
+//! Supported operations excluded by the requested read-only effect class are
+//! reported separately with bounded operation metadata and an explicit
+//! "do not invoke during pure-read discovery" reason, so the model can
+//! distinguish an unsafe supported operation from a nonexistent one.
 //! `namespacePrefix` also matches capability-pool family/owner metadata, not
 //! just literal operation-name prefixes, so family searches surface sibling
 //! operations such as context policy lists even when names differ.
