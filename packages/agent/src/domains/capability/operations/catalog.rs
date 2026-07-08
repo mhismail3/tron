@@ -357,6 +357,10 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
             "type": "string",
             "description": "Optional bounded repository ref id filter; unsupported aliases are rejected."
         }),
+        ("trace_get", "traceRecordId") => json!({
+            "type": "string",
+            "description": "Exact provider-safe trace record id returned in details.records[].id by trace_list for the current session."
+        }),
         (_, field) => json!({
             "type": "string",
             "description": format!(
@@ -880,6 +884,7 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
             "treeObjectRef",
             "idempotencyKey",
         ],
+        "trace_get" => vec!["operation", "traceRecordId"],
         "goal_inspect" => vec!["operation", "goalResourceId"],
         "question_inspect" => vec!["operation", "questionResourceId"],
         "memory_inspect" => vec!["operation", "recordResourceId"],
@@ -1111,6 +1116,14 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
                 .is_some_and(|operation| allowed.contains(operation))
         });
     }
+    if catalog_search_requests_read_only(payload) {
+        matches.retain(|entry| {
+            entry
+                .get("operation")
+                .and_then(Value::as_str)
+                .is_some_and(operation_is_read_only_inspection_safe)
+        });
+    }
     matches.sort_by(|left, right| {
         match_rank(left["matchKind"].as_str().unwrap_or_default())
             .cmp(&match_rank(right["matchKind"].as_str().unwrap_or_default()))
@@ -1165,6 +1178,19 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             );
         }
     }
+}
+
+fn catalog_search_requests_read_only(payload: &Value) -> bool {
+    payload
+        .get("effectClass")
+        .and_then(Value::as_str)
+        .map(|effect_class| {
+            matches!(
+                effect_class.trim().to_ascii_lowercase().as_str(),
+                "pure_read" | "read" | "read_only" | "inspect"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn readiness_plan_next_step(plan: &Value) -> Value {
@@ -2188,6 +2214,20 @@ mod tests {
 
         let trace_get = execute_operation_inspect_projection("trace_get", "execute::trace_get");
         assert_eq!(
+            trace_get["schema"]["requiredPayloadFields"],
+            json!(["operation", "traceRecordId"])
+        );
+        assert_eq!(
+            trace_get["inputSchema"]["required"],
+            json!(["operation", "traceRecordId"])
+        );
+        assert!(
+            trace_get["inputSchema"]["properties"]["traceRecordId"]["description"]
+                .as_str()
+                .expect("traceRecordId description")
+                .contains("trace record id")
+        );
+        assert_eq!(
             trace_get["outputSchema"]["properties"]["details"]["properties"]["record"]["properties"]
                 ["redaction"]["properties"]["rawRequestExcluded"]["const"],
             true
@@ -2753,6 +2793,40 @@ mod tests {
                 .expect("preflight instruction")
                 .contains("Do not call during read-only inspection")
         );
+    }
+
+    #[test]
+    fn catalog_search_pure_read_filter_excludes_mutating_operation_matches() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "effectClass": "pure_read",
+                "limit": 20,
+                "text": "resource list inspect current workspace session media import preview repository tree program execution prompt artifact module validation install dependency notification schedule question goal web source"
+            }),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        assert!(!matches.is_empty());
+        assert!(
+            matches.iter().all(|value| {
+                value["agentUsage"]["effect"]["readOnlyInspectionSafe"] == true
+                    && value["agentUsage"]["effect"]["mutatesState"] == false
+            }),
+            "pure_read searches must not return mutating execute operations: {matches:#?}"
+        );
+        let operations = matches
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert!(!operations.contains(&"module_program_execution_start"));
+        assert!(!operations.contains(&"repository_tree_snapshot"));
+        assert!(operations.contains(&"import_preview_list"));
+        assert!(operations.contains(&"repository_tree_list"));
     }
 
     #[test]

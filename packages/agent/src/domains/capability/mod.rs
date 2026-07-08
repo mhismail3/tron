@@ -110,7 +110,10 @@
 //! `catalog_search`
 //! accepts the safe read-only `effectClass` aliases `read`, `read_only`, and
 //! `inspect` as `pure_read` so natural discovery filters do not become invalid
-//! calls. `catalog_inspect` accepts
+//! calls; read-only searches must return only operations whose agent-usage
+//! metadata proves they are inspection-safe and non-mutating, so broad resource
+//! discovery queries cannot steer the model into write or record operations.
+//! `catalog_inspect` accepts
 //! `execute::<supported_operation>` and supported-operation ids directly; those
 //! aliases return operation-specific call contracts, preflight guidance, and
 //! required top-level payload fields in both normalized `inputSchema` /
