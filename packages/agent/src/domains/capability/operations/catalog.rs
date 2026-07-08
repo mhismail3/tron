@@ -411,11 +411,19 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
         .filter_map(|operation| operation_match_projection(operation, &query))
         .collect::<Vec<_>>();
     let plan_operations = operation_search_plan_supported_operations(&query);
+    let trace_operations = trace_evidence_plan_supported_operations(&query);
     for operation in &plan_operations {
         promote_or_insert_planned_operation_match(&mut matches, operation);
     }
-    if !plan_operations.is_empty() {
-        let allowed = plan_operations.iter().copied().collect::<BTreeSet<_>>();
+    for operation in &trace_operations {
+        promote_or_insert_trace_operation_match(&mut matches, operation);
+    }
+    if !plan_operations.is_empty() || !trace_operations.is_empty() {
+        let allowed = plan_operations
+            .iter()
+            .chain(trace_operations.iter())
+            .copied()
+            .collect::<BTreeSet<_>>();
         matches.retain(|entry| {
             entry
                 .get("operation")
@@ -455,6 +463,8 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             }),
         );
         if let Some(plan) = operation_search_plan_projection(&query) {
+            object.insert("agentSearchPlan".to_owned(), plan);
+        } else if let Some(plan) = trace_evidence_plan_projection(&query) {
             object.insert("agentSearchPlan".to_owned(), plan);
         }
         if let Some(next_step) = preferred_execute_schema_next_step(&matches) {
@@ -704,6 +714,26 @@ fn planned_operation_match_projection(operation: &str) -> Value {
     })
 }
 
+fn trace_operation_match_projection(operation: &str) -> Value {
+    let score = match operation {
+        "trace_list" => 285,
+        "trace_get" => 275,
+        "catalog_inspect" => 265,
+        _ => 260,
+    };
+    json!({
+        "operation": operation,
+        "tool": "capability::execute",
+        "arguments": {"operation": operation},
+        "catalogInspectId": format!("execute::{operation}"),
+        "schemaInspection": execute_schema_inspection_step(operation),
+        "matchKind": "trace_plan",
+        "score": score,
+        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection()),
+        "agentUsage": operation_agent_usage_projection(operation)
+    })
+}
+
 fn execute_schema_inspection_step(operation: &str) -> Value {
     json!({
         "operation": "catalog_inspect",
@@ -731,14 +761,30 @@ fn promote_or_insert_planned_operation_match(matches: &mut Vec<Value>, operation
     }
 }
 
+fn promote_or_insert_trace_operation_match(matches: &mut Vec<Value>, operation: &str) {
+    let planned = trace_operation_match_projection(operation);
+    if let Some(existing) = matches
+        .iter_mut()
+        .find(|entry| entry["operation"] == operation)
+    {
+        if existing["matchKind"] == "exact" {
+            return;
+        }
+        *existing = planned;
+    } else {
+        matches.push(planned);
+    }
+}
+
 fn match_rank(match_kind: &str) -> usize {
     match match_kind {
         "exact" => 0,
         "prefix" => 1,
-        "plan" => 2,
-        "contains" => 3,
-        "terms" => 4,
-        "intent" => 5,
+        "trace_plan" => 2,
+        "plan" => 3,
+        "contains" => 4,
+        "terms" => 5,
+        "intent" => 6,
         _ => 5,
     }
 }
@@ -942,6 +988,53 @@ fn operation_search_plan_projection(query: &OperationSearchQuery) -> Option<Valu
     }))
 }
 
+fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value> {
+    let (target, query_terms) = trace_evidence_plan_target(query)?;
+    let mut read_only_sequence = vec![recovery_alternative(
+        "catalog_inspect",
+        json!({"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000}),
+        "Inspect the exact provider-visible request schema for the target operation before invoking it.",
+    )];
+
+    if target != "trace_list" {
+        read_only_sequence.push(recovery_alternative(
+            "trace_list",
+            json!({"operation": "trace_list", "limit": 25}),
+            "After invoking the target operation, list current-session trace evidence through the provider-safe trace projection.",
+        ));
+    }
+    read_only_sequence.push(recovery_alternative(
+        "trace_get",
+        json!({"operation": "trace_get", "traceRecordId": "<trace record id from trace_list>"}),
+        "Inspect one trace record only when trace_list returns an exact provider-safe trace record id.",
+    ));
+
+    Some(json!({
+        "purpose": "Deterministic read-only plan for schema inspection and provider-safe trace evidence.",
+        "targetOperation": target,
+        "traceIntentTerms": query_terms,
+        "primaryInspection": {
+            "tool": "capability::execute",
+            "operation": "catalog_inspect",
+            "arguments": {"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000},
+            "readOnlyInspectionSafe": true,
+            "reason": "Returns the exact provider-visible schema and top-level payload fields for the target operation."
+        },
+        "readOnlySequence": read_only_sequence,
+        "afterTargetInvocation": {
+            "tool": "capability::execute",
+            "operation": "trace_list",
+            "arguments": {"operation": "trace_list", "limit": 25},
+            "readOnlyInspectionSafe": true,
+            "reason": "Use trace_list after the target operation to verify provider-safe trace evidence."
+        },
+        "completionRule": "After schema inspection, one target invocation, and trace_list, answer from provider-safe trace fields only.",
+        "doNotInspect": [
+            {"field": "raw trace database rows", "reason": "Use provider-safe trace_list/trace_get projections instead of raw internal persistence."}
+        ]
+    }))
+}
+
 fn operation_search_plan_supported_operations(query: &OperationSearchQuery) -> Vec<&'static str> {
     let Some((target, query_terms)) = operation_search_plan_target(query) else {
         return Vec::new();
@@ -976,6 +1069,17 @@ fn operation_search_plan_supported_operations(query: &OperationSearchQuery) -> V
     operations
 }
 
+fn trace_evidence_plan_supported_operations(query: &OperationSearchQuery) -> Vec<&'static str> {
+    let Some((target, _)) = trace_evidence_plan_target(query) else {
+        return Vec::new();
+    };
+    let mut operations = vec![target, "catalog_inspect", "trace_list"];
+    if target != "trace_get" {
+        operations.push("trace_get");
+    }
+    operations
+}
+
 fn operation_search_plan_target(
     query: &OperationSearchQuery,
 ) -> Option<(&'static str, BTreeSet<String>)> {
@@ -1000,13 +1104,58 @@ fn operation_search_plan_target(
                 | "binding"
                 | "shadow"
                 | "trial"
-                | "evidence"
                 | "readiness"
                 | "rollback"
                 | "candidate"
         )
     });
     asks_readiness.then_some((target, query_terms))
+}
+
+fn trace_evidence_plan_target(
+    query: &OperationSearchQuery,
+) -> Option<(&'static str, BTreeSet<String>)> {
+    if operation_search_plan_target(query).is_some() {
+        return None;
+    }
+    let mut supported = supported_operations_in_query(query)
+        .into_iter()
+        .filter(|operation| !trace_evidence_helper_operation(operation))
+        .collect::<Vec<_>>();
+    supported.sort_unstable();
+    supported.dedup();
+    if supported.len() != 1 {
+        return None;
+    }
+    let target = supported.pop()?;
+    if !operation_is_read_only_inspection_safe(target) {
+        return None;
+    }
+    let query_terms = query_terms(query);
+    let asks_trace_evidence = query_terms
+        .iter()
+        .any(|term| matches!(term.as_str(), "trace" | "evidence" | "provider" | "safe"));
+    let asks_schema_or_trace = query_terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "schema" | "trace" | "evidence" | "projection" | "provider"
+        )
+    });
+    (asks_trace_evidence && asks_schema_or_trace).then_some((target, query_terms))
+}
+
+fn trace_evidence_helper_operation(operation: &str) -> bool {
+    matches!(operation, "catalog_inspect" | "trace_list" | "trace_get")
+}
+
+fn operation_is_read_only_inspection_safe(operation: &str) -> bool {
+    operation_agent_usage_projection(operation)
+        .and_then(|usage| {
+            usage
+                .pointer("/effect/readOnlyInspectionSafe")
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
 }
 
 fn annotate_catalog_function_pool(object: &mut serde_json::Map<String, Value>, catalog_id: &str) {
@@ -1177,6 +1326,7 @@ mod tests {
             discovery["inputSchema"]["properties"]["operation"]["const"],
             "capability_shadow_trial_evidence_inspect"
         );
+        assert_eq!(discovery["inputSchema"]["additionalProperties"], true);
         assert_eq!(
             discovery["inputSchema"]["properties"]["capabilityShadowTrialEvidenceResourceId"]["type"],
             "string"
@@ -1530,6 +1680,94 @@ mod tests {
         assert_eq!(
             discovery["agentNextStep"]["schemaInspection"]["arguments"]["id"],
             "execute::git_status"
+        );
+    }
+
+    #[test]
+    fn catalog_search_prioritizes_trace_evidence_plan_for_schema_and_trace_queries() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "text": "git_status trace evidence provider-visible schema",
+                "limit": 10
+            }),
+        );
+
+        let operations = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            operations,
+            vec!["git_status", "trace_list", "trace_get", "catalog_inspect"]
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["purpose"],
+            "Deterministic read-only plan for schema inspection and provider-safe trace evidence."
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["primaryInspection"]["arguments"]["id"],
+            "execute::git_status"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["afterTargetInvocation"]["operation"],
+            "trace_list"
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["schemaInspection"]["arguments"]["id"],
+            "execute::git_status"
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["thenInvoke"]["operation"],
+            "git_status"
+        );
+    }
+
+    #[test]
+    fn catalog_search_keeps_trace_plan_when_query_names_trace_helpers() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "text": "execute git_status schema read-only current session trace evidence trace_list",
+                "limit": 10
+            }),
+        );
+
+        assert_eq!(
+            discovery["agentSearchPlan"]["targetOperation"],
+            "git_status"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["primaryInspection"]["arguments"]["id"],
+            "execute::git_status"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["afterTargetInvocation"]["arguments"]["operation"],
+            "trace_list"
+        );
+    }
+
+    #[test]
+    fn catalog_search_does_not_create_trace_plan_for_mutating_targets() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "text": "capability_shadow_trial_request_record trace evidence schema",
+                "limit": 10
+            }),
+        );
+
+        assert!(
+            discovery.get("agentSearchPlan").is_none(),
+            "mutating operations must not be recommended as read-only trace evidence targets: {discovery}"
         );
     }
 

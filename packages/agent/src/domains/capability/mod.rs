@@ -98,7 +98,12 @@
 //! matches, and readiness searches that name one runtime-routable target
 //! operation return a deterministic read-only
 //! `agentSearchPlan` limited to the exact inspect/list sequence before the
-//! model needs to inspect cockpit details. `catalog_inspect` accepts
+//! model needs to inspect cockpit details. Trace/evidence searches that name one
+//! target operation return a separate read-only plan: inspect the
+//! `execute::<operation>` schema, invoke the target once, then inspect
+//! provider-safe trace evidence with `trace_list`/`trace_get` instead of
+//! routing the agent through replacement-readiness surfaces. `catalog_inspect`
+//! accepts
 //! `execute::<supported_operation>` and supported-operation ids directly; those
 //! aliases return operation-specific call contracts, preflight guidance, and
 //! required top-level payload fields in both normalized `inputSchema` /

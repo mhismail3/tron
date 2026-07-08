@@ -590,6 +590,17 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
         });
     }
 
+    if operation_is_read_only_safe(operation) && ownership_class == "adapter_replaceable" {
+        return json!({
+            "authority": "derived_read_only_adapter_authority_for_exact_operation",
+            "networkPolicy": if matches!(family, "web") { "declared_by_operation" } else { "none" },
+            "agentStateInherited": false,
+            "requiredPayloadFields": ["operation"],
+            "readOnlyInstruction": "safe to call during read-only session work after inspecting the execute::<operation> schema when field names are unclear",
+            "beforeCalling": "Use the exact operation selector and operation-specific top-level fields only. Do not request replacement, route, shadow, binding, or rollback authority unless the user task is explicitly about replacing this operation."
+        });
+    }
+
     json!({
         "authority": authority_boundary_for_ownership(ownership_class),
         "evidence": evidence_boundary_for_ownership(ownership_class),
@@ -1119,6 +1130,33 @@ mod tests {
             assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
             assert_eq!(usage["effect"]["mutatesState"], false);
         }
+    }
+
+    #[test]
+    fn read_only_adapter_preflight_does_not_require_replacement_route_authority() {
+        let usage = operation_agent_usage_projection("git_status").expect("git_status usage");
+        assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
+        assert_eq!(
+            usage["preflight"]["authority"],
+            "derived_read_only_adapter_authority_for_exact_operation"
+        );
+        assert_eq!(usage["preflight"]["networkPolicy"], "none");
+        assert_eq!(usage["preflight"]["agentStateInherited"], false);
+        assert_eq!(
+            usage["preflight"]["requiredPayloadFields"],
+            json!(["operation"])
+        );
+        let preflight = serde_json::to_string(&usage["preflight"]).expect("json");
+        assert!(
+            !preflight.contains("route_authority"),
+            "plain read-only adapter preflight must not imply replacement route authority: {preflight}"
+        );
+        assert!(
+            usage["preflight"]["beforeCalling"]
+                .as_str()
+                .expect("before calling")
+                .contains("unless the user task is explicitly about replacing this operation")
+        );
     }
 
     #[test]
