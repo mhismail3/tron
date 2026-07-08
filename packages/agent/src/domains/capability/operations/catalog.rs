@@ -1079,10 +1079,17 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
 }
 
 fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
-    let Some(query) = payload.get("text").and_then(Value::as_str) else {
-        return;
-    };
-    let Some(query) = OperationSearchQuery::from_text(query) else {
+    let namespace_prefix = catalog_search_namespace_prefix(payload);
+    let query = payload
+        .get("text")
+        .and_then(Value::as_str)
+        .and_then(OperationSearchQuery::from_text)
+        .or_else(|| {
+            namespace_prefix
+                .as_deref()
+                .and_then(OperationSearchQuery::from_text)
+        });
+    let Some(query) = query else {
         return;
     };
     let limit = payload
@@ -1103,7 +1110,7 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     for operation in &trace_operations {
         promote_or_insert_trace_operation_match(&mut matches, operation);
     }
-    if let Some(namespace_prefix) = catalog_search_namespace_prefix(payload) {
+    if let Some(namespace_prefix) = namespace_prefix {
         for operation in supported_operation_names()
             .iter()
             .filter(|operation| operation_matches_namespace_prefix(operation, &namespace_prefix))
@@ -2890,11 +2897,14 @@ mod tests {
             &json!({
                 "effectClass": "pure_read",
                 "limit": 50,
-                "namespacePrefix": "context_control",
-                "text": "context_control"
+                "namespacePrefix": "context_control"
             }),
         );
 
+        assert_eq!(
+            discovery["executeOperationSearch"]["query"],
+            "context_control"
+        );
         let matches = discovery["executeOperationMatches"]
             .as_array()
             .expect("operation matches");
