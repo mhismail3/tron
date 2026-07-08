@@ -227,12 +227,9 @@ pub(super) async fn capability_binding_cockpit_overview(
         invocation,
     )
     .await?;
-    let total = details
-        .pointer("/summary/totalOperations")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let content = cockpit_overview_content(&details);
     Ok(result(
-        &format!("Capability cockpit overview returned {total} operation(s)."),
+        &content,
         "capability_binding_cockpit_overview",
         details,
     ))
@@ -601,4 +598,70 @@ fn shadow_result(text: &str, operation: &str, details: Value) -> CapabilityResul
             "capabilityShadowTrial": details
         }),
     )
+}
+
+fn cockpit_overview_content(details: &Value) -> String {
+    let total = details
+        .pointer("/summary/totalOperations")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let returned = details
+        .pointer("/summary/returnedOperations")
+        .and_then(Value::as_u64)
+        .unwrap_or(total);
+    let target_operation = details
+        .pointer("/operationList/targetOperation")
+        .and_then(Value::as_str);
+    if let Some(target_operation) = target_operation {
+        return format!(
+            "Capability cockpit overview returned 1 targeted operation for {target_operation} ({total} total operation(s) available)."
+        );
+    }
+    if returned < total {
+        return format!("Capability cockpit overview returned {returned} of {total} operation(s).");
+    }
+    format!("Capability cockpit overview returned {total} operation(s).")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cockpit_overview_content;
+    use serde_json::json;
+
+    #[test]
+    fn cockpit_overview_content_names_targeted_operation() {
+        let details = json!({
+            "summary": {
+                "totalOperations": 189,
+                "returnedOperations": 1
+            },
+            "operationList": {
+                "filterApplied": true,
+                "targetOperation": "git_status"
+            }
+        });
+
+        assert_eq!(
+            cockpit_overview_content(&details),
+            "Capability cockpit overview returned 1 targeted operation for git_status (189 total operation(s) available)."
+        );
+    }
+
+    #[test]
+    fn cockpit_overview_content_reports_truncated_operation_count() {
+        let details = json!({
+            "summary": {
+                "totalOperations": 189,
+                "returnedOperations": 25
+            },
+            "operationList": {
+                "filterApplied": false
+            }
+        });
+
+        assert_eq!(
+            cockpit_overview_content(&details),
+            "Capability cockpit overview returned 25 of 189 operation(s)."
+        );
+    }
 }

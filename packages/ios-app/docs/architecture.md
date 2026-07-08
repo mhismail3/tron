@@ -155,6 +155,12 @@ Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent
 Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
+`ContextControlSheet` presents Session Briefing as a mobile-first progressive
+disclosure surface. The top level is narrative plus compact metric strips; the
+same server-owned snapshot, memory refs, context actions, and audit details are
+available through divided rows and detail sections without duplicating raw
+context-control payloads at the top level.
+
 `AgentCockpitProjection` is also the boundary that turns partial or failed
 reads into truthful diagnostics: catalog decode degradation becomes a degraded
 summary, and view-model refresh failures keep the previous overview visible

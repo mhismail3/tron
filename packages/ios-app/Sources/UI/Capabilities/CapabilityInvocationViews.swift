@@ -147,7 +147,7 @@ struct CapabilityInvocationGroupChip: View {
         case .error, .unavailable:
             return .tronError
         default:
-            return .tronSuccess
+            return .tronEmerald
         }
     }
 

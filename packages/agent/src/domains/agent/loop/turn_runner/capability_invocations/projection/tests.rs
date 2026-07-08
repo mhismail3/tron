@@ -157,7 +157,20 @@ fn extract_result_content_projects_catalog_execute_operation_matches() {
                     "operation": "trace_list",
                     "tool": "capability::execute",
                     "arguments": {"operation": "trace_list"},
+                    "catalogInspectId": "execute::trace_list",
+                    "schemaInspection": {
+                        "operation": "catalog_inspect",
+                        "tool": "capability::execute",
+                        "arguments": {
+                            "operation": "catalog_inspect",
+                            "kind": "function",
+                            "id": "execute::trace_list",
+                            "maxSchemaBytes": 8000
+                        },
+                        "readOnlyInspectionSafe": true
+                    },
                     "matchKind": "exact",
+                    "score": 10,
                     "capabilityPool": {
                         "surface": "agent_operation",
                         "audience": "agent_diagnostics",
@@ -183,10 +196,236 @@ fn extract_result_content_projects_catalog_execute_operation_matches() {
     };
     assert!(text.contains("executeOperationMatches"));
     assert!(text.contains("trace_list"));
+    assert!(text.contains("execute::trace_list"));
+    assert!(text.contains("schemaInspection"));
+    assert!(text.contains("\"score\": 10"));
     assert!(text.contains("diagnose_or_verify"));
     assert!(text.contains("kernel_evolution_only"));
     assert!(text.contains("readOnlyInspectionSafe"));
     assert!(text.contains("safe to call during read-only inspection"));
+}
+
+#[test]
+fn extract_result_content_projects_git_status_evidence_for_agent() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "git_status ok: . on main clean (staged 0, unstaged 0, untracked 0, conflicted 0; porcelain empty; refs 0; truncated false)",
+        )]),
+        Some(json!({
+            "primitiveOperation": "git_status",
+            "status": "ok",
+            "git": {
+                "schemaVersion": "tron.git.v1",
+                "status": "ok",
+                "operation": "status",
+                "path": {"relativePath": "."},
+                "repository": {
+                    "repositoryRoot": {
+                        "root": "working_directory",
+                        "relativePath": "."
+                    },
+                    "branch": "main",
+                    "detachedHead": false,
+                    "hasUpstream": false,
+                    "ahead": 0,
+                    "behind": 0,
+                    "headOid": "should_not_be_required_for_summary",
+                    "indexTreeTruncated": false,
+                    "indexTreeOidUnavailable": false
+                },
+                "dirty": false,
+                "summary": {
+                    "stagedCount": 0,
+                    "unstagedCount": 0,
+                    "untrackedCount": 0,
+                    "conflictedCount": 0
+                },
+                "evidence": {
+                    "statusPorcelainV1Z": "",
+                    "statusTruncated": false,
+                    "statusLimitBytes": 20000,
+                    "resourceRefs": []
+                }
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("\"primitiveOperation\": \"git_status\""));
+    assert!(text.contains("\"branch\": \"main\""));
+    assert!(text.contains("\"dirty\": false"));
+    assert!(text.contains("\"stagedCount\": 0"));
+    assert!(text.contains("\"statusPorcelainEmpty\": true"));
+    assert!(text.contains("\"statusTruncated\": false"));
+    assert!(text.contains("\"relativePath\": \".\""));
+    assert!(!text.contains("statusPorcelainV1Z"));
+}
+
+#[test]
+fn extract_result_content_projects_catalog_agent_search_plan() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Catalog search returned 5 execute operation match(es).",
+        )]),
+        Some(json!({
+            "primitiveOperation": "catalog_search",
+            "status": "ok",
+            "catalogDiscovery": {
+                "summary": {"functions": {"visible": 0}},
+                "functions": [],
+                "executeOperationSearch": "git_status replacement readiness shadow trial route binding evidence",
+                "executeOperationMatches": [{
+                    "operation": "git_status",
+                    "tool": "capability::execute",
+                    "arguments": {"operation": "git_status"},
+                    "matchKind": "intent",
+                    "score": 18,
+                    "capabilityPool": {
+                        "surface": "agent_operation",
+                        "audience": "session_work",
+                        "replacementClass": "runtime_routable"
+                    }
+                }],
+                "agentSearchPlan": {
+                    "targetOperation": "git_status",
+                    "primaryInspection": {
+                        "operation": "capability_binding_cockpit_overview",
+                        "payload": {
+                            "operation": "capability_binding_cockpit_overview",
+                            "targetOperation": "git_status",
+                            "limit": 1
+                        },
+                        "readOnlyInspectionSafe": true,
+                        "reason": "Inspect replacement, binding, route, shadow, rollback, and evidence state for the exact target operation."
+                    },
+                    "readOnlySequence": [{
+                        "operation": "capability_replacement_candidate_list",
+                        "payload": {
+                            "operation": "capability_replacement_candidate_list",
+                            "targetOperation": "git_status",
+                            "networkPolicy": "none"
+                        },
+                        "readOnlyInspectionSafe": true,
+                        "reason": "List replacement candidates for the target operation."
+                    }],
+                    "doNotCall": [{
+                        "operation": "capability_shadow_trial_request_list",
+                        "reason": "This is not a supported operation. Use capability_binding_cockpit_overview targetOperation plus route/candidate/evidence list or inspect operations."
+                    }],
+                    "completionRule": "If the targeted cockpit row reports zero candidates, zero active routes, and zero shadow-trial runs for the current scope, answer that no current-scope replacement evidence exists instead of searching unsupported list names."
+                }
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("agentSearchPlan"));
+    assert!(text.contains("targetOperation"));
+    assert!(text.contains("git_status"));
+    assert!(text.contains("primaryInspection"));
+    assert!(text.contains("capability_binding_cockpit_overview"));
+    assert!(text.contains("capability_replacement_candidate_list"));
+    assert!(text.contains("capability_shadow_trial_request_list"));
+    assert!(text.contains("no current-scope replacement evidence exists"));
+    assert!(text.contains("\"score\": 18"));
+}
+
+#[test]
+fn extract_result_content_projects_catalog_execute_operation_inspect_schema() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Catalog execute_operation inspected: execute::capability_shadow_trial_evidence_inspect.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "catalog_inspect",
+            "status": "ok",
+            "catalogDiscovery": {
+                "kind": "execute_operation",
+                "id": "execute::capability_shadow_trial_evidence_inspect",
+                "aliasResolvedFrom": "execute::capability_shadow_trial_evidence_inspect",
+                "operation": "capability_shadow_trial_evidence_inspect",
+                "summary": "Provider-visible capability::execute operation capability_shadow_trial_evidence_inspect.",
+                "providerCallable": true,
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["operation", "capabilityShadowTrialEvidenceResourceId"],
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "const": "capability_shadow_trial_evidence_inspect"
+                        },
+                        "capabilityShadowTrialEvidenceResourceId": {
+                            "type": "string"
+                        }
+                    },
+                    "schemaCompleteness": "operation_specific_contract"
+                },
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["content", "details"],
+                    "schemaCompleteness": "operation_specific_contract"
+                },
+                "modelFacingInvocation": {
+                    "tool": "capability::execute",
+                    "operation": "capability_shadow_trial_evidence_inspect",
+                    "arguments": {"operation": "capability_shadow_trial_evidence_inspect"}
+                },
+                "capabilityPool": {
+                    "surface": "agent_operation",
+                    "audience": "governance",
+                    "replacementClass": "kernel_evolution_only"
+                },
+                "agentUsage": {
+                    "callable": true,
+                    "tool": "capability::execute",
+                    "operation": "capability_shadow_trial_evidence_inspect",
+                    "effect": {
+                        "mode": "read_only",
+                        "readOnlyInspectionSafe": true
+                    },
+                    "preflight": {
+                        "authorityScopes": ["capability_binding.read", "resource.read"],
+                        "resourceSelectors": ["kind:capability_shadow_trial_evidence"],
+                        "networkPolicy": "none"
+                    }
+                },
+                "schema": {
+                    "tool": "capability::execute",
+                    "operation": "capability_shadow_trial_evidence_inspect",
+                    "requiredPayloadFields": ["operation", "capabilityShadowTrialEvidenceResourceId"],
+                    "payloadPlacement": "Put operation-specific fields at the top level of the capability::execute payload.",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["operation", "capabilityShadowTrialEvidenceResourceId"],
+                        "schemaCompleteness": "operation_specific_contract"
+                    },
+                    "outputSchema": {
+                        "type": "object",
+                        "required": ["content", "details"],
+                        "schemaCompleteness": "operation_specific_contract"
+                    }
+                }
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("\"kind\": \"execute_operation\""));
+    assert!(text.contains("capability_shadow_trial_evidence_inspect"));
+    assert!(text.contains("capabilityShadowTrialEvidenceResourceId"));
+    assert!(text.contains("payloadPlacement"));
+    assert!(text.contains("\"inputSchema\""));
+    assert!(text.contains("\"outputSchema\""));
+    assert!(text.contains("\"schemaCompleteness\": \"operation_specific_contract\""));
+    assert!(text.contains("\"providerCallable\": true"));
+    assert!(text.contains("kernel_evolution_only"));
+    assert!(text.contains("capability_binding.read"));
 }
 
 #[test]
@@ -271,6 +510,77 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
                             "locked": false,
                             "builtIn": true,
                             "moduleOwned": false
+                        },
+                        "binding": {
+                            "requested": 0,
+                            "approved": 0,
+                            "rejected": 0,
+                            "activePolicies": 0,
+                            "failedReplacementAttempts": 0,
+                            "latestState": "none",
+                            "detail": "No binding requests have been recorded for this operation."
+                        },
+                        "shadowTrial": {
+                            "requested": 0,
+                            "approved": 0,
+                            "rejected": 0,
+                            "runs": 0,
+                            "passed": 0,
+                            "failed": 0,
+                            "availableForThisOperation": true,
+                            "latestState": "none",
+                            "detail": "No shadow trial runs have been recorded for this operation."
+                        },
+                        "route": {
+                            "candidates": 0,
+                            "bindings": 0,
+                            "activeRoutes": 0,
+                            "routeEvents": 0,
+                            "failedClosed": 0,
+                            "rolledBack": 0,
+                            "rollbackAvailable": false,
+                            "disableAvailable": false,
+                            "state": "built_in",
+                            "label": "Built-in route",
+                            "detail": "No runtime route is active for this operation."
+                        },
+                        "rollback": {
+                            "available": false,
+                            "disableAvailable": false,
+                            "abortAvailable": false,
+                            "boundary": "No active replacement rollback is available yet.",
+                            "detail": "Rollback appears after a governed route activates."
+                        },
+                        "agentPath": {
+                            "purpose": "Inspect replacement readiness for git_status without invoking the adapter.",
+                            "adapterExecutionGuidance": "Do not call git_status merely to inspect replacement readiness.",
+                            "evidenceGuidance": "If counts are zero, say no current-scope replacement evidence exists instead of searching unsupported list names.",
+                            "primaryInspection": {
+                                "operation": "capability_binding_cockpit_overview",
+                                "payload": {
+                                    "operation": "capability_binding_cockpit_overview",
+                                    "targetOperation": "git_status",
+                                    "limit": 1
+                                },
+                                "readOnlyInspectionSafe": true,
+                                "reason": "Return the exact operation row with replacement, binding, route, shadow, rollback, and evidence state."
+                            },
+                            "readOnlySequence": [{
+                                "label": "List replacement candidates",
+                                "operation": "capability_replacement_candidate_list",
+                                "payload": {
+                                    "operation": "capability_replacement_candidate_list",
+                                    "targetOperation": "git_status",
+                                    "networkPolicy": "none"
+                                },
+                                "readOnlyInspectionSafe": true,
+                                "reason": "Inspect candidate records for this operation only."
+                            }],
+                            "unavailableSurfaces": [{
+                                "operation": "capability_shadow_trial_request_list",
+                                "reason": "This is not a supported operation.",
+                                "alternative": "Use capability_binding_cockpit_overview targetOperation and supported evidence inspect operations."
+                            }]
                         }
                     },
                     {
@@ -452,6 +762,15 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
     assert!(text.contains("readOnlyInspectionSafe"));
     assert!(text.contains("safe to call during read-only inspection"));
     assert!(text.contains("do not call during read-only inspection"));
+    assert!(text.contains("agentPath"));
+    assert!(text.contains("primaryInspection"));
+    assert!(text.contains("capability_replacement_candidate_list"));
+    assert!(text.contains("capability_shadow_trial_request_list"));
+    assert!(text.contains("No binding requests have been recorded"));
+    assert!(text.contains("No runtime route is active"));
+    assert!(text.contains("No active replacement rollback is available yet"));
+    assert!(text.contains("Do not call git_status merely to inspect replacement readiness"));
+    assert!(text.contains("no current-scope replacement evidence exists"));
     assert!(!text.contains("authorityGrantId"));
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("nested_grant_must_not_project"));
@@ -684,13 +1003,14 @@ fn extract_result_content_projects_trace_metadata_ids() {
     assert!(text.contains("019f-trace-record"));
     assert!(text.contains("trace_nested"));
     assert!(text.contains("inv_nested"));
-    assert!(text.contains("provider_nested"));
     assert!(text.contains("procedural_definition_record"));
     assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
     assert!(text.contains("$.field"));
     assert!(text.contains("[redacted-path]"));
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("authorityGrantId"));
+    assert!(!text.contains("provider_nested"));
+    assert!(!text.contains("providerInvocationId"));
     assert!(!text.contains("/Users/example"));
     assert!(!text.contains("cat hidden"));
 }

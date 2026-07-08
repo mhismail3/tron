@@ -27,11 +27,13 @@
 //! clients also get one read-only `capability_binding::cockpit_overview`
 //! projection; `capability_binding_cockpit_overview` delegates to the same
 //! server-owned projection so native UI and model-facing capability inspection
-//! share one source of truth. The durable projection can include the complete
-//! operation set for UI/audit, while provider replay receives only a bounded
-//! digest with coverage counts, family summaries, and representative operation
-//! samples. The projection summarizes total/returned operations, list and
-//! bounded resource-scan
+//! share one source of truth. The projection accepts an exact `targetOperation`
+//! filter so agents can inspect one operation's role, readiness, safe read-only
+//! path, and unavailable surfaces without scanning the whole operation pool. The
+//! durable projection can include the complete operation set for UI/audit, while
+//! provider replay receives only a bounded digest with coverage counts, family
+//! summaries, and representative operation samples. The projection summarizes
+//! total/returned operations, list and bounded resource-scan
 //! completeness, redacted operation ownership, replacement target, readiness,
 //! and scoped binding/shadow-trial/route state without exposing raw resource
 //! ids. The `capability_binding` domain owns the projection, not the operations

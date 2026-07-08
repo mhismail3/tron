@@ -54,6 +54,13 @@ fn reasoning_summary_delta_event(delta: &str) -> ResponsesSseEvent {
     }
 }
 
+fn reasoning_summary_part_added_event() -> ResponsesSseEvent {
+    ResponsesSseEvent {
+        event_type: SseEventType::ReasoningSummaryPartAdded,
+        ..Default::default()
+    }
+}
+
 fn completed_event(
     output: Vec<ResponsesOutputItem>,
     usage: Option<ResponsesUsage>,
@@ -249,6 +256,35 @@ fn emits_thinking_delta_for_reasoning_summary() {
 }
 
 #[test]
+fn streamed_reasoning_summary_parts_keep_paragraph_boundaries() {
+    let mut state = create_stream_state();
+
+    let _ = process_stream_event(&reasoning_summary_part_added_event(), &mut state);
+    let first = process_stream_event(
+        &reasoning_summary_delta_event("First summary part."),
+        &mut state,
+    );
+    let _ = process_stream_event(&reasoning_summary_part_added_event(), &mut state);
+    let second = process_stream_event(
+        &reasoning_summary_delta_event("Second summary part."),
+        &mut state,
+    );
+
+    assert_eq!(
+        state.acc.accumulated_thinking,
+        "First summary part.\n\nSecond summary part."
+    );
+    assert!(matches!(
+        first.last(),
+        Some(StreamEvent::ThinkingDelta { delta, .. }) if delta == "First summary part."
+    ));
+    assert!(matches!(
+        second.last(),
+        Some(StreamEvent::ThinkingDelta { delta, .. }) if delta == "\n\nSecond summary part."
+    ));
+}
+
+#[test]
 fn deduplicates_reasoning_text() {
     let mut state = create_stream_state();
     state.acc.thinking_started = true;
@@ -296,6 +332,43 @@ fn handles_reasoning_from_output_item_done() {
             ..
         }
     ));
+}
+
+#[test]
+fn output_item_done_joins_multiple_reasoning_summary_parts() {
+    let mut state = create_stream_state();
+    let event = ResponsesSseEvent {
+        event_type: SseEventType::OutputItemDone,
+        item: Some(ResponsesOutputItem {
+            item_type: OutputItemType::Reasoning,
+            summary: Some(vec![
+                OutputContent {
+                    content_type: "summary_text".into(),
+                    text: Some("First part.".into()),
+                },
+                OutputContent {
+                    content_type: "summary_text".into(),
+                    text: Some("Second part.".into()),
+                },
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let events = process_stream_event(&event, &mut state);
+    assert_eq!(
+        state.acc.accumulated_thinking,
+        "First part.\n\nSecond part."
+    );
+    let deltas: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ThinkingDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deltas, vec!["First part.", "\n\nSecond part."]);
 }
 
 #[test]
@@ -746,6 +819,57 @@ fn completed_done_content_dedupes_repeated_thinking_snapshot() {
         &done.content[1],
         AssistantContent::CapabilityInvocation { id, .. } if id == "call_mid"
     ));
+}
+
+#[test]
+fn completed_done_content_joins_reasoning_summary_parts() {
+    let mut state = create_stream_state();
+
+    let event = completed_event(
+        vec![ResponsesOutputItem {
+            item_type: OutputItemType::Reasoning,
+            summary: Some(vec![
+                OutputContent {
+                    content_type: "summary_text".into(),
+                    text: Some("First completed part.".into()),
+                },
+                OutputContent {
+                    content_type: "summary_text".into(),
+                    text: Some("Second completed part.".into()),
+                },
+            ]),
+            ..Default::default()
+        }],
+        Some(ResponsesUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..Default::default()
+        }),
+    );
+
+    let events = process_stream_event(&event, &mut state);
+    let done = events
+        .iter()
+        .find_map(|event| match event {
+            StreamEvent::Done { message, .. } => Some(message),
+            _ => None,
+        })
+        .expect("done event");
+
+    assert_eq!(done.content.len(), 1);
+    assert!(matches!(
+        &done.content[0],
+        AssistantContent::Thinking { thinking, .. }
+            if thinking == "First completed part.\n\nSecond completed part."
+    ));
+}
+
+#[test]
+fn thinking_snapshot_dedupe_key_normalizes_whitespace() {
+    assert_eq!(
+        normalize_thinking_snapshot(" same\n\nreasoning\t"),
+        "same reasoning"
+    );
 }
 
 #[test]

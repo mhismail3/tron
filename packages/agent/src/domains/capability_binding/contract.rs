@@ -66,6 +66,10 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 200
+                },
+                "targetOperation": {
+                    "type": "string",
+                    "description": "Optional exact capability::execute operation name. When present, the projection returns the single operation row plus readiness path metadata for that operation."
                 }
             }
         }))

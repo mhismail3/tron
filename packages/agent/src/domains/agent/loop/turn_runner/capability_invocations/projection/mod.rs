@@ -104,6 +104,7 @@ fn model_context_evidence(details: Option<&Value>) -> Option<String> {
     let projected = match operation {
         "capability_binding_cockpit_overview" => project_capability_cockpit_evidence(details),
         "catalog_search" | "catalog_inspect" => project_catalog_evidence(details),
+        operation if operation.starts_with("git_") => project_git_evidence(details),
         "log_recent" => project_log_evidence(details),
         "trace_list" | "trace_get" => project_trace_evidence(details),
         operation if projects_metadata_operation(operation) => {
@@ -134,7 +135,12 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
     copy_key(&mut projected, discovery, "kind");
     copy_key(&mut projected, discovery, "id");
     copy_key(&mut projected, discovery, "aliasResolvedFrom");
+    copy_key(&mut projected, discovery, "operation");
+    copy_key(&mut projected, discovery, "providerCallable");
+    copy_key(&mut projected, discovery, "providerCallableReason");
     copy_key(&mut projected, discovery, "summary");
+    copy_key(&mut projected, discovery, "inputSchema");
+    copy_key(&mut projected, discovery, "outputSchema");
     if let Some(guidance) = discovery.get("modelFacingGuidance") {
         projected.insert(
             "modelFacingGuidance".to_owned(),
@@ -142,6 +148,14 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
         );
     }
     copy_key(&mut projected, discovery, "modelFacingInvocation");
+    copy_key(&mut projected, discovery, "capabilityPool");
+    copy_key(&mut projected, discovery, "agentUsage");
+    copy_key(&mut projected, discovery, "schema");
+    copy_key(&mut projected, discovery, "executeOperationSearch");
+    copy_key(&mut projected, discovery, "agentNextStep");
+    copy_key(&mut projected, discovery, "unsupportedOperationCandidate");
+    copy_key(&mut projected, discovery, "unsupportedOperationRecovery");
+    copy_key(&mut projected, discovery, "agentSearchPlan");
     if let Some(functions) = discovery.get("functions").and_then(Value::as_array) {
         projected.insert(
             "functions".to_owned(),
@@ -186,7 +200,13 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
 
 fn project_model_facing_guidance(guidance: &Value) -> Value {
     let mut projected = Map::new();
-    for key in ["catalogInspect", "capabilityExecute"] {
+    for key in [
+        "catalogInspect",
+        "capabilityExecute",
+        "operationSearch",
+        "executeSchemaInspection",
+        "internalDiscovery",
+    ] {
         copy_key(&mut projected, guidance, key);
     }
     if let Some(operations) = guidance
@@ -236,13 +256,98 @@ fn project_execute_operation_match(operation: &Value) -> Value {
         "operation",
         "tool",
         "arguments",
+        "catalogInspectId",
+        "schemaInspection",
         "matchKind",
+        "score",
         "capabilityPool",
         "agentUsage",
     ] {
         copy_key(&mut projected, operation, key);
     }
     Value::Object(projected)
+}
+
+fn project_git_evidence(details: &Value) -> Option<Value> {
+    let git = details.get("git")?;
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    let mut git_projected = Map::new();
+    for key in ["schemaVersion", "operation", "status", "dirty"] {
+        copy_key(&mut git_projected, git, key);
+    }
+    copy_pointer_as_key(
+        &mut git_projected,
+        git,
+        "/path/relativePath",
+        "relativePath",
+    );
+    copy_pointer_as_key(
+        &mut git_projected,
+        git,
+        "/repository/repositoryRoot/relativePath",
+        "repositoryRelativePath",
+    );
+    for (pointer, key) in [
+        ("/repository/branch", "branch"),
+        ("/repository/detachedHead", "detachedHead"),
+        ("/repository/hasUpstream", "hasUpstream"),
+        ("/repository/ahead", "ahead"),
+        ("/repository/behind", "behind"),
+        ("/repository/indexTreeTruncated", "indexTreeTruncated"),
+        (
+            "/repository/indexTreeOidUnavailable",
+            "indexTreeOidUnavailable",
+        ),
+    ] {
+        copy_pointer_as_key(&mut git_projected, git, pointer, key);
+    }
+    if let Some(summary) = git.get("summary") {
+        let mut summary_projected = Map::new();
+        for key in [
+            "stagedCount",
+            "unstagedCount",
+            "untrackedCount",
+            "conflictedCount",
+        ] {
+            copy_key(&mut summary_projected, summary, key);
+        }
+        if !summary_projected.is_empty() {
+            git_projected.insert("summary".to_owned(), Value::Object(summary_projected));
+        }
+    }
+    if let Some(evidence) = git.get("evidence") {
+        let mut evidence_projected = Map::new();
+        copy_key(&mut evidence_projected, evidence, "statusTruncated");
+        copy_key(&mut evidence_projected, evidence, "statusLimitBytes");
+        if let Some(porcelain) = evidence.get("statusPorcelainV1Z").and_then(Value::as_str) {
+            evidence_projected.insert(
+                "statusPorcelainEmpty".to_owned(),
+                json!(porcelain.is_empty()),
+            );
+        }
+        if let Some(refs) = evidence.get("resourceRefs").and_then(Value::as_array) {
+            evidence_projected.insert(
+                "resourceRefs".to_owned(),
+                json!({
+                    "total": refs.len(),
+                    "returned": refs
+                        .iter()
+                        .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                        .map(bounded_model_context_value)
+                        .collect::<Vec<_>>(),
+                    "truncated": refs.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
+                    "omitted": refs.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+                }),
+            );
+        }
+        if !evidence_projected.is_empty() {
+            git_projected.insert("evidence".to_owned(), Value::Object(evidence_projected));
+        }
+    }
+    projected.insert("git".to_owned(), Value::Object(git_projected));
+    Some(Value::Object(projected))
 }
 
 fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
@@ -399,6 +504,27 @@ fn project_cockpit_operation_for_agent(operation: &Value) -> Value {
     if let Some(status) = operation.get("status") {
         projected.insert("status".to_owned(), project_cockpit_status(status));
     }
+    if let Some(binding) = operation.get("binding") {
+        projected.insert("binding".to_owned(), project_cockpit_binding(binding));
+    }
+    if let Some(shadow_trial) = operation.get("shadowTrial") {
+        projected.insert(
+            "shadowTrial".to_owned(),
+            project_cockpit_shadow_trial(shadow_trial),
+        );
+    }
+    if let Some(route) = operation.get("route") {
+        projected.insert("route".to_owned(), project_cockpit_route(route));
+    }
+    if let Some(rollback) = operation.get("rollback") {
+        projected.insert("rollback".to_owned(), project_cockpit_rollback(rollback));
+    }
+    if let Some(agent_path) = operation.get("agentPath") {
+        projected.insert(
+            "agentPath".to_owned(),
+            project_cockpit_agent_path(agent_path),
+        );
+    }
     Value::Object(projected)
 }
 
@@ -493,6 +619,146 @@ fn project_cockpit_status(status: &Value) -> Value {
     Value::Object(projected)
 }
 
+fn project_cockpit_binding(binding: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "requested",
+        "approved",
+        "rejected",
+        "activePolicies",
+        "failedReplacementAttempts",
+        "latestState",
+        "lastUpdatedAt",
+        "detail",
+    ] {
+        copy_key(&mut projected, binding, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_shadow_trial(shadow_trial: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "requested",
+        "approved",
+        "rejected",
+        "runs",
+        "passed",
+        "failed",
+        "aborted",
+        "disabled",
+        "latestState",
+        "lastUpdatedAt",
+        "availableForThisOperation",
+        "detail",
+    ] {
+        copy_key(&mut projected, shadow_trial, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_route(route: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "candidates",
+        "bindings",
+        "activeRoutes",
+        "routeEvents",
+        "routedInvocations",
+        "failedClosed",
+        "disabled",
+        "rolledBack",
+        "rollbackRecords",
+        "rollbackAvailable",
+        "disableAvailable",
+        "latestState",
+        "lastUpdatedAt",
+        "state",
+        "label",
+        "detail",
+    ] {
+        copy_key(&mut projected, route, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_rollback(rollback: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "available",
+        "disableAvailable",
+        "abortAvailable",
+        "boundary",
+        "detail",
+    ] {
+        copy_key(&mut projected, rollback, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_agent_path(agent_path: &Value) -> Value {
+    let mut projected = Map::new();
+    copy_key(&mut projected, agent_path, "purpose");
+    copy_key(&mut projected, agent_path, "adapterExecutionGuidance");
+    copy_key(&mut projected, agent_path, "evidenceGuidance");
+    if let Some(primary) = agent_path.get("primaryInspection") {
+        projected.insert(
+            "primaryInspection".to_owned(),
+            project_cockpit_agent_path_step(primary),
+        );
+    }
+    if let Some(sequence) = agent_path.get("readOnlySequence").and_then(Value::as_array) {
+        projected.insert(
+            "readOnlySequence".to_owned(),
+            Value::Array(
+                sequence
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_cockpit_agent_path_step)
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(unavailable) = agent_path
+        .get("unavailableSurfaces")
+        .and_then(Value::as_array)
+    {
+        projected.insert(
+            "unavailableSurfaces".to_owned(),
+            Value::Array(
+                unavailable
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_cockpit_unavailable_surface)
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_agent_path_step(step: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "label",
+        "operation",
+        "payload",
+        "readOnlyInspectionSafe",
+        "reason",
+    ] {
+        copy_key(&mut projected, step, key);
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_unavailable_surface(surface: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in ["operation", "reason", "alternative"] {
+        copy_key(&mut projected, surface, key);
+    }
+    Value::Object(projected)
+}
+
 fn project_log_evidence(details: &Value) -> Option<Value> {
     let mut projected = Map::new();
     copy_key(&mut projected, details, "primitiveOperation");
@@ -571,7 +837,6 @@ fn project_trace_record(record: &Value) -> Value {
         "traceRecordId",
         "traceId",
         "invocationId",
-        "providerInvocationId",
         "parentInvocationId",
         "modelPrimitiveName",
         "operation",
@@ -597,7 +862,6 @@ fn project_error_evidence(details: &Value) -> Option<Value> {
     let failure = details.get("failure")?;
     let mut projected = Map::new();
     copy_key(&mut projected, details, "modelPrimitiveName");
-    copy_key(&mut projected, details, "providerInvocationId");
     copy_key(&mut projected, details, "primitiveTargetId");
     if let Some(failure) = project_failure_value(failure) {
         projected.extend(failure.as_object()?.clone());
@@ -915,6 +1179,12 @@ fn denied_model_context_key(key: &str) -> bool {
 
 fn copy_key(target: &mut Map<String, Value>, source: &Value, key: &str) {
     if let Some(value) = source.get(key) {
+        target.insert(key.to_owned(), bounded_model_context_value(value));
+    }
+}
+
+fn copy_pointer_as_key(target: &mut Map<String, Value>, source: &Value, pointer: &str, key: &str) {
+    if let Some(value) = source.pointer(pointer) {
         target.insert(key.to_owned(), bounded_model_context_value(value));
     }
 }

@@ -170,6 +170,8 @@ struct OperationListProjection {
     total_operations: usize,
     returned_operations: usize,
     requested_limit: usize,
+    target_operation: Option<String>,
+    filter_applied: bool,
     complete: bool,
     truncated: bool,
     state: &'static str,
@@ -237,6 +239,36 @@ struct OperationVisibility {
     shadow_trial: ShadowTrialProjection,
     route: RouteProjection,
     rollback: RollbackProjection,
+    agent_path: AgentPathProjection,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathProjection {
+    purpose: String,
+    primary_inspection: AgentPathStep,
+    read_only_sequence: Vec<AgentPathStep>,
+    unavailable_surfaces: Vec<UnavailableSurfaceProjection>,
+    adapter_execution_guidance: String,
+    evidence_guidance: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathStep {
+    label: String,
+    operation: String,
+    payload: Value,
+    read_only_inspection_safe: bool,
+    reason: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnavailableSurfaceProjection {
+    operation: String,
+    reason: String,
+    alternative: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -444,6 +476,20 @@ pub(crate) async fn cockpit_overview_value(
         .map(|value| value as usize)
         .unwrap_or_else(|| supported_operation_names().len())
         .clamp(1, MAX_LIMIT);
+    let target_operation = invocation
+        .payload
+        .get("targetOperation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    if let Some(target_operation) = target_operation.as_deref()
+        && !supported_operation_names().contains(&target_operation)
+    {
+        return Err(invalid(format!(
+            "unknown targetOperation {target_operation}"
+        )));
+    }
     let facts = collect_facts(deps, &scopes).await?;
     let mut all_operations = Vec::new();
     for operation in supported_operation_names() {
@@ -470,13 +516,27 @@ pub(crate) async fn cockpit_overview_value(
             .cmp(&right.family)
             .then_with(|| left.name.cmp(&right.name))
     });
-    let operation_list = operation_list_projection(all_operations.len(), limit);
+    let visible_operations = if let Some(target_operation) = target_operation.as_deref() {
+        all_operations
+            .iter()
+            .filter(|operation| operation.name == target_operation)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        all_operations
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let operation_list = operation_list_projection(
+        all_operations.len(),
+        visible_operations.len(),
+        limit,
+        target_operation.clone(),
+    );
     let resource_scan = resource_scan_projection(facts.scan);
-    let operations = all_operations
-        .iter()
-        .take(limit)
-        .cloned()
-        .collect::<Vec<_>>();
+    let operations = visible_operations;
     let route_stories = route_stories(&all_operations);
     let projection = CockpitProjection {
         schema_version: contract::COCKPIT_VISIBILITY_SCHEMA_VERSION,
@@ -787,7 +847,17 @@ fn operation_visibility(
     );
     let rollback = rollback_projection(metadata.ownership_class, &facts);
     let readiness = readiness_projection(metadata.ownership_class, &facts, &replacement);
+    let binding = binding_projection(&facts.binding);
+    let shadow_trial = shadow_projection(metadata.operation, &facts.shadow);
     let route = route_projection(&facts.route);
+    let agent_path = agent_path_projection(
+        metadata.operation,
+        &replacement,
+        &readiness,
+        &binding,
+        &shadow_trial,
+        &route,
+    );
     OperationVisibility {
         name: metadata.operation.to_owned(),
         family: metadata.family.to_owned(),
@@ -807,10 +877,159 @@ fn operation_visibility(
         status: status_projection(metadata.family, metadata.ownership_class),
         replacement,
         readiness,
-        binding: binding_projection(&facts.binding),
-        shadow_trial: shadow_projection(metadata.operation, &facts.shadow),
+        binding,
+        shadow_trial,
         route,
         rollback,
+        agent_path,
+    }
+}
+
+fn agent_path_projection(
+    operation: &str,
+    replacement: &ReplacementProjection,
+    readiness: &ReadinessProjection,
+    binding: &BindingProjection,
+    shadow_trial: &ShadowTrialProjection,
+    route: &RouteProjection,
+) -> AgentPathProjection {
+    let primary = AgentPathStep {
+        label: "Inspect this operation's readiness".to_owned(),
+        operation: "capability_binding_cockpit_overview".to_owned(),
+        payload: serde_json::json!({
+            "operation": "capability_binding_cockpit_overview",
+            "targetOperation": operation
+        }),
+        read_only_inspection_safe: true,
+        reason: "Returns one exact operation row with role, preflight, binding, shadow, route, rollback, and evidence availability without invoking the adapter.".to_owned(),
+    };
+    let mut read_only_sequence = vec![
+        AgentPathStep {
+            label: "Find the exact operation name".to_owned(),
+            operation: "catalog_search".to_owned(),
+            payload: serde_json::json!({
+                "operation": "catalog_search",
+                "text": operation,
+                "limit": 10
+            }),
+            read_only_inspection_safe: true,
+            reason: "Use executeOperationMatches directly; do not invent operation names from natural language.".to_owned(),
+        },
+        AgentPathStep {
+            label: "Inspect the request schema".to_owned(),
+            operation: "catalog_inspect".to_owned(),
+            payload: serde_json::json!({
+                "operation": "catalog_inspect",
+                "kind": "function",
+                "id": format!("execute::{operation}"),
+                "maxSchemaBytes": 8000
+            }),
+            read_only_inspection_safe: true,
+            reason: "Use exact schema field names before calling the operation.".to_owned(),
+        },
+        primary.clone(),
+    ];
+    if replacement.can_replace || replacement.can_shadow || replacement.can_extend {
+        read_only_sequence.extend([
+            AgentPathStep {
+                label: "List replacement candidates".to_owned(),
+                operation: "capability_replacement_candidate_list".to_owned(),
+                payload: serde_json::json!({
+                    "operation": "capability_replacement_candidate_list",
+                    "limit": 25
+                }),
+                read_only_inspection_safe: true,
+                reason: "Shows whether a governed candidate exists; an empty list means no candidate has been recorded in scope.".to_owned(),
+            },
+            AgentPathStep {
+                label: "List route bindings".to_owned(),
+                operation: "capability_route_binding_list".to_owned(),
+                payload: serde_json::json!({
+                    "operation": "capability_route_binding_list",
+                    "limit": 25
+                }),
+                read_only_inspection_safe: true,
+                reason: "Shows explicit route bindings without activating, disabling, or rolling back routing.".to_owned(),
+            },
+            AgentPathStep {
+                label: "List route events".to_owned(),
+                operation: "capability_route_event_list".to_owned(),
+                payload: serde_json::json!({
+                    "operation": "capability_route_event_list",
+                    "limit": 25
+                }),
+                read_only_inspection_safe: true,
+                reason: "Shows routed invocation, activation, disable, rollback, and failed-closed history.".to_owned(),
+            },
+        ]);
+    }
+    if binding.requested > 0 || binding.approved > 0 || binding.rejected > 0 {
+        read_only_sequence.extend([
+            AgentPathStep {
+                label: "List binding requests".to_owned(),
+                operation: "capability_binding_request_list".to_owned(),
+                payload: serde_json::json!({
+                    "operation": "capability_binding_request_list",
+                    "limit": 25
+                }),
+                read_only_inspection_safe: true,
+                reason: "Shows recorded governance requests; this is read-only and does not create a proposal.".to_owned(),
+            },
+            AgentPathStep {
+                label: "List binding decisions".to_owned(),
+                operation: "capability_binding_decision_list".to_owned(),
+                payload: serde_json::json!({
+                    "operation": "capability_binding_decision_list",
+                    "limit": 25
+                }),
+                read_only_inspection_safe: true,
+                reason: "Shows approval or rejection history; this is the safe source for governance outcomes.".to_owned(),
+            },
+        ]);
+    }
+
+    let mut unavailable_surfaces = Vec::new();
+    if shadow_trial.available_for_this_operation {
+        unavailable_surfaces.extend([
+            UnavailableSurfaceProjection {
+                operation: "capability_shadow_trial_request_list".to_owned(),
+                reason: "No provider-visible list operation exists for shadow trial requests in this slice.".to_owned(),
+                alternative: "Use capability_binding_cockpit_overview targetOperation plus capability_shadow_trial_evidence_inspect when an exact evidence resource id is known.".to_owned(),
+            },
+            UnavailableSurfaceProjection {
+                operation: "capability_shadow_trial_run_list".to_owned(),
+                reason: "No provider-visible list operation exists for shadow trial runs in this slice.".to_owned(),
+                alternative: "Use cockpit shadowTrial counts and route events; inspect exact evidence refs only when present.".to_owned(),
+            },
+        ]);
+    }
+
+    let adapter_execution_guidance = if operation == "git_status" {
+        "Do not call git_status just to prove replacement readiness. Use the targeted cockpit overview. Call git_status only when repository status is the task and the workspace is a Git worktree."
+            .to_owned()
+    } else {
+        format!(
+            "Do not invoke {operation} just to inspect its replacement readiness. Use the targeted cockpit overview and schema first, then call the operation only if the user task needs its effect."
+        )
+    };
+    let evidence_guidance = if route.route_events > 0 || shadow_trial.runs > 0 {
+        "Use route events, shadow evidence, and trace/resource refs returned by the read-only list/inspect operations; do not infer evidence from class labels alone."
+            .to_owned()
+    } else {
+        format!(
+            "Current readiness is {}. If counts are zero, say no scoped evidence is recorded instead of searching for unsupported list operations.",
+            readiness.label
+        )
+    };
+
+    AgentPathProjection {
+        purpose: "Agent-native read-only path from operation discovery to readiness evidence."
+            .to_owned(),
+        primary_inspection: primary,
+        read_only_sequence,
+        unavailable_surfaces,
+        adapter_execution_guidance,
+        evidence_guidance,
     }
 }
 
@@ -1323,16 +1542,24 @@ fn rollback_projection(ownership_class: &str, facts: &OperationFacts) -> Rollbac
 
 fn operation_list_projection(
     total_operations: usize,
+    returned_operations: usize,
     requested_limit: usize,
+    target_operation: Option<String>,
 ) -> OperationListProjection {
-    let returned_operations = total_operations.min(requested_limit);
-    let truncated = returned_operations < total_operations;
-    let label = if truncated {
+    let filter_applied = target_operation.is_some();
+    let truncated = !filter_applied && returned_operations < total_operations;
+    let label = if filter_applied {
+        "Operation filter applied"
+    } else if truncated {
         "Operation list truncated"
     } else {
         "Operation list complete"
     };
-    let detail = if truncated {
+    let detail = if let Some(target_operation) = target_operation.as_deref() {
+        format!(
+            "1 of {total_operations} operations is returned for exact targetOperation {target_operation}."
+        )
+    } else if truncated {
         format!(
             "{returned_operations} of {total_operations} operations are returned because the client requested limit {requested_limit}."
         )
@@ -1343,9 +1570,17 @@ fn operation_list_projection(
         total_operations,
         returned_operations,
         requested_limit,
+        target_operation,
+        filter_applied,
         complete: !truncated,
         truncated,
-        state: if truncated { "truncated" } else { "complete" },
+        state: if filter_applied {
+            "filtered"
+        } else if truncated {
+            "truncated"
+        } else {
+            "complete"
+        },
         label: label.to_owned(),
         detail,
     }

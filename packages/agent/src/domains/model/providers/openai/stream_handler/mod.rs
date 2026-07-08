@@ -42,6 +42,8 @@ pub struct StreamState {
     pub has_reasoning_text: bool,
     /// Source contract for the currently accumulated thinking-like content.
     pub thinking_kind: ThinkingContentKind,
+    /// Whether the next streamed reasoning-summary delta starts a new summary part.
+    pub reasoning_summary_pending_separator: bool,
 }
 
 /// State for an individual capability invocation being accumulated.
@@ -66,6 +68,7 @@ pub fn create_stream_state() -> StreamState {
         seen_thinking_texts: HashSet::new(),
         has_reasoning_text: false,
         thinking_kind: ThinkingContentKind::Thinking,
+        reasoning_summary_pending_separator: false,
     }
 }
 
@@ -151,6 +154,9 @@ fn handle_output_item_added(
 
 /// Handle `response.reasoning_summary_part.added` — emit `ThinkingStart` if not yet started.
 fn handle_reasoning_summary_part_added(state: &mut StreamState) -> Vec<StreamEvent> {
+    if !state.acc.accumulated_thinking.is_empty() {
+        state.reasoning_summary_pending_separator = true;
+    }
     state.acc.mark_thinking_started().into_iter().collect()
 }
 
@@ -164,6 +170,7 @@ fn handle_reasoning_text_delta(
         if !state.has_reasoning_text {
             state.has_reasoning_text = true;
             state.thinking_kind = ThinkingContentKind::Thinking;
+            state.reasoning_summary_pending_separator = false;
             if !state.acc.accumulated_thinking.is_empty() {
                 state.acc.accumulated_thinking.clear();
             }
@@ -186,9 +193,10 @@ fn handle_reasoning_summary_text_delta(
     {
         let _ = state.seen_thinking_texts.insert(delta.clone());
         state.thinking_kind = ThinkingContentKind::ReasoningSummary;
+        let delta = streamed_reasoning_summary_delta(state, delta);
         state
             .acc
-            .process_thinking_delta_with_kind(delta, ThinkingContentKind::ReasoningSummary)
+            .process_thinking_delta_with_kind(&delta, ThinkingContentKind::ReasoningSummary)
     } else {
         Vec::new()
     }
@@ -274,12 +282,13 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
             {
                 let _ = state.seen_thinking_texts.insert(text.clone());
                 state.thinking_kind = ThinkingContentKind::ReasoningSummary;
-                if let Some(error) = state.acc.accumulate_thinking(text) {
+                let delta = reasoning_summary_part_delta(&state.acc.accumulated_thinking, text);
+                if let Some(error) = state.acc.accumulate_thinking(&delta) {
                     events.push(error);
                     return events;
                 }
                 events.push(StreamEvent::ThinkingDelta {
-                    delta: text.clone(),
+                    delta,
                     kind: ThinkingContentKind::ReasoningSummary,
                 });
             }
@@ -416,13 +425,14 @@ fn merge_reasoning_item(
         return;
     }
     if let Some(summary) = &item.summary {
-        for s in summary {
-            if s.content_type == "summary_text"
-                && let Some(text) = &s.text
-            {
-                events.extend(state.acc.mark_thinking_started());
-                state.acc.accumulated_thinking.clone_from(text);
-            }
+        let thinking = join_reasoning_summary_parts(summary.iter().filter_map(|part| {
+            (part.content_type == "summary_text")
+                .then_some(part.text.as_deref())
+                .flatten()
+        }));
+        if !thinking.is_empty() {
+            events.extend(state.acc.mark_thinking_started());
+            state.acc.accumulated_thinking = thinking;
         }
     }
 }
@@ -481,12 +491,11 @@ fn build_done_event(
                     item.summary
                         .as_ref()
                         .map(|summary| {
-                            summary
-                                .iter()
-                                .filter(|part| part.content_type == "summary_text")
-                                .filter_map(|part| part.text.as_deref())
-                                .collect::<Vec<_>>()
-                                .join("")
+                            join_reasoning_summary_parts(summary.iter().filter_map(|part| {
+                                (part.content_type == "summary_text")
+                                    .then_some(part.text.as_deref())
+                                    .flatten()
+                            }))
                         })
                         .unwrap_or_default()
                 } else {
@@ -624,7 +633,32 @@ fn nonzero(value: u64) -> Option<u64> {
 }
 
 fn normalize_thinking_snapshot(thinking: &str) -> String {
-    thinking.trim().to_owned()
+    thinking.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn streamed_reasoning_summary_delta(state: &mut StreamState, delta: &str) -> String {
+    if state.reasoning_summary_pending_separator {
+        state.reasoning_summary_pending_separator = false;
+        reasoning_summary_part_delta(&state.acc.accumulated_thinking, delta)
+    } else {
+        delta.to_owned()
+    }
+}
+
+fn reasoning_summary_part_delta(existing: &str, text: &str) -> String {
+    if existing.trim().is_empty() || text.trim().is_empty() || text.starts_with(char::is_whitespace)
+    {
+        text.to_owned()
+    } else {
+        format!("\n\n{text}")
+    }
+}
+
+fn join_reasoning_summary_parts<'a>(parts: impl Iterator<Item = &'a str>) -> String {
+    parts
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn parse_openai_capability_arguments(

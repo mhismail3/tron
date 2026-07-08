@@ -82,11 +82,28 @@
 //! dependency, or network behavior occurs.
 //! `capability_binding_cockpit_overview` exposes the same read-only Engine
 //! Cockpit projection used by native clients so the agent can inspect operation
-//! ownership, replacement class, route state, and exact preflight guidance. The
-//! full projection remains durable UI/audit data, while the turn runner appends
-//! a bounded provider-visible digest with coverage counts, family summaries, and
+//! ownership, replacement class, route state, and exact preflight guidance. An
+//! exact `targetOperation` filter returns one operation row and a matching
+//! targeted content summary with the safe read-only path and unavailable-surface
+//! guidance, while the full projection remains durable UI/audit data. The turn
+//! runner appends a bounded
+//! provider-visible digest with coverage counts, family summaries, and
 //! representative operation samples so the agent can verify the pool without
 //! guessing or calling internal catalog functions directly.
+//! `catalog_search` is the agent-native entry point for operation discovery:
+//! exact and prefix operation queries return direct `capability::execute`
+//! arguments plus a preferred `catalog_inspect` step for the `execute::<operation>`
+//! schema before backing catalog-function diagnostics, unsupported
+//! operation-like names return explicit recovery guidance instead of fuzzy near
+//! matches, and readiness searches that name one runtime-routable target
+//! operation return a deterministic read-only
+//! `agentSearchPlan` limited to the exact inspect/list sequence before the
+//! model needs to inspect cockpit details. `catalog_inspect` accepts
+//! `execute::<supported_operation>` and supported-operation ids directly; those
+//! aliases return operation-specific call contracts, preflight guidance, and
+//! required top-level payload fields in both normalized `inputSchema` /
+//! `outputSchema` slots and the operation-specific schema block instead of the
+//! generic `capability::execute` wrapper.
 //! Capability-shadow-trial operations are an even narrower metadata-only path:
 //! they record request/decision/run/evidence resources for the selected
 //! read-only `git_status` target, compare bounded built-in and deterministic

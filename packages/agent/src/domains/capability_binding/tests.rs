@@ -4048,6 +4048,85 @@ async fn cockpit_overview_reports_operation_limit_and_bounded_resource_scan_trut
 }
 
 #[tokio::test]
+async fn cockpit_overview_filters_exact_operation_and_returns_agent_native_path() {
+    let fixture = Fixture::new("capability-cockpit-target").await;
+    let targeted = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation(
+            "cockpit-overview-target",
+            json!({"targetOperation": "git_status", "limit": 1}),
+        ),
+    )
+    .await
+    .expect("targeted cockpit overview");
+
+    let supported_operations = crate::domains::capability::supported_operation_names().len();
+    assert_eq!(
+        targeted["summary"]["totalOperations"],
+        json!(supported_operations)
+    );
+    assert_eq!(targeted["summary"]["returnedOperations"], json!(1));
+    assert_eq!(targeted["summary"]["operationListComplete"], json!(true));
+    assert_eq!(targeted["summary"]["operationListTruncated"], json!(false));
+    assert_eq!(targeted["operationList"]["state"], json!("filtered"));
+    assert_eq!(
+        targeted["operationList"]["targetOperation"],
+        json!("git_status")
+    );
+    assert_eq!(targeted["operationList"]["filterApplied"], json!(true));
+    assert_eq!(
+        targeted["operations"].as_array().expect("operations").len(),
+        1
+    );
+
+    let git_status = operation_projection(&targeted, "git_status");
+    assert_eq!(git_status["readiness"]["state"], json!("proposal_possible"));
+    assert_eq!(git_status["replacement"]["canShadow"], json!(true));
+    assert_eq!(
+        git_status["agentPath"]["primaryInspection"]["operation"],
+        json!("capability_binding_cockpit_overview")
+    );
+    assert_eq!(
+        git_status["agentPath"]["primaryInspection"]["payload"]["targetOperation"],
+        json!("git_status")
+    );
+    assert!(
+        git_status["agentPath"]["adapterExecutionGuidance"]
+            .as_str()
+            .expect("adapter guidance")
+            .contains("Do not call git_status just to prove replacement readiness")
+    );
+    let unavailable = git_status["agentPath"]["unavailableSurfaces"]
+        .as_array()
+        .expect("unavailable surfaces");
+    assert!(
+        unavailable
+            .iter()
+            .any(|surface| { surface["operation"] == "capability_shadow_trial_request_list" })
+    );
+    assert!(super::cockpit_visibility::test_serialized_has_no_raw_cockpit_material(&targeted));
+}
+
+#[tokio::test]
+async fn cockpit_overview_rejects_unknown_target_operation() {
+    let fixture = Fixture::new("capability-cockpit-unknown-target").await;
+    let error = cockpit_overview_value(
+        &fixture.deps,
+        &fixture.read_invocation(
+            "cockpit-overview-unknown-target",
+            json!({"targetOperation": "future_unknown_operation"}),
+        ),
+    )
+    .await
+    .expect_err("unknown target rejected")
+    .to_string();
+    assert!(
+        error.contains("unknown targetOperation future_unknown_operation"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn authoritative_target_metadata_rejects_spoofed_locked_replacement() {
     let fixture = Fixture::new("capability-binding-locked-spoof").await;
 

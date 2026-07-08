@@ -2,9 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use chrono::Utc;
+use regex::Regex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -26,6 +28,14 @@ use crate::shared::server::errors::CapabilityError;
 const TRACE_REDACTION_FINGERPRINT_ALGORITHM: &str = "sha256:tron.trace.redacted.v1";
 const AUTHORITY_GRANT_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.authority_grant_id.v1\0";
 const IDEMPOTENCY_KEY_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.idempotency_key.v1\0";
+static TRACE_ABSOLUTE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(^|[\s"'(:=])(?:/Users|/var|/tmp|/private|/Volumes|/Applications)/[^\s"')]+"#)
+        .expect("valid trace absolute path regex")
+});
+static TRACE_UNSAFE_RELATIVE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(^|[\s"'(:=])(?:\.{1,2}/|~/?)[^\s"')]+"#)
+        .expect("valid trace relative path regex")
+});
 
 pub(super) fn trace_list(
     invocation: &Invocation,
@@ -50,7 +60,7 @@ pub(super) fn trace_list(
         .map_err(|error| internal(format!("list trace records: {error}")))?;
     let records = records
         .into_iter()
-        .map(|record| record.record_json)
+        .map(|record| provider_safe_trace_record(&record.record_json))
         .collect::<Vec<_>>();
     Ok(ok_result(
         format!("Trace records: {}.", records.len()),
@@ -91,9 +101,93 @@ pub(super) fn trace_get(
         json!({
             "primitiveOperation": "trace_get",
             "status": "ok",
-            "record": record.record_json
+            "record": provider_safe_trace_record(&record.record_json)
         }),
     ))
+}
+
+fn provider_safe_trace_record(record: &Value) -> Value {
+    let metadata = record
+        .get("metadata")
+        .and_then(|metadata| metadata.get(TRON_TRACE_METADATA_KEY))
+        .unwrap_or(&Value::Null);
+    let authority = metadata.get("authority").unwrap_or(&Value::Null);
+    json!({
+        "schemaVersion": "tron.trace.provider_safe.v1",
+        "id": record.get("id").cloned().unwrap_or(Value::Null),
+        "version": record.get("version").cloned().unwrap_or(Value::Null),
+        "timestamp": record.get("timestamp").cloned().unwrap_or(Value::Null),
+        "traceId": metadata.get("traceId").cloned().unwrap_or(Value::Null),
+        "invocationId": metadata.get("invocationId").cloned().unwrap_or(Value::Null),
+        "parentInvocationId": metadata.get("parentInvocationId").cloned().unwrap_or(Value::Null),
+        "runId": metadata.get("runId").cloned().unwrap_or(Value::Null),
+        "sessionRef": metadata.get("sessionId").cloned().unwrap_or(Value::Null),
+        "workspaceRef": metadata.get("workspaceId").cloned().unwrap_or(Value::Null),
+        "turn": metadata.get("turn").cloned().unwrap_or(Value::Null),
+        "modelPrimitiveName": metadata.get("modelPrimitiveName").cloned().unwrap_or(Value::Null),
+        "operation": metadata.get("operation").cloned().unwrap_or(Value::Null),
+        "status": metadata.get("status").cloned().unwrap_or(Value::Null),
+        "startedAt": metadata.get("startedAt").cloned().unwrap_or(Value::Null),
+        "completedAt": metadata.get("completedAt").cloned().unwrap_or(Value::Null),
+        "durationMs": metadata.get("durationMs").cloned().unwrap_or(Value::Null),
+        "request": {
+            "hash": metadata.get("requestHash").cloned().unwrap_or(Value::Null),
+            "rawStoredInProjection": false
+        },
+        "result": {
+            "hash": metadata.get("resultHash").cloned().unwrap_or(Value::Null),
+            "rawStoredInProjection": false
+        },
+        "authority": {
+            "actorKind": authority.get("actorKind").cloned().unwrap_or(Value::Null),
+            "scopeCount": authority
+                .get("scopes")
+                .and_then(Value::as_array)
+                .map(|scopes| scopes.len())
+                .unwrap_or(0),
+            "rawActorIdStored": false,
+            "rawAuthorityGrantIdStored": false,
+            "rawIdempotencyKeyStored": false
+        },
+        "error": trace_safe_error(metadata.get("error")),
+        "redaction": {
+            "rawAuthorityIdsExcluded": true,
+            "rawGrantIdsExcluded": true,
+            "rawIdempotencyKeysExcluded": true,
+            "rawWorkingDirectoryExcluded": true,
+            "rawRequestExcluded": true,
+            "rawResultExcluded": true,
+            "rawFilesExcluded": true,
+            "rawVcsExcluded": true
+        }
+    })
+}
+
+fn trace_safe_error(error: Option<&Value>) -> Value {
+    let Some(error) = error else {
+        return Value::Null;
+    };
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .map(redact_trace_text);
+    json!({
+        "code": error.get("code").cloned().unwrap_or(Value::Null),
+        "category": error.get("category").cloned().unwrap_or(Value::Null),
+        "recoverable": error.get("recoverable").cloned().unwrap_or(Value::Null),
+        "message": message,
+        "detailsStoredInProjection": false
+    })
+}
+
+fn redact_trace_text(message: &str) -> String {
+    let redacted = crate::shared::foundation::redaction::redact_sensitive_content(message);
+    let redacted = TRACE_ABSOLUTE_PATHS
+        .replace_all(&redacted, "${1}[redacted-path]")
+        .to_string();
+    TRACE_UNSAFE_RELATIVE_PATHS
+        .replace_all(&redacted, "${1}[redacted-path]")
+        .to_string()
 }
 
 pub(super) fn started_trace_record(
@@ -541,4 +635,117 @@ fn hash_bytes_with_domain(domain: &[u8], bytes: &[u8]) -> String {
     hasher.update(domain);
     hasher.update(bytes);
     format!("sha256:{:x}", hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_safe_trace_record_excludes_internal_authority_and_raw_payloads() {
+        let record = json!({
+            "id": "trace_record_1",
+            "version": "0.1",
+            "timestamp": "2026-07-08T03:27:04Z",
+            "files": [{"path": "secret.txt"}],
+            "vcs": {"revision": "abc123"},
+            "metadata": {
+                TRON_TRACE_METADATA_KEY: {
+                    "traceId": "trace_1",
+                    "invocationId": "inv_1",
+                    "parentInvocationId": "root_1",
+                    "providerInvocationId": "call_1",
+                    "runId": "run_1",
+                    "sessionId": "sess_1",
+                    "workspaceId": "ws_1",
+                    "turn": 3,
+                    "modelPrimitiveName": "execute",
+                    "operation": "git_status",
+                    "status": "ok",
+                    "startedAt": "2026-07-08T03:27:04Z",
+                    "completedAt": "2026-07-08T03:27:05Z",
+                    "durationMs": 91,
+                    "workingDirectory": "/Users/example/private/repo",
+                    "request": {
+                        "operation": "process_run",
+                        "command": "cat /Users/example/.secret"
+                    },
+                    "requestHash": "sha256:request",
+                    "result": {
+                        "content": [{"type": "text", "text": "raw command output"}]
+                    },
+                    "resultHash": "sha256:result",
+                    "authority": {
+                        "actorId": "agent:sess_1",
+                        "actorKind": "Agent",
+                        "authorityGrantId": "grant_must_not_project",
+                        "idempotencyKey": "idempotency_must_not_project",
+                        "scopes": ["capability.execute", "git.read"]
+                    }
+                }
+            }
+        });
+
+        let safe = provider_safe_trace_record(&record);
+        let rendered = serde_json::to_string_pretty(&safe).expect("render safe trace record");
+
+        assert_eq!(safe["schemaVersion"], "tron.trace.provider_safe.v1");
+        assert_eq!(safe["id"], "trace_record_1");
+        assert_eq!(safe["traceId"], "trace_1");
+        assert_eq!(safe["invocationId"], "inv_1");
+        assert!(safe.get("providerInvocationId").is_none());
+        assert_eq!(safe["operation"], "git_status");
+        assert_eq!(safe["request"]["hash"], "sha256:request");
+        assert_eq!(safe["result"]["hash"], "sha256:result");
+        assert_eq!(safe["authority"]["scopeCount"], 2);
+        assert_eq!(safe["redaction"]["rawAuthorityIdsExcluded"], true);
+        assert!(!rendered.contains("authorityGrantId"), "{rendered}");
+        assert!(!rendered.contains("grant_must_not_project"), "{rendered}");
+        assert!(
+            !rendered.contains("idempotency_must_not_project"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("agent:sess_1"), "{rendered}");
+        assert!(!rendered.contains("/Users/example"), "{rendered}");
+        assert!(
+            !rendered.contains("cat /Users/example/.secret"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("raw command output"), "{rendered}");
+        assert!(!rendered.contains("secret.txt"), "{rendered}");
+        assert!(!rendered.contains("abc123"), "{rendered}");
+    }
+
+    #[test]
+    fn provider_safe_trace_record_redacts_error_message_paths() {
+        let record = json!({
+            "id": "trace_record_2",
+            "metadata": {
+                TRON_TRACE_METADATA_KEY: {
+                    "operation": "filesystem_read",
+                    "status": "error",
+                    "error": {
+                        "code": "ENGINE_POLICY_VIOLATION",
+                        "category": "invalid_request",
+                        "recoverable": true,
+                        "message": "failed to read /Users/example/private.txt",
+                        "details": {
+                            "rawCommand": "cat /Users/example/private.txt"
+                        }
+                    }
+                }
+            }
+        });
+
+        let safe = provider_safe_trace_record(&record);
+        let rendered = serde_json::to_string_pretty(&safe).expect("render safe trace record");
+
+        assert_eq!(safe["error"]["code"], "ENGINE_POLICY_VIOLATION");
+        assert_eq!(safe["error"]["category"], "invalid_request");
+        assert_eq!(safe["error"]["recoverable"], true);
+        assert_eq!(safe["error"]["detailsStoredInProjection"], false);
+        assert!(rendered.contains("[redacted-path]"), "{rendered}");
+        assert!(!rendered.contains("/Users/example"), "{rendered}");
+        assert!(!rendered.contains("rawCommand"), "{rendered}");
+    }
 }

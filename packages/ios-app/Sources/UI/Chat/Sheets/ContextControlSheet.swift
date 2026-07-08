@@ -171,18 +171,16 @@ struct ContextControlSheet: View {
     private var sessionBriefingSection: some View {
         SessionBriefingSection(title: "Briefing", icon: "person.text.rectangle", tint: .tronEmerald) {
             SessionBriefingGlassCard(color: .tronEmerald) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text(sessionBriefingTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(sessionBriefingDetail)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                         .foregroundStyle(.tronTextSecondary)
-                    HStack(spacing: 10) {
-                        SessionBriefingMiniMetric(label: "Context used", value: "\(usagePercentRounded)%")
-                        SessionBriefingMiniMetric(label: "Remaining", value: TokenFormatter.format(tokensRemaining))
-                        SessionBriefingMiniMetric(label: "Actions", value: "\(actions.count)")
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
+                    SessionBriefingMetricStrip(metrics: briefingMetrics)
                 }
             }
             .accessibilityIdentifier("session-briefing-summary")
@@ -212,7 +210,7 @@ struct ContextControlSheet: View {
             tint: .tronEmerald
         ) {
             SessionBriefingGlassCard(color: .tronEmerald) {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(usagePercentRounded)%")
@@ -236,46 +234,32 @@ struct ContextControlSheet: View {
                     ProgressView(value: Double(max(0, min(100, usagePercentRounded))), total: 100)
                         .tint(.tronEmerald)
 
-                    HStack(spacing: 10) {
-                        SessionBriefingMiniMetric(label: "Window", value: TokenFormatter.format(contextWindowTokens))
-                        SessionBriefingMiniMetric(label: "Epoch", value: snapshot?.currentEpoch ?? "epoch-0")
-                    }
+                    SessionBriefingMetricStrip(metrics: contextMetrics)
 
-                    SessionBriefingKeyValueRow(
-                        label: "Last action",
-                        value: actions.first?.summaryLine ?? "None recorded"
-                    )
-                    SessionBriefingKeyValueRow(
-                        label: "Freshness",
-                        value: isLoadingContext ? "Refreshing" : (snapshot?.createdAt ?? "Snapshot unavailable")
-                    )
+                    SessionBriefingInlineRows(rows: contextRows)
+
+                    Divider()
+                        .overlay(Color.tronEmerald.opacity(0.14))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Composition")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(.tronEmerald.opacity(0.72))
+                        compositionContent
+                    }
+                    .accessibilityIdentifier("session-briefing-composition-card")
                 }
             }
             .accessibilityIdentifier("session-briefing-context-summary")
+        }
+    }
 
-            SessionBriefingGlassCard(color: .tronEmerald, subtle: true) {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let snapshot, !snapshot.promptBlocks.isEmpty {
-                        ForEach(snapshot.promptBlocks) { block in
-                            VStack(alignment: .leading, spacing: 3) {
-                                SessionBriefingKeyValueRow(
-                                    label: block.label,
-                                    value: "\(TokenFormatter.format(block.estimatedTokens)) tokens"
-                                )
-                                Text(block.detail)
-                                    .font(TronTypography.codeCaption)
-                                    .foregroundStyle(.tronTextMuted)
-                            }
-                        }
-                        SessionBriefingKeyValueRow(label: "Resource refs", value: "\(snapshot.resourceRefCount)")
-                        SessionBriefingKeyValueRow(label: "Execution refs", value: "\(snapshot.executionRefCount)")
-                        SessionBriefingKeyValueRow(label: "Redaction", value: snapshot.proofLine)
-                    } else {
-                        SessionBriefingEmptyLine("No composition snapshot available")
-                    }
-                }
-            }
-            .accessibilityIdentifier("session-briefing-composition-card")
+    @ViewBuilder
+    private var compositionContent: some View {
+        if let snapshot, !snapshot.promptBlocks.isEmpty {
+            SessionBriefingInlineRows(rows: compositionRows)
+        } else {
+            SessionBriefingEmptyLine("No composition snapshot available")
         }
     }
 
@@ -283,12 +267,22 @@ struct ContextControlSheet: View {
         SessionBriefingSection(title: "Memory", icon: "brain.head.profile", tint: .tronEmerald) {
             SessionBriefingGlassCard(color: .tronEmerald, subtle: true) {
                 let memory = snapshot?.memory
-                VStack(alignment: .leading, spacing: 10) {
-                    SessionBriefingKeyValueRow(label: "Mode", value: memory?.status ?? "read_only")
-                    SessionBriefingKeyValueRow(label: "Policy", value: memory?.policy ?? "Memory refs only")
-                    SessionBriefingKeyValueRow(label: "Prompt trace refs", value: "\(memory?.promptTraceRefCount ?? 0)")
-                    SessionBriefingKeyValueRow(label: "Redacted memory refs", value: "\(memory?.redactedMemoryRefCount ?? 0)")
-                    SessionBriefingKeyValueRow(label: "Edit controls", value: "Not in this slice")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(memoryNarrative)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    SessionBriefingMetricStrip(
+                        metrics: [
+                            ContextControlMetric(label: "Mode", value: memory?.status ?? "read only"),
+                            ContextControlMetric(label: "Prompt refs", value: "\(memory?.promptTraceRefCount ?? 0)"),
+                            ContextControlMetric(label: "Memory refs", value: "\(memory?.redactedMemoryRefCount ?? 0)")
+                        ]
+                    )
+                    SessionBriefingInlineRows(rows: [
+                        ContextControlMetric(label: "Policy", value: memory?.policy ?? "Memory refs only in Session Briefing"),
+                        ContextControlMetric(label: "Edit controls", value: "Not included in this surface")
+                    ])
                 }
             }
         }
@@ -300,8 +294,12 @@ struct ContextControlSheet: View {
                 if actions.isEmpty {
                     SessionBriefingEmptyLine("No recent context actions")
                 } else {
-                    VStack(spacing: 12) {
-                        ForEach(actions) { action in
+                    VStack(spacing: 0) {
+                        ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                            if index > 0 {
+                                Divider()
+                                    .overlay(Color.tronEmerald.opacity(0.13))
+                            }
                             Button {
                                 Task { await inspect(action.resourceId) }
                             } label: {
@@ -323,10 +321,9 @@ struct ContextControlSheet: View {
                                             .foregroundStyle(.tronTextMuted)
                                     }
                                     Spacer(minLength: 8)
-                                    Image(systemName: "chevron.right")
-                                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                                        .foregroundStyle(.tronTextMuted)
                                 }
+                                .padding(.vertical, 9)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Inspect \(action.kind) context action")
@@ -340,14 +337,28 @@ struct ContextControlSheet: View {
     private func actionDetailSection(_ detail: ContextControlActionDetailDisplay) -> some View {
         SessionBriefingSection(title: "Action Detail", icon: detail.summary.icon, tint: detail.summary.tint) {
             SessionBriefingGlassCard(color: detail.summary.tint, subtle: true) {
-                VStack(alignment: .leading, spacing: 10) {
-                    SessionBriefingKeyValueRow(label: "Action", value: detail.summary.title)
-                    SessionBriefingKeyValueRow(label: "Result", value: detail.resultStatus)
-                    SessionBriefingKeyValueRow(label: "Actor", value: detail.actorKind)
-                    SessionBriefingKeyValueRow(label: "Expected effect", value: detail.expectedEffect)
-                    SessionBriefingKeyValueRow(label: "Timeline event", value: detail.timelineEvent)
-                    SessionBriefingKeyValueRow(label: "Audit refs", value: "\(detail.auditRefCount)")
-                    SessionBriefingKeyValueRow(label: "Provider safety", value: detail.proofLine)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("This context action is recorded with audit evidence and provider-safe projection proof.")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    SessionBriefingMetricStrip(
+                        metrics: [
+                            ContextControlMetric(label: "Action", value: detail.summary.title),
+                            ContextControlMetric(label: "Result", value: detail.resultStatus),
+                            ContextControlMetric(label: "Audit refs", value: "\(detail.auditRefCount)")
+                        ],
+                        tint: detail.summary.tint
+                    )
+                    SessionBriefingInlineRows(
+                        rows: [
+                            ContextControlMetric(label: "Actor", value: detail.actorKind),
+                            ContextControlMetric(label: "Expected effect", value: detail.expectedEffect),
+                            ContextControlMetric(label: "Timeline event", value: detail.timelineEvent),
+                            ContextControlMetric(label: "Provider safety", value: detail.proofLine)
+                        ],
+                        tint: detail.summary.tint
+                    )
                     Text(detail.summary.resourceId)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
@@ -478,5 +489,52 @@ struct ContextControlSheet: View {
             return "Context is getting full. Compact keeps durable history and audit refs while reducing provider context."
         }
         return "Current model, context usage, memory refs, and context actions are shown from session-scoped server truth."
+    }
+
+    private var briefingMetrics: [ContextControlMetric] {
+        [
+            ContextControlMetric(label: "Context", value: "\(usagePercentRounded)%"),
+            ContextControlMetric(label: "Remaining", value: TokenFormatter.format(tokensRemaining)),
+            ContextControlMetric(label: "Actions", value: "\(actions.count)")
+        ]
+    }
+
+    private var contextMetrics: [ContextControlMetric] {
+        [
+            ContextControlMetric(label: "Window", value: TokenFormatter.format(contextWindowTokens)),
+            ContextControlMetric(label: "Epoch", value: snapshot?.currentEpoch ?? "epoch-0"),
+            ContextControlMetric(label: "Model", value: displayModelName)
+        ]
+    }
+
+    private var contextRows: [ContextControlMetric] {
+        [
+            ContextControlMetric(label: "Last action", value: actions.first?.summaryLine ?? "None recorded"),
+            ContextControlMetric(label: "Freshness", value: isLoadingContext ? "Refreshing" : (snapshot?.createdAt ?? "Snapshot unavailable"))
+        ]
+    }
+
+    private var compositionRows: [ContextControlMetric] {
+        guard let snapshot else { return [] }
+        var rows = snapshot.promptBlocks.map { block in
+            ContextControlMetric(
+                label: block.label,
+                value: "\(TokenFormatter.format(block.estimatedTokens)) tokens · \(block.detail)"
+            )
+        }
+        rows.append(ContextControlMetric(label: "Resource refs", value: "\(snapshot.resourceRefCount)"))
+        rows.append(ContextControlMetric(label: "Execution refs", value: "\(snapshot.executionRefCount)"))
+        rows.append(ContextControlMetric(label: "Redaction", value: snapshot.proofLine))
+        return rows
+    }
+
+    private var memoryNarrative: String {
+        let memory = snapshot?.memory
+        let promptRefs = memory?.promptTraceRefCount ?? 0
+        let memoryRefs = memory?.redactedMemoryRefCount ?? 0
+        if promptRefs == 0 && memoryRefs == 0 {
+            return "No durable memory refs are currently included in this provider context."
+        }
+        return "Memory is read-only here. The sheet shows refs already included in provider-safe context, not editing controls."
     }
 }

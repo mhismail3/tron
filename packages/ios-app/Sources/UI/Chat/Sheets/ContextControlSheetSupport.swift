@@ -33,11 +33,8 @@ struct SessionBriefingGlassCard<Content: View>: View {
     var body: some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .glassEffect(
-                .regular.tint(color.opacity(subtle ? 0.09 : 0.14)).interactive(),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
+            .padding(14)
+            .sectionFill(color, cornerRadius: 12, subtle: subtle, interactive: false)
     }
 }
 
@@ -66,42 +63,83 @@ struct SessionBriefingToolbarButton: View {
     }
 }
 
-struct SessionBriefingMiniMetric: View {
-    let label: String
-    let value: String
+struct SessionBriefingMetricStrip: View {
+    let metrics: [ContextControlMetric]
+    var tint: Color = .tronEmerald
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextMuted)
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(metrics.indices, id: \.self) { index in
+                if index > 0 {
+                    Divider()
+                        .overlay(tint.opacity(0.16))
+                        .padding(.vertical, 2)
+                }
+                SessionBriefingMetricStripItem(metric: metrics[index], tint: tint)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-struct SessionBriefingKeyValueRow: View {
-    let label: String
-    let value: String
+private struct SessionBriefingMetricStripItem: View {
+    let metric: ContextControlMetric
+    let tint: Color
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextMuted)
-            Spacer(minLength: 8)
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(3)
-                .minimumScaleFactor(0.82)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(metric.label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(tint.opacity(0.72))
+                .lineLimit(1)
+            Text(metric.value)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
+}
+
+struct SessionBriefingInlineRows: View {
+    let rows: [ContextControlMetric]
+    var tint: Color = .tronEmerald
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(rows.indices, id: \.self) { index in
+                if index > 0 {
+                    Divider()
+                        .overlay(tint.opacity(0.13))
+                }
+                SessionBriefingInlineRow(metric: rows[index], tint: tint)
+            }
+        }
+    }
+}
+
+private struct SessionBriefingInlineRow: View {
+    let metric: ContextControlMetric
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(metric.label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(tint.opacity(0.72))
+            Text(metric.value)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(4)
+                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
     }
 }
 
