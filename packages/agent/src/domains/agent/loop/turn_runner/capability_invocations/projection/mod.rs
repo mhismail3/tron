@@ -842,13 +842,26 @@ fn project_trace_record(record: &Value) -> Value {
         "operation",
         "status",
         "timestamp",
+        "startedAt",
         "completedAt",
         "durationMs",
         "sessionId",
+        "sessionRef",
+        "workspaceRef",
+        "runId",
         "turn",
     ] {
         copy_key(&mut projected, record, key);
         copy_key(&mut projected, metadata, key);
+    }
+    for key in [
+        "projectionBoundary",
+        "redaction",
+        "request",
+        "result",
+        "authority",
+    ] {
+        copy_key(&mut projected, record, key);
     }
     if let Some(error) = record.get("error").or_else(|| metadata.get("error")) {
         if let Some(error) = project_failure_value(error) {

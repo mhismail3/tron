@@ -217,6 +217,12 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
         "repository_tree_snapshot" => {
             " Copy complete repositoryRef/rootRef/headRef objects, including kind, from git_status details.git.repository.repositoryTreeSnapshotInput; passing only .id values is invalid."
         }
+        "trace_list" => {
+            " Current-session scope is supplied by trusted runtime context; do not invent selector or scope fields. Optional top-level fields are limit and traceId only."
+        }
+        "trace_get" => {
+            " Current-session scope is supplied by trusted runtime context; pass only operation and the traceRecordId returned by trace_list."
+        }
         _ => "",
     }
 }
@@ -612,6 +618,71 @@ fn execute_operation_output_schema(operation: &str) -> Value {
             "schemaCompleteness": "operation_specific_contract"
         });
     }
+    if operation == "trace_list" {
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe trace summary with completed/in-progress counts and projection-boundary guidance."
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Provider-safe current-session trace list. Raw provider invocation ids, grant ids, idempotency keys, raw requests/results, paths, commands, logs, and file contents are excluded from records[].",
+                    "required": ["primitiveOperation", "status", "projectionBoundary", "statusSummary", "records"],
+                    "properties": {
+                        "primitiveOperation": {"const": "trace_list"},
+                        "status": {"const": "ok"},
+                        "projectionBoundary": trace_projection_boundary_output_schema(),
+                        "statusSummary": {
+                            "type": "object",
+                            "required": ["totalRecords", "completedStatusCounts", "inProgressCount", "currentTraceListMayAppearRunning"],
+                            "properties": {
+                                "totalRecords": {"type": "integer"},
+                                "completedStatusCounts": {
+                                    "type": "object",
+                                    "description": "Counts by completed trace status, normally ok/failed."
+                                },
+                                "completedStatusValuesOnlyOkFailed": {"type": "boolean"},
+                                "inProgressCount": {"type": "integer"},
+                                "currentTraceListMayAppearRunning": {"const": true},
+                                "answerGuidance": {"type": "string"}
+                            }
+                        },
+                        "records": {
+                            "type": "array",
+                            "description": "Bounded provider-safe trace records for the current session.",
+                            "items": provider_safe_trace_record_output_schema()
+                        }
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
+    if operation == "trace_get" {
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe trace-record summary for one current-session trace record."
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Provider-safe focused trace record. Raw provider invocation ids, grant ids, idempotency keys, raw requests/results, paths, commands, logs, and file contents are excluded.",
+                    "required": ["primitiveOperation", "status", "projectionBoundary", "record"],
+                    "properties": {
+                        "primitiveOperation": {"const": "trace_get"},
+                        "status": {"const": "ok"},
+                        "projectionBoundary": trace_projection_boundary_output_schema(),
+                        "record": provider_safe_trace_record_output_schema()
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
     json!({
         "type": "object",
         "required": ["content", "details"],
@@ -629,6 +700,154 @@ fn execute_operation_output_schema(operation: &str) -> Value {
             }
         },
         "schemaCompleteness": "operation_specific_contract"
+    })
+}
+
+fn trace_projection_boundary_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Explains that traceId, invocationId, parentInvocationId, runId, sessionRef, and workspaceRef are provider-safe engine refs, not raw provider invocation ids.",
+        "properties": {
+            "providerVisibleProjection": {"type": "string"},
+            "providerVisibleMeaning": {"type": "string"},
+            "internalAuditStorage": {"type": "string"},
+            "safeRefSemantics": {"type": "string"},
+            "recordProof": {"type": "string"},
+            "transcriptToolCallBoundary": {"type": "string"},
+            "operationBoundary": {"type": "string"},
+            "rawCommandEvidenceGuidance": {"type": "string"},
+            "answerGuidance": {"type": "string"},
+            "traceGetUse": {"type": "string"}
+        }
+    })
+}
+
+fn provider_safe_trace_record_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "schemaVersion",
+            "id",
+            "traceId",
+            "invocationId",
+            "modelPrimitiveName",
+            "operation",
+            "status",
+            "request",
+            "result",
+            "projectionBoundary",
+            "authority",
+            "redaction"
+        ],
+        "properties": {
+            "schemaVersion": {"const": "tron.trace.provider_safe.v1"},
+            "id": {"type": ["string", "null"], "description": "Provider-safe trace record ref."},
+            "version": {"type": ["string", "null"]},
+            "timestamp": {"type": ["string", "null"]},
+            "traceId": {"type": ["string", "null"], "description": "Provider-safe engine trace ref, not a raw provider invocation id."},
+            "invocationId": {"type": ["string", "null"], "description": "Provider-safe engine invocation ref, not a raw provider tool-call id."},
+            "parentInvocationId": {"type": ["string", "null"]},
+            "runId": {"type": ["string", "null"]},
+            "sessionRef": {"type": ["string", "null"]},
+            "workspaceRef": {"type": ["string", "null"]},
+            "turn": {"type": ["integer", "null"]},
+            "modelPrimitiveName": {"type": ["string", "null"]},
+            "operation": {"type": ["string", "null"]},
+            "status": {"type": ["string", "null"]},
+            "startedAt": {"type": ["string", "null"]},
+            "completedAt": {"type": ["string", "null"]},
+            "durationMs": {"type": ["integer", "null"]},
+            "request": {
+                "type": "object",
+                "required": ["hash", "rawStoredInProjection"],
+                "properties": {
+                    "hash": {"type": ["string", "null"]},
+                    "rawStoredInProjection": {"const": false}
+                }
+            },
+            "result": {
+                "type": "object",
+                "required": ["hash", "rawStoredInProjection"],
+                "properties": {
+                    "hash": {"type": ["string", "null"]},
+                    "rawStoredInProjection": {"const": false}
+                }
+            },
+            "projectionBoundary": {
+                "type": "object",
+                "required": [
+                    "providerVisibleProjection",
+                    "safeEngineRefsOnly",
+                    "rawAuditFieldsProjected",
+                    "internalAuditStorageMayRetainRawAuditFields"
+                ],
+                "properties": {
+                    "providerVisibleProjection": {"const": true},
+                    "safeEngineRefsOnly": {"const": true},
+                    "rawAuditFieldsProjected": {"const": false},
+                    "internalAuditStorageMayRetainRawAuditFields": {"const": true}
+                }
+            },
+            "authority": {
+                "type": "object",
+                "required": [
+                    "actorKind",
+                    "scopeCount",
+                    "rawActorIdStored",
+                    "rawAuthorityGrantIdStored",
+                    "rawIdempotencyKeyStored"
+                ],
+                "properties": {
+                    "actorKind": {"type": ["string", "null"]},
+                    "scopeCount": {"type": "integer"},
+                    "rawActorIdStored": {"const": false},
+                    "rawAuthorityGrantIdStored": {"const": false},
+                    "rawIdempotencyKeyStored": {"const": false}
+                }
+            },
+            "error": {
+                "type": ["object", "null"],
+                "description": "Provider-safe error summary. Raw error details are not stored in the projection."
+            },
+            "redaction": {
+                "type": "object",
+                "required": [
+                    "rawProviderInvocationIdsExcluded",
+                    "rawGrantIdsExcluded",
+                    "rawAuthorityIdsExcluded",
+                    "rawIdempotencyKeysExcluded",
+                    "rawWorkingDirectoryExcluded",
+                    "rawRequestExcluded",
+                    "rawResultExcluded",
+                    "rawFilesExcluded",
+                    "rawVcsExcluded"
+                ],
+                "properties": {
+                    "rawProviderInvocationIdsExcluded": {"const": true},
+                    "rawGrantIdsExcluded": {"const": true},
+                    "rawAuthorityIdsExcluded": {"const": true},
+                    "rawIdempotencyKeysExcluded": {"const": true},
+                    "rawWorkingDirectoryExcluded": {"const": true},
+                    "rawRequestExcluded": {"const": true},
+                    "rawResultExcluded": {"const": true},
+                    "rawFilesExcluded": {"const": true},
+                    "rawVcsExcluded": {"const": true}
+                }
+            }
+        },
+        "notProjectedFields": [
+            "providerInvocationId",
+            "authorityGrantId",
+            "actorId",
+            "idempotencyKey",
+            "workingDirectory",
+            "rawRequest",
+            "rawResult",
+            "rawCommand",
+            "rawLog",
+            "rawPath",
+            "fileContents"
+        ]
     })
 }
 
@@ -1898,6 +2117,80 @@ mod tests {
         assert_eq!(
             discovery["modelFacingInvocation"]["arguments"]["operation"],
             "capability_binding_cockpit_overview"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_trace_output_record_schema() {
+        let trace_list = execute_operation_inspect_projection("trace_list", "execute::trace_list");
+
+        assert_eq!(
+            trace_list["outputSchema"]["properties"]["details"]["properties"]["primitiveOperation"]
+                ["const"],
+            "trace_list"
+        );
+        assert_eq!(
+            trace_list["outputSchema"]["properties"]["details"]["required"],
+            json!([
+                "primitiveOperation",
+                "status",
+                "projectionBoundary",
+                "statusSummary",
+                "records"
+            ])
+        );
+        let record_schema =
+            &trace_list["outputSchema"]["properties"]["details"]["properties"]["records"]["items"];
+        assert_eq!(
+            record_schema["properties"]["schemaVersion"]["const"],
+            "tron.trace.provider_safe.v1"
+        );
+        assert_eq!(
+            record_schema["properties"]["projectionBoundary"]["properties"]["safeEngineRefsOnly"]["const"],
+            true
+        );
+        assert_eq!(
+            record_schema["properties"]["redaction"]["properties"]["rawProviderInvocationIdsExcluded"]
+                ["const"],
+            true
+        );
+        assert_eq!(
+            record_schema["properties"]["authority"]["properties"]["rawAuthorityGrantIdStored"]["const"],
+            false
+        );
+        assert!(
+            trace_list["outputSchema"]["properties"]["details"]["properties"]["projectionBoundary"]
+                ["properties"]["recordProof"]
+                .is_object()
+        );
+        assert!(
+            execute_operation_invocation_guidance("trace_list").contains("trusted runtime context")
+        );
+        assert!(
+            trace_list["outputSchema"]["properties"]["details"]["description"]
+                .as_str()
+                .expect("trace_list description")
+                .contains("Raw provider invocation ids")
+        );
+        assert!(
+            !record_schema["properties"]
+                .as_object()
+                .expect("record properties")
+                .contains_key("providerInvocationId")
+        );
+        assert!(
+            record_schema["notProjectedFields"]
+                .as_array()
+                .expect("not projected fields")
+                .iter()
+                .any(|field| field == "providerInvocationId")
+        );
+
+        let trace_get = execute_operation_inspect_projection("trace_get", "execute::trace_get");
+        assert_eq!(
+            trace_get["outputSchema"]["properties"]["details"]["properties"]["record"]["properties"]
+                ["redaction"]["properties"]["rawRequestExcluded"]["const"],
+            true
         );
     }
 

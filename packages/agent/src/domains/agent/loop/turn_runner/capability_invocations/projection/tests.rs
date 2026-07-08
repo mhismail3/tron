@@ -1016,6 +1016,86 @@ fn extract_result_content_projects_trace_metadata_ids() {
 }
 
 #[test]
+fn extract_result_content_projects_trace_projection_proof_for_agent() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Trace records: 1. Each details.records[] item includes projectionBoundary and redaction booleans proving this per record.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "trace_list",
+            "status": "ok",
+            "records": [{
+                "id": "019f-safe-record",
+                "traceId": "trace_safe",
+                "invocationId": "inv_safe",
+                "modelPrimitiveName": "execute",
+                "operation": "trace_list",
+                "status": "ok",
+                "sessionRef": "sess_safe",
+                "workspaceRef": "workspace_safe",
+                "request": {
+                    "hash": "request_hash_safe",
+                    "rawStoredInProjection": false
+                },
+                "result": {
+                    "hash": "result_hash_safe",
+                    "rawStoredInProjection": false
+                },
+                "projectionBoundary": {
+                    "providerVisibleProjection": true,
+                    "safeEngineRefsOnly": true,
+                    "rawAuditFieldsProjected": false,
+                    "internalAuditStorageMayRetainRawAuditFields": true
+                },
+                "authority": {
+                    "actorKind": "model",
+                    "scopeCount": 2,
+                    "rawActorIdStored": false,
+                    "rawAuthorityGrantIdStored": false,
+                    "rawIdempotencyKeyStored": false
+                },
+                "redaction": {
+                    "rawAuthorityIdsExcluded": true,
+                    "rawGrantIdsExcluded": true,
+                    "rawIdempotencyKeysExcluded": true,
+                    "rawProviderInvocationIdsExcluded": true,
+                    "rawWorkingDirectoryExcluded": true,
+                    "rawRequestExcluded": true,
+                    "rawResultExcluded": true,
+                    "rawFilesExcluded": true,
+                    "rawVcsExcluded": true
+                },
+                "metadata": {
+                    "dev.tron": {
+                        "providerInvocationId": "provider_must_not_project",
+                        "authority": {
+                            "authorityGrantId": "grant_must_not_project"
+                        },
+                        "workingDirectory": "/Users/example/private"
+                    }
+                }
+            }]
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("rawProviderInvocationIdsExcluded"));
+    assert!(text.contains("rawAuditFieldsProjected"));
+    assert!(text.contains("rawStoredInProjection"));
+    assert!(text.contains("rawAuthorityGrantIdStored"));
+    assert!(text.contains("request_hash_safe"));
+    assert!(text.contains("result_hash_safe"));
+    assert!(text.contains("scopeCount"));
+    assert!(!text.contains("provider_must_not_project"));
+    assert!(!text.contains("providerInvocationId"));
+    assert!(!text.contains("grant_must_not_project"));
+    assert!(!text.contains("authorityGrantId"));
+    assert!(!text.contains("/Users/example"));
+}
+
+#[test]
 fn extract_result_content_projects_recent_logs_for_model_context() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text("Log entries: 1.")]),

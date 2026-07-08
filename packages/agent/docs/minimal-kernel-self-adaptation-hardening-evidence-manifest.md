@@ -44,6 +44,7 @@ runtime behavior.
 | Compaction replacement is scoped to the summarizer. | Context-control docs and modularity invariants state that the summarizer strategy is replaceable, while snapshot/action/epoch/policy custody remains server-owned. |
 | User visibility is server-owned. | `capability_binding::cockpit_overview` projects route stories, operation state, route events, failed-closed/disabled/rolled-back state, and rollback controls from scoped resources; iOS renders those facts without raw IDs. |
 | Agent-native zero-evidence paths are terminal. | `catalog_search` now points shadow/readiness queries to one targeted cockpit inspection, keeps adapter invocation/schema inspection out of the actionable readiness match list, and targeted `capability_binding_cockpit_overview` rows tell the model to answer immediately when no scoped evidence refs, shadow runs, route bindings, or route events exist. The evidence inspector remains exposed only when an exact evidence resource id is returned. |
+| Trace evidence contracts are inspectable before invocation. | `catalog_inspect` for `execute::trace_list` and `execute::trace_get` now projects the provider-safe trace record output schema, including trusted current-session scoping guidance, safe engine ref semantics, status summaries, request/result hashes, per-record projection/redaction proof booleans, and the explicit list of raw provider invocation ids, grant ids, idempotency keys, paths, commands, logs, and file contents that are not projected. |
 | The foundation is honest. | Dynamic replacement scorecard states the first route target is read-only `git_status` and does not claim arbitrary live module-code execution or full autonomous self-update across all operations. |
 
 ## Validation Commands
@@ -60,6 +61,8 @@ CARGO_TARGET_DIR=/tmp/tron-agent-target-minimal-kernel cargo test --manifest-pat
 CARGO_TARGET_DIR=/tmp/tron-agent-target-minimal-kernel cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::capability_execute_dispatch_routes_git_status_through_active_replacement -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_search_returns_agent_readiness_plan_for_multi_intent_queries -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --lib cockpit_overview_filters_exact_operation_and_returns_agent_native_path -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_inspect_projects_trace_output_record_schema -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --lib extract_result_content_projects_trace_projection_proof_for_agent -- --nocapture
 scripts/personal-info-guard.sh
 git diff --check
 git diff --cached --check

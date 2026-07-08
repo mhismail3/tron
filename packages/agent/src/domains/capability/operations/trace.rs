@@ -29,7 +29,7 @@ use crate::shared::server::errors::CapabilityError;
 const TRACE_REDACTION_FINGERPRINT_ALGORITHM: &str = "sha256:tron.trace.redacted.v1";
 const AUTHORITY_GRANT_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.authority_grant_id.v1\0";
 const IDEMPOTENCY_KEY_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.idempotency_key.v1\0";
-const TRACE_PROJECTION_BOUNDARY_CONTENT: &str = "Provider-visible trace projection exposes safe engine trace/invocation refs only; it excludes raw provider invocation ids and other raw internals. Provider transcript tool-call ids may exist for protocol threading, but they are not trace projection providerInvocationId fields. Internal audit storage may retain raw fields for replay and policy, and engine-internal durability may create bookkeeping resources without being provider-visible mutating capability work.";
+const TRACE_PROJECTION_BOUNDARY_CONTENT: &str = "Provider-visible trace projection exposes safe engine trace/invocation refs only; it excludes raw provider invocation ids and other raw internals. Each details.records[] item includes projectionBoundary and redaction booleans proving this per record. Provider transcript tool-call ids may exist for protocol threading, but they are not trace projection providerInvocationId fields. Internal audit storage may retain raw fields for replay and policy, and engine-internal durability may create bookkeeping resources without being provider-visible mutating capability work.";
 static TRACE_ABSOLUTE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(^|[\s"'(:=])(?:/Users|/var|/tmp|/private|/Volumes|/Applications)/[^\s"')]+"#)
         .expect("valid trace absolute path regex")
@@ -168,6 +168,7 @@ fn trace_projection_boundary() -> Value {
         "providerVisibleMeaning": "Fields in this result are safe bounded projections for the model. Visible traceId/invocationId fields are engine refs, not raw provider invocation ids.",
         "internalAuditStorage": "Engine trace storage may retain raw audit fields for replay, policy, and debugging.",
         "safeRefSemantics": "traceId, invocationId, parentInvocationId, runId, sessionRef, and workspaceRef are provider-safe engine refs, not raw provider invocation ids.",
+        "recordProof": "Every details.records[] item carries projectionBoundary and redaction booleans. Use those fields for per-record proof instead of inferring from absent raw fields.",
         "transcriptToolCallBoundary": "Provider transcript tool-call ids may exist in model/provider message history for protocol threading. Trace projection safety claims are about trace_list/trace_get projection fields, where providerInvocationId is not exposed.",
         "operationBoundary": "Safety claims are about provider-visible capability operations and provider-visible projections. Internal engine durability may record prompt traces, resources, and audit bookkeeping for replay/policy without counting as a provider-visible mutating capability operation.",
         "rawCommandEvidenceGuidance": "Trace projection proves raw requests/results and local material are excluded. Operation-specific schemas or results may provide additional no-raw-command proof.",
@@ -920,6 +921,12 @@ mod tests {
                 .expect("trace get use")
                 .contains("trace_list")
         );
+        assert!(
+            boundary["recordProof"]
+                .as_str()
+                .expect("record proof")
+                .contains("details.records[]")
+        );
     }
 
     #[test]
@@ -961,6 +968,7 @@ mod tests {
         assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("Provider-visible"));
         assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("safe engine trace/invocation refs"));
         assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("excludes raw provider invocation ids"));
+        assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("details.records[]"));
         assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("protocol threading"));
         assert!(
             TRACE_PROJECTION_BOUNDARY_CONTENT
