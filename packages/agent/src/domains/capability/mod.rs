@@ -101,14 +101,25 @@
 //! model needs to inspect cockpit details. Trace/evidence searches that name one
 //! target operation return a separate read-only plan: inspect the
 //! `execute::<operation>` schema, invoke the target once, then inspect
-//! provider-safe trace evidence with `trace_list`/`trace_get` instead of
-//! routing the agent through replacement-readiness surfaces. `catalog_inspect`
-//! accepts
+//! provider-safe trace evidence with `trace_list` instead of routing the agent
+//! through replacement-readiness surfaces; `trace_get` is reserved for focused
+//! per-record detail after `trace_list` returns an exact record id. Trace
+//! projections name visible trace/invocation fields as safe engine refs, not raw
+//! provider invocation ids, and separate provider-visible capability safety from
+//! internal replay/policy bookkeeping.
+//! `catalog_search`
+//! accepts the safe read-only `effectClass` aliases `read`, `read_only`, and
+//! `inspect` as `pure_read` so natural discovery filters do not become invalid
+//! calls. `catalog_inspect` accepts
 //! `execute::<supported_operation>` and supported-operation ids directly; those
 //! aliases return operation-specific call contracts, preflight guidance, and
 //! required top-level payload fields in both normalized `inputSchema` /
 //! `outputSchema` slots and the operation-specific schema block instead of the
-//! generic `capability::execute` wrapper.
+//! generic `capability::execute` wrapper. Runtime-routable operations keep their
+//! capability-pool classification, but operation inspection also includes a
+//! `currentInvocation` boundary so normal read-only/session calls are not
+//! confused with explicit replacement, shadow, route, disable, or rollback
+//! workflows.
 //! Capability-shadow-trial operations are an even narrower metadata-only path:
 //! they record request/decision/run/evidence resources for the selected
 //! read-only `git_status` target, compare bounded built-in and deterministic

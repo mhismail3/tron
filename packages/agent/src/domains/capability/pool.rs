@@ -322,7 +322,7 @@ fn purpose_for_operation_family(family: &str) -> &'static str {
         "catalog_discovery" => "agent_inspects_capability_catalog",
         "capability_binding" => "agent_governs_future_capability_replacement",
         "context_control" => "agent_and_user_manage_provider_context_boundaries",
-        "git" => "agent_inspects_and_mutates_scoped_git_state",
+        "git" => "agent_inspects_or_changes_scoped_git_state_by_operation_effect",
         "filesystem" => "agent_reads_and_updates_scoped_filesystem_state",
         "jobs" => "agent_runs_and_observes_bounded_local_work",
         "module_runtime" | "module_lifecycle" | "module_program_execution" => {

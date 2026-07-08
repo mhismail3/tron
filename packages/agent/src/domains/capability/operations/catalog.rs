@@ -154,12 +154,19 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
     let preflight = agent_usage.get("preflight").cloned();
     let input_schema = execute_operation_input_schema(operation, &required_payload_field_names);
     let output_schema = execute_operation_output_schema(operation);
+    let capability_pool = operation_pool_metadata(operation).map(|metadata| {
+        operation_contextual_pool_projection(
+            operation,
+            serde_json::to_value(metadata.provider_projection())
+                .expect("capability pool projection serializes"),
+        )
+    });
     let model_facing_invocation = json!({
         "tool": "capability::execute",
         "operation": operation,
         "arguments": {"operation": operation},
         "catalogInspectId": id,
-        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection()),
+        "capabilityPool": capability_pool.clone(),
         "agentUsage": agent_usage.clone()
     });
 
@@ -173,7 +180,7 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
         "inputSchema": input_schema.clone(),
         "outputSchema": output_schema.clone(),
         "modelFacingInvocation": model_facing_invocation,
-        "capabilityPool": operation_pool_metadata(operation).map(|metadata| metadata.provider_projection()),
+        "capabilityPool": capability_pool,
         "agentUsage": agent_usage,
         "schema": {
             "tool": "capability::execute",
@@ -193,6 +200,36 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
             object.insert(
                 "aliasResolvedFrom".to_owned(),
                 Value::String(alias.to_owned()),
+            );
+        }
+    }
+    projection
+}
+
+fn operation_contextual_pool_projection(operation: &str, mut projection: Value) -> Value {
+    let usage = operation_agent_usage_projection(operation);
+    if let Some(object) = projection.as_object_mut() {
+        object.insert(
+            "currentInvocation".to_owned(),
+            json!({
+                "operation": operation,
+                "tool": "capability::execute",
+                "effect": usage.as_ref().and_then(|usage| usage.get("effect")).cloned(),
+                "preflight": usage.as_ref().and_then(|usage| usage.get("preflight")).cloned(),
+                "guidance": "For this operation-specific invocation, follow the input schema and preflight fields. Replacement/routing classification is informational unless the user task explicitly asks to replace, shadow, activate, disable, or roll back this operation."
+            }),
+        );
+        if matches!(
+            object.get("replacementClass").and_then(Value::as_str),
+            Some("runtime_routable")
+        ) {
+            object.insert(
+                "replacementWorkflowBoundary".to_owned(),
+                json!({
+                    "appliesOnlyWhen": "explicit_replacement_shadow_route_or_rollback_workflow",
+                    "notRequiredFor": "normal_read_only_or_session_work_invocation",
+                    "safeDefault": "invoke_builtin_operation_with_exact_schema_until_a_governed_route_is_active"
+                }),
             );
         }
     }
@@ -233,6 +270,73 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
 }
 
 fn execute_operation_output_schema(operation: &str) -> Value {
+    if operation == "git_status" {
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe text summary of repository status."
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Bounded provider-safe git status evidence. Absolute paths, raw commands, raw logs, grants, and authority ids are excluded.",
+                    "required": ["primitiveOperation", "status", "git"],
+                    "properties": {
+                        "primitiveOperation": {"const": "git_status"},
+                        "status": {"type": "string"},
+                        "git": {
+                            "type": "object",
+                            "required": ["schemaVersion", "status", "operation", "summary", "repository", "evidence"],
+                            "properties": {
+                                "schemaVersion": {"const": "tron.git_readonly.v1"},
+                                "status": {"type": "string"},
+                                "operation": {"const": "status"},
+                                "summary": {
+                                    "type": "object",
+                                    "properties": {
+                                        "stagedCount": {"type": "integer"},
+                                        "unstagedCount": {"type": "integer"},
+                                        "untrackedCount": {"type": "integer"},
+                                        "conflictedCount": {"type": "integer"}
+                                    }
+                                },
+                                "repository": {
+                                    "type": "object",
+                                    "description": "Provider-safe repository facts using workspace-relative path refs.",
+                                    "properties": {
+                                        "branch": {"type": ["string", "null"]},
+                                        "detachedHead": {"type": "boolean"},
+                                        "hasUpstream": {"type": "boolean"},
+                                        "ahead": {"type": ["integer", "null"]},
+                                        "behind": {"type": ["integer", "null"]},
+                                        "pathspec": {"type": "string"},
+                                        "repositoryRoot": {"description": "Workspace-relative repository root ref."},
+                                        "worktreeRoot": {"description": "Workspace-relative worktree root ref."},
+                                        "requestedPath": {"description": "Workspace-relative requested path ref."}
+                                    }
+                                },
+                                "evidence": {
+                                    "type": "object",
+                                    "properties": {
+                                        "resourceRefs": {"type": "array"},
+                                        "statusLimitBytes": {"type": "integer"},
+                                        "statusTruncated": {"type": "boolean"},
+                                        "statusPorcelainV1Z": {"type": "string"}
+                                    }
+                                },
+                                "staged": {"type": "array"},
+                                "unstaged": {"type": "array"},
+                                "untracked": {"type": "array"},
+                                "conflicted": {"type": "array"}
+                            }
+                        }
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
     json!({
         "type": "object",
         "required": ["content", "details"],
@@ -1003,12 +1107,6 @@ fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value>
             "After invoking the target operation, list current-session trace evidence through the provider-safe trace projection.",
         ));
     }
-    read_only_sequence.push(recovery_alternative(
-        "trace_get",
-        json!({"operation": "trace_get", "traceRecordId": "<trace record id from trace_list>"}),
-        "Inspect one trace record only when trace_list returns an exact provider-safe trace record id.",
-    ));
-
     Some(json!({
         "purpose": "Deterministic read-only plan for schema inspection and provider-safe trace evidence.",
         "targetOperation": target,
@@ -1028,7 +1126,14 @@ fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value>
             "readOnlyInspectionSafe": true,
             "reason": "Use trace_list after the target operation to verify provider-safe trace evidence."
         },
-        "completionRule": "After schema inspection, one target invocation, and trace_list, answer from provider-safe trace fields only.",
+        "optionalDetailInspection": {
+            "tool": "capability::execute",
+            "operation": "trace_get",
+            "arguments": {"operation": "trace_get", "traceRecordId": "<trace record id from trace_list>"},
+            "readOnlyInspectionSafe": true,
+            "reason": "Call trace_get only when the task explicitly needs one focused trace record; trace_list is the default proof path."
+        },
+        "completionRule": "After schema inspection, one target invocation, and trace_list, answer from provider-safe trace fields only. State that provider-visible trace projections exclude raw internals while internal audit storage may retain raw fields for replay and policy.",
         "doNotInspect": [
             {"field": "raw trace database rows", "reason": "Use provider-safe trace_list/trace_get projections instead of raw internal persistence."}
         ]
@@ -1073,11 +1178,7 @@ fn trace_evidence_plan_supported_operations(query: &OperationSearchQuery) -> Vec
     let Some((target, _)) = trace_evidence_plan_target(query) else {
         return Vec::new();
     };
-    let mut operations = vec![target, "catalog_inspect", "trace_list"];
-    if target != "trace_get" {
-        operations.push("trace_get");
-    }
-    operations
+    vec![target, "catalog_inspect", "trace_list"]
 }
 
 fn operation_search_plan_target(
@@ -1093,7 +1194,7 @@ fn operation_search_plan_target(
         return None;
     }
     let query_terms = query_terms(query);
-    let asks_readiness = query_terms.iter().any(|term| {
+    let asks_binding_or_route_readiness = query_terms.iter().any(|term| {
         matches!(
             term.as_str(),
             "replacement"
@@ -1102,14 +1203,12 @@ fn operation_search_plan_target(
                 | "route"
                 | "routing"
                 | "binding"
-                | "shadow"
-                | "trial"
                 | "readiness"
                 | "rollback"
                 | "candidate"
         )
     });
-    asks_readiness.then_some((target, query_terms))
+    asks_binding_or_route_readiness.then_some((target, query_terms))
 }
 
 fn trace_evidence_plan_target(
@@ -1343,6 +1442,68 @@ mod tests {
         assert_eq!(
             discovery["agentUsage"]["effect"]["readOnlyInspectionSafe"],
             true
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_documents_git_status_evidence_contract() {
+        let discovery = execute_operation_inspect_projection("git_status", "execute::git_status");
+
+        assert_eq!(discovery["inputSchema"]["additionalProperties"], true);
+        assert_eq!(discovery["inputSchema"]["required"], json!(["operation"]));
+        assert_eq!(
+            discovery["outputSchema"]["properties"]["details"]["properties"]["git"]["required"],
+            json!([
+                "schemaVersion",
+                "status",
+                "operation",
+                "summary",
+                "repository",
+                "evidence"
+            ])
+        );
+        assert_eq!(
+            discovery["outputSchema"]["properties"]["details"]["properties"]["git"]["properties"]["repository"]
+                ["description"],
+            "Provider-safe repository facts using workspace-relative path refs."
+        );
+        assert_eq!(
+            discovery["outputSchema"]["properties"]["details"]["description"],
+            "Bounded provider-safe git status evidence. Absolute paths, raw commands, raw logs, grants, and authority ids are excluded."
+        );
+        assert_eq!(
+            discovery["agentUsage"]["preflight"]["authority"],
+            "derived_read_only_adapter_authority_for_exact_operation"
+        );
+        assert_eq!(
+            discovery["agentUsage"]["preflight"]["networkPolicy"],
+            "none"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_qualifies_runtime_routing_metadata_for_read_only_invocation() {
+        let discovery = execute_operation_inspect_projection("git_status", "execute::git_status");
+
+        assert_eq!(
+            discovery["capabilityPool"]["currentInvocation"]["guidance"],
+            "For this operation-specific invocation, follow the input schema and preflight fields. Replacement/routing classification is informational unless the user task explicitly asks to replace, shadow, activate, disable, or roll back this operation."
+        );
+        assert_eq!(
+            discovery["capabilityPool"]["currentInvocation"]["effect"]["mode"],
+            "read_only"
+        );
+        assert_eq!(
+            discovery["capabilityPool"]["replacementWorkflowBoundary"]["appliesOnlyWhen"],
+            "explicit_replacement_shadow_route_or_rollback_workflow"
+        );
+        assert_eq!(
+            discovery["capabilityPool"]["replacementWorkflowBoundary"]["notRequiredFor"],
+            "normal_read_only_or_session_work_invocation"
+        );
+        assert_eq!(
+            discovery["capabilityPool"]["purpose"],
+            "agent_inspects_or_changes_scoped_git_state_by_operation_effect"
         );
     }
 
@@ -1703,7 +1864,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             operations,
-            vec!["git_status", "trace_list", "trace_get", "catalog_inspect"]
+            vec!["git_status", "trace_list", "catalog_inspect"]
         );
         assert_eq!(
             discovery["agentSearchPlan"]["purpose"],
@@ -1750,6 +1911,59 @@ mod tests {
         assert_eq!(
             discovery["agentSearchPlan"]["afterTargetInvocation"]["arguments"]["operation"],
             "trace_list"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["optionalDetailInspection"]["operation"],
+            "trace_get"
+        );
+        assert!(
+            discovery["agentSearchPlan"]["completionRule"]
+                .as_str()
+                .expect("completion rule")
+                .contains("internal audit storage may retain raw fields")
+        );
+        let operations = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert!(!operations.contains(&"trace_get"));
+    }
+
+    #[test]
+    fn catalog_search_keeps_git_status_primary_for_shadow_trial_recovery_trace_queries() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "text": "supported read-only operations list capability shadow trial request schema git status trace evidence provider safe",
+                "limit": 10
+            }),
+        );
+
+        assert_eq!(
+            discovery["agentSearchPlan"]["purpose"],
+            "Deterministic read-only plan for schema inspection and provider-safe trace evidence."
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["targetOperation"],
+            "git_status"
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["schemaInspection"]["arguments"]["id"],
+            "execute::git_status"
+        );
+        let operations = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            operations,
+            vec!["git_status", "trace_list", "catalog_inspect"]
         );
     }
 

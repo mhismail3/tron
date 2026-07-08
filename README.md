@@ -1509,8 +1509,8 @@ Current primitive operations:
 | `update_diagnostic_record` | Record one scoped `update_diagnostic_record` resource for signed-release/update-check metadata only, with bounded provenance/signature/source/evidence refs, retention metadata, trace/replay refs, lifecycle evidence, fingerprinted idempotency evidence, and no raw update payloads, package bytes, production endpoint details, installer commands, restart commands, or deploy automation. |
 | `update_diagnostic_list` | List scoped `update_diagnostic_record` resources as bounded/redacted metadata projections with diagnostic status, signature status, release identity, and explicit no-live-network/no-installer flags only. |
 | `update_diagnostic_inspect` | Inspect one scoped `update_diagnostic_record` after stored kind/schema/scope revalidation, returning bounded/redacted diagnostic metadata, refs, lifecycle evidence, and update-boundary proof without raw packages, endpoints, commands, or authority ids. |
-| `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id; provider-visible projections include safe trace ids, invocation ids, parent invocation ids, request/result hashes, status/timing, safe errors, and redaction proof while excluding provider invocation ids, raw authority/grant ids, idempotency keys, working directories, raw requests/results, prompts, logs, commands, code, paths, file contents, and VCS payloads. |
-| `trace_get` | Read one durable trace record by id within the current session through the same provider-safe projection as `trace_list`, preserving trace/audit refs and hashes without exposing raw provider call metadata or execution payloads. |
+| `trace_list` | List durable Agent Trace-style records for the current session as the default provider-safe trace proof path, optionally filtered by trace id; provider-visible projections include safe engine trace/invocation refs, parent engine invocation refs, request/result hashes, status/timing, safe errors, projection-boundary guidance, and redaction proof while excluding raw provider invocation ids, raw authority/grant ids, idempotency keys, working directories, raw requests/results, prompts, logs, commands, code, paths, file contents, and VCS payloads. |
+| `trace_get` | Read one durable trace record by id within the current session only when focused per-record detail is needed after `trace_list`; it uses the same provider-safe projection as `trace_list`, preserving safe engine trace/audit refs and hashes without exposing raw provider call metadata or execution payloads. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive; model-context replay includes bounded entry ids, timestamps, levels, components, messages, session ids, and trace ids instead of a count-only summary. |
 | `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled-state reporting. |
 | `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
@@ -1520,8 +1520,8 @@ Current primitive operations:
 | `memory_decision_list` | Accepted Slice 24D operation that lists redacted current-session `memory_decision` evidence records with reason codes, prompt-inclusion proof, retention/edit/delete policy evidence, refs, redaction proof, and no automatic retention. |
 | `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
-| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments plus a preferred `catalog_inspect` step for `execute::<operation>` so the agent inspects the provider-visible schema before backing engine-substrate functions, readiness searches that name one runtime-routable operation plus replacement/route/binding/shadow/evidence intent return an `agentSearchPlan` limited to the exact read-only inspection sequence and unsupported names to avoid, unsupported operation-like names stay recovery-guidance results instead of fuzzy near matches, generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation, and provider guidance carries a bounded canonical supported-execute-operation list with total/returned/truncated/omitted metadata. |
-| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, and required top-level payload fields instead of collapsing to the generic `capability::execute` wrapper. |
+| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments plus a preferred `catalog_inspect` step for `execute::<operation>` so the agent inspects the provider-visible schema before backing engine-substrate functions, readiness searches that name one runtime-routable operation plus replacement/route/binding/shadow/evidence intent return an `agentSearchPlan` limited to the exact read-only inspection sequence and unsupported names to avoid, trace/evidence searches that name one read-only target return an `agentSearchPlan` to inspect the target schema, invoke the target once, and inspect provider-safe trace evidence, `effectClass` accepts canonical values plus safe read-only aliases (`read`, `read_only`, `inspect`) for `pure_read`, unsupported operation-like names stay recovery-guidance results instead of fuzzy near matches, generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation, and provider guidance carries a bounded canonical supported-execute-operation list with total/returned/truncated/omitted metadata. |
+| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, required top-level payload fields, and current-invocation guidance that keeps normal read-only/session calls separate from explicit replacement, shadow, route, disable, and rollback workflows. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks; this is verification-report evidence, not passive read-only inspection. |
 
 File access goes through the hardened `filesystem_*` operation package.
@@ -2777,12 +2777,23 @@ Trace reads are backed by `trace_records`; effectful `execute` calls insert a
 running record before the effect runs and update that same record with status,
 duration, result/error hashes, authority, provider/model metadata, VCS revision
 when available, and file attribution/content hashes after completion. Provider
-projections for `trace_list` and `trace_get` copy only bounded safe trace ids,
-invocation ids, parent invocation ids, status/timing fields, request/result
-hashes, safe errors, and redaction proof from those rows. Provider invocation
-ids, raw authority/grant ids, idempotency keys, working directories, raw
-requests/results, prompts, logs, commands, code, file contents, local paths,
-VCS payloads, and secrets stay internal. The
+projections for `trace_list` and `trace_get` copy only bounded safe engine
+trace/invocation refs, parent engine invocation refs, status/timing fields,
+request/result hashes, safe errors, projection-boundary guidance, and redaction
+proof from those rows. Raw provider invocation ids, raw authority/grant ids,
+idempotency keys, working directories, raw requests/results, prompts, logs,
+commands, code, file contents, local paths, VCS payloads, and secrets stay
+internal. Agents should use `trace_list` as the normal current-session proof
+path and reserve `trace_get` for explicit focused inspection of one record;
+final answers should state that provider-visible projections expose only safe
+engine refs, exclude raw provider invocation ids and other raw internals, and
+that transcript tool-call ids may still exist in provider message history for
+protocol threading while `trace_list`/`trace_get` do not project
+`providerInvocationId`. Internal audit storage may retain raw fields for replay
+and policy.
+Engine-internal durability may still create prompt-trace/resource/audit
+bookkeeping; safety claims should therefore say no provider-visible mutating
+capability operation was used rather than saying no mutation occurred at all. The
 agent backend logs run/turn/provider/stream/capability/execute lifecycle
 metadata to the `logs` table with stable `component`, `agent_event`, session,
 workspace, trace, run, turn, invocation, resource, and status fields where those

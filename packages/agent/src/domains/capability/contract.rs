@@ -622,10 +622,12 @@ fn execute_model_request_schema() -> serde_json::Value {
         "Catalog namespace prefix filter.",
     );
     insert_string(&mut properties, "visibility", "Catalog visibility filter.");
-    insert_string(
-        &mut properties,
-        "effectClass",
-        "Catalog effect-class filter.",
+    properties.insert(
+        "effectClass".to_owned(),
+        json!({
+            "type": "string",
+            "description": "Catalog search effect-class filter. Accepted values: pure_read, deterministic_compute, delegated_invocation, idempotent_write, append_only_event, reversible_side_effect, external_side_effect, irreversible_side_effect. Safe read-only aliases read, read_only, and inspect are accepted as pure_read."
+        }),
     );
     insert_string(&mut properties, "maxRisk", "Catalog maximum risk filter.");
     insert_string(&mut properties, "health", "Catalog health filter.");
@@ -804,6 +806,12 @@ mod tests {
             operations.contains("catalog_conformance creates a durable catalog_discovery_report")
         );
         assert!(operations.contains("is not read-only inspection"));
+        let effect_description = schema["properties"]["effectClass"]["description"]
+            .as_str()
+            .expect("effect class description");
+        assert!(effect_description.contains("pure_read"));
+        assert!(effect_description.contains("read_only"));
+        assert!(effect_description.contains("Accepted values"));
         for operation in crate::domains::capability::supported_operation_names() {
             assert!(operations.contains(operation), "missing {operation}");
         }

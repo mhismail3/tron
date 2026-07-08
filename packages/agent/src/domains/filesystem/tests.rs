@@ -512,6 +512,13 @@ async fn execute_rejects_unsupported_file_write_operation() {
     )
     .await;
     assert!(error.contains("Unsupported primitive execute operation 'file_write'"));
+    assert!(error.contains("Do not retry this operation"));
+    assert!(error.contains("catalog_search"));
+    assert!(error.contains("catalog_inspect"));
+    assert!(
+        !error.contains("filesystem_read, filesystem_list"),
+        "unsupported operation errors must not dump the full registry"
+    );
     assert!(!target.exists());
 }
 

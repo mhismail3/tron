@@ -2,7 +2,6 @@
 
 use serde_json::{Value, json};
 
-use super::registry::operation_list_text;
 use crate::engine::Invocation;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -103,8 +102,7 @@ pub(super) fn invalid(message: impl Into<String>) -> CapabilityError {
 pub(super) fn unsupported_operation(operation: &str) -> CapabilityError {
     CapabilityError::InvalidParams {
         message: format!(
-            "Unsupported primitive execute operation '{operation}'. Use {}.",
-            operation_list_text()
+            "Unsupported primitive execute operation '{operation}'. Do not retry this operation. Recover by calling catalog_search with only operation='catalog_search', text='<goal and candidate capability terms>', and optional limit; then inspect the returned execute::<operation> schema with catalog_inspect before invoking a supported operation."
         ),
     }
 }

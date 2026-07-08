@@ -107,7 +107,23 @@ fn search_schema() -> serde_json::Value {
             "text": {"type": "string"},
             "namespacePrefix": {"type": "string"},
             "visibility": {"type": "string"},
-            "effectClass": {"type": "string"},
+            "effectClass": {
+                "type": "string",
+                "enum": [
+                    "pure_read",
+                    "read",
+                    "read_only",
+                    "inspect",
+                    "deterministic_compute",
+                    "delegated_invocation",
+                    "idempotent_write",
+                    "append_only_event",
+                    "reversible_side_effect",
+                    "external_side_effect",
+                    "irreversible_side_effect"
+                ],
+                "description": "Optional effect filter. Use pure_read, read, read_only, or inspect for read-only discovery."
+            },
             "maxRisk": {"type": "string"},
             "health": {"type": "string"},
             "includeProtectedCounts": {"type": "boolean"},

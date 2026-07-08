@@ -66,6 +66,28 @@ async fn search_omits_protected_function_names_but_reports_counts() {
 }
 
 #[tokio::test]
+async fn search_accepts_read_alias_for_pure_read_filter() {
+    let ctx = make_test_context();
+    register_demo_function(&ctx, "demo::visible", VisibilityScope::System, None).await;
+
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(super::SEARCH_FUNCTION).unwrap(),
+            json!({"namespacePrefix": "demo", "effectClass": "read"}),
+            client_context("catalog-discovery-search-read-alias").with_scope(super::READ_SCOPE),
+        ))
+        .await;
+
+    assert_eq!(result.error, None, "search failed: {:?}", result.error);
+    let value = result.value.expect("search value");
+    let serialized = serde_json::to_string(&value).unwrap();
+    assert!(serialized.contains("demo::visible"), "{serialized}");
+    assert_eq!(value["query"]["effectClass"], "read");
+    assert_eq!(value["summary"]["functions"]["visible"], 1);
+}
+
+#[tokio::test]
 async fn inspect_returns_schema_metadata_and_conformance_without_execution() {
     let ctx = make_test_context();
     let calls = Arc::new(AtomicUsize::new(0));

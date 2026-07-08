@@ -28,6 +28,7 @@ use crate::shared::server::errors::CapabilityError;
 const TRACE_REDACTION_FINGERPRINT_ALGORITHM: &str = "sha256:tron.trace.redacted.v1";
 const AUTHORITY_GRANT_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.authority_grant_id.v1\0";
 const IDEMPOTENCY_KEY_FINGERPRINT_DOMAIN: &[u8] = b"tron.trace.idempotency_key.v1\0";
+const TRACE_PROJECTION_BOUNDARY_CONTENT: &str = "Provider-visible trace projection exposes safe engine trace/invocation refs only; it excludes raw provider invocation ids and other raw internals. Provider transcript tool-call ids may exist for protocol threading, but they are not trace projection providerInvocationId fields. Internal audit storage may retain raw fields for replay and policy, and engine-internal durability may create bookkeeping resources without being provider-visible mutating capability work.";
 static TRACE_ABSOLUTE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(^|[\s"'(:=])(?:/Users|/var|/tmp|/private|/Volumes|/Applications)/[^\s"')]+"#)
         .expect("valid trace absolute path regex")
@@ -63,10 +64,14 @@ pub(super) fn trace_list(
         .map(|record| provider_safe_trace_record(&record.record_json))
         .collect::<Vec<_>>();
     Ok(ok_result(
-        format!("Trace records: {}.", records.len()),
+        format!(
+            "Trace records: {}. {TRACE_PROJECTION_BOUNDARY_CONTENT}",
+            records.len()
+        ),
         json!({
             "primitiveOperation": "trace_list",
             "status": "ok",
+            "projectionBoundary": trace_projection_boundary(),
             "records": records
         }),
     ))
@@ -97,13 +102,28 @@ pub(super) fn trace_get(
         });
     }
     Ok(ok_result(
-        format!("Trace record: {id}."),
+        format!("Trace record: {id}. {TRACE_PROJECTION_BOUNDARY_CONTENT}"),
         json!({
             "primitiveOperation": "trace_get",
             "status": "ok",
+            "projectionBoundary": trace_projection_boundary(),
             "record": provider_safe_trace_record(&record.record_json)
         }),
     ))
+}
+
+fn trace_projection_boundary() -> Value {
+    json!({
+        "providerVisibleProjection": "provider_safe_trace_projection",
+        "providerVisibleMeaning": "Fields in this result are safe bounded projections for the model. Visible traceId/invocationId fields are engine refs, not raw provider invocation ids.",
+        "internalAuditStorage": "Engine trace storage may retain raw audit fields for replay, policy, and debugging.",
+        "safeRefSemantics": "traceId, invocationId, parentInvocationId, runId, sessionRef, and workspaceRef are provider-safe engine refs, not raw provider invocation ids.",
+        "transcriptToolCallBoundary": "Provider transcript tool-call ids may exist in model/provider message history for protocol threading. Trace projection safety claims are about trace_list/trace_get projection fields, where providerInvocationId is not exposed.",
+        "operationBoundary": "Safety claims are about provider-visible capability operations and provider-visible projections. Internal engine durability may record prompt traces, resources, and audit bookkeeping for replay/policy without counting as a provider-visible mutating capability operation.",
+        "rawCommandEvidenceGuidance": "Trace projection proves raw requests/results and local material are excluded. Operation-specific schemas or results may provide additional no-raw-command proof.",
+        "answerGuidance": "When reporting safety, say provider-visible trace projections expose safe engine trace/invocation refs only, exclude raw provider invocation ids and raw internals, and do not claim internal audit storage lacks those fields. Say no provider-visible mutating capability operation was used instead of saying no mutation occurred at all.",
+        "traceGetUse": "Use trace_list for normal current-session proof. Call trace_get only when a specific trace record needs focused inspection."
+    })
 }
 
 fn provider_safe_trace_record(record: &Value) -> Value {
@@ -138,6 +158,12 @@ fn provider_safe_trace_record(record: &Value) -> Value {
             "hash": metadata.get("resultHash").cloned().unwrap_or(Value::Null),
             "rawStoredInProjection": false
         },
+        "projectionBoundary": {
+            "providerVisibleProjection": true,
+            "safeEngineRefsOnly": true,
+            "rawAuditFieldsProjected": false,
+            "internalAuditStorageMayRetainRawAuditFields": true
+        },
         "authority": {
             "actorKind": authority.get("actorKind").cloned().unwrap_or(Value::Null),
             "scopeCount": authority
@@ -154,6 +180,7 @@ fn provider_safe_trace_record(record: &Value) -> Value {
             "rawAuthorityIdsExcluded": true,
             "rawGrantIdsExcluded": true,
             "rawIdempotencyKeysExcluded": true,
+            "rawProviderInvocationIdsExcluded": true,
             "rawWorkingDirectoryExcluded": true,
             "rawRequestExcluded": true,
             "rawResultExcluded": true,
@@ -697,8 +724,21 @@ mod tests {
         assert_eq!(safe["operation"], "git_status");
         assert_eq!(safe["request"]["hash"], "sha256:request");
         assert_eq!(safe["result"]["hash"], "sha256:result");
+        assert_eq!(
+            safe["projectionBoundary"]["providerVisibleProjection"],
+            true
+        );
+        assert_eq!(safe["projectionBoundary"]["safeEngineRefsOnly"], true);
+        assert_eq!(safe["projectionBoundary"]["rawAuditFieldsProjected"], false);
+        assert_eq!(
+            safe["projectionBoundary"]["internalAuditStorageMayRetainRawAuditFields"],
+            true
+        );
         assert_eq!(safe["authority"]["scopeCount"], 2);
         assert_eq!(safe["redaction"]["rawAuthorityIdsExcluded"], true);
+        assert_eq!(safe["redaction"]["rawProviderInvocationIdsExcluded"], true);
+        assert!(!rendered.contains("providerInvocationId"), "{rendered}");
+        assert!(!rendered.contains("call_1"), "{rendered}");
         assert!(!rendered.contains("authorityGrantId"), "{rendered}");
         assert!(!rendered.contains("grant_must_not_project"), "{rendered}");
         assert!(
@@ -714,6 +754,74 @@ mod tests {
         assert!(!rendered.contains("raw command output"), "{rendered}");
         assert!(!rendered.contains("secret.txt"), "{rendered}");
         assert!(!rendered.contains("abc123"), "{rendered}");
+    }
+
+    #[test]
+    fn trace_projection_boundary_instructs_provider_safe_answering() {
+        let boundary = trace_projection_boundary();
+
+        assert_eq!(
+            boundary["providerVisibleProjection"],
+            "provider_safe_trace_projection"
+        );
+        assert!(
+            boundary["answerGuidance"]
+                .as_str()
+                .expect("answer guidance")
+                .contains("exclude raw provider invocation ids")
+        );
+        assert!(
+            boundary["safeRefSemantics"]
+                .as_str()
+                .expect("safe ref semantics")
+                .contains("not raw provider invocation ids")
+        );
+        assert!(
+            boundary["transcriptToolCallBoundary"]
+                .as_str()
+                .expect("transcript tool call boundary")
+                .contains("protocol threading")
+        );
+        assert!(
+            boundary["operationBoundary"]
+                .as_str()
+                .expect("operation boundary")
+                .contains("provider-visible mutating capability operation")
+        );
+        assert!(
+            boundary["rawCommandEvidenceGuidance"]
+                .as_str()
+                .expect("raw command evidence guidance")
+                .contains("Operation-specific schemas")
+        );
+        assert!(
+            boundary["internalAuditStorage"]
+                .as_str()
+                .expect("internal audit storage")
+                .contains("may retain raw audit fields")
+        );
+        assert!(
+            boundary["traceGetUse"]
+                .as_str()
+                .expect("trace get use")
+                .contains("trace_list")
+        );
+    }
+
+    #[test]
+    fn trace_projection_boundary_content_is_model_facing() {
+        assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("Provider-visible"));
+        assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("safe engine trace/invocation refs"));
+        assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("excludes raw provider invocation ids"));
+        assert!(TRACE_PROJECTION_BOUNDARY_CONTENT.contains("protocol threading"));
+        assert!(
+            TRACE_PROJECTION_BOUNDARY_CONTENT
+                .contains("Internal audit storage may retain raw fields")
+        );
+        assert!(
+            TRACE_PROJECTION_BOUNDARY_CONTENT
+                .contains("engine-internal durability may create bookkeeping resources")
+        );
     }
 
     #[test]

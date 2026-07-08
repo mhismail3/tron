@@ -212,7 +212,7 @@ fn parse_visibility(value: &str) -> Result<VisibilityScope, CapabilityError> {
 
 fn parse_effect(value: &str) -> Result<EffectClass, CapabilityError> {
     Ok(match normalize_key(value).as_str() {
-        "pureread" => EffectClass::PureRead,
+        "pureread" | "readonly" | "read" | "inspect" | "inspection" => EffectClass::PureRead,
         "deterministiccompute" => EffectClass::DeterministicCompute,
         "delegatedinvocation" => EffectClass::DelegatedInvocation,
         "idempotentwrite" => EffectClass::IdempotentWrite,
