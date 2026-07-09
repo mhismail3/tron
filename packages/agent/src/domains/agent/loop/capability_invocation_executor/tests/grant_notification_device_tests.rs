@@ -39,14 +39,11 @@ async fn device_read_runtime_grants_are_read_only_and_selector_bounded() {
         }
         assert_eq!(
             grant.allowed_resource_kinds,
-            vec!["agent_state".to_owned(), "device_registration".to_owned()]
+            vec!["device_registration".to_owned()]
         );
         assert_eq!(
             grant.resource_selectors,
-            vec![
-                "kind:agent_state".to_owned(),
-                "kind:device_registration".to_owned()
-            ]
+            vec!["kind:device_registration".to_owned()]
         );
     }
 }
@@ -134,12 +131,11 @@ async fn notification_read_runtime_grants_are_selector_bounded() {
         );
         let expected_kinds = if operation == "notification_inspect" {
             vec![
-                "agent_state".to_owned(),
                 "notification".to_owned(),
                 "notification_delivery".to_owned(),
             ]
         } else {
-            vec!["agent_state".to_owned(), "notification".to_owned()]
+            vec!["notification".to_owned()]
         };
         assert_eq!(grant.allowed_resource_kinds, expected_kinds);
         for selector in grant.resource_selectors.iter() {

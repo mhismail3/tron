@@ -14,7 +14,10 @@
 //! primitives, because discovery must not carry write authority it cannot use.
 //! Diagnostic read calls such as `trace_list` follow the same exact-target
 //! grant rule: they can inspect trusted engine projections without inheriting
-//! scratch-state read/write delegation.
+//! scratch-state read/write delegation. Scratch-state authority is explicit and
+//! isolated to the `state_get`, `state_set`, and `state_list` execute
+//! operations; non-state operations do not receive state capabilities as a
+//! fallback.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the

@@ -43,10 +43,7 @@ async fn repository_tree_read_runtime_grants_are_read_only_and_selector_bounded(
         }
         assert_eq!(
             grant.allowed_resource_kinds,
-            vec![
-                "agent_state".to_owned(),
-                "repository_tree_snapshot".to_owned()
-            ]
+            vec!["repository_tree_snapshot".to_owned()]
         );
         assert!(
             grant

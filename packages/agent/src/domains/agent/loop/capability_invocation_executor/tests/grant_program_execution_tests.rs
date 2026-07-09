@@ -33,10 +33,7 @@ async fn program_execution_read_runtime_grants_are_read_only_and_selector_bounde
         );
         assert_eq!(
             grant.allowed_resource_kinds,
-            vec![
-                "agent_state".to_owned(),
-                "program_execution_record".to_owned()
-            ]
+            vec!["program_execution_record".to_owned()]
         );
         assert!(
             grant

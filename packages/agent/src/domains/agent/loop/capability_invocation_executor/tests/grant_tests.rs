@@ -35,6 +35,75 @@ fn assert_no_state_inheritance(grant: &crate::engine::EngineGrant) {
 }
 
 #[tokio::test]
+async fn state_runtime_grants_are_explicit_state_only() {
+    for (operation, expected_capability, expected_scope) in [
+        ("state_get", "state::get", "state.read"),
+        ("state_set", "state::set", "state.write"),
+        ("state_list", "state::list", "state.read"),
+    ] {
+        let payload = match operation {
+            "state_get" => json!({
+                "operation": operation,
+                "namespace": "runtime-grant",
+                "key": "item",
+                "idempotencyKey": format!("{operation}-grant")
+            }),
+            "state_set" => json!({
+                "operation": operation,
+                "namespace": "runtime-grant",
+                "key": "item",
+                "value": {"ok": true},
+                "idempotencyKey": format!("{operation}-grant")
+            }),
+            "state_list" => json!({
+                "operation": operation,
+                "namespace": "runtime-grant",
+                "idempotencyKey": format!("{operation}-grant")
+            }),
+            _ => unreachable!(),
+        };
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_eq!(grant.network_policy, "none");
+        assert_eq!(
+            grant.allowed_capabilities,
+            vec![
+                "capability::execute".to_owned(),
+                expected_capability.to_owned()
+            ]
+        );
+        assert!(
+            grant
+                .allowed_authority_scopes
+                .contains(&expected_scope.to_owned()),
+            "{operation} grant should include {expected_scope}: {:?}",
+            grant.allowed_authority_scopes
+        );
+        for forbidden_scope in ["state.read", "state.write"] {
+            if forbidden_scope == expected_scope {
+                continue;
+            }
+            assert!(
+                !grant
+                    .allowed_authority_scopes
+                    .contains(&forbidden_scope.to_owned()),
+                "{operation} grant must not include {forbidden_scope}"
+            );
+        }
+        assert_eq!(grant.allowed_resource_kinds, vec!["agent_state".to_owned()]);
+        assert_eq!(
+            grant.resource_selectors,
+            vec!["kind:agent_state".to_owned()]
+        );
+    }
+}
+
+#[tokio::test]
 async fn goal_create_runtime_grant_propagates_write_scopes_without_wildcards() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "goal_create",
@@ -1152,14 +1221,11 @@ fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::Engine
     }
     assert_eq!(
         grant.allowed_resource_kinds,
-        vec!["agent_state".to_owned(), "subagent_task".to_owned()]
+        vec!["subagent_task".to_owned()]
     );
     assert_eq!(
         grant.resource_selectors,
-        vec![
-            "kind:agent_state".to_owned(),
-            "kind:subagent_task".to_owned()
-        ]
+        vec!["kind:subagent_task".to_owned()]
     );
     for forbidden_kind in [
         "worker_package",
@@ -1202,12 +1268,7 @@ fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::Engine
     }
     assert_eq!(
         grant.allowed_capabilities,
-        vec![
-            "capability::execute".to_owned(),
-            "state::get".to_owned(),
-            "state::list".to_owned(),
-            "state::set".to_owned(),
-        ]
+        vec!["capability::execute".to_owned()]
     );
 }
 
@@ -1475,12 +1536,7 @@ fn assert_worker_package_runtime_grant_is_read_only_for_kind(
     }
     assert_eq!(
         grant.allowed_capabilities,
-        vec![
-            "capability::execute".to_owned(),
-            "state::get".to_owned(),
-            "state::list".to_owned(),
-            "state::set".to_owned(),
-        ]
+        vec!["capability::execute".to_owned()]
     );
 }
 

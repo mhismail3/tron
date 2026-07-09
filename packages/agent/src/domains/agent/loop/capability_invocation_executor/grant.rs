@@ -35,65 +35,10 @@ pub(super) async fn derive_capability_runtime_grant(
         .get("operation")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let state_operation = matches!(operation, "state_get" | "state_set" | "state_list");
     let catalog_discovery_operation = is_catalog_discovery_operation(operation);
-    let module_registry_read_operation = matches!(operation, "module_list" | "module_inspect");
-    let module_authoring_operation = matches!(
-        operation,
-        "module_proposal_record" | "module_proposal_list" | "module_proposal_inspect"
-    );
-    let module_validation_operation = matches!(
-        operation,
-        "module_validation_record" | "module_validation_list" | "module_validation_inspect"
-    );
-    let module_install_operation = matches!(
-        operation,
-        "module_install_request_record"
-            | "module_install_request_list"
-            | "module_install_request_inspect"
-            | "module_install_decision_record"
-            | "module_install_decision_list"
-            | "module_install_decision_inspect"
-    );
-    let module_dependencies_operation = matches!(
-        operation,
-        "module_dependency_request_record"
-            | "module_dependency_request_list"
-            | "module_dependency_request_inspect"
-            | "module_dependency_decision_record"
-            | "module_dependency_decision_list"
-            | "module_dependency_decision_inspect"
-            | "module_dependency_policy_activate"
-            | "module_dependency_policy_list"
-            | "module_dependency_policy_inspect"
-    );
     let capability_binding_operation = is_capability_binding_operation(operation);
     let capability_route_operation = is_capability_route_operation(operation);
-    let web_research_operation = matches!(
-        operation,
-        "web_research_request_record"
-            | "web_research_request_list"
-            | "web_research_request_inspect"
-            | "web_research_review_record"
-            | "web_research_review_list"
-            | "web_research_review_inspect"
-            | "web_research_source_record"
-            | "web_research_source_list"
-            | "web_research_source_inspect"
-    );
-    let module_lifecycle_operation = matches!(
-        operation,
-        "module_lifecycle_request"
-            | "module_lifecycle_decision"
-            | "module_lifecycle_list"
-            | "module_lifecycle_inspect"
-    );
-    let module_runtime_operation = matches!(
-        operation,
-        "module_runtime_request"
-            | "module_runtime_list"
-            | "module_runtime_inspect"
-            | "module_runtime_cancel"
-    );
     let context_control_operation = matches!(
         operation,
         "context_control_status"
@@ -110,41 +55,12 @@ pub(super) async fn derive_capability_runtime_grant(
             | "context_exclusion_disable"
             | "context_policy_snapshot"
     );
-    let module_program_execution_operation = matches!(
-        operation,
-        "module_program_execution_start"
-            | "module_program_execution_status"
-            | "module_program_execution_cancel"
-            | "module_program_execution_cleanup"
-    );
-    let procedural_module_operation = is_procedural_module_operation(operation);
-    let memory_module_operation = is_memory_module_operation(operation);
     let delegated_subagent_operation = matches!(
         operation,
         "subagent_launch" | "subagent_status" | "subagent_result" | "subagent_cancel"
     );
-    let file_git_module_operation = is_file_git_module_operation(operation);
     let diagnostic_read_operation = is_diagnostic_read_operation(operation);
     let web_network_operation = matches!(operation, "web_fetch" | "web_robots_check");
-    let exact_target_runtime_operation = module_registry_read_operation
-        || module_authoring_operation
-        || module_validation_operation
-        || module_install_operation
-        || module_dependencies_operation
-        || capability_binding_operation
-        || capability_route_operation
-        || web_research_operation
-        || module_lifecycle_operation
-        || module_runtime_operation
-        || context_control_operation
-        || module_program_execution_operation
-        || procedural_module_operation
-        || memory_module_operation
-        || delegated_subagent_operation
-        || file_git_module_operation
-        || catalog_discovery_operation
-        || diagnostic_read_operation
-        || web_network_operation;
     let notification_push_requested = operation == "notification_send"
         && effective_args
             .get("pushRequested")
@@ -153,21 +69,19 @@ pub(super) async fn derive_capability_runtime_grant(
     let web_fetch_uses_robots_policy = operation == "web_fetch"
         && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
         && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
-    let mut allowed_capabilities = if exact_target_runtime_operation {
-        vec![target_function_id.as_str().to_owned()]
-    } else {
-        vec![
-            target_function_id.as_str().to_owned(),
-            "state::get".to_owned(),
-            "state::set".to_owned(),
-            "state::list".to_owned(),
-        ]
-    };
+    let mut allowed_capabilities = vec![target_function_id.as_str().to_owned()];
+    if let Some(state_capability) = state_runtime_capability(operation) {
+        allowed_capabilities.push(state_capability.to_owned());
+    }
     allowed_capabilities.sort();
     allowed_capabilities.dedup();
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    if !exact_target_runtime_operation {
-        allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
+    if state_operation {
+        match operation {
+            "state_get" | "state_list" => allowed_authority_scopes.push("state.read".to_owned()),
+            "state_set" => allowed_authority_scopes.push("state.write".to_owned()),
+            _ => {}
+        }
     }
     if matches!(
         operation,
@@ -633,12 +547,16 @@ pub(super) async fn derive_capability_runtime_grant(
     } else {
         "none"
     };
-    let mut allowed_resource_kinds = if exact_target_runtime_operation {
-        Vec::new()
-    } else {
+    let mut allowed_resource_kinds = if state_operation {
         vec!["agent_state".to_owned()]
+    } else {
+        Vec::new()
     };
-    if catalog_discovery_operation {
+    if state_operation {
+        // State is the only execute operation family allowed to carry the
+        // scratch-state resource kind. Every other operation must declare its
+        // own resource custody below.
+    } else if catalog_discovery_operation {
         allowed_resource_kinds.push("catalog_discovery".to_owned());
     } else if diagnostic_read_operation {
         allowed_resource_kinds.extend(diagnostic_read_resource_kinds(operation));
@@ -1116,39 +1034,13 @@ fn diagnostic_read_resource_kinds(operation: &str) -> Vec<String> {
     }
 }
 
-fn is_file_git_module_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "filesystem_read"
-            | "filesystem_list"
-            | "filesystem_find"
-            | "filesystem_glob"
-            | "filesystem_search_text"
-            | "filesystem_diff"
-            | "filesystem_write"
-            | "filesystem_edit"
-            | "filesystem_apply_patch"
-            | "git_status"
-            | "git_diff"
-            | "git_branch_inventory"
-            | "git_stage"
-            | "git_unstage"
-            | "git_commit"
-            | "git_branch_start"
-    )
-}
-
-fn is_memory_module_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "memory_status"
-            | "memory_list"
-            | "memory_inspect"
-            | "memory_query_list"
-            | "memory_query_inspect"
-            | "memory_decision_list"
-            | "memory_decision_inspect"
-    )
+fn state_runtime_capability(operation: &str) -> Option<&'static str> {
+    match operation {
+        "state_get" => Some("state::get"),
+        "state_set" => Some("state::set"),
+        "state_list" => Some("state::list"),
+        _ => None,
+    }
 }
 
 fn is_capability_route_operation(operation: &str) -> bool {

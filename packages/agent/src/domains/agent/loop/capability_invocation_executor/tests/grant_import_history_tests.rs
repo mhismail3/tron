@@ -43,7 +43,7 @@ async fn import_history_read_runtime_grants_are_read_only_and_selector_bounded()
         }
         assert_eq!(
             grant.allowed_resource_kinds,
-            vec!["agent_state".to_owned(), "import_history_record".to_owned()]
+            vec!["import_history_record".to_owned()]
         );
         assert!(
             grant

@@ -33,7 +33,7 @@ async fn prompt_artifacts_read_runtime_grants_are_read_only_and_selector_bounded
         );
         assert_eq!(
             grant.allowed_resource_kinds,
-            vec!["agent_state".to_owned(), "prompt_artifact".to_owned()]
+            vec!["prompt_artifact".to_owned()]
         );
         assert!(
             grant

@@ -43,10 +43,7 @@ async fn update_diagnostics_read_runtime_grants_are_read_only_and_selector_bound
         }
         assert_eq!(
             grant.allowed_resource_kinds,
-            vec![
-                "agent_state".to_owned(),
-                "update_diagnostic_record".to_owned()
-            ]
+            vec!["update_diagnostic_record".to_owned()]
         );
         assert!(
             grant
