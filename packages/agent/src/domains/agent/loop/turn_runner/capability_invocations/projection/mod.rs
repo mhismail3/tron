@@ -11,6 +11,10 @@
 //! channel. Trace projections also preserve bounded top-level proof metadata so
 //! the model can verify redaction and status semantics without inferring from
 //! missing raw fields.
+//! Broad cockpit projections are a compact operation directory by default;
+//! exact `targetOperation` cockpit calls keep the deep readiness, preflight,
+//! binding, shadow, route, rollback, and agent-path detail. This keeps the
+//! capability map discoverable without flooding the next provider turn.
 
 use std::sync::LazyLock;
 
@@ -44,7 +48,7 @@ pub(super) fn extract_model_context_result_text(
 const MODEL_CONTEXT_EVIDENCE_MAX_CHARS: usize = 80_000;
 const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
 const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
-const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 256;
+const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 12;
 const MODEL_CONTEXT_OBJECT_MAX_KEYS: usize = 80;
 
 pub(super) fn extract_result_content(
@@ -466,21 +470,27 @@ fn project_cockpit_family(family: &Value) -> Value {
 }
 
 fn project_cockpit_operation_directory(operations: &[Value]) -> Value {
+    let detailed = operations.len() <= 1;
     json!({
         "total": operations.len(),
         "returned": operations.len().min(MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS),
         "truncated": operations.len() > MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS,
         "omitted": operations.len().saturating_sub(MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS),
         "maxItems": MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS,
+        "detailPolicy": if detailed {
+            "single operation row includes detailed readiness path"
+        } else {
+            "broad directory is compact; call capability_binding_cockpit_overview with targetOperation for one exact operation when detailed readiness, preflight, binding, shadow, route, rollback, or agentPath data is needed"
+        },
         "operations": operations
             .iter()
             .take(MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS)
-            .map(project_cockpit_operation_for_agent)
+            .map(|operation| project_cockpit_operation_for_agent(operation, detailed))
             .collect::<Vec<_>>()
     })
 }
 
-fn project_cockpit_operation_for_agent(operation: &Value) -> Value {
+fn project_cockpit_operation_for_agent(operation: &Value, detailed: bool) -> Value {
     let mut projected = Map::new();
     for key in ["name", "family", "familyLabel"] {
         copy_key(&mut projected, operation, key);
@@ -491,7 +501,11 @@ fn project_cockpit_operation_for_agent(operation: &Value) -> Value {
     if let Some(agent_usage) = operation.get("agentUsage") {
         projected.insert(
             "agentUsage".to_owned(),
-            project_cockpit_agent_usage(agent_usage),
+            if detailed {
+                project_cockpit_agent_usage(agent_usage)
+            } else {
+                project_cockpit_agent_usage_summary(agent_usage)
+            },
         );
     }
     if let Some(readiness) = operation.get("readiness") {
@@ -506,25 +520,39 @@ fn project_cockpit_operation_for_agent(operation: &Value) -> Value {
     if let Some(status) = operation.get("status") {
         projected.insert("status".to_owned(), project_cockpit_status(status));
     }
-    if let Some(binding) = operation.get("binding") {
-        projected.insert("binding".to_owned(), project_cockpit_binding(binding));
-    }
-    if let Some(shadow_trial) = operation.get("shadowTrial") {
+    if detailed {
+        if let Some(binding) = operation.get("binding") {
+            projected.insert("binding".to_owned(), project_cockpit_binding(binding));
+        }
+        if let Some(shadow_trial) = operation.get("shadowTrial") {
+            projected.insert(
+                "shadowTrial".to_owned(),
+                project_cockpit_shadow_trial(shadow_trial),
+            );
+        }
+        if let Some(route) = operation.get("route") {
+            projected.insert("route".to_owned(), project_cockpit_route(route));
+        }
+        if let Some(rollback) = operation.get("rollback") {
+            projected.insert("rollback".to_owned(), project_cockpit_rollback(rollback));
+        }
+        if let Some(agent_path) = operation.get("agentPath") {
+            projected.insert(
+                "agentPath".to_owned(),
+                project_cockpit_agent_path(agent_path),
+            );
+        }
+    } else {
         projected.insert(
-            "shadowTrial".to_owned(),
-            project_cockpit_shadow_trial(shadow_trial),
-        );
-    }
-    if let Some(route) = operation.get("route") {
-        projected.insert("route".to_owned(), project_cockpit_route(route));
-    }
-    if let Some(rollback) = operation.get("rollback") {
-        projected.insert("rollback".to_owned(), project_cockpit_rollback(rollback));
-    }
-    if let Some(agent_path) = operation.get("agentPath") {
-        projected.insert(
-            "agentPath".to_owned(),
-            project_cockpit_agent_path(agent_path),
+            "detailNextStep".to_owned(),
+            json!({
+                "operation": "capability_binding_cockpit_overview",
+                "arguments": {
+                    "operation": "capability_binding_cockpit_overview",
+                    "targetOperation": operation.get("name").cloned().unwrap_or(Value::Null)
+                },
+                "reason": "Use the exact targetOperation projection for detailed preflight, readiness, binding, shadow, route, rollback, and agentPath data."
+            }),
         );
     }
     Value::Object(projected)
@@ -577,6 +605,28 @@ fn project_cockpit_agent_usage(agent_usage: &Value) -> Value {
         }
         if !projected_preflight.is_empty() {
             projected.insert("preflight".to_owned(), Value::Object(projected_preflight));
+        }
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_agent_usage_summary(agent_usage: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in ["tool", "operation", "arguments", "callable", "defaultUse"] {
+        copy_key(&mut projected, agent_usage, key);
+    }
+    if let Some(effect) = agent_usage.get("effect") {
+        let mut projected_effect = Map::new();
+        for key in [
+            "mode",
+            "readOnlyInspectionSafe",
+            "mutatesState",
+            "readOnlyInstruction",
+        ] {
+            copy_key(&mut projected_effect, effect, key);
+        }
+        if !projected_effect.is_empty() {
+            projected.insert("effect".to_owned(), Value::Object(projected_effect));
         }
     }
     Value::Object(projected)

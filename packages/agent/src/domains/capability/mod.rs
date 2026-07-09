@@ -107,6 +107,12 @@
 //! projections name visible trace/invocation fields as safe engine refs, not raw
 //! provider invocation ids, and separate provider-visible capability safety from
 //! internal replay/policy bookkeeping.
+//! Broad module-governance readiness searches return a deterministic read-only
+//! plan over module registry/lifecycle/runtime/dependency, binding, candidate,
+//! route, and route-event list surfaces. That plan marks default list payloads
+//! as complete, discourages schema fan-out across every sibling operation,
+//! treats empty lists as valid current-scope evidence, and keeps activation,
+//! rollback, and write surfaces out of read-only checks.
 //! `catalog_search`
 //! accepts the safe read-only `effectClass` aliases `read`, `read_only`, and
 //! `inspect` as `pure_read` so natural discovery filters do not become invalid

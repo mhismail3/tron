@@ -754,26 +754,98 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
     assert!(text.contains("runtime_routable"));
     assert!(text.contains("kernel_evolution_only"));
     assert!(text.contains("operationDirectory"));
-    assert!(text.contains("requiredPayloadFields"));
+    assert!(text.contains("broad directory is compact"));
+    assert!(text.contains("detailNextStep"));
     assert!(text.contains("targetOperation"));
-    assert!(text.contains("capability_binding.read"));
-    assert!(text.contains("kind:capability_binding_request"));
-    assert!(text.contains("kind:capability_shadow_trial_request"));
     assert!(text.contains("readOnlyInspectionSafe"));
     assert!(text.contains("safe to call during read-only inspection"));
     assert!(text.contains("do not call during read-only inspection"));
-    assert!(text.contains("agentPath"));
-    assert!(text.contains("primaryInspection"));
-    assert!(text.contains("capability_replacement_candidate_list"));
-    assert!(text.contains("capability_shadow_trial_request_list"));
-    assert!(text.contains("No binding requests have been recorded"));
-    assert!(text.contains("No runtime route is active"));
-    assert!(text.contains("No active replacement rollback is available yet"));
-    assert!(text.contains("Do not call git_status merely to inspect replacement readiness"));
-    assert!(text.contains("no current-scope replacement evidence exists"));
+    assert!(!text.contains("requiredPayloadFields"));
+    assert!(!text.contains("capability_binding.read"));
+    assert!(!text.contains("kind:capability_binding_request"));
+    assert!(!text.contains("kind:capability_shadow_trial_request"));
+    assert!(!text.contains("\"agentPath\""));
+    assert!(!text.contains("\"primaryInspection\""));
+    assert!(!text.contains("capability_replacement_candidate_list"));
+    assert!(!text.contains("capability_shadow_trial_request_list"));
+    assert!(!text.contains("No binding requests have been recorded"));
+    assert!(!text.contains("No runtime route is active"));
+    assert!(!text.contains("No active replacement rollback is available yet"));
+    assert!(!text.contains("Do not call git_status merely to inspect replacement readiness"));
+    assert!(!text.contains("no current-scope replacement evidence exists"));
     assert!(!text.contains("authorityGrantId"));
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("nested_grant_must_not_project"));
+}
+
+#[test]
+fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Targeted cockpit for git_status.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "capability_binding_cockpit_overview",
+            "status": "ok",
+            "capabilityBinding": {
+                "summary": {
+                    "title": "Capability ownership visible",
+                    "totalOperations": 190,
+                    "returnedOperations": 1
+                },
+                "operationList": {
+                    "complete": true,
+                    "returnedOperations": 1,
+                    "totalOperations": 190,
+                    "targetOperation": "git_status",
+                    "filterApplied": true
+                },
+                "operations": [{
+                    "name": "git_status",
+                    "family": "git",
+                    "familyLabel": "Git",
+                    "capabilityPool": {
+                        "surface": "agent_operation",
+                        "audience": "session_work",
+                        "replacementClass": "runtime_routable"
+                    },
+                    "agentUsage": {
+                        "tool": "capability::execute",
+                        "operation": "git_status",
+                        "arguments": {"operation": "git_status"},
+                        "callable": true,
+                        "preflight": {
+                            "requiredPayloadFields": ["operation"],
+                            "authorityScopes": ["git.read"],
+                            "authorityGrantId": "targeted_grant_must_not_project"
+                        }
+                    },
+                    "agentPath": {
+                        "purpose": "Inspect replacement readiness for git_status without invoking the adapter.",
+                        "primaryInspection": {
+                            "operation": "capability_binding_cockpit_overview",
+                            "payload": {
+                                "operation": "capability_binding_cockpit_overview",
+                                "targetOperation": "git_status"
+                            },
+                            "readOnlyInspectionSafe": true,
+                            "reason": "Exact operation row."
+                        }
+                    }
+                }]
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("\"agentPath\""));
+    assert!(text.contains("\"primaryInspection\""));
+    assert!(text.contains("\"requiredPayloadFields\""));
+    assert!(text.contains("git.read"));
+    assert!(!text.contains("authorityGrantId"));
+    assert!(!text.contains("targeted_grant_must_not_project"));
 }
 
 #[test]

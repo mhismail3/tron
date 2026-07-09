@@ -1286,11 +1286,15 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
         .collect::<Vec<_>>();
     let plan_operations = operation_search_plan_supported_operations(&query);
     let trace_operations = trace_evidence_plan_supported_operations(&query);
+    let module_governance_operations = module_governance_plan_supported_operations(&query);
     for operation in &plan_operations {
         promote_or_insert_planned_operation_match(&mut matches, operation);
     }
     for operation in &trace_operations {
         promote_or_insert_trace_operation_match(&mut matches, operation);
+    }
+    for operation in &module_governance_operations {
+        promote_or_insert_planned_operation_match(&mut matches, operation);
     }
     if let Some(namespace_prefix) = namespace_prefix {
         for operation in supported_operation_names()
@@ -1300,10 +1304,14 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             promote_or_insert_namespace_operation_match(&mut matches, operation);
         }
     }
-    if !plan_operations.is_empty() || !trace_operations.is_empty() {
+    if !plan_operations.is_empty()
+        || !trace_operations.is_empty()
+        || !module_governance_operations.is_empty()
+    {
         let allowed = plan_operations
             .iter()
             .chain(trace_operations.iter())
+            .chain(module_governance_operations.iter())
             .copied()
             .collect::<BTreeSet<_>>();
         matches.retain(|entry| {
@@ -1375,6 +1383,12 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             if let Some(next_step) = preferred_execute_schema_next_step(&matches) {
                 object.insert("agentNextStep".to_owned(), next_step);
             }
+        } else if let Some(plan) = module_governance_plan_projection(&query) {
+            object.insert(
+                "agentNextStep".to_owned(),
+                module_governance_plan_next_step(&plan),
+            );
+            object.insert("agentSearchPlan".to_owned(), plan);
         } else if let Some(next_step) = preferred_execute_schema_next_step(&matches) {
             object.insert("agentNextStep".to_owned(), next_step);
         }
@@ -1440,6 +1454,16 @@ fn readiness_plan_next_step(plan: &Value) -> Value {
         "reason": "For replacement or shadow readiness, first inspect the exact targeted cockpit row. It is read-only and tells whether evidence exists; do not infer unsupported shadow list operations.",
         "primaryInspection": plan["primaryInspection"],
         "thenFollow": "agentSearchPlan.readOnlySequence",
+        "completionRule": plan["completionRule"]
+    })
+}
+
+fn module_governance_plan_next_step(plan: &Value) -> Value {
+    json!({
+        "priority": "follow_module_governance_read_only_plan",
+        "reason": "For broad module-governance readiness checks, use the listed read-only overview/list operations directly. Their default payload is complete: operation plus optional limit/includeArchived only. Inspect individual schemas only when you need non-default fields or a concrete resource id from list output.",
+        "thenFollow": "agentSearchPlan.readOnlySequence",
+        "schemaPolicy": plan["schemaPolicy"],
         "completionRule": plan["completionRule"]
     })
 }
@@ -2154,6 +2178,58 @@ fn trace_evidence_plan_supported_operations(query: &OperationSearchQuery) -> Vec
     vec![target, "catalog_inspect", "trace_list"]
 }
 
+fn module_governance_plan_supported_operations(query: &OperationSearchQuery) -> Vec<&'static str> {
+    if !module_governance_plan_query(query) {
+        return Vec::new();
+    }
+
+    let terms = query_terms(query);
+    let broad_governance = terms.contains("governance");
+    let mut operations = Vec::new();
+
+    if broad_governance || terms.contains("module") || terms.contains("registry") {
+        operations.push("module_list");
+    }
+    if broad_governance || terms.contains("lifecycle") {
+        operations.push("module_lifecycle_list");
+    }
+    if broad_governance || terms.contains("runtime") {
+        operations.push("module_runtime_list");
+    }
+    if broad_governance
+        || terms.contains("dependency")
+        || terms.contains("request")
+        || terms.contains("decision")
+        || terms.contains("policy")
+    {
+        operations.extend([
+            "module_dependency_request_list",
+            "module_dependency_decision_list",
+            "module_dependency_policy_list",
+        ]);
+    }
+    if broad_governance
+        || terms.contains("binding")
+        || terms.contains("replacement")
+        || terms.contains("route")
+        || terms.contains("routing")
+    {
+        operations.extend([
+            "capability_binding_cockpit_overview",
+            "capability_binding_request_list",
+            "capability_binding_decision_list",
+            "capability_binding_policy_list",
+            "capability_replacement_candidate_list",
+            "capability_route_binding_list",
+            "capability_route_event_list",
+        ]);
+    }
+
+    operations.sort_unstable();
+    operations.dedup();
+    operations
+}
+
 fn operation_search_plan_target(
     query: &OperationSearchQuery,
 ) -> Option<(&'static str, BTreeSet<String>)> {
@@ -2216,6 +2292,132 @@ fn trace_evidence_plan_target(
         )
     });
     (asks_trace_evidence && asks_schema_or_trace).then_some((target, query_terms))
+}
+
+fn module_governance_plan_projection(query: &OperationSearchQuery) -> Option<Value> {
+    let operations = module_governance_plan_supported_operations(query);
+    if operations.is_empty() {
+        return None;
+    }
+
+    let read_only_sequence = operations
+        .iter()
+        .map(|operation| {
+            recovery_alternative(
+                operation,
+                default_list_payload(operation),
+                read_only_module_governance_reason(operation),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    Some(json!({
+        "purpose": "Deterministic read-only plan for broad module-governance discovery and readiness checks.",
+        "query": query.display,
+        "readOnlySequence": read_only_sequence,
+        "schemaPolicy": {
+            "defaultPayloadComplete": true,
+            "defaultPayload": "operation-only unless the listed operation documents optional limit/includeArchived filters",
+            "inspectWhen": "Inspect execute::<operation> only when you need non-default fields, a concrete resource id from list output, or a focused inspect operation.",
+            "doNotInspectEverySibling": true,
+            "reason": "The read-only sequence is already constrained to provider-visible overview/list operations whose required payload is operation. Per-operation schema fan-out is unnecessary for a broad governance readiness check."
+        },
+        "resourceInspectPolicy": {
+            "callInspectOperationsOnlyWithExactResourceIds": true,
+            "sourceOfResourceIds": "list operation output or cockpit evidence refs",
+            "emptyListMeansNoScopedRecords": true
+        },
+        "doNotCall": [
+            {"operationFamily": "module_*_record/request/decision mutators", "reason": "This plan is read-only. Do not create proposals, install requests, lifecycle requests, runtime requests, dependency requests, or decisions."},
+            {"operationFamily": "capability_route_activate/disable/rollback", "reason": "Activation, disable, and rollback are governed state changes outside a read-only readiness check."},
+            {"operationFamily": "module_program_execution_*", "reason": "Runtime execution is not needed to inspect governance surfaces."}
+        ],
+        "completionRule": "After the listed overview/list operations and trace_list when the task asks for trace proof, answer from exact operation results. Empty lists are valid evidence of no current-scope records; do not invent resource ids or call inspect operations without ids.",
+        "finalAnswerGuidance": "Name the surfaces that were discoverable, the read-only operations used, any empty record planes, any confusing or missing guidance, and whether provider-safe trace evidence excludes raw internals."
+    }))
+}
+
+fn module_governance_plan_query(query: &OperationSearchQuery) -> bool {
+    if operation_search_plan_target(query).is_some() || trace_evidence_plan_target(query).is_some()
+    {
+        return false;
+    }
+    let terms = query_terms(query);
+    let asks_module_governance = terms.contains("governance")
+        || terms.contains("module")
+        || terms.contains("registry")
+        || terms.contains("lifecycle")
+        || terms.contains("runtime")
+        || terms.contains("dependency");
+    let asks_capability_governance = terms.contains("binding")
+        || terms.contains("replacement")
+        || terms.contains("route")
+        || terms.contains("routing");
+    let asks_read_only_overview = query.canonical.contains("read_only")
+        || query.canonical.contains("read")
+        || query.canonical.contains("inspect")
+        || query.canonical.contains("list")
+        || query.canonical.contains("readiness")
+        || terms.contains("policy")
+        || terms.contains("request")
+        || terms.contains("decision");
+    (asks_module_governance || asks_capability_governance) && asks_read_only_overview
+}
+
+fn default_list_payload(operation: &str) -> Value {
+    if operation == "capability_binding_cockpit_overview" {
+        json!({"operation": operation})
+    } else {
+        json!({
+            "operation": operation,
+            "limit": 25
+        })
+    }
+}
+
+fn read_only_module_governance_reason(operation: &str) -> &'static str {
+    match operation {
+        "module_list" => {
+            "List module manifest records without installing, enabling, or executing modules."
+        }
+        "module_lifecycle_list" => {
+            "List lifecycle records; empty output means no lifecycle state is currently recorded in scope."
+        }
+        "module_runtime_list" => {
+            "List runtime supervisor envelope records; empty output means no runtime envelope is recorded in scope."
+        }
+        "module_dependency_request_list" => {
+            "List dependency requests; this does not request, approve, restore, or install dependencies."
+        }
+        "module_dependency_decision_list" => {
+            "List dependency decisions; this does not create a decision."
+        }
+        "module_dependency_policy_list" => {
+            "List dependency policy records; this does not activate dependency restoration."
+        }
+        "capability_binding_cockpit_overview" => {
+            "Inspect operation ownership, replacement class, route state, and scoped evidence without changing routing."
+        }
+        "capability_binding_request_list" => {
+            "List binding requests; this does not create a replacement or extension request."
+        }
+        "capability_binding_decision_list" => {
+            "List binding decisions; this does not approve or reject anything."
+        }
+        "capability_binding_policy_list" => {
+            "List binding policies; this does not activate routing."
+        }
+        "capability_replacement_candidate_list" => {
+            "List replacement candidates; empty output means no candidate is recorded in scope."
+        }
+        "capability_route_binding_list" => {
+            "List route bindings; this does not activate, disable, or roll back routing."
+        }
+        "capability_route_event_list" => {
+            "List route events for activation, routed invocation, disable, rollback, and failed-closed history."
+        }
+        _ => "Read-only governance overview/list operation.",
+    }
 }
 
 fn trace_evidence_helper_operation(operation: &str) -> bool {
@@ -3928,6 +4130,105 @@ mod tests {
                 .expect("schema inspection id")
                 .starts_with("execute::capability_shadow_trial_")
         }));
+    }
+
+    #[test]
+    fn catalog_search_returns_module_governance_read_only_plan_for_broad_queries() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "text": "module governance registry lifecycle runtime dependency request decision policy replacement binding route read-only list inspect",
+                "effectClass": "pure_read",
+                "limit": 50
+            }),
+        );
+
+        assert_eq!(
+            discovery["agentSearchPlan"]["purpose"],
+            "Deterministic read-only plan for broad module-governance discovery and readiness checks."
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["priority"],
+            "follow_module_governance_read_only_plan"
+        );
+        assert_eq!(
+            discovery["agentSearchPlan"]["schemaPolicy"]["doNotInspectEverySibling"],
+            json!(true)
+        );
+        assert!(
+            discovery["agentSearchPlan"]["schemaPolicy"]["reason"]
+                .as_str()
+                .expect("schema policy reason")
+                .contains("Per-operation schema fan-out is unnecessary")
+        );
+        let operations = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches")
+            .iter()
+            .filter_map(|value| value["operation"].as_str())
+            .collect::<Vec<_>>();
+        for expected in [
+            "module_list",
+            "module_lifecycle_list",
+            "module_runtime_list",
+            "module_dependency_request_list",
+            "module_dependency_decision_list",
+            "module_dependency_policy_list",
+            "capability_binding_cockpit_overview",
+            "capability_binding_request_list",
+            "capability_binding_decision_list",
+            "capability_binding_policy_list",
+            "capability_replacement_candidate_list",
+            "capability_route_binding_list",
+            "capability_route_event_list",
+        ] {
+            assert!(
+                operations.contains(&expected),
+                "broad governance plan should include {expected}: {operations:?}"
+            );
+        }
+        assert!(
+            operations
+                .iter()
+                .all(|operation| operation.ends_with("_list")
+                    || *operation == "capability_binding_cockpit_overview"),
+            "broad governance plan must expose only overview/list operations: {operations:?}"
+        );
+        assert!(!operations.contains(&"module_lifecycle_request"));
+        assert!(!operations.contains(&"module_runtime_request"));
+        assert!(!operations.contains(&"module_dependency_request_record"));
+        assert!(!operations.contains(&"capability_route_activate"));
+        assert!(
+            discovery["executeOperationMatches"]
+                .as_array()
+                .expect("operation matches")
+                .iter()
+                .all(|value| value["agentUsage"]["effect"]["readOnlyInspectionSafe"] == true)
+        );
+        let sequence = discovery["agentSearchPlan"]["readOnlySequence"]
+            .as_array()
+            .expect("read-only sequence");
+        assert_eq!(sequence.len(), operations.len());
+        assert!(sequence.iter().all(|entry| {
+            entry["arguments"]["operation"]
+                .as_str()
+                .is_some_and(|operation| operations.contains(&operation))
+        }));
+        assert_eq!(
+            sequence
+                .iter()
+                .find(|entry| entry["operation"] == "capability_binding_cockpit_overview")
+                .expect("cockpit overview step")["arguments"],
+            json!({"operation": "capability_binding_cockpit_overview"})
+        );
+        assert!(
+            discovery["agentSearchPlan"]["completionRule"]
+                .as_str()
+                .expect("completion rule")
+                .contains("Empty lists are valid evidence")
+        );
     }
 
     #[test]
