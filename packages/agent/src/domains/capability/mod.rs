@@ -117,6 +117,12 @@
 //! reported separately with bounded operation metadata and an explicit
 //! "do not invoke during pure-read discovery" reason, so the model can
 //! distinguish an unsafe supported operation from a nonexistent one.
+//! The result summary also states whether the execute-operation search was
+//! complete or truncated and how many supported operations were effect-excluded,
+//! keeping those facts in the model's primary answer surface.
+//! Preferred next-step guidance may include an immediate `thenInvoke` only for
+//! read-only, non-mutating operations; write-like operations get schema
+//! inspection plus an explicit blocked-invoke reason instead.
 //! `namespacePrefix` also matches capability-pool family/owner metadata, not
 //! just literal operation-name prefixes, so family searches surface sibling
 //! operations such as context policy lists even when names differ.

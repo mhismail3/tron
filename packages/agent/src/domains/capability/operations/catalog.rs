@@ -22,6 +22,18 @@ pub(super) async fn catalog_search(
         service::search_catalog_value(&deps.engine_host, invocation, &invocation.payload).await?;
     annotate_model_facing_invocation(&mut discovery);
     annotate_execute_operation_matches(&mut discovery, &invocation.payload);
+    let content = catalog_search_content(&discovery);
+    Ok(ok_result(
+        content,
+        json!({
+            "primitiveOperation": "catalog_search",
+            "status": "ok",
+            "catalogDiscovery": discovery
+        }),
+    ))
+}
+
+fn catalog_search_content(discovery: &Value) -> String {
     let visible = discovery
         .pointer("/summary/functions/visible")
         .and_then(Value::as_u64)
@@ -34,7 +46,7 @@ pub(super) async fn catalog_search(
         .get("executeOperationSearch")
         .and_then(|search| search.get("totalMatches"))
         .and_then(Value::as_u64);
-    let content = if operation_matches > 0 {
+    let mut content = if operation_matches > 0 {
         format!(
             "Catalog search returned {operation_matches} provider-visible execute operation match(es) and {visible} diagnostic catalog function match(es)."
         )
@@ -45,14 +57,36 @@ pub(super) async fn catalog_search(
     } else {
         format!("Catalog search returned {visible} diagnostic catalog function match(es).")
     };
-    Ok(ok_result(
-        content,
-        json!({
-            "primitiveOperation": "catalog_search",
-            "status": "ok",
-            "catalogDiscovery": discovery
-        }),
-    ))
+    if let Some(search) = discovery.get("executeOperationSearch") {
+        let total = search
+            .get("totalMatches")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let omitted = search.get("omitted").and_then(Value::as_u64).unwrap_or(0);
+        let truncated = search
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let excluded = search
+            .get("effectClassExcludedMatches")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if truncated {
+            content.push_str(&format!(
+                " Search truncated: {omitted} additional execute operation match(es) omitted."
+            ));
+        } else {
+            content.push_str(&format!(
+                " Search complete: all {total} matching execute operation(s) returned."
+            ));
+        }
+        if excluded > 0 {
+            content.push_str(&format!(
+                " {excluded} supported operation(s) were excluded by the requested effect class because they are not safe for that discovery mode."
+            ));
+        }
+    }
+    content
 }
 
 pub(super) async fn catalog_inspect(
@@ -1373,16 +1407,43 @@ fn preferred_execute_schema_next_step(matches: &[Value]) -> Option<Value> {
         .first()
         .and_then(|entry| entry.get("operation"))
         .and_then(Value::as_str)?;
-    Some(json!({
+    let mut next_step = json!({
         "priority": "inspect_execute_operation_schema_first",
         "reason": "Before invoking a provider-visible capability::execute operation, inspect the execute::<operation> schema for exact top-level payload fields. Backing catalog function ids are engine substrate and are secondary unless the task is diagnostics or kernel evolution.",
-        "schemaInspection": execute_schema_inspection_step(operation),
-        "thenInvoke": {
+        "schemaInspection": execute_schema_inspection_step(operation)
+    });
+    if matches
+        .first()
+        .is_some_and(operation_match_is_read_only_inspection_safe)
+    {
+        next_step["thenInvoke"] = json!({
             "tool": "capability::execute",
             "operation": operation,
             "arguments": {"operation": operation}
-        }
-    }))
+        });
+    } else {
+        next_step["priority"] = json!("inspect_write_like_operation_before_use");
+        next_step["reason"] = json!(
+            "This supported operation is not read-only inspection safe. Inspect the execute::<operation> schema and only invoke it when the task explicitly allows the documented state change, resource write, approval, or policy effect."
+        );
+        next_step["thenInvokeBlocked"] = json!({
+            "operation": operation,
+            "reason": "Operation metadata is not read-only inspection safe; do not invoke directly from discovery.",
+            "requiresSchemaInspection": true
+        });
+    }
+    Some(next_step)
+}
+
+fn operation_match_is_read_only_inspection_safe(entry: &Value) -> bool {
+    entry
+        .pointer("/agentUsage/effect/readOnlyInspectionSafe")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && !entry
+            .pointer("/agentUsage/effect/mutatesState")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
 }
 
 #[derive(Clone, Debug)]
@@ -3057,6 +3118,76 @@ mod tests {
                 .as_str()
                 .expect("exclusion reason")
                 .contains("Supported operation exists")
+        );
+    }
+
+    #[test]
+    fn catalog_search_does_not_suggest_then_invoke_for_write_like_matches() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "limit": 10,
+                "text": "context_control_snapshot"
+            }),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        assert_eq!(matches[0]["operation"], "context_control_snapshot");
+        assert_eq!(
+            matches[0]["agentUsage"]["effect"]["readOnlyInspectionSafe"],
+            false
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["schemaInspection"]["arguments"]["id"],
+            "execute::context_control_snapshot"
+        );
+        assert!(
+            discovery["agentNextStep"].get("thenInvoke").is_none(),
+            "write-like discovery must not emit immediate invoke guidance"
+        );
+        assert_eq!(
+            discovery["agentNextStep"]["thenInvokeBlocked"]["operation"],
+            "context_control_snapshot"
+        );
+    }
+
+    #[test]
+    fn catalog_search_content_reports_complete_and_effect_excluded_matches() {
+        let mut discovery = json!({
+            "functions": [],
+            "summary": {
+                "functions": {
+                    "visible": 0
+                }
+            }
+        });
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "effectClass": "read_only",
+                "limit": 10,
+                "text": "context_policy_snapshot"
+            }),
+        );
+
+        let content = catalog_search_content(&discovery);
+        assert!(
+            content.contains("Search complete: all 0 matching execute operation(s) returned"),
+            "catalog_search content should not leave completeness implicit: {content}"
+        );
+        assert!(
+            content
+                .contains("1 supported operation(s) were excluded by the requested effect class"),
+            "catalog_search content should summarize effect-class exclusions: {content}"
+        );
+        assert!(
+            !content.contains("truncated"),
+            "complete searches must not be described as truncated: {content}"
         );
     }
 
