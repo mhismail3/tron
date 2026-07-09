@@ -733,7 +733,9 @@ audit, provider-safe prompt trace text, deterministic preview-backed
 query/result evidence, and prompt-inclusion decision proof. Memory policy
 resolves by session, then workspace, then system scope; prompt-trace audit
 writes use trace-specific idempotency so later turns do not replay stale memory
-status. Retained `bodyRef` payloads are pointer-only and reject inline
+status. Provider prompt text reports whether trace and decision evidence were
+recorded without exposing their server-owned resource identifiers. Retained
+`bodyRef` payloads are pointer-only and reject inline
 body-like keys at any nested depth on retain, edit, and migration import.
 Direct record-id operations fail closed when the addressed resource is outside
 the caller memory scope. Query/decision evidence stores bounded refs, ranked

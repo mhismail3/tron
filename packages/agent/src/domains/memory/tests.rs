@@ -433,7 +433,18 @@ async fn prompt_trace_records_audit_without_private_memory_content() {
     assert!(context.contains("Memory mode: active"));
     assert!(context.contains("Records considered: 1"));
     assert!(context.contains("Records included: 0"));
+    assert!(context.contains("Prompt trace recorded: yes"));
+    assert!(context.contains("Prompt inclusion decision recorded: yes"));
     assert!(context.contains("Private memory content included: no"));
+    let trace_resource_id = trace["traceResourceId"]
+        .as_str()
+        .expect("trace resource id");
+    assert!(!context.contains(trace_resource_id));
+    assert!(!context.contains("memory_prompt_trace:"));
+    if let Some(decision_resource_id) = trace["trace"]["decisionResourceId"].as_str() {
+        assert!(!context.contains(decision_resource_id));
+        assert!(!context.contains("memory_decision:"));
+    }
     assert!(!context.contains("vault://"));
     assert!(!context.contains("secret private body"));
     assert_eq!(trace["trace"]["privateContentLogged"], false);
@@ -441,11 +452,7 @@ async fn prompt_trace_records_audit_without_private_memory_content() {
 
     let inspection = ctx
         .engine_host
-        .inspect_resource(
-            trace["traceResourceId"]
-                .as_str()
-                .expect("trace resource id"),
-        )
+        .inspect_resource(trace_resource_id)
         .await
         .unwrap()
         .expect("prompt trace resource");

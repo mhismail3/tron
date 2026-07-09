@@ -30,7 +30,9 @@
 //! when the current memory policy enables `bounded_snippets`; otherwise it
 //! emits audit/status facts only. Record body content is never injected into
 //! provider context; prompt traces record considered/included/excluded refs,
-//! snippets, policy evidence, decisions, and reasons.
+//! snippets, policy evidence, decisions, and reasons. Durable prompt-trace and
+//! inclusion-decision resource ids remain server-owned and are projected to the
+//! provider only as recorded/not-recorded facts.
 //! `bodyRef` payloads must be custody pointers only: retain, edit, and
 //! migration import reject inline body-like keys at any nested depth.
 //! Policy lookup is hierarchical: an explicit session policy wins, then an

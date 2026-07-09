@@ -25,7 +25,6 @@ impl Provider for AuditProvider {
             serde_json::json!({
                 "model": self.model(),
                 "reasoningEffort": options.reasoning_effort.as_ref().map(ToString::to_string),
-                "promptCacheKey": options.prompt_cache_key.clone(),
                 "authorization": "Bearer abcdefghijklmnopqrstuvwxyz0123456789",
             }),
         ))
@@ -304,10 +303,7 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     );
     assert_eq!(evidence.safety.raw_reasoning_text, "omitted");
     assert_eq!(evidence.safety.synthetic_reasoning_summary, "omitted");
-    assert_eq!(
-        audit.stream_options["promptCacheKey"],
-        serde_json::json!("tron-session-sess-1")
-    );
+    assert!(audit.stream_options.get("promptCacheKey").is_none());
     assert_eq!(
         audit.stream_options["reasoningEffort"],
         serde_json::json!("xhigh")
@@ -316,9 +312,12 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
         audit.provider_request.kind,
         ProviderAuditPayloadKind::ExactProviderEnvelope
     );
-    assert_eq!(
-        audit.provider_request.body["promptCacheKey"],
-        serde_json::json!("tron-session-sess-1")
+    assert!(audit.provider_request.body.get("promptCacheKey").is_none());
+    assert!(
+        !serde_json::to_string(&audit.provider_request.body)
+            .expect("serialize provider request body")
+            .contains("sess-1"),
+        "server-owned session ids must not enter provider request envelopes"
     );
     assert_eq!(
         audit.provider_request.body["authorization"],

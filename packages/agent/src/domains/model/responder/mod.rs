@@ -5,7 +5,8 @@
 //! records provider health. It also builds provider request audit payloads from
 //! the same stream options used to open the provider stream, redacts and bounds
 //! those payloads before persistence, attaches metadata-only reasoning/status
-//! evidence, and redacts provider-derived failure text.
+//! evidence, and redacts provider-derived failure text. Provider requests never
+//! receive session-derived cache keys or other server-owned correlation ids.
 //! Agent loop code depends on this boundary instead of provider factories,
 //! provider traits, stream options, retry wrappers, or provider-native errors.
 
@@ -251,7 +252,8 @@ pub struct ModelResponderInfo {
 pub struct ModelResponseRequest {
     /// Complete model context for the turn.
     pub context: Context,
-    /// Session id used for prompt cache routing.
+    /// Session id persisted in the server-owned request audit. Provider request
+    /// envelopes must not derive fields from this identifier.
     pub session_id: String,
     /// Optional provider-neutral reasoning level.
     pub reasoning_level: Option<ModelReasoningLevel>,
@@ -327,8 +329,7 @@ pub trait ModelResponder: Send + Sync {
         request: &ModelResponseRequest,
     ) -> Result<ModelProviderRequestAudit, ModelResponseError> {
         let info = self.info();
-        let stream_options =
-            build_stream_options(request.reasoning_level.as_ref(), &request.session_id);
+        let stream_options = build_stream_options(request.reasoning_level.as_ref());
         let provider_request =
             ProviderAuditPayload::provider_independent_snapshot(serde_json::json!({
                 "provider": info.provider_type.as_str(),
@@ -428,8 +429,7 @@ impl ModelResponder for ProviderBackedModelResponder {
         request: &ModelResponseRequest,
     ) -> Result<ModelProviderRequestAudit, ModelResponseError> {
         let info = self.info();
-        let stream_options =
-            build_stream_options(request.reasoning_level.as_ref(), &request.session_id);
+        let stream_options = build_stream_options(request.reasoning_level.as_ref());
         let provider_request = self
             .provider
             .audit_payload(&request.context, &stream_options)
@@ -445,8 +445,7 @@ impl ModelResponder for ProviderBackedModelResponder {
         let request_start = Instant::now();
         counter!("provider_requests_total", "provider" => info.provider_name).increment(1);
 
-        let stream_options =
-            build_stream_options(request.reasoning_level.as_ref(), &request.session_id);
+        let stream_options = build_stream_options(request.reasoning_level.as_ref());
         let stream = match open_provider_stream(
             &self.provider,
             request.context,
@@ -487,17 +486,13 @@ impl ModelResponder for ProviderBackedModelResponder {
     }
 }
 
-fn build_stream_options(
-    reasoning_level: Option<&ModelReasoningLevel>,
-    session_id: &str,
-) -> ProviderStreamOptions {
+fn build_stream_options(reasoning_level: Option<&ModelReasoningLevel>) -> ProviderStreamOptions {
     ProviderStreamOptions {
         enable_thinking: Some(true),
         effort_level: reasoning_level.and_then(ModelReasoningLevel::as_anthropic_effort),
         reasoning_effort: reasoning_level.map(ModelReasoningLevel::as_openai_reasoning),
         thinking_level: reasoning_level.map(|r| r.as_gemini_thinking_level().to_owned()),
         provider_instructions: None,
-        prompt_cache_key: Some(format!("tron-session-{session_id}")),
         ..Default::default()
     }
 }

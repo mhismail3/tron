@@ -51,7 +51,7 @@ pub(crate) async fn record_prompt_trace_value(
             "idempotentReplay": true,
             "traceResourceId": trace_resource_id,
             "traceVersionId": version_id,
-            "context": prompt_context_text(&trace, Some(&existing.resource.resource_id)),
+            "context": prompt_context_text(&trace),
             "trace": trace_projection(&trace),
             "resourceRefs": [resource_ref(&existing.resource, "memory_prompt_trace")]
         }));
@@ -95,7 +95,7 @@ pub(crate) async fn record_prompt_trace_value(
         "status": "recorded",
         "traceResourceId": resource.resource_id.clone(),
         "traceVersionId": resource.current_version_id.clone(),
-        "context": prompt_context_text(&trace, Some(&resource.resource_id)),
+        "context": prompt_context_text(&trace),
         "trace": trace_projection(&trace),
         "resourceRefs": [resource_ref(&resource, "memory_prompt_trace")]
     }))
@@ -328,23 +328,23 @@ async fn build_prompt_trace(
     })
 }
 
-fn prompt_context_text(trace: &MemoryPromptTrace, trace_resource_id: Option<&str>) -> String {
+fn prompt_context_text(trace: &MemoryPromptTrace) -> String {
     let engine = trace.engine_id.as_deref().unwrap_or("none");
-    let resource = trace_resource_id.unwrap_or("not_recorded");
-    let decision = trace
+    let decision_recorded = trace
         .prompt_budget
         .get("decisionResourceId")
         .and_then(Value::as_str)
-        .unwrap_or("none");
+        .is_some();
     let mut text = format!(
-        "## Memory\n\nMemory mode: {mode}\nActive engine: {engine}\nPrompt trace: {resource}\nRecords considered: {considered}\nRecords included: {included}\nRecords excluded: {excluded}\nPrivate memory content included: no\n",
+        "## Memory\n\nMemory mode: {mode}\nActive engine: {engine}\nPrompt trace recorded: yes\nRecords considered: {considered}\nRecords included: {included}\nRecords excluded: {excluded}\nPrivate memory content included: no\n",
         mode = trace.mode.as_str(),
         considered = trace.considered.len(),
         included = trace.included.len(),
         excluded = trace.excluded.len(),
     );
     text.push_str(&format!(
-        "Prompt inclusion decision: {decision}\nBounded record previews included: {}\n",
+        "Prompt inclusion decision recorded: {}\nBounded record previews included: {}\n",
+        if decision_recorded { "yes" } else { "no" },
         if trace.included.is_empty() {
             "no"
         } else {

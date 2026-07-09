@@ -115,10 +115,6 @@ impl KimiProvider {
             "stream": true,
             "stream_options": {"include_usage": true},
         });
-        if let Some(prompt_cache_key) = options.prompt_cache_key.as_ref() {
-            body["prompt_cache_key"] = json!(prompt_cache_key);
-        }
-
         // System message goes first in the messages array
         let mut api_messages: Vec<Value> = Vec::new();
         if let Some(system) = Self::build_system_prompt(context) {
@@ -431,6 +427,7 @@ mod tests {
         assert_eq!(body["stream"], true);
         assert_eq!(body["stream_options"]["include_usage"], true);
         assert_eq!(body["max_completion_tokens"], 32_768);
+        assert!(body.get("prompt_cache_key").is_none());
         // System message should be in messages array
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");

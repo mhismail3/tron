@@ -127,9 +127,6 @@ pub struct ResponsesRequest {
     /// Text output configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<ResponseTextConfig>,
-    /// Stable prompt-cache routing key.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_cache_key: Option<String>,
 }
 
 /// Reasoning configuration for the Responses API.
