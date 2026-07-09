@@ -144,20 +144,17 @@ fn handle_output_item_added(
                     });
                 }
             }
-        } else if item.item_type == OutputItemType::Reasoning && !state.acc.thinking_started {
-            state.acc.thinking_started = true;
-            events.push(StreamEvent::ThinkingStart);
         }
     }
     events
 }
 
-/// Handle `response.reasoning_summary_part.added` — emit `ThinkingStart` if not yet started.
+/// Handle `response.reasoning_summary_part.added` without exposing an empty thinking lifecycle.
 fn handle_reasoning_summary_part_added(state: &mut StreamState) -> Vec<StreamEvent> {
     if !state.acc.accumulated_thinking.is_empty() {
         state.reasoning_summary_pending_separator = true;
     }
-    state.acc.mark_thinking_started().into_iter().collect()
+    Vec::new()
 }
 
 /// Handle `response.reasoning_text.delta` — full reasoning content, preferred over summary.

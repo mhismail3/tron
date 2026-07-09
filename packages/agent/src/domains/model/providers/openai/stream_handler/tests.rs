@@ -224,13 +224,12 @@ fn accumulates_args_delta_before_added_event() {
 // ── Reasoning streaming ────────────────────────────────────────
 
 #[test]
-fn emits_thinking_start_on_reasoning_item() {
+fn reasoning_item_without_content_does_not_start_thinking() {
     let mut state = create_stream_state();
     let events = process_stream_event(&reasoning_added_event(), &mut state);
 
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0], StreamEvent::ThinkingStart);
-    assert!(state.acc.thinking_started);
+    assert!(events.is_empty());
+    assert!(!state.acc.thinking_started);
 }
 
 #[test]
@@ -960,15 +959,15 @@ fn unknown_event_type_returns_empty() {
 // ── reasoning_summary_part.added ───────────────────────────────
 
 #[test]
-fn reasoning_summary_part_added_emits_thinking_start() {
+fn reasoning_summary_part_added_waits_for_content() {
     let mut state = create_stream_state();
     let event = ResponsesSseEvent {
         event_type: SseEventType::ReasoningSummaryPartAdded,
         ..Default::default()
     };
     let events = process_stream_event(&event, &mut state);
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0], StreamEvent::ThinkingStart);
+    assert!(events.is_empty());
+    assert!(!state.acc.thinking_started);
 }
 
 #[test]
@@ -981,6 +980,29 @@ fn reasoning_summary_part_added_noop_when_already_started() {
     };
     let events = process_stream_event(&event, &mut state);
     assert!(events.is_empty());
+}
+
+#[test]
+fn completed_empty_reasoning_item_emits_no_thinking_lifecycle() {
+    let mut state = create_stream_state();
+    let added = process_stream_event(&reasoning_added_event(), &mut state);
+    let completed = process_stream_event(
+        &completed_event(
+            vec![ResponsesOutputItem {
+                item_type: OutputItemType::Reasoning,
+                summary: Some(Vec::new()),
+                ..Default::default()
+            }],
+            None,
+        ),
+        &mut state,
+    );
+
+    assert!(added.is_empty());
+    assert!(!completed.iter().any(|event| matches!(
+        event,
+        StreamEvent::ThinkingStart | StreamEvent::ThinkingEnd { .. }
+    )));
 }
 
 // ── Token usage in done message ────────────────────────────────

@@ -16,6 +16,12 @@ use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED, RUNTIME_RUN_ERROR,
 };
 
+#[derive(Debug, PartialEq)]
+struct AgentResultMessage {
+    text: String,
+    event_ref: Option<String>,
+}
+
 pub(super) struct PromptRunCompletion<'a> {
     pub(super) result: crate::domains::agent::r#loop::types::RunResult,
     pub(super) persister:
@@ -70,12 +76,15 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         &model_for_error,
         &result,
     );
+    let agent_result_message =
+        resolve_agent_result_message(&event_store, &session_id, result.error.as_deref());
     let agent_result_refs = create_agent_result_resource(
         &engine_host,
         engine_causality.as_ref(),
         &session_id,
         &run_id,
         &result,
+        &agent_result_message,
     )
     .await;
     let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
@@ -118,6 +127,7 @@ async fn create_agent_result_resource(
     session_id: &str,
     run_id: &str,
     result: &crate::domains::agent::r#loop::types::RunResult,
+    message: &AgentResultMessage,
 ) -> Option<Vec<serde_json::Value>> {
     let mut context = causality
         .map(|causality| causality.context.clone())
@@ -146,7 +156,7 @@ async fn create_agent_result_resource(
         "scope": "session",
         "sessionId": session_id,
         "payload": {
-            "message": result.error.clone().unwrap_or_default(),
+            "message": message.text,
             "promotedRefs": [],
             "decisionRefs": [],
             "subgoalRefs": [],
@@ -154,6 +164,7 @@ async fn create_agent_result_resource(
             "tokenUsage": &result.total_token_usage,
             "metadata": {
                 "runId": run_id,
+                "messageEventRef": message.event_ref,
                 "turnsExecuted": result.turns_executed,
                 "interrupted": result.interrupted,
                 "lastContextWindowTokens": result.last_context_window_tokens
@@ -185,6 +196,70 @@ async fn create_agent_result_resource(
         "agent result resource recorded"
     );
     refs
+}
+
+fn resolve_agent_result_message(
+    event_store: &crate::domains::session::event_store::EventStore,
+    session_id: &str,
+    fallback_error: Option<&str>,
+) -> AgentResultMessage {
+    match event_store.get_messages_at_head(session_id) {
+        Ok(reconstruction) => {
+            agent_result_message_from_reconstruction(&reconstruction, fallback_error)
+        }
+        Err(error) => {
+            warn!(
+                session_id,
+                ?error,
+                "failed to reconstruct final assistant message for agent_result"
+            );
+            AgentResultMessage {
+                text: fallback_error.unwrap_or_default().to_owned(),
+                event_ref: None,
+            }
+        }
+    }
+}
+
+fn agent_result_message_from_reconstruction(
+    reconstruction: &crate::domains::session::event_store::reconstruction::ReconstructionResult,
+    fallback_error: Option<&str>,
+) -> AgentResultMessage {
+    let assistant = reconstruction
+        .messages_with_event_ids
+        .iter()
+        .rev()
+        .find(|entry| entry.message.role == "assistant");
+    let text = assistant
+        .map(|entry| assistant_content_text(&entry.message.content))
+        .filter(|text| !text.is_empty());
+
+    AgentResultMessage {
+        text: text.unwrap_or_else(|| fallback_error.unwrap_or_default().to_owned()),
+        event_ref: assistant.and_then(|entry| {
+            entry
+                .event_ids
+                .iter()
+                .rev()
+                .find_map(|event_id| event_id.clone())
+        }),
+    }
+}
+
+fn assistant_content_text(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|block| {
+                (block.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                    .then(|| block.get("text").and_then(serde_json::Value::as_str))
+                    .flatten()
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
 }
 
 async fn persist_interrupted_if_needed(
@@ -305,5 +380,85 @@ async fn emit_session_update(
                 "failed to load session update data"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::domains::session::event_store::reconstruction::ReconstructionResult;
+    use crate::domains::session::event_store::types::payloads::TokenTotals;
+    use crate::domains::session::event_store::types::state::{Message, MessageWithEventId};
+
+    fn reconstruction(messages_with_event_ids: Vec<MessageWithEventId>) -> ReconstructionResult {
+        ReconstructionResult {
+            messages_with_event_ids,
+            token_usage: TokenTotals::default(),
+            turn_count: 1,
+            reasoning_level: None,
+            system_prompt: None,
+        }
+    }
+
+    #[test]
+    fn agent_result_uses_latest_assistant_text_and_event_ref() {
+        let state = reconstruction(vec![
+            MessageWithEventId {
+                message: Message {
+                    role: "user".into(),
+                    content: json!("question"),
+                    invocation_id: None,
+                    is_error: None,
+                },
+                event_ids: vec![Some("evt-user".into())],
+            },
+            MessageWithEventId {
+                message: Message {
+                    role: "assistant".into(),
+                    content: json!([
+                        {"type": "thinking", "thinking": "private"},
+                        {"type": "text", "text": "first"},
+                        {"type": "text", "text": "second"}
+                    ]),
+                    invocation_id: None,
+                    is_error: None,
+                },
+                event_ids: vec![
+                    Some("evt-assistant-1".into()),
+                    Some("evt-assistant-2".into()),
+                ],
+            },
+        ]);
+
+        assert_eq!(
+            agent_result_message_from_reconstruction(&state, Some("fallback")),
+            AgentResultMessage {
+                text: "first\nsecond".into(),
+                event_ref: Some("evt-assistant-2".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn agent_result_uses_run_error_when_no_assistant_text_exists() {
+        let state = reconstruction(vec![MessageWithEventId {
+            message: Message {
+                role: "assistant".into(),
+                content: json!([{"type": "capability_invocation", "id": "call"}]),
+                invocation_id: None,
+                is_error: None,
+            },
+            event_ids: vec![Some("evt-call".into())],
+        }]);
+
+        assert_eq!(
+            agent_result_message_from_reconstruction(&state, Some("run failed")),
+            AgentResultMessage {
+                text: "run failed".into(),
+                event_ref: Some("evt-call".into()),
+            }
+        );
     }
 }

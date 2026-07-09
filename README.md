@@ -2226,14 +2226,10 @@ The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
 Public registered functions are limited to `agent::prompt`, `agent::abort`,
 `agent::abort_invocation`, and `agent::status`. Hidden internal functions
 `agent::prompt_apply` and `agent::run_turn` serialize accepted prompts into the
-provider loop and keep session truth consistent.
-Deleted product routes such as `agent::run_goal`, `agent::work_snapshot`,
-`agent::ask_user`, `agent::spawn_subagent`, subagent status/result/cancel, and
-public queue management are not registered.
-
-The teardown scorecard is complete. Retained source is limited to the primitive
-loop, generic shell, and evidence paths described here; deleted product routes
-are not supported branch behavior.
+provider loop and keep session truth consistent. On completion, the durable
+`agent_result` resource derives its final answer and source event reference from
+the flushed event-store reconstruction, so replay uses the same canonical text
+as session history rather than a parallel runtime copy.
 
 ## Engine Protocol API
 
