@@ -3014,6 +3014,39 @@ mod tests {
             discovery["modelFacingInvocation"]["arguments"]["operation"],
             "capability_binding_cockpit_overview"
         );
+        let selectors = discovery["agentUsage"]["preflight"]["resourceSelectors"]
+            .as_array()
+            .expect("resource selectors")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        for expected in [
+            "kind:capability_binding_request",
+            "kind:capability_binding_decision",
+            "kind:capability_binding_policy",
+            "kind:capability_replacement_candidate",
+            "kind:capability_route_binding",
+            "kind:capability_route_activation",
+            "kind:capability_route_event",
+            "kind:capability_route_rollback",
+            "kind:capability_shadow_trial_request",
+            "kind:capability_shadow_trial_decision",
+            "kind:capability_shadow_trial_run",
+            "kind:capability_shadow_trial_evidence",
+        ] {
+            assert!(
+                selectors.contains(&expected),
+                "catalog inspect cockpit preflight missing selector {expected}: {selectors:?}"
+            );
+        }
+        assert_eq!(
+            discovery["agentUsage"]["preflight"]["networkPolicy"],
+            "none"
+        );
+        assert_eq!(
+            discovery["agentUsage"]["preflight"]["agentStateInherited"],
+            false
+        );
     }
 
     #[test]
@@ -3833,7 +3866,14 @@ mod tests {
         );
         assert_eq!(
             discovery["functions"][2]["agentUsage"]["preflight"]["resourceSelectors"][0],
-            "kind:capability_binding_request"
+            "kind:capability_binding_decision"
+        );
+        assert!(
+            discovery["functions"][2]["agentUsage"]["preflight"]["resourceSelectors"]
+                .as_array()
+                .expect("resource selectors")
+                .iter()
+                .any(|selector| selector == "kind:capability_route_event")
         );
         assert_eq!(
             discovery["functions"][0]["capabilityPool"]["surface"],

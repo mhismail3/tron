@@ -39,6 +39,7 @@ pub(super) async fn derive_capability_runtime_grant(
     let catalog_discovery_operation = is_catalog_discovery_operation(operation);
     let capability_binding_operation = is_capability_binding_operation(operation);
     let capability_route_operation = is_capability_route_operation(operation);
+    let capability_shadow_trial_operation = is_capability_shadow_trial_operation(operation);
     let context_control_operation = matches!(
         operation,
         "context_control_status"
@@ -321,6 +322,18 @@ pub(super) async fn derive_capability_runtime_grant(
             "resource.read".to_owned(),
         ]);
     } else if is_capability_route_write_operation(operation) {
+        allowed_authority_scopes.extend([
+            "capability_binding.read".to_owned(),
+            "capability_binding.write".to_owned(),
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if is_capability_shadow_trial_read_operation(operation) {
+        allowed_authority_scopes.extend([
+            "capability_binding.read".to_owned(),
+            "resource.read".to_owned(),
+        ]);
+    } else if is_capability_shadow_trial_write_operation(operation) {
         allowed_authority_scopes.extend([
             "capability_binding.read".to_owned(),
             "capability_binding.write".to_owned(),
@@ -684,6 +697,8 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_resource_kinds.extend(capability_binding_resource_kinds(operation));
     } else if capability_route_operation {
         allowed_resource_kinds.extend(capability_route_resource_kinds());
+    } else if capability_shadow_trial_operation {
+        allowed_resource_kinds.extend(capability_shadow_trial_resource_kinds());
     } else if matches!(
         operation,
         "web_research_request_record"
@@ -1047,6 +1062,11 @@ fn is_capability_route_operation(operation: &str) -> bool {
     is_capability_route_read_operation(operation) || is_capability_route_write_operation(operation)
 }
 
+fn is_capability_shadow_trial_operation(operation: &str) -> bool {
+    is_capability_shadow_trial_read_operation(operation)
+        || is_capability_shadow_trial_write_operation(operation)
+}
+
 fn is_capability_binding_operation(operation: &str) -> bool {
     is_capability_binding_read_operation(operation)
         || is_capability_binding_write_operation(operation)
@@ -1131,6 +1151,19 @@ fn is_capability_route_write_operation(operation: &str) -> bool {
     )
 }
 
+fn is_capability_shadow_trial_read_operation(operation: &str) -> bool {
+    operation == "capability_shadow_trial_evidence_inspect"
+}
+
+fn is_capability_shadow_trial_write_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "capability_shadow_trial_request_record"
+            | "capability_shadow_trial_decision_record"
+            | "capability_shadow_trial_run_record"
+    )
+}
+
 fn capability_route_resource_kinds() -> Vec<String> {
     vec![
         "capability_replacement_candidate".to_owned(),
@@ -1143,6 +1176,15 @@ fn capability_route_resource_kinds() -> Vec<String> {
         "capability_shadow_trial_decision".to_owned(),
         "capability_shadow_trial_request".to_owned(),
         "capability_binding_policy".to_owned(),
+    ]
+}
+
+fn capability_shadow_trial_resource_kinds() -> Vec<String> {
+    vec![
+        "capability_shadow_trial_request".to_owned(),
+        "capability_shadow_trial_decision".to_owned(),
+        "capability_shadow_trial_run".to_owned(),
+        "capability_shadow_trial_evidence".to_owned(),
     ]
 }
 

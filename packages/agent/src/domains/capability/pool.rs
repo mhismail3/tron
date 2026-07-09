@@ -654,24 +654,24 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
 }
 
 fn capability_binding_kind_selectors_for_operation(operation: &str) -> Vec<&'static str> {
-    if operation.starts_with("capability_shadow_trial_") {
-        return vec![
-            "kind:capability_shadow_trial_request",
-            "kind:capability_shadow_trial_decision",
-            "kind:capability_shadow_trial_run",
-            "kind:capability_shadow_trial_evidence",
+    if operation == "capability_binding_cockpit_overview" {
+        let mut selectors = vec![
+            "kind:capability_binding_request",
+            "kind:capability_binding_decision",
+            "kind:capability_binding_policy",
         ];
+        selectors.extend(capability_route_kind_selectors());
+        selectors.sort_unstable();
+        selectors.dedup();
+        return selectors;
+    }
+    if operation.starts_with("capability_shadow_trial_") {
+        return capability_shadow_trial_kind_selectors();
     }
     if operation.starts_with("capability_route_")
         || operation.starts_with("capability_replacement_")
     {
-        return vec![
-            "kind:capability_replacement_candidate",
-            "kind:capability_route_binding",
-            "kind:capability_route_activation",
-            "kind:capability_route_event",
-            "kind:capability_route_rollback",
-        ];
+        return capability_route_kind_selectors();
     }
     match operation {
         "capability_binding_request_record"
@@ -700,6 +700,30 @@ fn capability_binding_kind_selectors_for_operation(operation: &str) -> Vec<&'sta
     vec![
         "kind:capability_binding_request",
         "kind:capability_binding_decision",
+        "kind:capability_binding_policy",
+    ]
+}
+
+fn capability_shadow_trial_kind_selectors() -> Vec<&'static str> {
+    vec![
+        "kind:capability_shadow_trial_request",
+        "kind:capability_shadow_trial_decision",
+        "kind:capability_shadow_trial_run",
+        "kind:capability_shadow_trial_evidence",
+    ]
+}
+
+fn capability_route_kind_selectors() -> Vec<&'static str> {
+    vec![
+        "kind:capability_replacement_candidate",
+        "kind:capability_route_binding",
+        "kind:capability_route_activation",
+        "kind:capability_route_event",
+        "kind:capability_route_rollback",
+        "kind:capability_shadow_trial_request",
+        "kind:capability_shadow_trial_decision",
+        "kind:capability_shadow_trial_run",
+        "kind:capability_shadow_trial_evidence",
         "kind:capability_binding_policy",
     ]
 }
@@ -1173,6 +1197,116 @@ mod tests {
             assert!(!scopes.contains(&"capability_binding.write"));
             assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
             assert_eq!(usage["effect"]["mutatesState"], false);
+        }
+    }
+
+    #[test]
+    fn capability_cockpit_and_route_usage_advertise_full_governance_selectors() {
+        let expected_route_selectors = vec![
+            "kind:capability_replacement_candidate",
+            "kind:capability_route_binding",
+            "kind:capability_route_activation",
+            "kind:capability_route_event",
+            "kind:capability_route_rollback",
+            "kind:capability_shadow_trial_request",
+            "kind:capability_shadow_trial_decision",
+            "kind:capability_shadow_trial_run",
+            "kind:capability_shadow_trial_evidence",
+            "kind:capability_binding_policy",
+        ];
+        for operation in [
+            "capability_replacement_candidate_list",
+            "capability_route_binding_list",
+            "capability_route_event_list",
+        ] {
+            let usage = operation_agent_usage_projection(operation)
+                .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
+            let selectors = usage["preflight"]["resourceSelectors"]
+                .as_array()
+                .expect("resource selectors")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                selectors, expected_route_selectors,
+                "{operation} route selectors drifted"
+            );
+            assert_eq!(usage["preflight"]["networkPolicy"], "none");
+            assert_eq!(usage["preflight"]["agentStateInherited"], false);
+            assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
+        }
+
+        let cockpit = operation_agent_usage_projection("capability_binding_cockpit_overview")
+            .expect("cockpit usage");
+        let cockpit_selectors = cockpit["preflight"]["resourceSelectors"]
+            .as_array()
+            .expect("resource selectors")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        for expected in [
+            "kind:capability_binding_request",
+            "kind:capability_binding_decision",
+            "kind:capability_binding_policy",
+            "kind:capability_replacement_candidate",
+            "kind:capability_route_binding",
+            "kind:capability_route_activation",
+            "kind:capability_route_event",
+            "kind:capability_route_rollback",
+            "kind:capability_shadow_trial_request",
+            "kind:capability_shadow_trial_decision",
+            "kind:capability_shadow_trial_run",
+            "kind:capability_shadow_trial_evidence",
+        ] {
+            assert!(
+                cockpit_selectors.contains(&expected),
+                "cockpit preflight missing selector {expected}: {cockpit_selectors:?}"
+            );
+        }
+        assert_eq!(cockpit["preflight"]["networkPolicy"], "none");
+        assert_eq!(cockpit["preflight"]["agentStateInherited"], false);
+        assert_eq!(cockpit["effect"]["readOnlyInspectionSafe"], true);
+        assert_eq!(cockpit["effect"]["mutatesState"], false);
+    }
+
+    #[test]
+    fn capability_shadow_trial_usage_advertises_exact_trial_selectors() {
+        for (operation, write) in [
+            ("capability_shadow_trial_request_record", true),
+            ("capability_shadow_trial_decision_record", true),
+            ("capability_shadow_trial_run_record", true),
+            ("capability_shadow_trial_evidence_inspect", false),
+        ] {
+            let usage = operation_agent_usage_projection(operation)
+                .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
+            let selectors = usage["preflight"]["resourceSelectors"]
+                .as_array()
+                .expect("resource selectors")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                selectors,
+                vec![
+                    "kind:capability_shadow_trial_request",
+                    "kind:capability_shadow_trial_decision",
+                    "kind:capability_shadow_trial_run",
+                    "kind:capability_shadow_trial_evidence",
+                ],
+                "{operation} shadow selectors drifted"
+            );
+            let scopes = usage["preflight"]["authorityScopes"]
+                .as_array()
+                .expect("authority scopes")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            assert!(scopes.contains(&"capability_binding.read"));
+            assert!(scopes.contains(&"resource.read"));
+            assert_eq!(scopes.contains(&"capability_binding.write"), write);
+            assert_eq!(scopes.contains(&"resource.write"), write);
+            assert_eq!(usage["preflight"]["networkPolicy"], "none");
+            assert_eq!(usage["preflight"]["agentStateInherited"], false);
         }
     }
 

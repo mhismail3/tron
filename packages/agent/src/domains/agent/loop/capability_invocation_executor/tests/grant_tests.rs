@@ -569,6 +569,92 @@ async fn capability_binding_cockpit_overview_runtime_grant_authorizes_governance
 }
 
 #[tokio::test]
+async fn capability_shadow_trial_runtime_grants_authorize_exact_trial_kinds() {
+    for (operation, write) in [
+        ("capability_shadow_trial_request_record", true),
+        ("capability_shadow_trial_decision_record", true),
+        ("capability_shadow_trial_run_record", true),
+        ("capability_shadow_trial_evidence_inspect", false),
+    ] {
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+            "operation": operation,
+            "idempotencyKey": format!("{operation}-runtime-grant")
+        }))
+        .await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+        assert_eq!(grant.network_policy, "none");
+        for expected_kind in [
+            "capability_shadow_trial_request",
+            "capability_shadow_trial_decision",
+            "capability_shadow_trial_run",
+            "capability_shadow_trial_evidence",
+        ] {
+            assert!(
+                grant
+                    .allowed_resource_kinds
+                    .contains(&expected_kind.to_owned()),
+                "{operation} grant missing shadow kind {expected_kind}: {:?}",
+                grant.allowed_resource_kinds
+            );
+            assert!(
+                grant
+                    .resource_selectors
+                    .contains(&format!("kind:{expected_kind}")),
+                "{operation} grant missing selector kind:{expected_kind}: {:?}",
+                grant.resource_selectors
+            );
+        }
+        for forbidden_kind in [
+            "capability_replacement_candidate",
+            "capability_route_binding",
+            "capability_route_activation",
+            "capability_route_event",
+            "capability_route_rollback",
+            "agent_state",
+        ] {
+            assert!(
+                !grant
+                    .allowed_resource_kinds
+                    .contains(&forbidden_kind.to_owned()),
+                "{operation} shadow grant must not inherit {forbidden_kind}"
+            );
+        }
+        assert_invocation_scopes(
+            &invocation,
+            if write {
+                &[
+                    "capability.execute",
+                    "capability_binding.read",
+                    "capability_binding.write",
+                    "resource.read",
+                    "resource.write",
+                ]
+            } else {
+                &[
+                    "capability.execute",
+                    "capability_binding.read",
+                    "resource.read",
+                ]
+            },
+        );
+        assert_eq!(
+            grant
+                .allowed_authority_scopes
+                .contains(&"capability_binding.write".to_owned()),
+            write,
+            "{operation} write scope drifted: {:?}",
+            grant.allowed_authority_scopes
+        );
+    }
+}
+
+#[tokio::test]
 async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "procedural_state_inspect",
