@@ -53,12 +53,15 @@ pub(super) async fn web_robots_check(
         &invocation.payload,
     )
     .await?;
+    let policy_id = value["webRobotsPolicyResourceId"]
+        .as_str()
+        .unwrap_or("web_robots_policy");
+    let policy_version_id = value["webRobotsPolicyVersionId"]
+        .as_str()
+        .unwrap_or("current_version");
     Ok(ok_result(
         format!(
-            "Checked robots policy {}",
-            value["webRobotsPolicyResourceId"]
-                .as_str()
-                .unwrap_or("web_robots_policy")
+            "Checked robots policy {policy_id}; for a robots-gated web_fetch pass webRobotsPolicyResourceId={policy_id} unchanged and expectedWebRobotsPolicyVersionId={policy_version_id} copied from webRobotsPolicyVersionId."
         ),
         json!({
             "primitiveOperation": "web_robots_check",

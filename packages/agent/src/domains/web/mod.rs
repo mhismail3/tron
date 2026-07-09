@@ -7,7 +7,7 @@
 //! hash. Slice 8D adds explicit archive lifecycle updates for current-session
 //! source records while preserving source evidence for replay/citation audit. The
 //! provider-visible surface remains the single `capability::execute` primitive
-//! with `web_fetch`, `web_source_list`, `web_source_inspect`, and
+//! with `web_fetch`, `web_robots_check`, `web_source_list`, `web_source_inspect`, and
 //! `web_source_archive` operation
 //! values; this package owns URL validation, network authority checks, bounded
 //! HTTP fetching, source/cache resource evidence, readable-text extraction,
@@ -36,6 +36,12 @@
 //! functions. `web_fetch` and `web_robots_check` are the only network operations
 //! and must fail closed unless the trusted runtime context carries a derived
 //! grant whose network policy explicitly permits declared network access.
+//! `catalog_inspect` is the canonical model-facing contract for these
+//! operations: `execute::web_robots_check` must expose `url` and bounded robots
+//! controls, while `execute::web_fetch` must expose `url` plus optional
+//! `webRobotsPolicyResourceId`/`expectedWebRobotsPolicyVersionId` linkage so
+//! agents do not infer fetch arguments from generic schemas. Web idempotency is
+//! supplied by trusted runtime context, not by model-facing web payload fields.
 //! Source list/inspect/archive operations are resource inspections or
 //! append-only resource lifecycle updates and must remain valid under
 //! `networkPolicy none`. `web_robots_check` fetches only one origin's
@@ -47,7 +53,9 @@
 //! plus robots/source parity: a replacement must preserve source and
 //! robots-policy evidence, provider-safe refs, replay/idempotency evidence,
 //! fail-closed side effects, and rollback/disable metadata before binding
-//! policy may later consider routing.
+//! policy may later consider routing. Kernel authorization rejects wildcard,
+//! `state.*`, or `agent_state`-inherited grants for `web_fetch` and
+//! `web_robots_check`.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

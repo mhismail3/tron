@@ -2,6 +2,38 @@ use super::*;
 use crate::engine::{CreateResource, EngineResourceScope, SUBAGENT_TASK_KIND};
 use sha2::{Digest, Sha256};
 
+fn assert_no_state_inheritance(grant: &crate::engine::EngineGrant) {
+    for scope in ["state.read", "state.write"] {
+        assert!(
+            !grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "grant must not inherit {scope}: {:?}",
+            grant.allowed_authority_scopes
+        );
+    }
+    for capability in ["state::get", "state::set", "state::list"] {
+        assert!(
+            !grant.allowed_capabilities.contains(&capability.to_owned()),
+            "grant must not inherit capability {capability}: {:?}",
+            grant.allowed_capabilities
+        );
+    }
+    assert!(
+        !grant
+            .allowed_resource_kinds
+            .contains(&"agent_state".to_owned()),
+        "grant must not inherit agent_state resource authority: {:?}",
+        grant.allowed_resource_kinds
+    );
+    assert!(
+        !grant
+            .resource_selectors
+            .iter()
+            .any(|selector| selector.contains("agent_state")),
+        "grant must not inherit agent_state selectors: {:?}",
+        grant.resource_selectors
+    );
+}
+
 #[tokio::test]
 async fn goal_create_runtime_grant_propagates_write_scopes_without_wildcards() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
@@ -67,6 +99,11 @@ async fn web_fetch_runtime_grant_stays_source_only_without_robots_evidence() {
         .expect("derived grant");
 
     assert_eq!(grant.network_policy, "declared");
+    assert_no_state_inheritance(&grant);
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec!["capability::execute".to_owned()]
+    );
     assert!(
         grant
             .allowed_authority_scopes
@@ -107,6 +144,50 @@ async fn web_fetch_runtime_grant_stays_source_only_without_robots_evidence() {
 }
 
 #[tokio::test]
+async fn web_robots_check_runtime_grant_is_exact_network_policy_grant() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "web_robots_check",
+        "url": "https://example.com/"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_eq!(grant.network_policy, "declared");
+    assert_no_state_inheritance(&grant);
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec!["capability::execute".to_owned()]
+    );
+    for scope in ["web.write", "resource.read", "resource.write"] {
+        assert!(
+            grant.allowed_authority_scopes.contains(&scope.to_owned()),
+            "web_robots_check grant should include {scope}"
+        );
+    }
+    assert_eq!(
+        grant.allowed_resource_kinds,
+        vec!["web_robots_policy".to_owned()]
+    );
+    assert_eq!(
+        grant.resource_selectors,
+        vec!["kind:web_robots_policy".to_owned()]
+    );
+    assert_invocation_scopes(
+        &invocation,
+        &[
+            "capability.execute",
+            "web.write",
+            "resource.read",
+            "resource.write",
+        ],
+    );
+}
+
+#[tokio::test]
 async fn web_fetch_runtime_grant_stays_source_only_with_null_robots_fields() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "web_fetch",
@@ -123,6 +204,11 @@ async fn web_fetch_runtime_grant_stays_source_only_with_null_robots_fields() {
         .expect("derived grant");
 
     assert_eq!(grant.network_policy, "declared");
+    assert_no_state_inheritance(&grant);
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec!["capability::execute".to_owned()]
+    );
     assert!(
         grant
             .allowed_authority_scopes
@@ -180,6 +266,11 @@ async fn web_fetch_runtime_grant_includes_robots_policy_authority_when_linked() 
         .expect("derived grant");
 
     assert_eq!(grant.network_policy, "declared");
+    assert_no_state_inheritance(&grant);
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec!["capability::execute".to_owned()]
+    );
     for scope in ["web.read", "web.write", "resource.read", "resource.write"] {
         assert!(
             grant.allowed_authority_scopes.contains(&scope.to_owned()),

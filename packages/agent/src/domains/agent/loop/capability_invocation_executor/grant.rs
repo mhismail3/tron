@@ -125,6 +125,7 @@ pub(super) async fn derive_capability_runtime_grant(
     );
     let file_git_module_operation = is_file_git_module_operation(operation);
     let diagnostic_read_operation = is_diagnostic_read_operation(operation);
+    let web_network_operation = matches!(operation, "web_fetch" | "web_robots_check");
     let exact_target_runtime_operation = module_registry_read_operation
         || module_authoring_operation
         || module_validation_operation
@@ -142,7 +143,8 @@ pub(super) async fn derive_capability_runtime_grant(
         || delegated_subagent_operation
         || file_git_module_operation
         || catalog_discovery_operation
-        || diagnostic_read_operation;
+        || diagnostic_read_operation
+        || web_network_operation;
     let notification_push_requested = operation == "notification_send"
         && effective_args
             .get("pushRequested")
@@ -626,7 +628,7 @@ pub(super) async fn derive_capability_runtime_grant(
     }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
-    let network_policy = if matches!(operation, "web_fetch" | "web_robots_check") {
+    let network_policy = if web_network_operation {
         "declared"
     } else {
         "none"

@@ -337,12 +337,8 @@ async fn web_fetch_robots_policy_rejects_invalid_evidence_before_target_network_
         "web-fetch-robots-invalid",
         "declared",
         &["capability.execute", "web.write", "resource.write"],
-        &["agent_state", "web_source", "web_robots_policy"],
-        &[
-            "kind:agent_state",
-            "kind:web_source",
-            "kind:web_robots_policy",
-        ],
+        &["web_source", "web_robots_policy"],
+        &["kind:web_source", "kind:web_robots_policy"],
     )
     .await;
     let missing_read = no_resource_read

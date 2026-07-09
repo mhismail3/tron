@@ -89,6 +89,9 @@ pub(super) fn authorize_with_grant(
     if is_capability_binding_invocation(invocation) {
         ensure_capability_binding_grant_is_explicit(grant, invocation)?;
     }
+    if is_web_network_invocation(invocation) {
+        ensure_web_network_grant_is_explicit(grant, invocation)?;
+    }
     if is_web_research_invocation(invocation) {
         ensure_web_research_grant_is_explicit(grant)?;
     }
@@ -363,6 +366,16 @@ fn ensure_web_research_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn ensure_web_network_grant_is_explicit(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+) -> Result<()> {
+    ensure_no_wildcard_grant_items(grant, "web network operations")?;
+    ensure_no_state_inheritance(grant, "web network operations")?;
+    let kinds = capability_execute_resource_kinds(invocation);
+    ensure_kind_selectors(grant, &kinds, "web network operations")
 }
 
 fn ensure_module_lifecycle_grant_is_explicit(grant: &EngineGrant) -> Result<()> {
@@ -643,6 +656,36 @@ fn ensure_no_wildcard_grant_items(grant: &EngineGrant, label: &str) -> Result<()
                 grant.grant_id
             )));
         }
+    }
+    Ok(())
+}
+
+fn ensure_no_state_inheritance(grant: &EngineGrant, label: &str) -> Result<()> {
+    for forbidden in ["state.read", "state.write"] {
+        if grant
+            .allowed_authority_scopes
+            .iter()
+            .any(|scope| scope == forbidden)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} cannot inherit {forbidden} for {label}",
+                grant.grant_id
+            )));
+        }
+    }
+    if grant
+        .allowed_resource_kinds
+        .iter()
+        .any(|kind| kind == "agent_state")
+        || grant
+            .resource_selectors
+            .iter()
+            .any(|selector| selector.contains("agent_state"))
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "authority grant {} cannot inherit agent_state resources for {label}",
+            grant.grant_id
+        )));
     }
     Ok(())
 }
@@ -1565,6 +1608,14 @@ fn is_web_research_invocation(invocation: &Invocation) -> bool {
                     | "web_research_source_list"
                     | "web_research_source_inspect"
             )
+        )
+}
+
+fn is_web_network_invocation(invocation: &Invocation) -> bool {
+    invocation.function_id.as_str() == "capability::execute"
+        && matches!(
+            invocation.payload.get("operation").and_then(Value::as_str),
+            Some("web_fetch" | "web_robots_check")
         )
 }
 
@@ -3706,6 +3757,119 @@ mod tests {
             authorize_with_grant(&exact, &function, &invocation)
                 .unwrap_or_else(|error| panic!("{operation} exact selector denied: {error}"));
         }
+    }
+
+    #[test]
+    fn web_network_operations_reject_state_inherited_grants() {
+        let function = test_execute_function();
+        let fetch_grant = test_grant(
+            &["capability.execute", "resource.write", "web.write"],
+            &["web_source"],
+            &["kind:web_source"],
+        );
+        authorize_with_grant(
+            &fetch_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "web_fetch",
+                "url": "https://example.com/"
+            })),
+        )
+        .expect("plain web_fetch exact grant accepted");
+
+        let robots_grant = test_grant(
+            &[
+                "capability.execute",
+                "resource.read",
+                "resource.write",
+                "web.write",
+            ],
+            &["web_robots_policy"],
+            &["kind:web_robots_policy"],
+        );
+        authorize_with_grant(
+            &robots_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "web_robots_check",
+                "url": "https://example.com/"
+            })),
+        )
+        .expect("web_robots_check exact grant accepted");
+
+        let robots_fetch_grant = test_grant(
+            &[
+                "capability.execute",
+                "resource.read",
+                "resource.write",
+                "web.read",
+                "web.write",
+            ],
+            &["web_source", "web_robots_policy"],
+            &["kind:web_source", "kind:web_robots_policy"],
+        );
+        authorize_with_grant(
+            &robots_fetch_grant,
+            &function,
+            &test_invocation(json!({
+                "operation": "web_fetch",
+                "url": "https://example.com/",
+                "webRobotsPolicyResourceId": "web_robots_policy:allow",
+                "expectedWebRobotsPolicyVersionId": "ver_allow"
+            })),
+        )
+        .expect("robots-gated web_fetch exact grant accepted");
+
+        let state_inherited = test_grant(
+            &[
+                "capability.execute",
+                "resource.read",
+                "resource.write",
+                "state.read",
+                "state.write",
+                "web.read",
+                "web.write",
+            ],
+            &["agent_state", "web_source", "web_robots_policy"],
+            &[
+                "kind:agent_state",
+                "kind:web_source",
+                "kind:web_robots_policy",
+            ],
+        );
+        let error = authorize_with_grant(
+            &state_inherited,
+            &function,
+            &test_invocation(json!({
+                "operation": "web_fetch",
+                "url": "https://example.com/",
+                "webRobotsPolicyResourceId": "web_robots_policy:allow",
+                "expectedWebRobotsPolicyVersionId": "ver_allow"
+            })),
+        )
+        .expect_err("web network operations must reject state-inherited grants")
+        .to_string();
+        assert!(
+            error.contains("state.read") || error.contains("agent_state"),
+            "{error}"
+        );
+
+        let wildcard = test_grant(
+            &["*", "web.write", "resource.write"],
+            &["web_source"],
+            &["kind:web_source"],
+        );
+        let error = authorize_with_grant(
+            &wildcard,
+            &function,
+            &test_invocation(json!({
+                "operation": "web_fetch",
+                "url": "https://example.com/"
+            })),
+        )
+        .expect_err("web network operations must reject wildcard grants")
+        .to_string();
+        assert!(error.contains("wildcard authority scopes"), "{error}");
     }
 
     #[test]

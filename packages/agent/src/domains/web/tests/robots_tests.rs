@@ -37,6 +37,22 @@ async fn web_robots_check_fetches_only_origin_robots_and_records_allow_evidence(
     let resource_id = web["webRobotsPolicyResourceId"]
         .as_str()
         .expect("resource id");
+    let version_id = web["webRobotsPolicyVersionId"]
+        .as_str()
+        .expect("version id");
+    let content = value["content"][0]["text"].as_str().expect("content");
+    assert!(
+        content.contains("webRobotsPolicyResourceId="),
+        "robots content must make fetch linkage copy-ready: {content}"
+    );
+    assert!(
+        content.contains("expectedWebRobotsPolicyVersionId="),
+        "robots content must name the web_fetch freshness field: {content}"
+    );
+    assert!(
+        content.contains(resource_id) && content.contains(version_id),
+        "robots content must include current resource/version refs: {content}"
+    );
     let inspection = ctx
         .engine_host
         .inspect_resource(resource_id)
@@ -251,8 +267,8 @@ async fn web_robots_check_authority_failures_happen_before_network_io() {
             "resource.read",
             "resource.write",
         ],
-        &["agent_state", "web_source"],
-        &["kind:agent_state", "kind:web_source"],
+        &["web_source"],
+        &["kind:web_source"],
     )
     .await;
     let no_kind_error = no_kind
@@ -269,8 +285,8 @@ async fn web_robots_check_authority_failures_happen_before_network_io() {
         "web-robots-no-resource-read",
         "declared",
         &["capability.execute", "web.write", "resource.write"],
-        &["agent_state", "web_robots_policy"],
-        &["kind:agent_state", "kind:web_robots_policy"],
+        &["web_robots_policy"],
+        &["kind:web_robots_policy"],
     )
     .await;
     let no_resource_read_error = no_resource_read
@@ -295,8 +311,8 @@ async fn web_robots_check_authority_failures_happen_before_network_io() {
             "resource.read",
             "resource.write",
         ],
-        &["agent_state", "web_robots_policy"],
-        &["kind:agent_state"],
+        &["web_robots_policy"],
+        &["kind:web_source"],
     )
     .await;
     let no_selector_error = no_selector

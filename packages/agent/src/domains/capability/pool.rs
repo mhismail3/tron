@@ -423,9 +423,26 @@ fn operation_effect_projection(operation: &str, family: &str, ownership_class: &
         } else {
             "do not call during read-only inspection; inspect schema/catalog/list operations instead"
         },
+        "priorEvidence": prior_evidence_for_operation(operation),
         "requiresPriorEvidence": !read_only && matches!(ownership_class, "record_plane" | "governance_locked"),
         "family": family
     })
+}
+
+fn prior_evidence_for_operation(operation: &str) -> Value {
+    match operation {
+        "web_fetch" => json!({
+            "mode": "conditional",
+            "requiredWhen": "the task requires robots-gated fetch proof or a robots policy was checked for this target",
+            "sourceOperation": "web_robots_check",
+            "copyFields": {
+                "webRobotsPolicyResourceId": "web_fetch.webRobotsPolicyResourceId",
+                "webRobotsPolicyVersionId": "web_fetch.expectedWebRobotsPolicyVersionId"
+            },
+            "failClosed": "missing, mismatched, or stale robots refs are rejected before target network I/O"
+        }),
+        _ => json!({"mode": "none"}),
+    }
 }
 
 fn operation_is_read_only_safe(operation: &str) -> bool {

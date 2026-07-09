@@ -474,8 +474,8 @@ impl<'a> WebFixture<'a> {
                 "resource.read",
                 "resource.write",
             ],
-            &["agent_state", "web_source"],
-            &["kind:agent_state", "kind:web_source"],
+            &["web_source"],
+            &["kind:web_source"],
         )
         .await
     }
@@ -496,8 +496,8 @@ impl<'a> WebFixture<'a> {
                 "resource.read",
                 "resource.write",
             ],
-            &["agent_state", "web_robots_policy"],
-            &["kind:agent_state", "kind:web_robots_policy"],
+            &["web_robots_policy"],
+            &["kind:web_robots_policy"],
         )
         .await
     }
@@ -518,12 +518,8 @@ impl<'a> WebFixture<'a> {
                 "resource.read",
                 "resource.write",
             ],
-            &["agent_state", "web_source", "web_robots_policy"],
-            &[
-                "kind:agent_state",
-                "kind:web_source",
-                "kind:web_robots_policy",
-            ],
+            &["web_source", "web_robots_policy"],
+            &["kind:web_source", "kind:web_robots_policy"],
         )
         .await
     }

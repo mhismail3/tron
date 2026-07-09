@@ -1285,9 +1285,12 @@ provider-safety, route events, and rollback/disable contracts. This foundation
 proves the first scoped read-only `git_status` route and the contract future
 routes must satisfy. It does not claim broad autonomous self-update across every
 operation.
-`catalog_inspect` also projects operation-specific output contracts for
-provider-safe trace operations, so `execute::trace_list` and `execute::trace_get`
-show the model the safe record shape and redaction guarantees before invocation.
+`catalog_inspect` also projects operation-specific contracts for provider-safe
+trace and web operations. `execute::trace_list` and `execute::trace_get` show the
+model the safe record shape and redaction guarantees before invocation, while
+`execute::web_robots_check` and `execute::web_fetch` show the exact top-level web
+payload fields, bounded network controls, and robots-policy freshness linkage
+needed for safe web use.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
@@ -1389,8 +1392,8 @@ Current primitive operations:
 | `question_list` | List scoped user questions with bounded summaries and explicit truncation metadata. |
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
-| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, optionally linking current-session allow `web_robots_policy` evidence by resource/version before target network I/O. |
-| `web_robots_check` | Check one origin `robots.txt` for one requested URL under declared network authority, producing bounded `web_robots_policy` evidence with no sitemap traversal, crawling, search, browser, or login scope. |
+| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, optionally linking current-session allow `web_robots_policy` evidence by `webRobotsPolicyResourceId` plus `expectedWebRobotsPolicyVersionId` before target network I/O. |
+| `web_robots_check` | Check one origin `robots.txt` for one requested URL under declared network authority, producing bounded `web_robots_policy` evidence and copy-ready `webRobotsPolicyResourceId`/`webRobotsPolicyVersionId` refs for a later robots-gated `web_fetch`, with no sitemap traversal, crawling, search, browser, or login scope. |
 | `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
 | `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
 | `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
@@ -1770,14 +1773,23 @@ fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
 version, matched user-agent, allow/deny decision, relevant matched rule,
 sitemap refs as metadata only, authority refs, trace/replay refs, redacted
 display URLs, an exact canonical target URL fingerprint, and idempotency/cache
-refs. The accepted Slice 8F foundation lets callers supply robots evidence when
-they need policy-bound fetch proof, and when `web_fetch` receives `webRobotsPolicyResourceId` plus
+refs. The model-facing `web_robots_check` result names the copy-ready
+`webRobotsPolicyResourceId` and `webRobotsPolicyVersionId`; callers use the
+version as `expectedWebRobotsPolicyVersionId` when a later `web_fetch` must be
+robots-gated. The model-facing web schemas do not ask the agent for
+`idempotencyKey`; web replay/idempotency is supplied by trusted runtime context
+and stored as bounded evidence. The accepted Slice 8F foundation lets callers
+supply robots evidence when they need policy-bound fetch proof, and when
+`web_fetch` receives
+`webRobotsPolicyResourceId` plus
 `expectedWebRobotsPolicyVersionId` it validates the current-session
 `web_robots_policy` resource, version, origin, sanitized display target URL,
 exact target fingerprint, and `allow` decision before target HTTP client
 construction. Robots-linked fetch grants add only the needed `web.read`,
 `resource.read`, and `kind:web_robots_policy` authority when both robots fields
-are non-empty strings; source payloads, `web_source_list`, and
+are non-empty strings; `web_fetch` and `web_robots_check` reject wildcard,
+`state.*`, or `agent_state`-inherited grants at the kernel authorization
+boundary. Source payloads, `web_source_list`, and
 `web_source_inspect` expose bounded `robotsPolicyRefs` without robots body,
 target fingerprints, or sitemap content. It fetches only `robots.txt`; sitemap
 traversal, search providers, browser automation, crawling, login/cookies,

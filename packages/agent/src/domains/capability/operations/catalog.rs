@@ -260,6 +260,12 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
         "context_control_status" => {
             " Current-session scope is supplied by trusted runtime context; pass only operation. Do not include sessionId or selector fields. The result content summarizes epoch, token budget, composition blocks, and freshness proof without recording a snapshot or action."
         }
+        "web_robots_check" => {
+            " Pass the explicit target url. On success, pass webRobotsPolicyResourceId unchanged to a robots-gated web_fetch, and copy webRobotsPolicyVersionId into web_fetch.expectedWebRobotsPolicyVersionId."
+        }
+        "web_fetch" => {
+            " Pass the explicit target url. When using robots evidence, pass webRobotsPolicyResourceId unchanged from web_robots_check and copy webRobotsPolicyVersionId into expectedWebRobotsPolicyVersionId; missing or stale versions fail closed before target network I/O."
+        }
         _ => "",
     }
 }
@@ -402,6 +408,11 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
             "type": "string",
             "description": "Current trusted session id. If supplied, it must match the invocation session context."
         }),
+        (_, "url") => json!({
+            "type": "string",
+            "format": "uri",
+            "description": "Explicit target URL for this web operation. web_robots_check fetches only the target origin robots.txt; web_fetch fetches exactly this target URL after authority and optional robots checks."
+        }),
         (_, field) => json!({
             "type": "string",
             "description": format!(
@@ -458,6 +469,54 @@ fn add_operation_specific_optional_fields(
                 "description": "Optional exact provider-visible operation name. When set, returns one compact cockpit row with role, replacement, binding, shadow, route, rollback, and scoped evidence facts for that operation."
             }),
         )],
+        "web_robots_check" => vec![
+            (
+                "userAgent",
+                json!({"type": "string", "description": "Optional bounded user-agent token used only for robots.txt matching. Browser-like wildcard strings such as `*` are invalid; omit this field for the default Tron robots user agent."}),
+            ),
+            (
+                "maxRobotsBytes",
+                json!({"type": "integer", "minimum": 1, "maximum": 262144, "description": "Maximum captured robots.txt bytes for bounded policy evidence."}),
+            ),
+            (
+                "maxOutputBytes",
+                json!({"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum provider-visible redacted robots preview bytes."}),
+            ),
+            (
+                "maxRedirects",
+                json!({"type": "integer", "minimum": 0, "maximum": 10, "description": "Maximum robots.txt redirects. Redirect targets are validated before follow."}),
+            ),
+            (
+                "timeoutMs",
+                json!({"type": "integer", "minimum": 1, "maximum": 30000, "description": "Request timeout in milliseconds."}),
+            ),
+        ],
+        "web_fetch" => vec![
+            (
+                "webRobotsPolicyResourceId",
+                json!({"type": ["string", "null"], "description": "Optional current-session web_robots_policy resource id returned by web_robots_check. Required together with expectedWebRobotsPolicyVersionId when the task requires robots-gated fetch proof."}),
+            ),
+            (
+                "expectedWebRobotsPolicyVersionId",
+                json!({"type": ["string", "null"], "description": "Expected current web_robots_policy version id returned as webRobotsPolicyVersionId by web_robots_check. Stale or missing versions fail closed before target network I/O when a robots policy ref is supplied."}),
+            ),
+            (
+                "maxResponseBytes",
+                json!({"type": "integer", "minimum": 1, "maximum": 1048576, "description": "Maximum captured response bytes for source evidence."}),
+            ),
+            (
+                "maxOutputBytes",
+                json!({"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum provider-visible redacted extracted text bytes."}),
+            ),
+            (
+                "maxRedirects",
+                json!({"type": "integer", "minimum": 0, "maximum": 10, "description": "Maximum target fetch redirects. Redirect targets are validated before follow."}),
+            ),
+            (
+                "timeoutMs",
+                json!({"type": "integer", "minimum": 1, "maximum": 30000, "description": "Request timeout in milliseconds."}),
+            ),
+        ],
         "capability_shadow_trial_decision_record" => vec![
             (
                 "capabilityShadowTrialDecisionId",
@@ -655,6 +714,85 @@ fn execute_operation_output_schema(operation: &str) -> Value {
                                 "unstaged": {"type": "array"},
                                 "untracked": {"type": "array"},
                                 "conflicted": {"type": "array"}
+                            }
+                        }
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
+    if operation == "web_robots_check" {
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe robots-policy summary including copy-ready robots evidence refs for a later robots-gated web_fetch."
+                },
+                "details": {
+                    "type": "object",
+                    "required": ["primitiveOperation", "status", "web"],
+                    "properties": {
+                        "primitiveOperation": {"const": "web_robots_check"},
+                        "status": {"const": "ok"},
+                        "web": {
+                            "type": "object",
+                            "required": [
+                                "schemaVersion",
+                                "status",
+                                "operation",
+                                "webRobotsPolicyResourceId",
+                                "webRobotsPolicyVersionId",
+                                "resourceRefs"
+                            ],
+                            "properties": {
+                                "schemaVersion": {"const": "tron.web_robots_policy.v1"},
+                                "status": {"const": "checked"},
+                                "operation": {"const": "web_robots_check"},
+                                "webRobotsPolicyResourceId": {"type": "string", "description": "Copy this into web_fetch.webRobotsPolicyResourceId when a subsequent fetch must be robots-gated."},
+                                "webRobotsPolicyVersionId": {"type": "string", "description": "Copy this into web_fetch.expectedWebRobotsPolicyVersionId for freshness."},
+                                "resourceRefs": {"type": "array", "description": "Bounded robots-policy resource refs; resourceRefs[0].versionId equals webRobotsPolicyVersionId."}
+                            }
+                        }
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
+    if operation == "web_fetch" {
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe fetch/source summary; raw HTML and raw bytes are not returned directly."
+                },
+                "details": {
+                    "type": "object",
+                    "required": ["primitiveOperation", "status", "web"],
+                    "properties": {
+                        "primitiveOperation": {"const": "web_fetch"},
+                        "status": {"const": "ok"},
+                        "web": {
+                            "type": "object",
+                            "required": [
+                                "schemaVersion",
+                                "status",
+                                "operation",
+                                "webSourceResourceId",
+                                "webSourceVersionId",
+                                "resourceRefs"
+                            ],
+                            "properties": {
+                                "schemaVersion": {"const": "tron.web_source.v1"},
+                                "status": {"const": "fetched"},
+                                "operation": {"const": "web_fetch"},
+                                "webSourceResourceId": {"type": "string"},
+                                "webSourceVersionId": {"type": "string"},
+                                "robotsPolicyRefs": {"type": "array", "description": "Present when fetch was linked to current robots evidence; contains bounded resource/version refs only."},
+                                "resourceRefs": {"type": "array", "description": "Bounded source resource refs for later web_source_list/inspect/archive operations."}
                             }
                         }
                     }
@@ -1018,6 +1156,8 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         "capability_route_event_inspect" => vec!["operation", "capabilityRouteEventResourceId"],
         "module_lifecycle_inspect" => vec!["operation", "moduleLifecycleResourceId"],
         "module_runtime_inspect" => vec!["operation", "moduleRuntimeResourceId"],
+        "web_fetch" => vec!["operation", "url"],
+        "web_robots_check" => vec!["operation", "url"],
         "web_source_inspect" => vec!["operation", "webSourceResourceId"],
         "web_research_request_inspect" => vec!["operation", "webResearchRequestResourceId"],
         "web_research_review_inspect" => vec!["operation", "webResearchReviewResourceId"],
@@ -2305,6 +2445,135 @@ mod tests {
         assert_eq!(
             discovery["modelFacingInvocation"]["arguments"]["operation"],
             "capability_binding_cockpit_overview"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_web_operation_contracts() {
+        let robots =
+            execute_operation_inspect_projection("web_robots_check", "execute::web_robots_check");
+        assert_eq!(
+            robots["schema"]["requiredPayloadFields"],
+            json!(["operation", "url"])
+        );
+        assert_eq!(
+            robots["inputSchema"]["required"],
+            json!(["operation", "url"])
+        );
+        assert_eq!(
+            robots["inputSchema"]["properties"]["operation"]["const"],
+            "web_robots_check"
+        );
+        assert_eq!(robots["inputSchema"]["properties"]["url"]["format"], "uri");
+        assert!(
+            robots["inputSchema"]["properties"]["userAgent"]["description"]
+                .as_str()
+                .expect("userAgent description")
+                .contains("omit this field")
+        );
+        assert!(
+            execute_operation_invocation_guidance("web_robots_check")
+                .contains("copy webRobotsPolicyVersionId")
+        );
+        assert!(
+            robots["inputSchema"]["properties"]
+                .as_object()
+                .expect("robots properties")
+                .get("idempotencyKey")
+                .is_none(),
+            "trusted runtime context owns web robots idempotency keys"
+        );
+        assert_eq!(
+            robots["outputSchema"]["properties"]["details"]["properties"]["web"]["required"],
+            json!([
+                "schemaVersion",
+                "status",
+                "operation",
+                "webRobotsPolicyResourceId",
+                "webRobotsPolicyVersionId",
+                "resourceRefs"
+            ])
+        );
+
+        let fetch = execute_operation_inspect_projection("web_fetch", "execute::web_fetch");
+        assert_eq!(
+            fetch["schema"]["requiredPayloadFields"],
+            json!(["operation", "url"])
+        );
+        assert_eq!(
+            fetch["inputSchema"]["required"],
+            json!(["operation", "url"])
+        );
+        assert_eq!(
+            fetch["inputSchema"]["properties"]["operation"]["const"],
+            "web_fetch"
+        );
+        assert_eq!(
+            fetch["inputSchema"]["properties"]["webRobotsPolicyResourceId"]["type"],
+            json!(["string", "null"])
+        );
+        assert!(
+            fetch["inputSchema"]["properties"]["expectedWebRobotsPolicyVersionId"]["description"]
+                .as_str()
+                .expect("expected version description")
+                .contains("webRobotsPolicyVersionId")
+        );
+        assert!(
+            fetch["inputSchema"]["properties"]
+                .as_object()
+                .expect("fetch properties")
+                .get("idempotencyKey")
+                .is_none(),
+            "trusted runtime context owns web fetch idempotency keys"
+        );
+        assert!(execute_operation_invocation_guidance("web_fetch").contains("copy"));
+        assert!(execute_operation_invocation_guidance("web_fetch").contains("fail closed"));
+        assert_eq!(
+            fetch["outputSchema"]["properties"]["details"]["properties"]["web"]["required"],
+            json!([
+                "schemaVersion",
+                "status",
+                "operation",
+                "webSourceResourceId",
+                "webSourceVersionId",
+                "resourceRefs"
+            ])
+        );
+    }
+
+    #[test]
+    fn catalog_search_advertises_conditional_web_fetch_evidence_linkage() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({"text": "web fetch robots evidence", "limit": 10}),
+        );
+
+        let matches = discovery["executeOperationMatches"]
+            .as_array()
+            .expect("operation matches");
+        let web_fetch = matches
+            .iter()
+            .find(|value| value["operation"] == "web_fetch")
+            .expect("web_fetch match");
+        assert_eq!(
+            web_fetch["agentUsage"]["effect"]["priorEvidence"]["mode"],
+            "conditional"
+        );
+        assert_eq!(
+            web_fetch["agentUsage"]["effect"]["priorEvidence"]["sourceOperation"],
+            "web_robots_check"
+        );
+        assert_eq!(
+            web_fetch["agentUsage"]["effect"]["priorEvidence"]["copyFields"]["webRobotsPolicyVersionId"],
+            "web_fetch.expectedWebRobotsPolicyVersionId"
+        );
+        assert!(
+            web_fetch["agentUsage"]["effect"]["priorEvidence"]["failClosed"]
+                .as_str()
+                .expect("fail closed guidance")
+                .contains("before target network I/O")
         );
     }
 

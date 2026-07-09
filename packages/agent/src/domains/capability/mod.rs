@@ -167,6 +167,9 @@
 //! primitive, but derived grants use exact filesystem/Git/resource scopes,
 //! trusted working-directory roots, and existing evidence resource kinds
 //! instead of implicit `agent_state` authority or new provider-visible tools.
+//! Web network operations follow the same no-inheritance rule: `web_fetch` and
+//! `web_robots_check` run only with explicit web/resource grants and must not
+//! inherit `state.*` or `agent_state` authority from the parent turn.
 //!
 //! ## Submodules
 //!
