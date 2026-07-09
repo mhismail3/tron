@@ -348,6 +348,8 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
             | "job_cancel"
             | "job_cleanup"
             | "process_run"
+            | "trace_list"
+            | "trace_get"
     );
     json!({
         "type": "object",
@@ -718,6 +720,16 @@ fn add_operation_specific_optional_fields(
             (
                 "maxOutputBytes",
                 json!({"type": "integer", "minimum": 1, "maximum": 200000, "description": "Maximum provider-visible stdout/stderr preview bytes returned directly by process_run."}),
+            ),
+        ],
+        "trace_list" => vec![
+            (
+                "limit",
+                json!({"type": "integer", "minimum": 1, "description": "Optional bounded maximum number of current-session trace records to return."}),
+            ),
+            (
+                "traceId",
+                json!({"type": "string", "description": "Optional provider-safe engine trace id filter. Omit for whole-session evidence."}),
             ),
         ],
         _ => Vec::new(),
@@ -3265,6 +3277,14 @@ mod tests {
         let trace_list = execute_operation_inspect_projection("trace_list", "execute::trace_list");
 
         assert_eq!(
+            trace_list["schema"]["requiredPayloadFields"],
+            json!(["operation"])
+        );
+        assert_eq!(trace_list["inputSchema"]["required"], json!(["operation"]));
+        assert_eq!(trace_list["inputSchema"]["additionalProperties"], false);
+        assert!(trace_list["inputSchema"]["properties"]["limit"].is_object());
+        assert!(trace_list["inputSchema"]["properties"]["traceId"].is_object());
+        assert_eq!(
             trace_list["outputSchema"]["properties"]["details"]["properties"]["primitiveOperation"]
                 ["const"],
             "trace_list"
@@ -3352,6 +3372,7 @@ mod tests {
             trace_get["inputSchema"]["required"],
             json!(["operation", "traceRecordId"])
         );
+        assert_eq!(trace_get["inputSchema"]["additionalProperties"], false);
         assert!(
             trace_get["inputSchema"]["properties"]["traceRecordId"]["description"]
                 .as_str()
