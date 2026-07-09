@@ -11,6 +11,9 @@
 //! channel. Trace projections also preserve bounded top-level proof metadata so
 //! the model can verify redaction and status semantics without inferring from
 //! missing raw fields.
+//! Context-control action lists expose exact provider-safe inspect arguments for
+//! each returned action so the model can drill into durable audit records without
+//! guessing resource ids.
 //! Broad cockpit projections are a compact operation directory by default;
 //! exact `targetOperation` cockpit calls keep the deep readiness, preflight,
 //! binding, shadow, route, rollback, and agent-path detail. This keeps the
@@ -113,6 +116,9 @@ fn model_context_evidence(details: Option<&Value>) -> Option<String> {
         operation if operation.starts_with("git_") => project_git_evidence(details),
         "log_recent" => project_log_evidence(details),
         "trace_list" | "trace_get" => project_trace_evidence(details),
+        operation if operation.starts_with("context_control_") => {
+            project_context_control_evidence(operation, details)
+        }
         operation if projects_metadata_operation(operation) => {
             project_metadata_operation_evidence(operation, details)
         }
@@ -920,6 +926,132 @@ fn project_trace_record(record: &Value) -> Value {
     if let Some(error) = record.get("error").or_else(|| metadata.get("error")) {
         if let Some(error) = project_failure_value(error) {
             projected.insert("error".to_owned(), error);
+        }
+    }
+    Value::Object(projected)
+}
+
+fn project_context_control_evidence(operation: &str, details: &Value) -> Option<Value> {
+    let context = details.get("contextControl")?;
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    projected.insert("operation".to_owned(), json!(operation));
+    for key in [
+        "schemaVersion",
+        "sessionId",
+        "contextControlSnapshotResourceId",
+        "contextControlSnapshotVersionId",
+        "contextControlActionResourceId",
+        "contextControlActionVersionId",
+    ] {
+        copy_key(&mut projected, context, key);
+    }
+    if let Some(projection) = context.get("projection") {
+        match operation {
+            "context_control_action_list" => {
+                if let Some(actions) = projection.pointer("/actions").and_then(Value::as_array) {
+                    projected.insert(
+                        "actions".to_owned(),
+                        json!({
+                            "total": actions.len(),
+                            "returned": actions.len().min(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+                            "truncated": actions.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
+                            "omitted": actions.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+                            "items": actions
+                                .iter()
+                                .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                                .map(project_context_control_action_summary)
+                                .collect::<Vec<_>>()
+                        }),
+                    );
+                    projected.insert(
+                        "agentNextStep".to_owned(),
+                        json!({
+                            "inspectOperation": "context_control_action_inspect",
+                            "argumentField": "contextControlActionResourceId",
+                            "source": "actions.items[].contextControlActionResourceId",
+                            "rule": "Use the exact contextControlActionResourceId returned by context_control_action_list when action audit detail is needed; do not invent ids."
+                        }),
+                    );
+                }
+                copy_pointer_as_key(&mut projected, projection, "/limit", "limit");
+                copy_pointer_as_key(&mut projected, projection, "/providerSafe", "providerSafe");
+            }
+            "context_control_action_inspect"
+            | "context_control_compact"
+            | "context_control_clear" => {
+                if let Some(action) = projection.get("action") {
+                    projected.insert(
+                        "action".to_owned(),
+                        project_context_control_action_summary(action),
+                    );
+                }
+                for key in ["preflight", "result", "auditRefs", "proof"] {
+                    if let Some(value) = projection.get(key) {
+                        projected.insert(key.to_owned(), bounded_model_context_value(value));
+                    }
+                }
+            }
+            "context_control_status" => {
+                if let Some(status) = projection.get("status") {
+                    projected.insert(
+                        "statusProjection".to_owned(),
+                        bounded_model_context_value(status),
+                    );
+                }
+            }
+            "context_control_snapshot" => {
+                if let Some(snapshot) = projection.get("snapshot") {
+                    projected.insert("snapshot".to_owned(), bounded_model_context_value(snapshot));
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(Value::Object(projected))
+}
+
+fn project_context_control_action_summary(action: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "actionId",
+        "state",
+        "kind",
+        "reason",
+        "actorKind",
+        "createdAt",
+        "updatedAt",
+        "resultStatus",
+    ] {
+        copy_key(&mut projected, action, key);
+    }
+    if let Some(resource) = action.get("resource") {
+        let mut projected_resource = Map::new();
+        for key in [
+            "kind",
+            "resourceKind",
+            "lifecycle",
+            "resourceId",
+            "versionId",
+        ] {
+            copy_key(&mut projected_resource, resource, key);
+        }
+        if let Some(resource_id) = resource.get("resourceId").and_then(Value::as_str) {
+            projected.insert(
+                "contextControlActionResourceId".to_owned(),
+                json!(truncate_model_context_string(resource_id)),
+            );
+            projected.insert(
+                "inspectArguments".to_owned(),
+                json!({
+                    "operation": "context_control_action_inspect",
+                    "contextControlActionResourceId": truncate_model_context_string(resource_id)
+                }),
+            );
+        }
+        if !projected_resource.is_empty() {
+            projected.insert("resource".to_owned(), Value::Object(projected_resource));
         }
     }
     Value::Object(projected)

@@ -849,6 +849,61 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
 }
 
 #[test]
+fn extract_result_content_projects_context_action_list_inspect_arguments() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Listed 1 context-control action(s).",
+        )]),
+        Some(json!({
+            "primitiveOperation": "context_control_action_list",
+            "status": "ok",
+            "contextControl": {
+                "operation": "context_control_action_list",
+                "schemaVersion": "tron.context_control_action.v1",
+                "sessionId": "sess_context_projection",
+                "projection": {
+                    "limit": 10,
+                    "providerSafe": true,
+                    "actions": [{
+                        "actionId": "compact-model-capability-invocation:v1:abc",
+                        "actorKind": "agent",
+                        "createdAt": "2026-07-09T00:00:00Z",
+                        "kind": "compact",
+                        "reason": "verify inspectable action refs",
+                        "resource": {
+                            "kind": "context_control_action",
+                            "lifecycle": "succeeded",
+                            "resourceId": "context_control_action:abc",
+                            "resourceKind": "context_control_action",
+                            "versionId": "ver_context_action_abc",
+                            "authorityGrantId": "grant_must_not_project"
+                        },
+                        "resultStatus": "succeeded",
+                        "state": "succeeded",
+                        "updatedAt": "2026-07-09T00:00:01Z"
+                    }]
+                },
+                "authorityGrantId": "grant_top_level_must_not_project"
+            }
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("modelContextEvidence"));
+    assert!(text.contains("\"inspectOperation\": \"context_control_action_inspect\""));
+    assert!(text.contains("\"argumentField\": \"contextControlActionResourceId\""));
+    assert!(text.contains("\"contextControlActionResourceId\": \"context_control_action:abc\""));
+    assert!(text.contains("\"operation\": \"context_control_action_inspect\""));
+    assert!(text.contains("\"resourceId\": \"context_control_action:abc\""));
+    assert!(text.contains("\"versionId\": \"ver_context_action_abc\""));
+    assert!(!text.contains("grant_must_not_project"));
+    assert!(!text.contains("grant_top_level_must_not_project"));
+    assert!(!text.contains("authorityGrantId"));
+}
+
+#[test]
 fn extract_result_content_projects_metadata_ids_without_raw_payload() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
