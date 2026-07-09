@@ -4182,6 +4182,66 @@ async fn cockpit_overview_filters_exact_operation_and_returns_agent_native_path(
         git_status["agentPath"]["completion"]["action"],
         json!("stop_after_targeted_cockpit")
     );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readinessVerdict"]["readyForRouting"],
+        json!(false)
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readinessVerdict"]["finalAnswerReady"],
+        json!(true)
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readinessVerdict"]["stopNow"],
+        json!(true)
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readinessVerdict"]["currentScopeState"],
+        json!("no_current_scope_shadow_or_route_evidence")
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readinessVerdict"]["currentScopeEvidence"],
+        json!({
+            "shadowEvidenceRefs": 0,
+            "shadowRuns": 0,
+            "routeBindings": 0,
+            "activeRoutes": 0,
+            "routeEvents": 0
+        })
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readOnlyBoundary"]["capabilityRequestedMutation"],
+        json!(false)
+    );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readOnlyBoundary"]["engineAuditPersistence"],
+        json!(true)
+    );
+    let governed_next_steps = git_status["agentPath"]["completion"]["governedNextSteps"]
+        .as_array()
+        .expect("governed next steps");
+    let governed_operations = governed_next_steps
+        .iter()
+        .map(|step| step["operation"].as_str().expect("next step operation"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        governed_operations,
+        vec![
+            "capability_replacement_candidate_record",
+            "capability_shadow_trial_request_record",
+            "capability_shadow_trial_decision_record",
+            "capability_shadow_trial_run_record",
+            "capability_shadow_trial_evidence_inspect",
+            "capability_binding_request_record",
+            "capability_binding_decision_record",
+            "capability_binding_policy_activate",
+            "capability_route_binding_record",
+            "capability_route_activate",
+            "capability_route_event_list",
+        ]
+    );
+    assert!(governed_next_steps.iter().any(|step| {
+        step["operation"] == "capability_route_activate" && step["requiresApproval"] == json!(true)
+    }));
     assert!(
         git_status["agentPath"]["completion"]["finalAnswerGuidance"]
             .as_str()

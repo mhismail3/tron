@@ -39,7 +39,10 @@
 //! Broad overview rows do not expose raw resource ids; targeted rows may expose
 //! bounded exact shadow-evidence inspect payloads when that is the only
 //! deterministic next step for the agent. The `capability_binding` domain owns
-//! the projection, not the operations being described.
+//! the projection, not the operations being described. Targeted rows also carry
+//! a final-answer-ready readiness verdict, the read-only boundary that explains
+//! engine audit persistence, and exact governed next-step operation names so
+//! agents do not infer replacement workflows from broad catalog matches.
 //!
 //! ## Submodules
 //!

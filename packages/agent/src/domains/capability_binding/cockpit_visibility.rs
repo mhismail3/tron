@@ -290,7 +290,48 @@ struct AgentPathCompletionProjection {
     reason: String,
     stop_when: String,
     final_answer_guidance: String,
+    readiness_verdict: AgentPathReadinessVerdictProjection,
+    read_only_boundary: AgentPathReadOnlyBoundaryProjection,
+    governed_next_steps: Vec<AgentPathNextStepProjection>,
     do_not_inspect: Vec<AgentPathDoNotInspectProjection>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathReadinessVerdictProjection {
+    ready_for_routing: bool,
+    final_answer_ready: bool,
+    stop_now: bool,
+    current_scope_state: String,
+    current_scope_evidence: AgentPathEvidenceCountsProjection,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathEvidenceCountsProjection {
+    shadow_evidence_refs: usize,
+    shadow_runs: usize,
+    route_bindings: usize,
+    active_routes: usize,
+    route_events: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathReadOnlyBoundaryProjection {
+    capability_requested_mutation: bool,
+    engine_audit_persistence: bool,
+    detail: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPathNextStepProjection {
+    order: usize,
+    operation: &'static str,
+    effect: &'static str,
+    requires_approval: bool,
+    reason: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1119,6 +1160,15 @@ fn agent_path_completion_projection(
     let has_shadow_evidence = !shadow_trial.evidence_refs.is_empty() || shadow_trial.runs > 0;
     let has_route_evidence =
         route.route_events > 0 || route.active_routes > 0 || route.bindings > 0;
+    let readiness_verdict = readiness_verdict_projection(
+        readiness,
+        shadow_trial,
+        route,
+        has_shadow_evidence,
+        has_route_evidence,
+    );
+    let read_only_boundary = read_only_boundary_projection();
+    let governed_next_steps = governed_next_steps_projection(readiness, route);
     if has_shadow_evidence || has_route_evidence {
         AgentPathCompletionProjection {
             state: "continue_with_returned_evidence_refs".to_owned(),
@@ -1128,6 +1178,9 @@ fn agent_path_completion_projection(
                 .to_owned(),
             final_answer_guidance: "Answer from targeted cockpit facts, exact evidence refs, route events, and provider-safe trace/resource projections."
                 .to_owned(),
+            readiness_verdict,
+            read_only_boundary,
+            governed_next_steps,
             do_not_inspect: vec![AgentPathDoNotInspectProjection {
                 operation: "unsupported_shadow_trial_list_operations".to_owned(),
                 reason:
@@ -1147,6 +1200,9 @@ fn agent_path_completion_projection(
                 .to_owned(),
             final_answer_guidance: "State that no current-scope shadow or route evidence is recorded for this operation, and do not inspect evidence schemas without an exact evidence resource id."
                 .to_owned(),
+            readiness_verdict,
+            read_only_boundary,
+            governed_next_steps,
             do_not_inspect: vec![
                 AgentPathDoNotInspectProjection {
                     operation: "capability_shadow_trial_evidence_inspect".to_owned(),
@@ -1163,6 +1219,169 @@ fn agent_path_completion_projection(
             ],
         }
     }
+}
+
+fn readiness_verdict_projection(
+    readiness: &ReadinessProjection,
+    shadow_trial: &ShadowTrialProjection,
+    route: &RouteProjection,
+    has_shadow_evidence: bool,
+    has_route_evidence: bool,
+) -> AgentPathReadinessVerdictProjection {
+    let ready_for_routing = readiness.state == "runtime_route_active";
+    let stop_now = !has_shadow_evidence && !has_route_evidence;
+    let current_scope_state = if ready_for_routing {
+        "active_runtime_route_recorded"
+    } else if has_shadow_evidence || has_route_evidence {
+        "current_scope_evidence_available"
+    } else {
+        "no_current_scope_shadow_or_route_evidence"
+    };
+    AgentPathReadinessVerdictProjection {
+        ready_for_routing,
+        final_answer_ready: stop_now,
+        stop_now,
+        current_scope_state: current_scope_state.to_owned(),
+        current_scope_evidence: AgentPathEvidenceCountsProjection {
+            shadow_evidence_refs: shadow_trial.evidence_refs.len(),
+            shadow_runs: shadow_trial.runs,
+            route_bindings: route.bindings,
+            active_routes: route.active_routes,
+            route_events: route.route_events,
+        },
+    }
+}
+
+fn read_only_boundary_projection() -> AgentPathReadOnlyBoundaryProjection {
+    AgentPathReadOnlyBoundaryProjection {
+        capability_requested_mutation: false,
+        engine_audit_persistence: true,
+        detail: "Read-only capability inspection must not request target effects or governance writes, but the engine still records session, trace, resource, and audit evidence so the run can be replayed.",
+    }
+}
+
+fn governed_next_steps_projection(
+    readiness: &ReadinessProjection,
+    route: &RouteProjection,
+) -> Vec<AgentPathNextStepProjection> {
+    if route.active_routes > 0 {
+        return vec![
+            AgentPathNextStepProjection {
+                order: 1,
+                operation: "capability_route_event_list",
+                effect: "read_route_history",
+                requires_approval: false,
+                reason: "Inspect routed invocation and activation history before changing an active route.",
+            },
+            AgentPathNextStepProjection {
+                order: 2,
+                operation: "capability_route_disable",
+                effect: "metadata_write",
+                requires_approval: true,
+                reason: "Disable the active scoped route only when the user or policy asks to stop using it.",
+            },
+            AgentPathNextStepProjection {
+                order: 3,
+                operation: "capability_route_rollback",
+                effect: "metadata_write",
+                requires_approval: true,
+                reason: "Roll back when verification fails or built-in ownership must be restored.",
+            },
+        ];
+    }
+    if !matches!(
+        readiness.state.as_str(),
+        "proposal_possible"
+            | "route_candidate_recorded"
+            | "metadata_policy_active"
+            | "needs_governance_review"
+            | "shadow_evidence_recorded"
+            | "awaiting_governance"
+            | "route_failed_closed"
+            | "route_disabled"
+            | "route_rolled_back"
+    ) {
+        return Vec::new();
+    }
+    vec![
+        AgentPathNextStepProjection {
+            order: 1,
+            operation: "capability_replacement_candidate_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Record the candidate module, contract, authority, rollback, and safety rationale.",
+        },
+        AgentPathNextStepProjection {
+            order: 2,
+            operation: "capability_shadow_trial_request_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Request a shadow comparison without routing live user calls.",
+        },
+        AgentPathNextStepProjection {
+            order: 3,
+            operation: "capability_shadow_trial_decision_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Record governance approval or denial before any shadow run.",
+        },
+        AgentPathNextStepProjection {
+            order: 4,
+            operation: "capability_shadow_trial_run_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Persist bounded built-in versus candidate comparison evidence.",
+        },
+        AgentPathNextStepProjection {
+            order: 5,
+            operation: "capability_shadow_trial_evidence_inspect",
+            effect: "read_evidence",
+            requires_approval: false,
+            reason: "Inspect only the exact evidence resource id returned by the shadow run.",
+        },
+        AgentPathNextStepProjection {
+            order: 6,
+            operation: "capability_binding_request_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Request binding only after candidate and shadow evidence prove contract compatibility.",
+        },
+        AgentPathNextStepProjection {
+            order: 7,
+            operation: "capability_binding_decision_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Record approval or denial for the proposed binding.",
+        },
+        AgentPathNextStepProjection {
+            order: 8,
+            operation: "capability_binding_policy_activate",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Activate governance policy metadata before runtime routing.",
+        },
+        AgentPathNextStepProjection {
+            order: 9,
+            operation: "capability_route_binding_record",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Create the exact scoped route binding with rollback proof.",
+        },
+        AgentPathNextStepProjection {
+            order: 10,
+            operation: "capability_route_activate",
+            effect: "metadata_write",
+            requires_approval: true,
+            reason: "Activate the route only after all prior governed evidence exists.",
+        },
+        AgentPathNextStepProjection {
+            order: 11,
+            operation: "capability_route_event_list",
+            effect: "read_route_history",
+            requires_approval: false,
+            reason: "Verify activation, routed invocations, failed-closed events, and rollback history.",
+        },
+    ]
 }
 
 fn capability_pool_role_projection(
