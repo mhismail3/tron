@@ -86,6 +86,20 @@ fn catalog_search_content(discovery: &Value) -> String {
             ));
         }
     }
+    if let Some(candidates) = discovery
+        .get("unsupportedOperationCandidates")
+        .and_then(Value::as_array)
+        .filter(|candidates| !candidates.is_empty())
+    {
+        let names = candidates
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        content.push_str(&format!(
+            " Explicit unsupported operation candidate(s): {names}. Do not invoke or inspect those names as supported operations; follow unsupportedOperationRecovery."
+        ));
+    }
     content
 }
 
@@ -135,6 +149,27 @@ pub(super) async fn catalog_inspect(
             }),
         ));
     }
+    if let Some(candidate) = unsupported_execute_operation_inspect_candidate(&invocation.payload) {
+        let recovery = unsupported_operation_recovery_projection(&candidate);
+        return Ok(ok_result(
+            format!(
+                "Catalog inspect found no provider-visible operation named {}. Do not invoke this name; follow unsupportedOperationRecovery.",
+                candidate.canonical
+            ),
+            json!({
+                "primitiveOperation": "catalog_inspect",
+                "status": "ok",
+                "catalogDiscovery": {
+                    "kind": "execute_operation",
+                    "id": format!("execute::{}", candidate.canonical),
+                    "found": false,
+                    "providerCallable": false,
+                    "unsupportedOperationCandidate": true,
+                    "unsupportedOperationRecovery": recovery
+                }
+            }),
+        ));
+    }
 
     let (payload, alias) = normalize_catalog_inspect_payload(&invocation.payload);
     let normalized_invocation = Invocation {
@@ -177,6 +212,19 @@ fn execute_operation_inspect_target(payload: &Value) -> Option<(String, String)>
     } else {
         None
     }
+}
+
+fn unsupported_execute_operation_inspect_candidate(
+    payload: &Value,
+) -> Option<OperationSearchQuery> {
+    if payload.get("kind").and_then(Value::as_str)? != "function" {
+        return None;
+    }
+    let id = payload.get("id").and_then(Value::as_str)?;
+    let candidate = OperationSearchQuery::from_text(id.strip_prefix("execute::").unwrap_or(id))?;
+    (!is_supported_operation(&candidate.canonical)
+        && looks_like_unsupported_operation_candidate(&candidate))
+    .then_some(candidate)
 }
 
 #[cfg(test)]
@@ -1593,19 +1641,32 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     let Some(query) = query else {
         return;
     };
+    let unsupported_candidates = explicit_unsupported_operation_candidates(&query);
+    let focus_on_unsupported_candidate =
+        !unsupported_candidates.is_empty() && supported_operations_in_query(&query).is_empty();
     let limit = payload
         .get("limit")
         .and_then(Value::as_u64)
         .map(|limit| limit as usize)
         .unwrap_or(20)
         .clamp(1, 50);
-    let mut matches = supported_operation_names()
-        .iter()
-        .filter_map(|operation| operation_match_projection(operation, &query))
-        .collect::<Vec<_>>();
-    let plan_operations = operation_search_plan_supported_operations(&query);
-    let trace_operations = trace_evidence_plan_supported_operations(&query);
-    let module_governance_operations = module_governance_plan_supported_operations(&query);
+    let mut matches = if focus_on_unsupported_candidate {
+        Vec::new()
+    } else {
+        supported_operation_names()
+            .iter()
+            .filter_map(|operation| operation_match_projection(operation, &query))
+            .collect::<Vec<_>>()
+    };
+    let plan_operations = (!focus_on_unsupported_candidate)
+        .then(|| operation_search_plan_supported_operations(&query))
+        .unwrap_or_default();
+    let trace_operations = (!focus_on_unsupported_candidate)
+        .then(|| trace_evidence_plan_supported_operations(&query))
+        .unwrap_or_default();
+    let module_governance_operations = (!focus_on_unsupported_candidate)
+        .then(|| module_governance_plan_supported_operations(&query))
+        .unwrap_or_default();
     for operation in &plan_operations {
         promote_or_insert_planned_operation_match(&mut matches, operation);
     }
@@ -1720,7 +1781,25 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             object.insert("agentNextStep".to_owned(), next_step);
         }
         object.insert("executeOperationMatches".to_owned(), Value::Array(matches));
-        if total == 0
+        if !unsupported_candidates.is_empty() {
+            object.insert(
+                "unsupportedOperationCandidates".to_owned(),
+                Value::Array(
+                    unsupported_candidates
+                        .iter()
+                        .map(|candidate| Value::String(candidate.canonical.clone()))
+                        .collect(),
+                ),
+            );
+            object.insert(
+                "unsupportedOperationCandidate".to_owned(),
+                Value::Bool(true),
+            );
+            object.insert(
+                "unsupportedOperationRecovery".to_owned(),
+                unsupported_operation_recovery_projection(&unsupported_candidates[0]),
+            );
+        } else if total == 0
             && effect_excluded_total == 0
             && looks_like_unsupported_operation_candidate(&query)
         {
@@ -1874,6 +1953,27 @@ fn looks_like_unsupported_operation_candidate(query: &OperationSearchQuery) -> b
             || canonical.ends_with("_activate")
             || canonical.ends_with("_rollback")
             || canonical.ends_with("_disable"))
+}
+
+fn explicit_unsupported_operation_candidates(
+    query: &OperationSearchQuery,
+) -> Vec<OperationSearchQuery> {
+    let mut candidates = query
+        .display
+        .split_whitespace()
+        .filter_map(OperationSearchQuery::from_text)
+        .filter(|candidate| looks_like_unsupported_operation_candidate(candidate))
+        .filter(|candidate| !is_supported_operation(&candidate.canonical))
+        .filter(|candidate| {
+            let prefix = format!("{}_", candidate.canonical);
+            !supported_operation_names()
+                .iter()
+                .any(|operation| operation.starts_with(&prefix))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.canonical.cmp(&right.canonical));
+    candidates.dedup_by(|left, right| left.canonical == right.canonical);
+    candidates
 }
 
 fn unsupported_operation_recovery_projection(query: &OperationSearchQuery) -> Value {
@@ -4567,6 +4667,47 @@ mod tests {
         assert!(alternatives.iter().any(|alternative| {
             alternative["operation"] == "capability_shadow_trial_evidence_inspect"
         }));
+    }
+
+    #[test]
+    fn catalog_search_prioritizes_explicit_unsupported_tokens_in_natural_language() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "effectClass": "pure_read",
+                "limit": 10,
+                "text": "capability_shadow_trial_request_list provider-visible operation"
+            }),
+        );
+
+        assert_eq!(discovery["executeOperationSearch"]["totalMatches"], 0);
+        assert_eq!(discovery["executeOperationMatches"], json!([]));
+        assert_eq!(
+            discovery["unsupportedOperationCandidates"],
+            json!(["capability_shadow_trial_request_list"])
+        );
+        assert_eq!(discovery["unsupportedOperationCandidate"], true);
+        assert!(
+            catalog_search_content(&discovery)
+                .contains("Do not invoke or inspect those names as supported operations")
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_returns_recovery_for_explicit_unsupported_execute_id() {
+        let candidate = unsupported_execute_operation_inspect_candidate(&json!({
+            "kind": "function",
+            "id": "execute::capability_shadow_trial_request_list"
+        }))
+        .expect("unsupported execute candidate");
+
+        assert_eq!(candidate.canonical, "capability_shadow_trial_request_list");
+        assert_eq!(
+            unsupported_operation_recovery_projection(&candidate)["supportedOperation"],
+            false
+        );
     }
 
     #[test]

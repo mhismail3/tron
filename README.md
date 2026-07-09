@@ -1217,6 +1217,12 @@ schemas are opt-in through `includeOutputSchema: true`; ordinary inspection
 returns one input schema rather than duplicating input/output contracts across
 multiple result fields.
 
+Catalog search extracts complete operation-like tokens from natural-language
+queries. Unsupported names are reported explicitly and do not produce unrelated
+fuzzy operation matches, while valid prefixes still expand to supported
+operations. Inspecting an unsupported `execute::<operation>` id returns bounded
+recovery guidance rather than an opaque catalog failure.
+
 Capability modularity is tracked in
 `packages/agent/docs/capability-modularity-scorecard.md`, with the
 machine-readable inventory in

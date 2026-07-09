@@ -211,6 +211,11 @@
 //! only the catalog bootstrap fields plus an open operation payload. Exact
 //! operation fields remain discoverable through `catalog_inspect`; the compact
 //! bootstrap must not become a second operation-contract registry.
+//! Natural-language catalog queries that contain a complete unsupported
+//! operation-like token report that token explicitly and suppress unrelated
+//! fuzzy matches. Valid operation prefixes still expand normally. Inspecting an
+//! unsupported `execute::<operation>` id returns bounded recovery metadata
+//! instead of surfacing a generic catalog-engine failure.
 //! File access through this tool must use the hardened `filesystem_*` operation
 //! package registered in the operations registry.
 //! Agent-launched executions persist trace provider ownership and canonical
