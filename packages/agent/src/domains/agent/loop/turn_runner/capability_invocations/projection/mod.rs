@@ -368,12 +368,39 @@ fn project_effect_class_excluded_operation_match(operation: &Value) -> Value {
         "matchKind",
         "score",
         "capabilityPool",
-        "agentUsage",
         "excludedByEffectClass",
         "exclusionReason",
     ] {
         copy_key(&mut projected, operation, key);
     }
+    if let Some(agent_usage) = operation.get("agentUsage") {
+        projected.insert(
+            "agentUsage".to_owned(),
+            project_effect_class_excluded_agent_usage(agent_usage),
+        );
+    }
+    projected.insert(
+        "invokeArgumentsOmitted".to_owned(),
+        json!("excluded_by_active_effect_filter"),
+    );
+    Value::Object(projected)
+}
+
+fn project_effect_class_excluded_agent_usage(agent_usage: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "operation",
+        "tool",
+        "audience",
+        "callable",
+        "defaultUse",
+        "effect",
+        "preflight",
+        "failureRecovery",
+    ] {
+        copy_key(&mut projected, agent_usage, key);
+    }
+    projected.insert("currentSearchCallable".to_owned(), Value::Bool(false));
     projected.insert(
         "invokeArgumentsOmitted".to_owned(),
         json!("excluded_by_active_effect_filter"),

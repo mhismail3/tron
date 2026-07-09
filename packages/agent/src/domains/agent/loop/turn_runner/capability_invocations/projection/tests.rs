@@ -150,6 +150,16 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
                     "operation": "question_answer",
                     "catalogInspectId": "execute::question_answer",
                     "arguments": {"operation": "question_answer"},
+                    "agentUsage": {
+                        "operation": "question_answer",
+                        "tool": "capability::execute",
+                        "arguments": {"operation": "question_answer"},
+                        "callable": true,
+                        "effect": {
+                            "mode": "state_change",
+                            "readOnlyInspectionSafe": false
+                        }
+                    },
                     "exclusionReason": "Supported operation exists but was excluded from immediate invocation by the requested effect class."
                 }]
             }
@@ -197,8 +207,22 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
             .all(|target| target.get("arguments").is_none()),
         "effect-excluded projection must not expose direct execute args: {excluded_matches:#?}"
     );
+    assert!(
+        excluded_matches
+            .iter()
+            .all(|target| target.pointer("/agentUsage/arguments").is_none()),
+        "effect-excluded agent usage must not expose direct execute args: {excluded_matches:#?}"
+    );
     assert_eq!(
         excluded_matches[0]["invokeArgumentsOmitted"],
+        json!("excluded_by_active_effect_filter")
+    );
+    assert_eq!(
+        excluded_matches[0]["agentUsage"]["currentSearchCallable"],
+        json!(false)
+    );
+    assert_eq!(
+        excluded_matches[0]["agentUsage"]["invokeArgumentsOmitted"],
         json!("excluded_by_active_effect_filter")
     );
 }
