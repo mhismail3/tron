@@ -107,6 +107,66 @@ fn extract_result_content_projects_catalog_ids_for_model_context() {
 }
 
 #[test]
+fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Catalog search returned execute operation matches.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "catalog_search",
+            "status": "ok",
+            "catalogDiscovery": {
+                "executeOperationSearch": {
+                    "query": "question",
+                    "effectClassExcludedMatches": 1
+                },
+                "executeOperationMatches": [{
+                    "operation": "question_inspect",
+                    "catalogInspectId": "execute::question_inspect",
+                    "arguments": {"operation": "question_inspect"}
+                }],
+                "allDiscoveredInspectTargets": [{
+                    "operation": "question_inspect",
+                    "catalogInspectId": "execute::question_inspect",
+                    "inspectArguments": {
+                        "operation": "catalog_inspect",
+                        "kind": "function",
+                        "id": "execute::question_inspect"
+                    },
+                    "excludedFromImmediateInvocation": false
+                }, {
+                    "operation": "question_answer",
+                    "catalogInspectId": "execute::question_answer",
+                    "inspectArguments": {
+                        "operation": "catalog_inspect",
+                        "kind": "function",
+                        "id": "execute::question_answer"
+                    },
+                    "excludedFromImmediateInvocation": true
+                }],
+                "effectClassExcludedOperationMatches": [{
+                    "operation": "question_answer",
+                    "catalogInspectId": "execute::question_answer",
+                    "exclusionReason": "Supported operation exists but was excluded from immediate invocation by the requested effect class."
+                }]
+            }
+        })),
+    );
+
+    let content = extract_result_content(&exec);
+
+    let CapabilityResultMessageContent::Text(text) = content else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("modelContextEvidence"));
+    assert!(text.contains("allDiscoveredInspectTargets"));
+    assert!(text.contains("effectClassExcludedOperationMatches"));
+    assert!(text.contains("execute::question_inspect"));
+    assert!(text.contains("execute::question_answer"));
+    assert!(text.contains("excludedFromImmediateInvocation"));
+}
+
+#[test]
 fn extract_result_content_projects_catalog_operation_truncation_metadata() {
     let operations = (0..25)
         .map(|index| json!(format!("operation_{index}")))

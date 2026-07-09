@@ -14,6 +14,9 @@
 //! Context-control action lists expose exact provider-safe inspect arguments for
 //! each returned action so the model can drill into durable audit records without
 //! guessing resource ids.
+//! Catalog projections expose the merged inspect target list, including
+//! effect-excluded matches, so the model can inspect non-invocable operations
+//! without needing to reconstruct hidden search state.
 //! Broad cockpit projections are a compact operation directory by default;
 //! exact `targetOperation` cockpit calls keep the deep readiness, preflight,
 //! binding, shadow, route, rollback, and agent-path detail. This keeps the
@@ -167,6 +170,12 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
     copy_key(&mut projected, discovery, "agentUsage");
     copy_key(&mut projected, discovery, "schema");
     copy_key(&mut projected, discovery, "executeOperationSearch");
+    copy_key(&mut projected, discovery, "allDiscoveredInspectTargets");
+    copy_key(
+        &mut projected,
+        discovery,
+        "effectClassExcludedOperationMatches",
+    );
     copy_key(&mut projected, discovery, "agentNextStep");
     copy_key(&mut projected, discovery, "unsupportedOperationCandidate");
     copy_key(&mut projected, discovery, "unsupportedOperationRecovery");
