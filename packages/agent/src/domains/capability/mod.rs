@@ -95,8 +95,10 @@
 //! arguments plus a preferred `catalog_inspect` step for the `execute::<operation>`
 //! schema before backing catalog-function diagnostics, unsupported
 //! operation-like names return explicit recovery guidance instead of fuzzy near
-//! matches, and readiness searches that name one runtime-routable target
-//! operation return a deterministic read-only
+//! matches, read-only searches include one merged `allDiscoveredInspectTargets`
+//! list for both immediately callable read-only matches and supported
+//! effect-excluded operations that should be inspected but not invoked, and
+//! readiness searches that name one runtime-routable target operation return a deterministic read-only
 //! `agentSearchPlan` limited to the exact inspect/list sequence before the
 //! model needs to inspect cockpit details. Trace/evidence searches that name one
 //! target operation return a separate read-only plan: inspect the
@@ -105,8 +107,9 @@
 //! through replacement-readiness surfaces; `trace_get` is reserved for focused
 //! per-record detail after `trace_list` returns an exact record id. Trace
 //! projections name visible trace/invocation fields as safe engine refs, not raw
-//! provider invocation ids, and separate provider-visible capability safety from
-//! internal replay/policy bookkeeping.
+//! provider invocation ids, label the current `trace_list` invocation as pending
+//! at projection time until completion is recorded, and separate
+//! provider-visible capability safety from internal replay/policy bookkeeping.
 //! Broad module-governance readiness searches return a deterministic read-only
 //! plan over module registry/lifecycle/runtime/dependency, binding, candidate,
 //! route, and route-event list surfaces. That plan marks default list payloads

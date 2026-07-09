@@ -91,7 +91,7 @@ fn trace_list_content(record_count: usize, status_summary: &Value) -> String {
         .and_then(Value::as_u64)
         .unwrap_or(0);
     format!(
-        "Trace records: {record_count}. Completed trace statuses: ok {ok_count}, failed {failed_count}. In-progress records: {in_progress}; the current trace_list call may appear as running until this call completes. {TRACE_PROJECTION_BOUNDARY_CONTENT}"
+        "Trace records: {record_count}. Completed trace statuses: ok {ok_count}, failed {failed_count}. In-progress records: {in_progress}; the current trace_list call is pending at projection time and may appear in-progress until this call completes. {TRACE_PROJECTION_BOUNDARY_CONTENT}"
     )
 }
 
@@ -123,7 +123,10 @@ fn trace_status_summary(records: &[Value]) -> Value {
         "completedStatusValuesOnlyOkFailed": completed_status_values_only_ok_failed,
         "inProgressCount": in_progress_count,
         "currentTraceListMayAppearRunning": true,
-        "answerGuidance": "When asked whether trace status values are only ok/failed, answer about completed trace records separately from in-progress records. The current trace_list invocation can appear running until this call is complete."
+        "currentInvocationStatus": "pending_at_projection_time",
+        "inProgressInterpretation": "The currently executing trace_list invocation can be included before its completion is recorded, so an in-progress trace_list record does not mean a completed trace has a non-ok/failed status.",
+        "completedStatusGuidance": "Use completedStatusCounts and completedStatusValuesOnlyOkFailed for claims about finished trace records.",
+        "answerGuidance": "When asked whether trace status values are only ok/failed, answer about completed trace records separately from in-progress records. Treat the current trace_list invocation as pending at projection time until this call is complete."
     })
 }
 
@@ -954,6 +957,22 @@ mod tests {
         assert_eq!(summary["completedStatusCounts"]["failed"], 1);
         assert_eq!(summary["completedStatusValuesOnlyOkFailed"], true);
         assert_eq!(summary["inProgressCount"], 1);
+        assert_eq!(
+            summary["currentInvocationStatus"],
+            "pending_at_projection_time"
+        );
+        assert!(
+            summary["inProgressInterpretation"]
+                .as_str()
+                .expect("in-progress interpretation")
+                .contains("does not mean a completed trace has a non-ok/failed status")
+        );
+        assert!(
+            summary["completedStatusGuidance"]
+                .as_str()
+                .expect("completed status guidance")
+                .contains("completedStatusCounts")
+        );
         assert!(
             summary["answerGuidance"]
                 .as_str()
@@ -961,7 +980,7 @@ mod tests {
                 .contains("completed trace records separately")
         );
         assert!(content.contains("Completed trace statuses: ok 1, failed 1"));
-        assert!(content.contains("current trace_list call may appear as running"));
+        assert!(content.contains("pending at projection time"));
     }
 
     #[test]

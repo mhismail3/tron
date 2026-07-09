@@ -819,7 +819,7 @@ fn execute_operation_output_schema(operation: &str) -> Value {
                         "projectionBoundary": trace_projection_boundary_output_schema(),
                         "statusSummary": {
                             "type": "object",
-                            "required": ["totalRecords", "completedStatusCounts", "inProgressCount", "currentTraceListMayAppearRunning"],
+                            "required": ["totalRecords", "completedStatusCounts", "inProgressCount", "currentTraceListMayAppearRunning", "currentInvocationStatus"],
                             "properties": {
                                 "totalRecords": {"type": "integer"},
                                 "completedStatusCounts": {
@@ -829,6 +829,12 @@ fn execute_operation_output_schema(operation: &str) -> Value {
                                 "completedStatusValuesOnlyOkFailed": {"type": "boolean"},
                                 "inProgressCount": {"type": "integer"},
                                 "currentTraceListMayAppearRunning": {"const": true},
+                                "currentInvocationStatus": {
+                                    "const": "pending_at_projection_time",
+                                    "description": "The current trace_list invocation is projected before its own completion is recorded."
+                                },
+                                "inProgressInterpretation": {"type": "string"},
+                                "completedStatusGuidance": {"type": "string"},
                                 "answerGuidance": {"type": "string"}
                             }
                         },
@@ -1366,6 +1372,8 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
     matches.truncate(limit);
     let effect_excluded_total = effect_excluded_matches.len();
     effect_excluded_matches.truncate(20);
+    let all_discovered_inspect_targets =
+        discovered_inspect_targets_projection(&matches, &effect_excluded_matches);
     if let Some(object) = discovery.as_object_mut() {
         object.insert(
             "executeOperationSearch".to_owned(),
@@ -1380,6 +1388,12 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
                 "effectClassExcludedMatches": effect_excluded_total,
             }),
         );
+        if !all_discovered_inspect_targets.is_empty() {
+            object.insert(
+                "allDiscoveredInspectTargets".to_owned(),
+                Value::Array(all_discovered_inspect_targets),
+            );
+        }
         if !effect_excluded_matches.is_empty() {
             object.insert(
                 "effectClassExcludedOperationMatches".to_owned(),
@@ -1418,6 +1432,69 @@ fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
             );
         }
     }
+}
+
+fn discovered_inspect_targets_projection(
+    included_matches: &[Value],
+    effect_excluded_matches: &[Value],
+) -> Vec<Value> {
+    included_matches
+        .iter()
+        .map(|entry| discovered_inspect_target_projection(entry, false))
+        .chain(
+            effect_excluded_matches
+                .iter()
+                .map(|entry| discovered_inspect_target_projection(entry, true)),
+        )
+        .collect()
+}
+
+fn discovered_inspect_target_projection(
+    entry: &Value,
+    excluded_from_immediate_invocation: bool,
+) -> Value {
+    let operation = entry
+        .get("operation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let catalog_inspect_id = entry
+        .get("catalogInspectId")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("execute::{operation}"));
+    let read_only_inspection_safe = entry
+        .pointer("/agentUsage/effect/readOnlyInspectionSafe")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut target = json!({
+        "operation": operation,
+        "tool": "capability::execute",
+        "catalogInspectId": catalog_inspect_id.clone(),
+        "inspectOperation": "catalog_inspect",
+        "inspectArguments": {
+            "operation": "catalog_inspect",
+            "kind": "function",
+            "id": catalog_inspect_id,
+            "maxSchemaBytes": 8000
+        },
+        "invokeArguments": {"operation": operation},
+        "readOnlyInspectionSafe": read_only_inspection_safe,
+        "excludedFromImmediateInvocation": excluded_from_immediate_invocation,
+        "agentGuidance": if excluded_from_immediate_invocation {
+            "Supported operation found but excluded from immediate invocation by the requested effect class. Inspect the schema only; do not invoke unless the task explicitly allows its effect."
+        } else {
+            "Inspect the schema before invoking the operation."
+        }
+    });
+    if let Some(reason) = entry.get("exclusionReason").and_then(Value::as_str) {
+        if let Some(object) = target.as_object_mut() {
+            object.insert(
+                "exclusionReason".to_owned(),
+                Value::String(reason.to_owned()),
+            );
+        }
+    }
+    target
 }
 
 fn effect_class_exclusion_projection(mut entry: Value) -> Value {
@@ -2816,6 +2893,11 @@ mod tests {
             "tron.trace.provider_safe.v1"
         );
         assert_eq!(
+            trace_list["outputSchema"]["properties"]["details"]["properties"]["statusSummary"]["properties"]
+                ["currentInvocationStatus"]["const"],
+            "pending_at_projection_time"
+        );
+        assert_eq!(
             record_schema["properties"]["projectionBoundary"]["properties"]["safeEngineRefsOnly"]["const"],
             true
         );
@@ -3670,6 +3752,58 @@ mod tests {
                 .as_str()
                 .expect("exclusion reason")
                 .contains("Supported operation exists")
+        );
+    }
+
+    #[test]
+    fn catalog_search_returns_flat_inspect_targets_for_included_and_effect_excluded_matches() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_execute_operation_matches(
+            &mut discovery,
+            &json!({
+                "effectClass": "read_only",
+                "limit": 10,
+                "text": "question"
+            }),
+        );
+
+        let targets = discovery["allDiscoveredInspectTargets"]
+            .as_array()
+            .expect("flat inspect targets");
+        let operations = targets
+            .iter()
+            .filter_map(|target| target["operation"].as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(operations.contains("question_inspect"));
+        assert!(operations.contains("question_create"));
+        assert!(operations.contains("question_answer"));
+
+        let inspect = targets
+            .iter()
+            .find(|target| target["operation"] == "question_inspect")
+            .expect("question inspect target");
+        assert_eq!(inspect["catalogInspectId"], "execute::question_inspect");
+        assert_eq!(
+            inspect["inspectArguments"]["id"],
+            "execute::question_inspect"
+        );
+        assert_eq!(inspect["excludedFromImmediateInvocation"], false);
+        assert_eq!(inspect["readOnlyInspectionSafe"], true);
+
+        let create = targets
+            .iter()
+            .find(|target| target["operation"] == "question_create")
+            .expect("question create target");
+        assert_eq!(create["catalogInspectId"], "execute::question_create");
+        assert_eq!(create["inspectArguments"]["id"], "execute::question_create");
+        assert_eq!(create["excludedFromImmediateInvocation"], true);
+        assert_eq!(create["readOnlyInspectionSafe"], false);
+        assert!(
+            create["agentGuidance"]
+                .as_str()
+                .expect("agent guidance")
+                .contains("Inspect the schema only")
         );
     }
 
