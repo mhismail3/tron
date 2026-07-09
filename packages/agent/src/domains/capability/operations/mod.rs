@@ -8,7 +8,10 @@
 //! matches the requested job resource before status, cancellation, or cleanup
 //! can read or mutate job state; procedural module-pack operations similarly
 //! require exact procedural resource selectors and remain metadata-only review
-//! records rather than activation, prompt injection, or code execution.
+//! records rather than activation, prompt injection, or code execution. The
+//! short `content` string returned by each operation is model-facing navigation
+//! guidance: it must expose the decisive next action and point to structured
+//! evidence fields instead of acting as a UI-only prose summary.
 
 use std::time::Instant;
 

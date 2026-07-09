@@ -635,13 +635,17 @@ fn cockpit_overview_content(details: &Value) -> String {
             .and_then(|operation| operation.pointer("/route/bindings"))
             .and_then(Value::as_u64)
             .unwrap_or(0);
+        let route_events = operation
+            .and_then(|operation| operation.pointer("/route/routeEvents"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         if evidence_refs > 0 {
             return format!(
-                "Targeted cockpit for {target_operation}: {evidence_refs} exact shadow evidence inspect payload(s), {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), and {active_routes} active route(s). Use returned capability_shadow_trial_evidence_inspect payloads for exact evidence."
+                "Targeted cockpit for {target_operation}: {evidence_refs} exact shadow evidence inspect payload(s), {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), {active_routes} active route(s), and {route_events} route event(s). Inspect only returned evidence refs, then answer from agentPath.completion."
             );
         }
         return format!(
-            "Targeted cockpit for {target_operation}: no scoped shadow evidence refs, {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), and {active_routes} active route(s). If counts are zero, stop and report no current-scope evidence. Do not inspect evidence schemas without an exact evidence resource id, and do not inspect the target adapter schema unless the task requires invoking the adapter effect."
+            "Targeted cockpit for {target_operation}: no scoped shadow evidence refs, {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), {active_routes} active route(s), and {route_events} route event(s). Verdict is final-answer-ready when these counts are zero: stop after this row, report no current-scope evidence, and copy agentPath.completion.governedNextSteps exactly for future workflow operation names. Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
         );
     }
     if returned < total {
@@ -727,14 +731,15 @@ mod tests {
                 "route": {
                     "candidates": 0,
                     "bindings": 0,
-                    "activeRoutes": 0
+                    "activeRoutes": 0,
+                    "routeEvents": 0
                 }
             }]
         });
 
         assert_eq!(
             cockpit_overview_content(&details),
-            "Targeted cockpit for git_status: no scoped shadow evidence refs, 0 shadow run(s), 0 candidate(s), 0 route binding(s), and 0 active route(s). If counts are zero, stop and report no current-scope evidence. Do not inspect evidence schemas without an exact evidence resource id, and do not inspect the target adapter schema unless the task requires invoking the adapter effect."
+            "Targeted cockpit for git_status: no scoped shadow evidence refs, 0 shadow run(s), 0 candidate(s), 0 route binding(s), 0 active route(s), and 0 route event(s). Verdict is final-answer-ready when these counts are zero: stop after this row, report no current-scope evidence, and copy agentPath.completion.governedNextSteps exactly for future workflow operation names. Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
         );
     }
 
