@@ -1287,10 +1287,14 @@ routes must satisfy. It does not claim broad autonomous self-update across every
 operation.
 `catalog_inspect` also projects operation-specific contracts for provider-safe
 trace and web operations. `execute::trace_list` and `execute::trace_get` show the
-model the safe record shape and redaction guarantees before invocation, while
-`execute::web_robots_check` and `execute::web_fetch` show the exact top-level web
-payload fields, bounded network controls, and robots-policy freshness linkage
-needed for safe web use.
+model the safe record shape and redaction guarantees before invocation. Whole
+session trace proof is point-in-time: agents call `trace_list` after the
+operations being audited or explicitly qualify that later operations are not
+covered, and they distinguish provider transcript tool-call ids from raw trace
+`providerInvocationId` fields, which trace projections exclude.
+`execute::web_robots_check` and `execute::web_fetch` show the exact top-level
+web payload fields, bounded network controls, and robots-policy freshness
+linkage needed for safe web use.
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
