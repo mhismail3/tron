@@ -639,19 +639,36 @@ fn cockpit_overview_content(details: &Value) -> String {
             .and_then(|operation| operation.pointer("/route/routeEvents"))
             .and_then(Value::as_u64)
             .unwrap_or(0);
+        let next_steps = operation
+            .and_then(|operation| operation.pointer("/agentPath/completion/governedNextSteps"))
+            .and_then(Value::as_array)
+            .map(|steps| governed_next_step_operations_text(steps))
+            .unwrap_or_else(|| "No governed next-step operations are available.".to_owned());
         if evidence_refs > 0 {
             return format!(
-                "Targeted cockpit for {target_operation}: {evidence_refs} exact shadow evidence inspect payload(s), {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), {active_routes} active route(s), and {route_events} route event(s). Inspect only returned evidence refs, then answer from agentPath.completion."
+                "Targeted cockpit for {target_operation}: {evidence_refs} exact shadow evidence inspect payload(s), {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), {active_routes} active route(s), and {route_events} route event(s). Inspect only returned evidence refs, then answer from agentPath.completion. Exact governed next-step operations: {next_steps}"
             );
         }
         return format!(
-            "Targeted cockpit for {target_operation}: no scoped shadow evidence refs, {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), {active_routes} active route(s), and {route_events} route event(s). Verdict is final-answer-ready when these counts are zero: stop after this row, report no current-scope evidence, and copy agentPath.completion.governedNextSteps exactly for future workflow operation names. Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
+            "Targeted cockpit for {target_operation}: no scoped shadow evidence refs, {shadow_runs} shadow run(s), {candidates} candidate(s), {bindings} route binding(s), {active_routes} active route(s), and {route_events} route event(s). Verdict is final-answer-ready when these counts are zero: stop after this row and report no current-scope evidence. Exact governed next-step operations: {next_steps} Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
         );
     }
     if returned < total {
         return format!("Capability cockpit overview returned {returned} of {total} operation(s).");
     }
     format!("Capability cockpit overview returned {total} operation(s).")
+}
+
+fn governed_next_step_operations_text(steps: &[Value]) -> String {
+    let operations = steps
+        .iter()
+        .filter_map(|step| step.get("operation").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if operations.is_empty() {
+        "No governed next-step operations are available.".to_owned()
+    } else {
+        operations.join(" -> ")
+    }
 }
 
 fn cockpit_overview_result_details(details: Value) -> Value {
@@ -733,13 +750,30 @@ mod tests {
                     "bindings": 0,
                     "activeRoutes": 0,
                     "routeEvents": 0
+                },
+                "agentPath": {
+                    "completion": {
+                        "governedNextSteps": [
+                            {"operation": "capability_replacement_candidate_record"},
+                            {"operation": "capability_shadow_trial_request_record"},
+                            {"operation": "capability_shadow_trial_decision_record"},
+                            {"operation": "capability_shadow_trial_run_record"},
+                            {"operation": "capability_shadow_trial_evidence_inspect"},
+                            {"operation": "capability_binding_request_record"},
+                            {"operation": "capability_binding_decision_record"},
+                            {"operation": "capability_binding_policy_activate"},
+                            {"operation": "capability_route_binding_record"},
+                            {"operation": "capability_route_activate"},
+                            {"operation": "capability_route_event_list"}
+                        ]
+                    }
                 }
             }]
         });
 
         assert_eq!(
             cockpit_overview_content(&details),
-            "Targeted cockpit for git_status: no scoped shadow evidence refs, 0 shadow run(s), 0 candidate(s), 0 route binding(s), 0 active route(s), and 0 route event(s). Verdict is final-answer-ready when these counts are zero: stop after this row, report no current-scope evidence, and copy agentPath.completion.governedNextSteps exactly for future workflow operation names. Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
+            "Targeted cockpit for git_status: no scoped shadow evidence refs, 0 shadow run(s), 0 candidate(s), 0 route binding(s), 0 active route(s), and 0 route event(s). Verdict is final-answer-ready when these counts are zero: stop after this row and report no current-scope evidence. Exact governed next-step operations: capability_replacement_candidate_record -> capability_shadow_trial_request_record -> capability_shadow_trial_decision_record -> capability_shadow_trial_run_record -> capability_shadow_trial_evidence_inspect -> capability_binding_request_record -> capability_binding_decision_record -> capability_binding_policy_activate -> capability_route_binding_record -> capability_route_activate -> capability_route_event_list Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
         );
     }
 
