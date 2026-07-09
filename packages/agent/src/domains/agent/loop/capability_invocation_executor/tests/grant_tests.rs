@@ -493,6 +493,82 @@ async fn capability_binding_list_runtime_grants_authorize_exact_record_kind_only
 }
 
 #[tokio::test]
+async fn capability_binding_cockpit_overview_runtime_grant_authorizes_governance_projection_kinds()
+{
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "capability_binding_cockpit_overview",
+        "targetOperation": "git_status",
+        "idempotencyKey": "capability-binding-cockpit-overview-runtime-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+    assert_eq!(grant.network_policy, "none");
+    assert!(!grant.allowed_resource_kinds.is_empty());
+    assert_invocation_scopes(
+        &invocation,
+        &[
+            "capability.execute",
+            "capability_binding.read",
+            "resource.read",
+        ],
+    );
+    for expected_kind in [
+        "capability_binding_request",
+        "capability_binding_decision",
+        "capability_binding_policy",
+        "capability_replacement_candidate",
+        "capability_route_binding",
+        "capability_route_activation",
+        "capability_route_event",
+        "capability_route_rollback",
+        "capability_shadow_trial_request",
+        "capability_shadow_trial_decision",
+        "capability_shadow_trial_run",
+        "capability_shadow_trial_evidence",
+    ] {
+        assert!(
+            grant
+                .allowed_resource_kinds
+                .contains(&expected_kind.to_owned()),
+            "cockpit overview grant missing kind {expected_kind}: {:?}",
+            grant.allowed_resource_kinds
+        );
+        assert!(
+            grant
+                .resource_selectors
+                .contains(&format!("kind:{expected_kind}")),
+            "cockpit overview grant missing selector kind:{expected_kind}: {:?}",
+            grant.resource_selectors
+        );
+    }
+    assert!(
+        grant
+            .resource_selectors
+            .contains(&"session:session-grant".to_owned()),
+        "cockpit overview grant should remain session-scoped: {:?}",
+        grant.resource_selectors
+    );
+    assert!(
+        !grant
+            .allowed_resource_kinds
+            .contains(&"agent_state".to_owned()),
+        "cockpit overview must not inherit agent_state authority"
+    );
+    assert!(
+        !grant
+            .allowed_authority_scopes
+            .contains(&"capability_binding.write".to_owned()),
+        "cockpit overview must stay read-only"
+    );
+}
+
+#[tokio::test]
 async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "procedural_state_inspect",

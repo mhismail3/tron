@@ -829,7 +829,7 @@ pub(super) async fn derive_capability_runtime_grant(
     if context_control_operation {
         resource_selectors.push(format!("session:{session_id}"));
     }
-    if capability_route_operation {
+    if capability_route_operation || operation == "capability_binding_cockpit_overview" {
         resource_selectors.push(format!("session:{session_id}"));
     }
     for (operations, field) in exact_resource_selector_fields() {
@@ -1055,7 +1055,8 @@ fn is_capability_binding_operation(operation: &str) -> bool {
 fn is_capability_binding_read_operation(operation: &str) -> bool {
     matches!(
         operation,
-        "capability_binding_request_list"
+        "capability_binding_cockpit_overview"
+            | "capability_binding_request_list"
             | "capability_binding_request_inspect"
             | "capability_binding_decision_list"
             | "capability_binding_decision_inspect"
@@ -1075,6 +1076,17 @@ fn is_capability_binding_write_operation(operation: &str) -> bool {
 
 fn capability_binding_resource_kinds(operation: &str) -> Vec<String> {
     match operation {
+        "capability_binding_cockpit_overview" => {
+            let mut kinds = vec![
+                "capability_binding_request".to_owned(),
+                "capability_binding_decision".to_owned(),
+                "capability_binding_policy".to_owned(),
+            ];
+            kinds.extend(capability_route_resource_kinds());
+            kinds.sort();
+            kinds.dedup();
+            kinds
+        }
         "capability_binding_request_record"
         | "capability_binding_request_list"
         | "capability_binding_request_inspect" => vec!["capability_binding_request".to_owned()],
