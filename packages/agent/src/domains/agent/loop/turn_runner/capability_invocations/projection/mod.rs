@@ -119,6 +119,9 @@ fn model_context_evidence(details: Option<&Value>) -> Option<String> {
         operation if operation.starts_with("context_control_") => {
             project_context_control_evidence(operation, details)
         }
+        operation if operation.starts_with("goal_") || operation.starts_with("question_") => {
+            project_goal_question_evidence(operation, details)
+        }
         operation if projects_metadata_operation(operation) => {
             project_metadata_operation_evidence(operation, details)
         }
@@ -1140,6 +1143,193 @@ fn project_metadata_operation_evidence(operation: &str, details: &Value) -> Opti
     (projected.len() > 2).then_some(Value::Object(projected))
 }
 
+fn project_goal_question_evidence(operation: &str, details: &Value) -> Option<Value> {
+    let Value::Object(mut projected) = project_metadata_operation_evidence(operation, details)?
+    else {
+        return None;
+    };
+
+    match operation {
+        "goal_create" | "goal_inspect" | "goal_cancel" => {
+            if let Some(goal_ref) = goal_action_ref(details) {
+                projected.insert("agentGoalRef".to_owned(), goal_ref);
+            }
+            if let Some(goal) = details.get("goal").and_then(goal_action_ref) {
+                projected.insert("agentGoalRef".to_owned(), goal);
+            }
+            projected.insert(
+                "agentNextStep".to_owned(),
+                json!("Use the returned goalResourceId exactly. Inspect with goal_inspect before cancellation or follow-up decisions; never invent goal ids."),
+            );
+        }
+        "goal_list" => {
+            if let Some(goals) = details.get("goals").and_then(Value::as_array) {
+                projected.insert(
+                    "agentInspectableGoals".to_owned(),
+                    resource_action_list(
+                        goals,
+                        goal_action_ref,
+                        "No goals were returned in the current scope.",
+                    ),
+                );
+            }
+            projected.insert(
+                "agentNextStep".to_owned(),
+                json!("Use an exact goalResourceId from agentInspectableGoals.items[].inspectArguments. If no item is returned, do not call goal_inspect or goal_cancel."),
+            );
+        }
+        "question_create" | "question_inspect" | "question_answer" => {
+            if let Some(question_ref) = question_action_ref(details) {
+                projected.insert("agentQuestionRef".to_owned(), question_ref);
+            }
+            if let Some(question) = details.get("question").and_then(question_action_ref) {
+                projected.insert("agentQuestionRef".to_owned(), question);
+            }
+            projected.insert(
+                "agentNextStep".to_owned(),
+                json!("Use the returned questionResourceId and questionVersionId exactly. Answer with question_answer only after inspecting or receiving the current questionVersionId; never invent question ids or versions."),
+            );
+        }
+        "question_list" => {
+            if let Some(questions) = details.get("questions").and_then(Value::as_array) {
+                projected.insert(
+                    "agentInspectableQuestions".to_owned(),
+                    resource_action_list(
+                        questions,
+                        question_action_ref,
+                        "No questions were returned in the current scope.",
+                    ),
+                );
+            }
+            projected.insert(
+                "agentNextStep".to_owned(),
+                json!("Use an exact questionResourceId from agentInspectableQuestions.items[].inspectArguments. If no item is returned, do not call question_inspect or question_answer."),
+            );
+        }
+        _ => {}
+    }
+
+    Some(Value::Object(projected))
+}
+
+fn resource_action_list(
+    records: &[Value],
+    project: fn(&Value) -> Option<Value>,
+    empty_guidance: &str,
+) -> Value {
+    let items = records
+        .iter()
+        .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+        .filter_map(project)
+        .collect::<Vec<_>>();
+    json!({
+        "total": records.len(),
+        "returned": items.len(),
+        "truncated": records.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
+        "omitted": records.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+        "emptyGuidance": empty_guidance,
+        "items": items
+    })
+}
+
+fn goal_action_ref(record: &Value) -> Option<Value> {
+    let goal_resource_id = record.get("goalResourceId").and_then(Value::as_str)?;
+    let mut projected = Map::new();
+    copy_key(&mut projected, record, "goalResourceId");
+    copy_key(&mut projected, record, "goalVersionId");
+    copy_key(&mut projected, record, "state");
+    copy_key(&mut projected, record, "status");
+    copy_key(&mut projected, record, "summary");
+    copy_key(&mut projected, record, "summaryTruncated");
+    copy_key(&mut projected, record, "revision");
+    copy_key(&mut projected, record, "queueRefCount");
+    copy_key(&mut projected, record, "planRefCount");
+    copy_key(&mut projected, record, "evidenceRefCount");
+    copy_key(&mut projected, record, "resourceRefs");
+    projected.insert(
+        "inspectArguments".to_owned(),
+        json!({
+            "operation": "goal_inspect",
+            "goalResourceId": goal_resource_id
+        }),
+    );
+    if goal_is_cancellable(record) {
+        projected.insert(
+            "cancelArgumentsBase".to_owned(),
+            json!({
+                "operation": "goal_cancel",
+                "goalResourceId": goal_resource_id
+            }),
+        );
+        projected.insert(
+            "cancelRequiredAdditionalFields".to_owned(),
+            json!(["reason", "idempotencyKey"]),
+        );
+    }
+    Some(Value::Object(projected))
+}
+
+fn goal_is_cancellable(record: &Value) -> bool {
+    let state = record
+        .get("state")
+        .or_else(|| record.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    matches!(state, "open")
+}
+
+fn question_action_ref(record: &Value) -> Option<Value> {
+    let question_resource_id = record.get("questionResourceId").and_then(Value::as_str)?;
+    let mut projected = Map::new();
+    copy_key(&mut projected, record, "questionResourceId");
+    copy_key(&mut projected, record, "questionVersionId");
+    copy_key(&mut projected, record, "state");
+    copy_key(&mut projected, record, "status");
+    copy_key(&mut projected, record, "summary");
+    copy_key(&mut projected, record, "summaryTruncated");
+    copy_key(&mut projected, record, "goalRef");
+    copy_key(&mut projected, record, "expiresAt");
+    copy_key(&mut projected, record, "revision");
+    copy_key(&mut projected, record, "answerResourceId");
+    copy_key(&mut projected, record, "answerVersionId");
+    copy_key(&mut projected, record, "unblocksGoal");
+    copy_key(&mut projected, record, "answerDoesNotMintAuthority");
+    copy_key(&mut projected, record, "resourceRefs");
+    projected.insert(
+        "inspectArguments".to_owned(),
+        json!({
+            "operation": "question_inspect",
+            "questionResourceId": question_resource_id
+        }),
+    );
+    if question_is_answerable(record) {
+        if let Some(question_version_id) = record.get("questionVersionId").and_then(Value::as_str) {
+            projected.insert(
+                "answerArgumentsBase".to_owned(),
+                json!({
+                    "operation": "question_answer",
+                    "questionResourceId": question_resource_id,
+                    "expectedQuestionVersionId": question_version_id
+                }),
+            );
+            projected.insert(
+                "answerRequiredAdditionalFields".to_owned(),
+                json!(["answerText", "reason", "idempotencyKey"]),
+            );
+        }
+    }
+    Some(Value::Object(projected))
+}
+
+fn question_is_answerable(record: &Value) -> bool {
+    let state = record
+        .get("state")
+        .or_else(|| record.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    matches!(state, "pending")
+}
+
 fn project_safe_metadata_value(key: &str, value: &Value, depth: usize) -> Option<Value> {
     if depth > 5 || denied_model_context_key(key) {
         return None;
@@ -1351,6 +1541,8 @@ fn denied_model_context_key(key: &str) -> bool {
         || lower.contains("token")
         || lower.contains("credential")
         || lower.contains("password")
+        || lower == "idempotency"
+        || lower.contains("idempotencykey")
         || lower.contains("raw")
         || lower.contains("command")
         || lower == "cmd"

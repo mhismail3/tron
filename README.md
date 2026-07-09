@@ -1384,12 +1384,12 @@ Current primitive operations:
 | `module_program_execution_status` | Inspect one delegated module job through exact runtime and job selectors, returning ref-only job/output custody with fingerprints, truncation, duration, exit, timeout, and terminal metadata instead of job logs or output previews. |
 | `module_program_execution_cancel` | Request cancellation for one delegated module job through exact runtime/job selectors and idempotency, updating module runtime cancellation metadata while keeping raw reason/output/process payloads out of provider-visible results. |
 | `module_program_execution_cleanup` | Archive one terminal delegated module job after exact module-runtime and job-version freshness checks, recording cleanup metadata and bounded refs without exposing raw job or execution-output resource payloads. |
-| `goal_create` | Create a scoped durable `goal` record with bounded objective, owner/scope, queue/plan/evidence refs, trace/replay refs, lifecycle state, and resource evidence. |
-| `goal_list` | List scoped goal records with bounded summaries and explicit truncation metadata. |
+| `goal_create` | Create a scoped durable `goal` record with bounded objective, owner/scope, queue/plan/evidence refs, trace/replay refs, lifecycle state, resource evidence, and exact provider-safe inspect/cancel argument bases. |
+| `goal_list` | List scoped goal records with bounded summaries, explicit truncation metadata, and exact provider-safe `goal_inspect`/`goal_cancel` argument bases for returned records. |
 | `goal_inspect` | Inspect one scoped goal record with current resource/version refs and lifecycle evidence. |
 | `goal_cancel` | Cancel one nonterminal goal idempotently with required reason, lifecycle stream evidence, and resource-version freshness. |
-| `question_create` | Create a scoped durable `user_question` record, optionally associated with a goal, with prompt/options/free-form/expiry and trace/replay evidence. |
-| `question_list` | List scoped user questions with bounded summaries and explicit truncation metadata. |
+| `question_create` | Create a scoped durable `user_question` record, optionally associated with a goal, with prompt/options/free-form/expiry, trace/replay evidence, and exact provider-safe inspect/answer argument bases. |
+| `question_list` | List scoped user questions with bounded summaries, explicit truncation metadata, and exact provider-safe `question_inspect`/`question_answer` argument bases for returned pending questions. |
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
 | `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, optionally linking current-session allow `web_robots_policy` evidence by `webRobotsPolicyResourceId` plus `expectedWebRobotsPolicyVersionId` before target network I/O. |
@@ -1598,6 +1598,10 @@ authority/freshness evidence, idempotency details, trace/replay refs, and
 bounded provider-visible refs. Answering requires a stable idempotency key and
 `expectedQuestionVersionId`; stale, wrong-scope, expired, closed, malformed,
 empty, oversized, missing-reason, or untrusted-context calls fail closed.
+Create/list projections include exact provider-safe inspect arguments and
+bounded answer/cancel argument bases so the model can continue from returned
+resource refs without inventing goal or question ids; raw prompt bodies,
+authority grant ids, and hidden payloads remain outside model context.
 This foundation does not add an autonomous goal runner, planner, hidden prompt
 queue, notification/APNs behavior, subagents, public
 `/engine` goal API expansion, settings fields, or native Work/question UI.

@@ -947,6 +947,81 @@ fn extract_result_content_projects_metadata_ids_without_raw_payload() {
 }
 
 #[test]
+fn extract_result_content_projects_goal_question_next_call_arguments() {
+    let goal_exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("Goal list returned.".into()),
+        Some(json!({
+            "primitiveOperation": "goal_list",
+            "status": "ok",
+            "goals": [{
+                "goalResourceId": "goal:abc123",
+                "goalVersionId": "ver_goal_abc123",
+                "state": "open",
+                "summary": "Bounded test goal",
+                "summaryTruncated": false,
+                "revision": 1,
+                "resourceRefs": [{"kind": "goal", "resourceId": "goal:abc123"}],
+                "authorityGrantId": "grant_must_not_project"
+            }],
+            "authorityGrantId": "grant_top_level_must_not_project"
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(goal_text) = extract_result_content(&goal_exec) else {
+        panic!("expected text result");
+    };
+    assert!(goal_text.contains("modelContextEvidence"));
+    assert!(goal_text.contains("\"agentInspectableGoals\""));
+    assert!(goal_text.contains("\"inspectArguments\""));
+    assert!(goal_text.contains("\"operation\": \"goal_inspect\""));
+    assert!(goal_text.contains("\"goalResourceId\": \"goal:abc123\""));
+    assert!(goal_text.contains("\"cancelArgumentsBase\""));
+    assert!(goal_text.contains("\"operation\": \"goal_cancel\""));
+    assert!(goal_text.contains("\"cancelRequiredAdditionalFields\""));
+    assert!(goal_text.contains("\"reason\""));
+    assert!(goal_text.contains("\"idempotencyKey\""));
+    assert!(!goal_text.contains("grant_must_not_project"));
+    assert!(!goal_text.contains("grant_top_level_must_not_project"));
+    assert!(!goal_text.contains("authorityGrantId"));
+
+    let question_exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("Question list returned.".into()),
+        Some(json!({
+            "primitiveOperation": "question_list",
+            "status": "ok",
+            "questions": [{
+                "questionResourceId": "user_question:def456",
+                "questionVersionId": "ver_question_def456",
+                "state": "pending",
+                "summary": "Bounded question summary",
+                "summaryTruncated": false,
+                "prompt": "raw prompt body must not be projected",
+                "revision": 1,
+                "resourceRefs": [{"kind": "user_question", "resourceId": "user_question:def456"}]
+            }]
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(question_text) =
+        extract_result_content(&question_exec)
+    else {
+        panic!("expected text result");
+    };
+    assert!(question_text.contains("\"agentInspectableQuestions\""));
+    assert!(question_text.contains("\"operation\": \"question_inspect\""));
+    assert!(question_text.contains("\"questionResourceId\": \"user_question:def456\""));
+    assert!(question_text.contains("\"answerArgumentsBase\""));
+    assert!(question_text.contains("\"operation\": \"question_answer\""));
+    assert!(question_text.contains("\"expectedQuestionVersionId\": \"ver_question_def456\""));
+    assert!(question_text.contains("\"answerRequiredAdditionalFields\""));
+    assert!(question_text.contains("\"answerText\""));
+    assert!(question_text.contains("\"reason\""));
+    assert!(question_text.contains("\"idempotencyKey\""));
+    assert!(!question_text.contains("raw prompt body"));
+    assert!(!question_text.contains("\"prompt\""));
+}
+
+#[test]
 fn extract_result_content_projects_schema_error_code_and_path() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(

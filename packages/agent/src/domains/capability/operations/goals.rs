@@ -12,7 +12,7 @@ pub(super) async fn goal_create(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::create_goal_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Goal recorded.", details))
+    Ok(result("Goal recorded.", "goal_create", details))
 }
 
 pub(super) async fn goal_list(
@@ -21,7 +21,7 @@ pub(super) async fn goal_list(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::list_goals_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Goal list returned.", details))
+    Ok(result("Goal list returned.", "goal_list", details))
 }
 
 pub(super) async fn goal_inspect(
@@ -30,7 +30,7 @@ pub(super) async fn goal_inspect(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::inspect_goal_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Goal inspected.", details))
+    Ok(result("Goal inspected.", "goal_inspect", details))
 }
 
 pub(super) async fn goal_cancel(
@@ -39,7 +39,7 @@ pub(super) async fn goal_cancel(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::cancel_goal_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Goal cancelled.", details))
+    Ok(result("Goal cancelled.", "goal_cancel", details))
 }
 
 pub(super) async fn question_create(
@@ -48,7 +48,7 @@ pub(super) async fn question_create(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::create_question_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Question recorded.", details))
+    Ok(result("Question recorded.", "question_create", details))
 }
 
 pub(super) async fn question_list(
@@ -57,7 +57,7 @@ pub(super) async fn question_list(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::list_questions_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Question list returned.", details))
+    Ok(result("Question list returned.", "question_list", details))
 }
 
 pub(super) async fn question_inspect(
@@ -66,7 +66,7 @@ pub(super) async fn question_inspect(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::inspect_question_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Question inspected.", details))
+    Ok(result("Question inspected.", "question_inspect", details))
 }
 
 pub(super) async fn question_answer(
@@ -75,9 +75,24 @@ pub(super) async fn question_answer(
 ) -> Result<CapabilityResult, CapabilityError> {
     let details =
         service::answer_question_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    Ok(result("Question answered.", details))
+    Ok(result("Question answered.", "question_answer", details))
 }
 
-fn result(text: &str, details: Value) -> CapabilityResult {
+fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
+    let mut details = details;
+    match &mut details {
+        Value::Object(object) => {
+            object.insert(
+                "primitiveOperation".to_owned(),
+                Value::String(operation.to_owned()),
+            );
+        }
+        other => {
+            details = serde_json::json!({
+                "primitiveOperation": operation,
+                "details": other
+            });
+        }
+    }
     ok_result(text.to_owned(), details)
 }

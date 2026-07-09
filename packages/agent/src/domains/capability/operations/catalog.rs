@@ -1064,8 +1064,19 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
             "idempotencyKey",
         ],
         "trace_get" => vec!["operation", "traceRecordId"],
+        "goal_create" => vec!["operation", "objective", "idempotencyKey"],
         "goal_inspect" => vec!["operation", "goalResourceId"],
+        "goal_cancel" => vec!["operation", "goalResourceId", "reason", "idempotencyKey"],
+        "question_create" => vec!["operation", "prompt", "idempotencyKey"],
         "question_inspect" => vec!["operation", "questionResourceId"],
+        "question_answer" => vec![
+            "operation",
+            "questionResourceId",
+            "expectedQuestionVersionId",
+            "answerText",
+            "reason",
+            "idempotencyKey",
+        ],
         "memory_inspect" => vec!["operation", "recordResourceId"],
         "memory_query_inspect" => vec!["operation", "queryResourceId"],
         "memory_decision_inspect" => vec!["operation", "decisionResourceId"],
@@ -3120,6 +3131,67 @@ mod tests {
         assert!(
             !discovery.to_string().contains("repositoryTreeRefId"),
             "catalog must not suggest unsupported repository tree aliases"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_goal_question_required_fields() {
+        let goal_create =
+            execute_operation_inspect_projection("goal_create", "execute::goal_create");
+        assert_eq!(
+            goal_create["schema"]["requiredPayloadFields"],
+            json!(["operation", "objective", "idempotencyKey"])
+        );
+        assert_eq!(
+            goal_create["inputSchema"]["required"],
+            json!(["operation", "objective", "idempotencyKey"])
+        );
+
+        let goal_cancel =
+            execute_operation_inspect_projection("goal_cancel", "execute::goal_cancel");
+        assert_eq!(
+            goal_cancel["schema"]["requiredPayloadFields"],
+            json!(["operation", "goalResourceId", "reason", "idempotencyKey"])
+        );
+        assert_eq!(
+            goal_cancel["inputSchema"]["required"],
+            json!(["operation", "goalResourceId", "reason", "idempotencyKey"])
+        );
+
+        let question_create =
+            execute_operation_inspect_projection("question_create", "execute::question_create");
+        assert_eq!(
+            question_create["schema"]["requiredPayloadFields"],
+            json!(["operation", "prompt", "idempotencyKey"])
+        );
+        assert_eq!(
+            question_create["inputSchema"]["required"],
+            json!(["operation", "prompt", "idempotencyKey"])
+        );
+
+        let question_answer =
+            execute_operation_inspect_projection("question_answer", "execute::question_answer");
+        assert_eq!(
+            question_answer["schema"]["requiredPayloadFields"],
+            json!([
+                "operation",
+                "questionResourceId",
+                "expectedQuestionVersionId",
+                "answerText",
+                "reason",
+                "idempotencyKey"
+            ])
+        );
+        assert_eq!(
+            question_answer["inputSchema"]["required"],
+            json!([
+                "operation",
+                "questionResourceId",
+                "expectedQuestionVersionId",
+                "answerText",
+                "reason",
+                "idempotencyKey"
+            ])
         );
     }
 
