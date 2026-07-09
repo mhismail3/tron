@@ -176,6 +176,26 @@ pub(crate) fn register_engine_transport_triggers_for_context(
     Ok(())
 }
 
+/// Register public engine transport trigger types and message triggers during
+/// async server startup.
+pub(crate) async fn register_engine_transport_triggers_for_runtime_context(
+    ctx: &ServerRuntimeContext,
+) -> EngineResult<()> {
+    let handle = &ctx.engine_host;
+    handle
+        .register_trigger_type(engine_ws_trigger_type()?, false)
+        .await?;
+    handle
+        .register_trigger_type(manual_trigger_type()?, false)
+        .await?;
+    for spec in &public_engine_transport_specs()? {
+        if let Some(trigger) = engine_ws_trigger_for_spec(spec)? {
+            handle.register_trigger(trigger, false).await?;
+        }
+    }
+    Ok(())
+}
+
 fn public_spec(
     method: &'static str,
     function_id: &'static str,

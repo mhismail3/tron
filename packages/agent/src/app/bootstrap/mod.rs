@@ -487,8 +487,11 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let config = ServerConfig::from_settings(args.host, args.port, &settings.server);
     let metrics_handle = crate::app::health::metrics::install_recorder();
     let server = TronServer::new(config, runtime_context, metrics_handle);
-    crate::transport::runtime::setup::register_server_domains_for_context(server.runtime_context())
-        .context("Failed to register server domain workers")?;
+    crate::transport::runtime::setup::register_server_domains_for_runtime_context(
+        server.runtime_context(),
+    )
+    .await
+    .context("Failed to register server domain workers")?;
     register_blocking_supervisor_shutdown(server.shutdown());
     register_transcription_sidecar(
         settings.server.transcription.enabled,

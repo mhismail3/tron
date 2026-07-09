@@ -28,8 +28,10 @@
 //!   [`crate::engine::EngineHostHandle`].
 //! - [`engine::socket::run_engine_ws_session`] owns one live WebSocket session,
 //!   subscriptions, request/response writes, and socket closure.
-//! - [`runtime::setup::register_server_domains_for_context`] registers retained
-//!   domain workers during app startup.
+//! - [`runtime::setup::register_server_domains_for_runtime_context`] registers
+//!   retained domain workers during async app startup.
+//! - [`runtime::setup::register_server_domains_for_context`] remains the
+//!   single-threaded setup/test fixture entrypoint.
 //! - [`runtime::EngineRuntimeServices::start`] launches retained runtime pumps.
 //!
 //! ## Invariants

@@ -48,8 +48,11 @@ async fn server_boots_and_responds() {
         .build_recorder()
         .handle();
     let server = TronServer::new(config, runtime_context, metrics_handle);
-    crate::transport::runtime::setup::register_server_domains_for_context(server.runtime_context())
-        .unwrap();
+    crate::transport::runtime::setup::register_server_domains_for_runtime_context(
+        server.runtime_context(),
+    )
+    .await
+    .unwrap();
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
@@ -108,8 +111,11 @@ async fn server_graceful_shutdown() {
         .build_recorder()
         .handle();
     let server = TronServer::new(ServerConfig::default(), runtime_context, metrics_handle);
-    crate::transport::runtime::setup::register_server_domains_for_context(server.runtime_context())
-        .unwrap();
+    crate::transport::runtime::setup::register_server_domains_for_runtime_context(
+        server.runtime_context(),
+    )
+    .await
+    .unwrap();
     let (_, handle) = server.listen().await.unwrap();
 
     server.shutdown().shutdown();

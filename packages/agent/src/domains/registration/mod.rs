@@ -42,6 +42,14 @@ pub(crate) fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) ->
     register_domain_workers(ctx)
 }
 
+/// Register server-owned domain workers, canonical functions, and trigger
+/// records from async server startup.
+pub(crate) async fn register_domain_workers_for_runtime_context(
+    ctx: &ServerRuntimeContext,
+) -> EngineResult<()> {
+    register_domain_workers_runtime(ctx).await
+}
+
 fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
     for module in domain_worker_modules(ctx)? {
@@ -53,6 +61,20 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
                 Some(function.handler),
                 false,
             )?;
+        }
+    }
+    Ok(())
+}
+
+async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineResult<()> {
+    let handle = &ctx.engine_host;
+    for module in domain_worker_modules(ctx)? {
+        validate_domain_stream_topics(&module)?;
+        handle.register_worker(module.worker, false).await?;
+        for function in module.functions {
+            handle
+                .register_function(function.definition, Some(function.handler), false)
+                .await?;
         }
     }
     Ok(())

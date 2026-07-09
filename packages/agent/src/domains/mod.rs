@@ -80,9 +80,10 @@
 //! deps/service -> engine ledger/streams/queues/grants/leases`.
 //!
 //! Startup enters the domain tree through
-//! `transport::runtime::setup::register_server_domains_for_context`. That
-//! facade delegates to the crate-private registration owner, which is the only
-//! non-test code allowed to wire concrete domain worker modules. Individual
+//! `transport::runtime::setup::register_server_domains_for_runtime_context`.
+//! That facade delegates to the crate-private registration owner, which is the
+//! only non-test code allowed to wire concrete domain worker modules.
+//! Single-threaded test fixtures use the paired setup-only facade. Individual
 //! domains expose their public behavior through `contract.rs` definitions and
 //! handler tables, not through transport-specific functions.
 //!
