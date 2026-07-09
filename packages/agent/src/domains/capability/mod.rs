@@ -86,21 +86,27 @@
 //! exact `targetOperation` filter returns one operation row and a matching
 //! targeted content summary with the safe read-only path and unavailable-surface
 //! guidance, while the full projection remains durable UI/audit data. The turn
-//! runner appends a bounded
-//! provider-visible digest with coverage counts, family summaries, and
-//! representative operation samples so the agent can verify the pool without
-//! guessing or calling internal catalog functions directly.
+//! runner reads the compact durable `target` row for targeted calls and projects
+//! its completion verdict, exact governed next steps, and required final-answer
+//! suffix. Broad calls append a bounded provider-visible directory with coverage
+//! counts, family summaries, and representative operation samples so the agent
+//! can verify the pool without guessing or calling internal catalog functions
+//! directly.
 //! `catalog_search` is the agent-native entry point for operation discovery:
 //! exact and prefix operation queries return direct `capability::execute`
 //! arguments plus a preferred `catalog_inspect` step for the `execute::<operation>`
 //! schema before backing catalog-function diagnostics, unsupported
 //! operation-like names return explicit recovery guidance instead of fuzzy near
-//! matches, read-only searches include one merged `allDiscoveredInspectTargets`
-//! list for both immediately callable read-only matches and supported
-//! effect-excluded operations that should be inspected but not invoked, and
-//! readiness searches that name one runtime-routable target operation return a deterministic read-only
-//! `agentSearchPlan` limited to the exact inspect/list sequence before the
-//! model needs to inspect cockpit details. Trace/evidence searches that name one
+//! matches, durable search details include one merged
+//! `allDiscoveredInspectTargets` list for audit/replay, while provider context
+//! receives separate immediately callable and effect-excluded operation lists,
+//! and
+//! readiness searches that name one runtime-routable target operation retain a
+//! deterministic read-only `agentSearchPlan` in durable audit details. The
+//! provider projection deliberately omits that duplicated full plan and any
+//! contextual write-operation schemas; it receives exact operation matches and
+//! one compact `agentNextStep`, then obtains deep readiness from the targeted
+//! cockpit row. Trace/evidence searches that name one
 //! target operation return a separate read-only plan: inspect the
 //! `execute::<operation>` schema, invoke the target once, then inspect
 //! provider-safe trace evidence with `trace_list` instead of routing the agent

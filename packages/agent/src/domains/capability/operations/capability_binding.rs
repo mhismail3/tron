@@ -649,11 +649,11 @@ fn cockpit_overview_content(details: &Value) -> String {
         );
         if evidence_refs > 0 {
             return format!(
-                "Targeted cockpit for {target_operation}: currentScopeEvidence: {evidence_counts}. Continue only by inspecting returned evidence refs. Mandatory final-answer boundary (copy exactly): capabilityRequestedMutation=false; engineAuditPersistence=true. Exact governed next-step operations: {next_steps}"
+                "Targeted cockpit for {target_operation}: currentScopeEvidence: {evidence_counts}. Continue only by inspecting returned evidence refs. The final answer MUST end with this exact single line, byte-for-byte, including the semicolon: capabilityRequestedMutation=false; engineAuditPersistence=true Do not split, bullet, quote, or reformat that line. Exact governed next-step operations: {next_steps}"
             );
         }
         return format!(
-            "Targeted cockpit for {target_operation}: currentScopeEvidence: {evidence_counts}. Stop after this targeted cockpit and report no current-scope evidence. Mandatory final-answer boundary (copy exactly): capabilityRequestedMutation=false; engineAuditPersistence=true. Exact governed next-step operations: {next_steps} Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
+            "Targeted cockpit for {target_operation}: currentScopeEvidence: {evidence_counts}. Stop after this targeted cockpit and report no current-scope evidence. The final answer MUST end with this exact single line, byte-for-byte, including the semicolon: capabilityRequestedMutation=false; engineAuditPersistence=true Do not split, bullet, quote, or reformat that line. Exact governed next-step operations: {next_steps} Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
         );
     }
     if returned < total {
@@ -775,7 +775,7 @@ mod tests {
 
         assert_eq!(
             cockpit_overview_content(&details),
-            "Targeted cockpit for git_status: currentScopeEvidence: shadowEvidenceRefs=0; shadowRuns=0; replacementCandidates=0; routeBindings=0; activeRoutes=0; routeEvents=0. Stop after this targeted cockpit and report no current-scope evidence. Mandatory final-answer boundary (copy exactly): capabilityRequestedMutation=false; engineAuditPersistence=true. Exact governed next-step operations: capability_replacement_candidate_record -> capability_shadow_trial_request_record -> capability_shadow_trial_decision_record -> capability_shadow_trial_run_record -> capability_shadow_trial_evidence_inspect -> capability_binding_request_record -> capability_binding_decision_record -> capability_binding_policy_activate -> capability_route_binding_record -> capability_route_activate -> capability_route_event_list Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
+            "Targeted cockpit for git_status: currentScopeEvidence: shadowEvidenceRefs=0; shadowRuns=0; replacementCandidates=0; routeBindings=0; activeRoutes=0; routeEvents=0. Stop after this targeted cockpit and report no current-scope evidence. The final answer MUST end with this exact single line, byte-for-byte, including the semicolon: capabilityRequestedMutation=false; engineAuditPersistence=true Do not split, bullet, quote, or reformat that line. Exact governed next-step operations: capability_replacement_candidate_record -> capability_shadow_trial_request_record -> capability_shadow_trial_decision_record -> capability_shadow_trial_run_record -> capability_shadow_trial_evidence_inspect -> capability_binding_request_record -> capability_binding_decision_record -> capability_binding_policy_activate -> capability_route_binding_record -> capability_route_activate -> capability_route_event_list Do not inspect evidence schemas without an exact evidence resource id, and do not invoke the target adapter unless the task requires its effect."
         );
     }
 

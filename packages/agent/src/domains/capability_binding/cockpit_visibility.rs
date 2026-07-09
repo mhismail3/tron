@@ -321,6 +321,7 @@ struct AgentPathEvidenceCountsProjection {
 struct AgentPathReadOnlyBoundaryProjection {
     capability_requested_mutation: bool,
     engine_audit_persistence: bool,
+    required_final_answer_suffix: &'static str,
     detail: &'static str,
 }
 
@@ -1256,7 +1257,8 @@ fn read_only_boundary_projection() -> AgentPathReadOnlyBoundaryProjection {
     AgentPathReadOnlyBoundaryProjection {
         capability_requested_mutation: false,
         engine_audit_persistence: true,
-        detail: "Read-only capability inspection must not request target effects or governance writes, but the engine still records session, trace, resource, and audit evidence so the run can be replayed.",
+        required_final_answer_suffix: "capabilityRequestedMutation=false; engineAuditPersistence=true",
+        detail: "Read-only capability inspection must not request target effects or governance writes, but the engine still records session, trace, resource, and audit evidence so the run can be replayed. The final answer must end with requiredFinalAnswerSuffix as one unchanged line.",
     }
 }
 

@@ -107,7 +107,7 @@ fn extract_result_content_projects_catalog_ids_for_model_context() {
 }
 
 #[test]
-fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
+fn extract_result_content_separates_callable_and_effect_excluded_matches() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             "Catalog search returned execute operation matches.",
@@ -172,31 +172,17 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
         panic!("expected text result");
     };
     assert!(text.contains("modelContextEvidence"));
-    assert!(text.contains("allDiscoveredInspectTargets"));
+    assert!(!text.contains("allDiscoveredInspectTargets"));
     assert!(text.contains("effectClassExcludedOperationMatches"));
     assert!(text.contains("execute::question_inspect"));
     assert!(text.contains("execute::question_answer"));
-    assert!(text.contains("excludedFromImmediateInvocation"));
     let json_start = text.find("\n\n{").expect("model context evidence JSON") + 2;
     let evidence: Value =
         serde_json::from_str(&text[json_start..]).expect("model context evidence parses");
     let context = &evidence["modelContextEvidence"];
-    let targets = context["allDiscoveredInspectTargets"]
-        .as_array()
-        .expect("inspect targets");
-    assert!(
-        targets
-            .iter()
-            .all(|target| target.get("invokeArguments").is_none()),
-        "inspect-target projection must not expose direct invoke args: {targets:#?}"
-    );
-    let excluded_target = targets
-        .iter()
-        .find(|target| target["operation"] == "question_answer")
-        .expect("excluded inspect target");
     assert_eq!(
-        excluded_target["invokeArgumentsOmitted"],
-        json!("excluded_by_active_effect_filter")
+        context["executeOperationMatches"][0]["operation"],
+        json!("question_inspect")
     );
     let excluded_matches = context["effectClassExcludedOperationMatches"]
         .as_array()
@@ -228,7 +214,7 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
 }
 
 #[test]
-fn extract_result_content_projects_read_only_supported_operation_filter() {
+fn extract_result_content_omits_redundant_supported_operation_directory() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             "Catalog search found no operation matches.",
@@ -268,16 +254,8 @@ fn extract_result_content_projects_read_only_supported_operation_filter() {
     let CapabilityResultMessageContent::Text(text) = content else {
         panic!("expected text result");
     };
-    let json_start = text.find("\n\n{").expect("model context evidence JSON") + 2;
-    let evidence: Value =
-        serde_json::from_str(&text[json_start..]).expect("model context evidence parses");
-    let supported =
-        &evidence["modelContextEvidence"]["modelFacingGuidance"]["supportedExecuteOperations"];
-    assert_eq!(
-        supported["filter"]["mode"],
-        json!("read_only_inspection_safe")
-    );
-    assert_eq!(supported["returned"][0], json!("catalog_search"));
+    assert!(!text.contains("modelFacingGuidance"));
+    assert!(!text.contains("supportedExecuteOperations"));
     assert!(!text.contains("filesystem_write"));
     assert!(!text.contains("git_commit"));
 }
@@ -285,7 +263,13 @@ fn extract_result_content_projects_read_only_supported_operation_filter() {
 #[test]
 fn extract_result_content_projects_catalog_operation_truncation_metadata() {
     let operations = (0..25)
-        .map(|index| json!(format!("operation_{index}")))
+        .map(|index| {
+            json!({
+                "operation": format!("operation_{index}"),
+                "catalogInspectId": format!("execute::operation_{index}"),
+                "arguments": {"operation": format!("operation_{index}")}
+            })
+        })
         .collect::<Vec<_>>();
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
@@ -297,11 +281,7 @@ fn extract_result_content_projects_catalog_operation_truncation_metadata() {
             "catalogDiscovery": {
                 "summary": {"functions": {"visible": 1}},
                 "functions": [],
-                "modelFacingGuidance": {
-                    "catalogInspect": "Use functions[].id exactly.",
-                    "capabilityExecute": "Use capability::execute.",
-                    "supportedExecuteOperations": operations
-                }
+                "executeOperationMatches": operations
             }
         })),
     );
@@ -309,10 +289,7 @@ fn extract_result_content_projects_catalog_operation_truncation_metadata() {
     let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
         panic!("expected text result");
     };
-    assert!(text.contains("\"total\": 25"));
-    assert!(text.contains("\"returned\""));
-    assert!(text.contains("\"truncated\": true"));
-    assert!(text.contains("\"omitted\": 5"));
+    assert!(text.contains("\"executeOperationMatchesOmitted\": 5"));
     assert!(text.contains("operation_19"));
     assert!(!text.contains("operation_20"));
 }
@@ -440,7 +417,8 @@ fn extract_result_content_projects_git_status_evidence_for_agent() {
 }
 
 #[test]
-fn extract_result_content_projects_catalog_agent_search_plan() {
+fn extract_result_content_projects_compact_catalog_next_step() {
+    let oversized_durable_plan = "x".repeat(30_000);
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             "Catalog search returned 5 execute operation match(es).",
@@ -464,33 +442,26 @@ fn extract_result_content_projects_catalog_agent_search_plan() {
                         "replacementClass": "runtime_routable"
                     }
                 }],
-                "agentSearchPlan": {
-                    "targetOperation": "git_status",
+                "agentNextStep": {
+                    "priority": "follow_primary_inspection",
+                    "reason": "Inspect the exact target row.",
                     "primaryInspection": {
                         "operation": "capability_binding_cockpit_overview",
-                        "payload": {
+                        "arguments": {
                             "operation": "capability_binding_cockpit_overview",
-                            "targetOperation": "git_status",
-                            "limit": 1
+                            "targetOperation": "git_status"
                         },
                         "readOnlyInspectionSafe": true,
                         "reason": "Inspect replacement, binding, route, shadow, rollback, and evidence state for the exact target operation."
                     },
-                    "readOnlySequence": [{
-                        "operation": "capability_replacement_candidate_list",
-                        "payload": {
-                            "operation": "capability_replacement_candidate_list",
-                            "targetOperation": "git_status",
-                            "networkPolicy": "none"
-                        },
-                        "readOnlyInspectionSafe": true,
-                        "reason": "List replacement candidates for the target operation."
-                    }],
-                    "doNotCall": [{
-                        "operation": "capability_shadow_trial_request_list",
-                        "reason": "This is not a supported operation. Use capability_binding_cockpit_overview targetOperation plus route/candidate/evidence list or inspect operations."
-                    }],
+                    "thenFollow": "target.agentPath",
                     "completionRule": "If the targeted cockpit row reports zero candidates, zero active routes, and zero shadow-trial runs for the current scope, answer that no current-scope replacement evidence exists instead of searching unsupported list names."
+                },
+                "agentSearchPlan": {
+                    "contextualWriteOperations": [{
+                        "operation": "must_not_project",
+                        "schema": {"large": oversized_durable_plan}
+                    }]
                 }
             }
         })),
@@ -499,15 +470,21 @@ fn extract_result_content_projects_catalog_agent_search_plan() {
     let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
         panic!("expected text result");
     };
-    assert!(text.contains("agentSearchPlan"));
+    assert!(text.contains("agentNextStep"));
     assert!(text.contains("targetOperation"));
     assert!(text.contains("git_status"));
     assert!(text.contains("primaryInspection"));
     assert!(text.contains("capability_binding_cockpit_overview"));
-    assert!(text.contains("capability_replacement_candidate_list"));
-    assert!(text.contains("capability_shadow_trial_request_list"));
     assert!(text.contains("no current-scope replacement evidence exists"));
     assert!(text.contains("\"score\": 18"));
+    assert!(!text.contains("agentSearchPlan"));
+    assert!(!text.contains("contextualWriteOperations"));
+    assert!(!text.contains("must_not_project"));
+    assert!(
+        text.len() < 16_000,
+        "catalog search projection must fit the provider tool-result boundary: {} bytes",
+        text.len()
+    );
 }
 
 #[test]
@@ -976,7 +953,7 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
                     "targetOperation": "git_status",
                     "filterApplied": true
                 },
-                "operations": [{
+                "target": {
                     "name": "git_status",
                     "family": "git",
                     "familyLabel": "Git",
@@ -1006,9 +983,22 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
                             },
                             "readOnlyInspectionSafe": true,
                             "reason": "Exact operation row."
+                        },
+                        "completion": {
+                            "state": "answer_now_no_current_scope_evidence",
+                            "action": "stop_after_targeted_cockpit",
+                            "readOnlyBoundary": {
+                                "capabilityRequestedMutation": false,
+                                "engineAuditPersistence": true,
+                                "requiredFinalAnswerSuffix": "capabilityRequestedMutation=false; engineAuditPersistence=true"
+                            },
+                            "governedNextSteps": [{
+                                "order": 1,
+                                "operation": "capability_replacement_candidate_record"
+                            }]
                         }
                     }
-                }]
+                }
             }
         })),
     );
@@ -1018,6 +1008,11 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
     };
     assert!(text.contains("\"agentPath\""));
     assert!(text.contains("\"primaryInspection\""));
+    assert!(text.contains("\"completion\""));
+    assert!(text.contains("capabilityRequestedMutation=false; engineAuditPersistence=true"));
+    assert!(text.contains("capability_replacement_candidate_record"));
+    assert!(text.contains("\"operationsReturned\": 1"));
+    assert!(text.contains("\"returned\": 1"));
     assert!(text.contains("\"requiredPayloadFields\""));
     assert!(text.contains("git.read"));
     assert!(!text.contains("authorityGrantId"));

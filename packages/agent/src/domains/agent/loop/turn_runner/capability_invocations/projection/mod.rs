@@ -14,11 +14,11 @@
 //! Context-control action lists expose exact provider-safe inspect arguments for
 //! each returned action so the model can drill into durable audit records without
 //! guessing resource ids.
-//! Catalog projections expose the merged inspect target list, including
-//! effect-excluded matches, so the model can inspect non-invocable operations
-//! without needing to reconstruct hidden search state. Inspection-target
-//! projections intentionally omit direct invocation arguments for effect-excluded
-//! operations; allowed invocation arguments remain in `executeOperationMatches`.
+//! Catalog projections expose immediately callable matches and effect-excluded
+//! matches as separate bounded lists. Both include exact inspect ids, while
+//! effect-excluded rows omit direct invocation arguments. The broader merged
+//! target list remains durable audit data instead of duplicating the same rows
+//! in provider context.
 //! Broad cockpit projections are a compact operation directory by default;
 //! exact `targetOperation` cockpit calls keep the deep readiness, preflight,
 //! binding, shadow, route, rollback, and agent-path detail. This keeps the
@@ -149,6 +149,10 @@ fn render_model_context_evidence(projected: Value) -> Option<String> {
 
 fn project_catalog_evidence(details: &Value) -> Option<Value> {
     let discovery = details.get("catalogDiscovery")?;
+    let operation = details
+        .get("primitiveOperation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let mut projected = Map::new();
     copy_key(&mut projected, details, "primitiveOperation");
     copy_key(&mut projected, details, "status");
@@ -159,37 +163,33 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
     copy_key(&mut projected, discovery, "providerCallable");
     copy_key(&mut projected, discovery, "providerCallableReason");
     copy_key(&mut projected, discovery, "summary");
-    copy_key(&mut projected, discovery, "inputSchema");
-    copy_key(&mut projected, discovery, "outputSchema");
-    if let Some(guidance) = discovery.get("modelFacingGuidance") {
-        projected.insert(
-            "modelFacingGuidance".to_owned(),
-            project_model_facing_guidance(guidance),
-        );
+    if operation == "catalog_inspect" {
+        copy_key(&mut projected, discovery, "inputSchema");
+        copy_key(&mut projected, discovery, "outputSchema");
+        copy_key(&mut projected, discovery, "modelFacingInvocation");
+        copy_key(&mut projected, discovery, "capabilityPool");
+        copy_key(&mut projected, discovery, "agentUsage");
+        copy_key(&mut projected, discovery, "schema");
     }
-    copy_key(&mut projected, discovery, "modelFacingInvocation");
-    copy_key(&mut projected, discovery, "capabilityPool");
-    copy_key(&mut projected, discovery, "agentUsage");
-    copy_key(&mut projected, discovery, "schema");
     copy_key(&mut projected, discovery, "executeOperationSearch");
-    if let Some(targets) = discovery
-        .get("allDiscoveredInspectTargets")
+    if let Some(matches) = discovery
+        .get("executeOperationMatches")
         .and_then(Value::as_array)
     {
         projected.insert(
-            "allDiscoveredInspectTargets".to_owned(),
+            "executeOperationMatches".to_owned(),
             Value::Array(
-                targets
+                matches
                     .iter()
                     .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
-                    .map(project_discovered_inspect_target)
+                    .map(project_execute_operation_match)
                     .collect(),
             ),
         );
-        if targets.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+        if matches.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
             projected.insert(
-                "allDiscoveredInspectTargetsOmitted".to_owned(),
-                json!(targets.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+                "executeOperationMatchesOmitted".to_owned(),
+                json!(matches.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
             );
         }
     }
@@ -214,10 +214,14 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
             );
         }
     }
-    copy_key(&mut projected, discovery, "agentNextStep");
+    if let Some(next_step) = discovery.get("agentNextStep") {
+        projected.insert(
+            "agentNextStep".to_owned(),
+            project_catalog_agent_next_step(next_step),
+        );
+    }
     copy_key(&mut projected, discovery, "unsupportedOperationCandidate");
     copy_key(&mut projected, discovery, "unsupportedOperationRecovery");
-    copy_key(&mut projected, discovery, "agentSearchPlan");
     if let Some(functions) = discovery.get("functions").and_then(Value::as_array) {
         projected.insert(
             "functions".to_owned(),
@@ -236,64 +240,19 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
             );
         }
     }
-    if let Some(matches) = discovery
-        .get("executeOperationMatches")
-        .and_then(Value::as_array)
-    {
-        projected.insert(
-            "executeOperationMatches".to_owned(),
-            Value::Array(
-                matches
-                    .iter()
-                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
-                    .map(project_execute_operation_match)
-                    .collect(),
-            ),
-        );
-        if matches.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
-            projected.insert(
-                "executeOperationMatchesOmitted".to_owned(),
-                json!(matches.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
-            );
-        }
-    }
     Some(Value::Object(projected))
 }
 
-fn project_model_facing_guidance(guidance: &Value) -> Value {
+fn project_catalog_agent_next_step(next_step: &Value) -> Value {
     let mut projected = Map::new();
-    for key in [
-        "catalogInspect",
-        "capabilityExecute",
-        "operationSearch",
-        "executeSchemaInspection",
-        "internalDiscovery",
-    ] {
-        copy_key(&mut projected, guidance, key);
+    for key in ["priority", "reason", "thenFollow", "completionRule"] {
+        copy_key(&mut projected, next_step, key);
     }
-    if let Some(operations) = guidance
-        .get("supportedExecuteOperations")
-        .and_then(Value::as_array)
-    {
-        let returned = operations
-            .iter()
-            .filter_map(Value::as_str)
-            .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
-            .map(|operation| Value::String(operation.to_owned()))
-            .collect::<Vec<_>>();
-        let mut supported = json!({
-            "total": operations.len(),
-            "returned": returned,
-            "truncated": operations.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
-            "omitted": operations.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
-            "maxItems": MODEL_CONTEXT_ARRAY_MAX_ITEMS
-        });
-        if let Some(filter) = guidance.get("supportedExecuteOperationsFilter") {
-            if let Some(object) = supported.as_object_mut() {
-                object.insert("filter".to_owned(), filter.clone());
-            }
-        }
-        projected.insert("supportedExecuteOperations".to_owned(), supported);
+    if let Some(primary) = next_step.get("primaryInspection") {
+        projected.insert(
+            "primaryInspection".to_owned(),
+            bounded_model_context_value(primary),
+        );
     }
     Value::Object(projected)
 }
@@ -325,37 +284,16 @@ fn project_execute_operation_match(operation: &Value) -> Value {
         "schemaInspection",
         "matchKind",
         "score",
-        "capabilityPool",
-        "agentUsage",
     ] {
         copy_key(&mut projected, operation, key);
     }
-    Value::Object(projected)
-}
-
-fn project_discovered_inspect_target(target: &Value) -> Value {
-    let mut projected = Map::new();
-    for key in [
-        "operation",
-        "tool",
-        "catalogInspectId",
-        "inspectOperation",
-        "inspectArguments",
-        "readOnlyInspectionSafe",
-        "excludedFromImmediateInvocation",
-        "agentGuidance",
-        "exclusionReason",
-    ] {
-        copy_key(&mut projected, target, key);
+    if let Some(pool) = operation.get("capabilityPool") {
+        projected.insert("capabilityPool".to_owned(), project_cockpit_pool(pool));
     }
-    if target
-        .get("excludedFromImmediateInvocation")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if let Some(agent_usage) = operation.get("agentUsage") {
         projected.insert(
-            "invokeArgumentsOmitted".to_owned(),
-            json!("excluded_by_active_effect_filter"),
+            "agentUsage".to_owned(),
+            project_cockpit_agent_usage_summary(agent_usage),
         );
     }
     Value::Object(projected)
@@ -495,11 +433,16 @@ fn project_git_evidence(details: &Value) -> Option<Value> {
 
 fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
     let cockpit = details.get("capabilityBinding")?;
-    let operations = cockpit
-        .get("operations")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
+    let operations = if let Some(target) = cockpit.get("target").filter(|target| !target.is_null())
+    {
+        vec![target]
+    } else {
+        cockpit
+            .get("operations")
+            .and_then(Value::as_array)
+            .map(|operations| operations.iter().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
     let mut projected = Map::new();
     copy_key(&mut projected, details, "primitiveOperation");
     copy_key(&mut projected, details, "status");
@@ -552,7 +495,7 @@ fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
     }
     projected.insert(
         "operationDirectory".to_owned(),
-        project_cockpit_operation_directory(operations),
+        project_cockpit_operation_directory(&operations),
     );
     Some(Value::Object(projected))
 }
@@ -606,7 +549,7 @@ fn project_cockpit_family(family: &Value) -> Value {
     Value::Object(projected)
 }
 
-fn project_cockpit_operation_directory(operations: &[Value]) -> Value {
+fn project_cockpit_operation_directory(operations: &[&Value]) -> Value {
     let detailed = operations.len() <= 1;
     json!({
         "total": operations.len(),
@@ -919,6 +862,55 @@ fn project_cockpit_agent_path(agent_path: &Value) -> Value {
                     .iter()
                     .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
                     .map(project_cockpit_unavailable_surface)
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(completion) = agent_path.get("completion") {
+        projected.insert(
+            "completion".to_owned(),
+            project_cockpit_agent_path_completion(completion),
+        );
+    }
+    Value::Object(projected)
+}
+
+fn project_cockpit_agent_path_completion(completion: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "state",
+        "action",
+        "reason",
+        "stopWhen",
+        "finalAnswerGuidance",
+        "readinessVerdict",
+        "readOnlyBoundary",
+    ] {
+        copy_key(&mut projected, completion, key);
+    }
+    if let Some(steps) = completion
+        .get("governedNextSteps")
+        .and_then(Value::as_array)
+    {
+        projected.insert(
+            "governedNextSteps".to_owned(),
+            Value::Array(
+                steps
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(bounded_model_context_value)
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(blocked) = completion.get("doNotInspect").and_then(Value::as_array) {
+        projected.insert(
+            "doNotInspect".to_owned(),
+            Value::Array(
+                blocked
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(bounded_model_context_value)
                     .collect(),
             ),
         );

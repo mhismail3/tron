@@ -4216,6 +4216,10 @@ async fn cockpit_overview_filters_exact_operation_and_returns_agent_native_path(
         git_status["agentPath"]["completion"]["readOnlyBoundary"]["engineAuditPersistence"],
         json!(true)
     );
+    assert_eq!(
+        git_status["agentPath"]["completion"]["readOnlyBoundary"]["requiredFinalAnswerSuffix"],
+        json!("capabilityRequestedMutation=false; engineAuditPersistence=true")
+    );
     let governed_next_steps = git_status["agentPath"]["completion"]["governedNextSteps"]
         .as_array()
         .expect("governed next steps");
