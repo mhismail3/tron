@@ -53,6 +53,7 @@ pub(crate) const SUPPORTED_OPERATION_NAMES: &[&str] = &[
     "memory_query_inspect",
     "memory_decision_list",
     "memory_decision_inspect",
+    "context_control_status",
     "context_control_snapshot",
     "context_control_compact",
     "context_control_clear",

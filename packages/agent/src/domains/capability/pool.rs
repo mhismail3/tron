@@ -590,6 +590,33 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
         });
     }
 
+    if family == "context_control" {
+        let write = !operation_is_read_only_safe(operation);
+        let mut scopes = vec!["context_control.read", "resource.read"];
+        if write {
+            scopes.extend(["context_control.write", "resource.write"]);
+        }
+        return json!({
+            "authorityScopes": scopes,
+            "resourceSelectors": [
+                "kind:context_control_snapshot",
+                "kind:context_control_action",
+                "kind:context_control_epoch",
+                "kind:context_survivor",
+                "kind:context_exclusion",
+                "kind:context_policy_snapshot"
+            ],
+            "networkPolicy": "none",
+            "agentStateInherited": false,
+            "readOnlyInstruction": if write {
+                "do not call during read-only inspection; use context_control_status, list, or inspect operations instead"
+            } else {
+                "safe to call during read-only current-session context inspection"
+            },
+            "beforeCalling": "Use the trusted current session, exact sessionId when supplied, and provider-safe refs only. Do not use wildcard selectors, raw prompt bodies, hidden system/soul prompt text, local paths, commands, logs, grants, authority ids, or hidden chain-of-thought."
+        });
+    }
+
     if operation_is_read_only_safe(operation) && ownership_class == "adapter_replaceable" {
         return json!({
             "authority": "derived_read_only_adapter_authority_for_exact_operation",

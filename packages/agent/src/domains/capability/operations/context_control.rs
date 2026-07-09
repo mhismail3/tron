@@ -8,16 +8,32 @@ use crate::engine::Invocation;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
+pub(super) async fn context_control_status(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation_at: DateTime<Utc>,
+) -> Result<CapabilityResult, CapabilityError> {
+    let context_deps = context_deps(deps);
+    let details = crate::domains::context_control::service::status_value_at(
+        &context_deps,
+        invocation,
+        &invocation.payload,
+        operation_at,
+    )
+    .await?;
+    Ok(result(
+        "Context status inspected without recording a snapshot.",
+        "context_control_status",
+        details,
+    ))
+}
+
 pub(super) async fn context_control_snapshot(
     invocation: &Invocation,
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let context_deps = crate::domains::context_control::Deps {
-        engine_host: deps.engine_host.clone(),
-        event_store: deps.event_store.clone(),
-        session_manager: deps.session_manager.clone(),
-    };
+    let context_deps = context_deps(deps);
     let details = crate::domains::context_control::service::snapshot_value_at(
         &context_deps,
         invocation,

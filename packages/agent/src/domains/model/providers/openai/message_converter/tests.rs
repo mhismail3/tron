@@ -633,6 +633,7 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("deterministic retrieval and prompt-inclusion evidence"));
     assert!(result.contains("bounded preview snippets only when policy allowed"));
     assert!(result.contains("never raw body refs"));
+    assert!(result.contains("context_control_status"));
     assert!(result.contains("context_control_snapshot"));
     assert!(result.contains("context_control_compact"));
     assert!(result.contains("context_control_clear"));
@@ -646,7 +647,7 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("contextControlActionResourceId"));
     assert!(result.contains("contextSurvivorResourceId"));
     assert!(result.contains("contextExclusionResourceId"));
-    assert!(result.contains("current-session context snapshots"));
+    assert!(result.contains("read-only current-session context composition"));
     assert!(result.contains("server-owned survivor/exclusion policy refs"));
     assert!(result.contains("hidden system/soul prompt text"));
     for non_goal in [

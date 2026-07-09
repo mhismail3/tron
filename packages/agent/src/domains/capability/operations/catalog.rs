@@ -395,6 +395,10 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
             "type": "string",
             "description": "Exact provider-safe trace record id returned in details.records[].id by trace_list for the current session."
         }),
+        (_, "sessionId") => json!({
+            "type": "string",
+            "description": "Current trusted session id. If supplied, it must match the invocation session context."
+        }),
         (_, field) => json!({
             "type": "string",
             "description": format!(
@@ -924,6 +928,7 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         "memory_inspect" => vec!["operation", "recordResourceId"],
         "memory_query_inspect" => vec!["operation", "queryResourceId"],
         "memory_decision_inspect" => vec!["operation", "decisionResourceId"],
+        "context_control_status" => vec!["operation", "sessionId"],
         "context_control_action_inspect" => vec!["operation", "contextControlActionResourceId"],
         "media_inspect" => vec!["operation", "mediaResourceId"],
         "import_history_inspect" => vec!["operation", "importHistoryResourceId"],
@@ -3008,6 +3013,7 @@ mod tests {
             .filter_map(|value| value["operation"].as_str())
             .collect::<Vec<_>>();
         for expected in [
+            "context_control_status",
             "context_control_action_list",
             "context_control_action_inspect",
             "context_survivor_list",
@@ -3152,6 +3158,28 @@ mod tests {
         assert_eq!(
             discovery["agentNextStep"]["thenInvokeBlocked"]["operation"],
             "context_control_snapshot"
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_advertises_context_status_as_read_only_session_state() {
+        let discovery = execute_operation_inspect_projection(
+            "context_control_status",
+            "execute::context_control_status",
+        );
+
+        assert_eq!(
+            discovery["schema"]["requiredPayloadFields"],
+            json!(["operation", "sessionId"])
+        );
+        assert_eq!(
+            discovery["agentUsage"]["effect"]["readOnlyInspectionSafe"],
+            true
+        );
+        assert_eq!(discovery["agentUsage"]["effect"]["mutatesState"], false);
+        assert_eq!(
+            discovery["agentUsage"]["preflight"]["networkPolicy"],
+            "none"
         );
     }
 

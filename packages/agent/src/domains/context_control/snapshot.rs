@@ -101,6 +101,23 @@ pub(super) async fn build_snapshot_record(
     }))
 }
 
+pub(super) fn status_projection(record: &Value) -> Value {
+    json!({
+        "status": {
+            "session": record["session"],
+            "composition": record["composition"],
+            "memory": record["memory"],
+            "proof": record["proof"],
+            "freshness": {
+                "kind": "ephemeral_current_head",
+                "createdAt": record["createdAt"],
+                "resourceWritten": false,
+                "actionWritten": false
+            }
+        }
+    })
+}
+
 fn role_counts(
     messages: &[crate::domains::session::event_store::types::state::MessageWithEventId],
 ) -> Value {

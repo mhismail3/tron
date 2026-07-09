@@ -4,7 +4,7 @@ Status: **complete**
 
 Current score: **100/100**
 
-The modularity measurement slice is complete: inventory coverage is 189/189, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now executes through the supervised module-runtime provider-safe adapter projection boundary; broader operation coverage stays governed by the dynamic replacement scorecard.
+The modularity measurement slice is complete: inventory coverage is 190/190, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now executes through the supervised module-runtime provider-safe adapter projection boundary; broader operation coverage stays governed by the dynamic replacement scorecard.
 
 Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
 
@@ -46,7 +46,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 |---|---:|
 | `kernel_locked` | 11 |
 | `governance_locked` | 72 |
-| `record_plane` | 71 |
+| `record_plane` | 72 |
 | `adapter_replaceable` | 31 |
 | `module_owned` | 4 |
 | `deferred` | 0 |
@@ -57,7 +57,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 |---|---:|---|
 | `capability_binding` | 25 | Governance substrate for metadata-only binding requests, decisions, policies, the provider-visible cockpit overview, the `git_status` shadow trial, scoped route records, and the first scoped supervised module-runtime adapter projection for `git_status`; broader route targets remain dynamic replacement follow-ons. |
 | `catalog_discovery` | 3 | Engine-owned catalog trust and freshness substrate. |
-| `context_control` | 12 | Record-plane snapshot/action/epoch and survivor/exclusion policy custody; the compaction summarizer strategy is replaceable only behind a server-owned context-audit and policy-snapshot seam. |
+| `context_control` | 13 | Record-plane status/snapshot/action/epoch and survivor/exclusion policy custody; the compaction summarizer strategy is replaceable only behind a server-owned context-audit and policy-snapshot seam. |
 | `core` | 3 | Kernel diagnostics plus adapter review for `process_run`. |
 | `device` | 4 | Device token custody is governance; safe inspection is record-plane. |
 | `filesystem` | 9 | Adapter-replaceable after exact root authority, preview/commit evidence, bounded file side effects, provider-safe refs, replay/idempotency, and rollback/disable prerequisites. |
@@ -96,9 +96,9 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 | ID | Check | Weight | Status | Evidence |
 |---|---|---:|---|---|
-| CMS-0 | Registry/dispatch baseline | 10 | passed | 189 registry names and 189 dispatch arms are statically compared. |
+| CMS-0 | Registry/dispatch baseline | 10 | passed | 190 registry names and 190 dispatch arms are statically compared. |
 | CMS-1 | Ownership taxonomy | 10 | passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
-| CMS-2 | Per-operation inventory | 20 | passed | `capability-modularity-inventory.tsv` lists all 189 operations exactly once. |
+| CMS-2 | Per-operation inventory | 20 | passed | `capability-modularity-inventory.tsv` lists all 190 operations exactly once. |
 | CMS-3 | Kernel/governance lock | 12 | passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
 | CMS-4 | Adapter replacement targets | 12 | passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; capability binding can record proposals, shadow trials, governed route controls, and the first scoped supervised module-runtime adapter projection for `git_status`. |
 | CMS-5 | Record-plane custody | 10 | passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |

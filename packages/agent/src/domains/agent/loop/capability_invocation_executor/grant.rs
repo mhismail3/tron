@@ -96,7 +96,8 @@ pub(super) async fn derive_capability_runtime_grant(
     );
     let context_control_operation = matches!(
         operation,
-        "context_control_snapshot"
+        "context_control_status"
+            | "context_control_snapshot"
             | "context_control_compact"
             | "context_control_clear"
             | "context_control_action_list"
@@ -479,7 +480,8 @@ pub(super) async fn derive_capability_runtime_grant(
         ]);
     } else if matches!(
         operation,
-        "context_control_action_list"
+        "context_control_status"
+            | "context_control_action_list"
             | "context_control_action_inspect"
             | "context_survivor_list"
             | "context_exclusion_list"

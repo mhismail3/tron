@@ -98,6 +98,7 @@ pub(super) async fn execute_operation(
         "memory_query_inspect" => memory_query_inspect(invocation, deps).await?,
         "memory_decision_list" => memory_decision_list(invocation, deps).await?,
         "memory_decision_inspect" => memory_decision_inspect(invocation, deps).await?,
+        "context_control_status" => context_control_status(invocation, deps, operation_at).await?,
         "context_control_snapshot" => {
             context_control_snapshot(invocation, deps, operation_at).await?
         }

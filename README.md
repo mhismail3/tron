@@ -97,7 +97,7 @@ Current living entry points:
   kernel-locked, governance-locked, record-plane, adapter-replaceable,
   module-owned, or deferred so future modular replacement work is measurable.
 - `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 189-row inventory for the capability modularity scorecard.
+  machine-readable 190-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
@@ -745,11 +745,13 @@ embeddings, vector stores, generated summaries, episodic event retrieval,
 procedural rules, hidden prompt memory, automatic retention, or network-backed
 memory behavior.
 `domains/context_control` is the implementation-candidate owner for user and
-agent context-management visibility. It records `context_control_snapshot`,
+agent context-management visibility. It exposes `context_control_status` for
+read-only current-session context composition without recording a snapshot or
+action. It records `context_control_snapshot`,
 `context_control_action`, `context_control_epoch`, `context_survivor`,
 `context_exclusion`, and `context_policy_snapshot` resources with provider
-safe projections only. `context_control_snapshot`, `context_control_compact`,
-`context_control_clear`, `context_control_action_list`, and
+safe projections only. `context_control_status`, `context_control_snapshot`,
+`context_control_compact`, `context_control_clear`, `context_control_action_list`, and
 `context_control_action_inspect`, plus `context_survivor_record/list/disable`,
 `context_exclusion_record/list/disable`, and `context_policy_snapshot`, stay
 behind `capability::execute` for model
@@ -1206,7 +1208,7 @@ Capability modularity is tracked in
 machine-readable inventory in
 `packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
 in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 189
+`capability_modularity_scorecard_invariants` test locks the current 190
 operation baseline, registry/dispatch parity, and the ownership classes used for
 future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 `adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
@@ -1410,6 +1412,7 @@ Current primitive operations:
 | `subagent_task_inspect` | Inspect one scoped `subagent_task` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle, delegation, and merge-proposal evidence without raw prompts, secrets, raw process output, local paths, or raw authority ids. |
 | `worker_package_list` | List scoped worker lifecycle resource records one kind at a time with bounded identity, lifecycle state, refs, explicit truncation metadata, `networkPolicy: none`, and no install, enable, launch, stop, registration, or execution. |
 | `worker_package_inspect` | Inspect one scoped `worker_package`, `worker_package_installation`, `worker_package_proposal`, `worker_package_conformance_report`, or `worker_launch_attempt` resource after stored kind/schema revalidation, returning bounded/redacted lifecycle evidence without tokens, env values, manifests, endpoints, or local paths. |
+| `context_control_status` | Implementation-candidate read-only operation that returns current-session provider-safe context composition, token estimates, memory/resource/execution refs, epoch metadata, and freshness proof without recording a snapshot or action, using exact session-scoped read authority, `networkPolicy: none`, and no raw prompt bodies, hidden chain-of-thought, secrets, env values, local paths, commands, logs, grant ids, or authority ids. |
 | `context_control_snapshot` | Implementation-candidate operation that records and returns a provider-safe current-session context snapshot with bounded composition blocks, token estimates, memory/resource/execution refs, epoch freshness, redaction/truncation proof, exact session-scoped authority, idempotency evidence, `networkPolicy: none`, and no raw prompt bodies, hidden chain-of-thought, secrets, env values, local paths, commands, logs, grant ids, or authority ids. |
 | `context_control_compact` | Implementation-candidate operation that records a durable preflight snapshot, writes a bounded compact-boundary timeline event when context is summarizable, and stores a context-control action record with actor, reason, expected effect, result, audit refs, and provider-safe proof without deleting history/resources/traces or exposing raw prior context. |
 | `context_control_clear` | Implementation-candidate operation that records a durable preflight snapshot, writes a context-cleared timeline event, creates a new `context_control_epoch`, and stores a context-control action record proving prior turns are excluded from future provider context while chat history, resources, traces, and durable refs remain inspectable. |

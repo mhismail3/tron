@@ -7,9 +7,9 @@ use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRI
 use super::service::{
     RuntimeCompactionInput, action_inspect_value, action_list_value, clear_value_at,
     exclusion_list_value, exclusion_record_value_at, policy_snapshot_value_at,
-    record_runtime_compaction_action, snapshot_value_at, survivor_disable_value_at,
-    survivor_list_value, survivor_record_value_at, ui_action_list_value, ui_compact_value_at,
-    ui_snapshot_value_at,
+    record_runtime_compaction_action, snapshot_value_at, status_value_at,
+    survivor_disable_value_at, survivor_list_value, survivor_record_value_at, ui_action_list_value,
+    ui_compact_value_at, ui_snapshot_value_at,
 };
 use super::{
     CONTEXT_CONTROL_ACTION_KIND, CONTEXT_CONTROL_ACTION_SCHEMA_ID, CONTEXT_CONTROL_EPOCH_KIND,
@@ -22,7 +22,7 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::session::event_store::{AppendOptions, EventType};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, RiskLevel, TraceId, builtin_resource_type_definitions,
+    InvocationId, ListResources, RiskLevel, TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -182,6 +182,69 @@ fn context_control_resource_types_are_registered_with_metadata_only_bounds() {
         assert_eq!(
             definition.materialization_rules["providerSafeProjectionRequired"],
             json!(true)
+        );
+    }
+}
+
+#[tokio::test]
+async fn status_returns_current_provider_safe_composition_without_recording_snapshot() {
+    let fixture = Fixture::new("context-control-status").await;
+    let payload = json!({
+        "operation": "context_control_status",
+        "sessionId": fixture.session_id
+    });
+    let invocation = fixture.read_invocation("status-1", "context_control_status", payload.clone());
+    let before = fixture
+        .deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(CONTEXT_CONTROL_SNAPSHOT_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list snapshots before")
+        .len();
+
+    let status = status_value_at(&fixture.deps, &invocation, &payload, operation_at())
+        .await
+        .expect("status");
+    let after = fixture
+        .deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(CONTEXT_CONTROL_SNAPSHOT_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list snapshots after")
+        .len();
+
+    assert_eq!(status["operation"], json!("context_control_status"));
+    assert_eq!(
+        status["projection"]["status"]["proof"]["providerSafe"],
+        true
+    );
+    assert_eq!(
+        status["projection"]["status"]["freshness"]["resourceWritten"],
+        false
+    );
+    assert_eq!(before, after, "status must not create snapshot resources");
+    let rendered = serde_json::to_string(&status).expect("serialize status");
+    for forbidden in [
+        "\"systemPrompt\"",
+        "\"authorityGrantId\"",
+        "sk-",
+        "/Users/",
+        "chain of thought",
+        "rawCommandsStored",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "status leaked forbidden material {forbidden}: {rendered}"
         );
     }
 }

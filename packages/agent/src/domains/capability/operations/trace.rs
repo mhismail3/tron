@@ -545,7 +545,8 @@ fn is_module_runtime_operation(operation: &str) -> bool {
 fn is_context_control_operation(operation: &str) -> bool {
     matches!(
         operation,
-        "context_control_snapshot"
+        "context_control_status"
+            | "context_control_snapshot"
             | "context_control_compact"
             | "context_control_clear"
             | "context_control_action_list"

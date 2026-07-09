@@ -32,7 +32,7 @@ use super::resource_store::{
     ensure_context_snapshot, ensure_context_survivor, ensure_scope, inspect_resource_required,
     publish_lifecycle_event, update_policy_resource,
 };
-use super::snapshot::build_snapshot_record;
+use super::snapshot::{build_snapshot_record, status_projection};
 use super::validation::{
     actor_kind, bounded_text, engine_error, id_error, idempotency_key, optional_str, optional_u64,
     policy_target_kind, policy_target_ref, reason, required_reason, required_str, runtime_error,
@@ -65,6 +65,9 @@ operation_bindings! {
     deps = Deps;
     hidden = [];
     bindings = [
+        "status" => |invocation, deps| {
+            status_value_at(deps, invocation, &invocation.payload, Utc::now()).await
+        },
         "snapshot" => |invocation, deps| {
             snapshot_value_at(deps, invocation, &invocation.payload, Utc::now()).await
         },
@@ -117,6 +120,43 @@ operation_bindings! {
             ui_action_inspect_value(deps, invocation, &invocation.payload).await
         },
     ];
+}
+
+pub(crate) async fn status_value_at(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    operation_at: DateTime<Utc>,
+) -> Result<Value, CapabilityError> {
+    let (session_id, scope) = session_scope_for_invocation(
+        invocation,
+        optional_str(payload, "sessionId")?,
+        "context_control_status",
+    )?;
+    ensure_authority(
+        deps,
+        invocation,
+        "context_control_status",
+        AccessMode::Read,
+        &session_id,
+        None,
+    )
+    .await?;
+    let record = build_snapshot_record(
+        deps,
+        &session_id,
+        &scope,
+        "ephemeral-current-status",
+        operation_at,
+    )
+    .await?;
+    Ok(json!({
+        "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
+        "operation": "context_control_status",
+        "status": "ok",
+        "sessionId": session_id,
+        "projection": status_projection(&record)
+    }))
 }
 
 pub(crate) async fn ui_snapshot_value_at(

@@ -32,6 +32,19 @@ pub(crate) const POLICY_SNAPSHOT_SCHEMA_VERSION: &str =
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         contract(
+            "context_control::status",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some(READ_SCOPE),
+        )
+        .description(
+            "Return the current provider-safe context composition without recording a snapshot",
+        )
+        .tags(vec!["context", "status", "tokens", "read-only"])
+        .request_schema(status_request_schema())
+        .response_schema(common_response_schema("context_control_status"))
+        .build()?,
+        contract(
             "context_control::snapshot",
             EffectClass::AppendOnlyEvent,
             RiskLevel::Low,
@@ -312,6 +325,17 @@ fn session_request_schema() -> serde_json::Value {
             "sessionId": {"type": "string", "minLength": 1},
             "reason": {"type": "string", "minLength": 1, "maxLength": 200},
             "idempotencyKey": {"type": "string", "minLength": 1, "maxLength": 256}
+        }
+    })
+}
+
+fn status_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sessionId"],
+        "properties": {
+            "sessionId": {"type": "string", "minLength": 1}
         }
     })
 }
