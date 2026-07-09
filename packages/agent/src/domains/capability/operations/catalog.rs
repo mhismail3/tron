@@ -257,6 +257,21 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
         "trace_get" => {
             " Current-session scope is supplied by trusted runtime context; pass only operation and the traceRecordId returned by trace_list."
         }
+        "job_start" => {
+            " Durable job writes require command plus a stable bounded idempotencyKey. That caller key is provider-visible in the tool-call payload because you supply it; job_status, job_log, job_list, and trace projections redact raw idempotency keys. Use jobResourceId from job_start for later status/log/cancel calls."
+        }
+        "job_status" | "job_log" => {
+            " Pass only operation and the exact jobResourceId returned by job_start or job_list. job_status/list return provider-safe lifecycle/output refs without raw command text, working directories, authority, idempotency keys, stdout, or stderr; use job_log when the task needs bounded stdout/stderr previews."
+        }
+        "job_cancel" => {
+            " Pass operation, exact jobResourceId, bounded reason, and a stable bounded idempotencyKey. The caller key is provider-visible in the tool-call payload but redacted from status/list/log/trace projections."
+        }
+        "job_cleanup" => {
+            " Pass operation, optional olderThanSeconds/limit, and a stable bounded idempotencyKey. Cleanup archives terminal job resources only; it does not expose raw command, path, authority, stdout, stderr, or idempotency payloads."
+        }
+        "process_run" => {
+            " Use process_run only for short synchronous no-network commands. For inspectable durable execution, prefer job_start followed by job_status/job_log. process_run returns bounded stdout/stderr previews directly and is not a durable job lifecycle."
+        }
         "context_control_status" => {
             " Current-session scope is supplied by trusted runtime context; pass only operation. Do not include sessionId or selector fields. The result content summarizes epoch, token budget, composition blocks, and freshness proof without recording a snapshot or action."
         }
@@ -323,7 +338,16 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
     add_operation_specific_optional_fields(operation, &mut properties);
     let additional_properties = !matches!(
         operation,
-        "repository_tree_snapshot" | "repository_tree_list" | "repository_tree_inspect"
+        "repository_tree_snapshot"
+            | "repository_tree_list"
+            | "repository_tree_inspect"
+            | "job_start"
+            | "job_status"
+            | "job_list"
+            | "job_log"
+            | "job_cancel"
+            | "job_cleanup"
+            | "process_run"
     );
     json!({
         "type": "object",
@@ -391,6 +415,18 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
         ("repository_tree_snapshot", "idempotencyKey") => json!({
             "type": "string",
             "description": "Required stable bounded idempotency key for this metadata-only snapshot write."
+        }),
+        ("job_start", "command") | ("process_run", "command") => json!({
+            "type": "string",
+            "description": "Bounded shell command executed from the trusted working directory supplied by runtime context. Do not include secrets, credentials, package installs, network access, or personal information."
+        }),
+        ("job_start" | "job_cancel" | "job_cleanup", "idempotencyKey") => json!({
+            "type": "string",
+            "description": "Required stable bounded caller idempotency key for this write. It is provider-visible in the tool-call payload because the model supplies it; status/list/log/trace projections redact raw idempotency keys."
+        }),
+        ("job_status" | "job_log" | "job_cancel", "jobResourceId") => json!({
+            "type": "string",
+            "description": "Exact durable job_process resource id returned by job_start or job_list for the current session scope."
         }),
         ("repository_tree_inspect", "repositoryTreeResourceId") => json!({
             "type": "string",
@@ -636,6 +672,54 @@ fn add_operation_specific_optional_fields(
             ("networkPolicy", network_policy_none_schema()),
         ],
         "repository_tree_inspect" => vec![("networkPolicy", network_policy_none_schema())],
+        "job_start" => vec![
+            (
+                "timeoutMs",
+                json!({"type": "integer", "minimum": 1, "maximum": 120000, "description": "Maximum runtime before the durable job is timed out."}),
+            ),
+            (
+                "maxOutputBytes",
+                json!({"type": "integer", "minimum": 1, "maximum": 200000, "description": "Maximum captured output bytes. job_status/list expose refs/fingerprints; job_log exposes bounded previews."}),
+            ),
+            (
+                "cleanupAfterSeconds",
+                json!({"type": "integer", "minimum": 0, "description": "Optional retention hint for terminal job cleanup."}),
+            ),
+        ],
+        "job_list" => vec![
+            (
+                "state",
+                json!({"type": "string", "enum": ["running", "completed", "failed", "timed_out", "cancelled", "archived"], "description": "Optional lifecycle filter for current-session durable jobs."}),
+            ),
+            (
+                "limit",
+                json!({"type": "integer", "minimum": 1, "description": "Optional bounded maximum number of current-session durable jobs to return."}),
+            ),
+        ],
+        "job_cancel" => vec![(
+            "reason",
+            json!({"type": "string", "description": "Optional bounded cancellation reason. Provider-facing status/list/log projections redact the raw reason."}),
+        )],
+        "job_cleanup" => vec![
+            (
+                "olderThanSeconds",
+                json!({"type": "integer", "minimum": 0, "description": "Optional terminal-age filter before cleanup archives matching job resources."}),
+            ),
+            (
+                "limit",
+                json!({"type": "integer", "minimum": 1, "description": "Optional bounded maximum number of terminal job resources to archive."}),
+            ),
+        ],
+        "process_run" => vec![
+            (
+                "timeoutMs",
+                json!({"type": "integer", "minimum": 1, "maximum": 120000, "description": "Maximum runtime before the short synchronous process is timed out."}),
+            ),
+            (
+                "maxOutputBytes",
+                json!({"type": "integer", "minimum": 1, "maximum": 200000, "description": "Maximum provider-visible stdout/stderr preview bytes returned directly by process_run."}),
+            ),
+        ],
         _ => Vec::new(),
     };
     for (field, schema) in optional_fields {
@@ -801,6 +885,87 @@ fn execute_operation_output_schema(operation: &str) -> Value {
             "schemaCompleteness": "operation_specific_contract"
         });
     }
+    if matches!(operation, "job_status" | "job_list") {
+        let jobs_schema = if operation == "job_status" {
+            json!({
+                "type": "object",
+                "required": ["schemaVersion", "status", "job", "resourceRefs"],
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "status": {"type": "string"},
+                    "job": redacted_job_output_schema(),
+                    "resourceRefs": {"type": "array", "description": "Provider-safe job/output refs only."}
+                }
+            })
+        } else {
+            json!({
+                "type": "object",
+                "required": ["schemaVersion", "status", "jobs"],
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "status": {"const": "ok"},
+                    "jobs": {"type": "array", "items": redacted_job_output_schema()}
+                }
+            })
+        };
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe lifecycle summary for durable jobs."
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Provider-safe durable job lifecycle projection. Raw commands, working directories, authority/grant ids, raw idempotency keys, stdout, stderr, and raw job/output payloads are excluded.",
+                    "required": ["primitiveOperation", "status", "jobs"],
+                    "properties": {
+                        "primitiveOperation": {"const": operation},
+                        "status": {"type": "string"},
+                        "jobs": jobs_schema
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
+    if operation == "job_log" {
+        return json!({
+            "type": "object",
+            "required": ["content", "details"],
+            "properties": {
+                "content": {
+                    "description": "Provider-safe bounded stdout/stderr preview summary for one durable job."
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Bounded job log projection for explicit output inspection. Raw working directories, authority/grant ids, raw idempotency keys, and raw job payloads are excluded.",
+                    "required": ["primitiveOperation", "status", "jobs"],
+                    "properties": {
+                        "primitiveOperation": {"const": "job_log"},
+                        "status": {"type": "string"},
+                        "jobs": {
+                            "type": "object",
+                            "required": ["schemaVersion", "status", "jobResourceId", "jobVersionId", "stdoutPreview", "stderrPreview", "outputTruncated", "resourceRefs"],
+                            "properties": {
+                                "schemaVersion": {"type": "string"},
+                                "status": {"type": "string"},
+                                "jobResourceId": {"type": "string"},
+                                "jobVersionId": {"type": "string"},
+                                "stdoutPreview": {"type": "string"},
+                                "stderrPreview": {"type": "string"},
+                                "outputResourceId": {"type": ["string", "null"]},
+                                "outputVersionId": {"type": ["string", "null"]},
+                                "outputTruncated": {"type": "boolean"},
+                                "resourceRefs": {"type": "array"}
+                            }
+                        }
+                    }
+                }
+            },
+            "schemaCompleteness": "operation_specific_contract"
+        });
+    }
     if operation == "trace_list" {
         return json!({
             "type": "object",
@@ -889,6 +1054,75 @@ fn execute_operation_output_schema(operation: &str) -> Value {
             }
         },
         "schemaCompleteness": "operation_specific_contract"
+    })
+}
+
+fn redacted_job_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Redacted durable job lifecycle projection.",
+        "required": ["jobResourceId", "jobVersionId", "state", "limits", "retention", "cancellation", "projection"],
+        "properties": {
+            "jobResourceId": {"type": "string"},
+            "jobVersionId": {"type": "string"},
+            "state": {"type": "string"},
+            "limits": {
+                "type": "object",
+                "properties": {
+                    "timeoutMs": {"type": "integer"},
+                    "maxOutputBytes": {"type": "integer"}
+                }
+            },
+            "retention": {"type": "object"},
+            "createdAt": {"type": "string"},
+            "startedAt": {"type": ["string", "null"]},
+            "completedAt": {"type": ["string", "null"]},
+            "cancellation": {
+                "type": "object",
+                "properties": {
+                    "requested": {"type": "boolean"},
+                    "reasonRedacted": {"type": "boolean"},
+                    "rawReasonReturned": {"const": false}
+                }
+            },
+            "terminal": {
+                "type": ["object", "null"],
+                "properties": {
+                    "status": {"type": "string"},
+                    "exitCode": {"type": ["integer", "null"]},
+                    "timedOut": {"type": "boolean"},
+                    "cancelled": {"type": "boolean"},
+                    "errorRedacted": {"type": "boolean"},
+                    "rawErrorReturned": {"const": false}
+                }
+            },
+            "output": {
+                "type": ["object", "null"],
+                "properties": {
+                    "kind": {"type": "string"},
+                    "resourceId": {"type": "string"},
+                    "versionId": {"type": "string"},
+                    "contentHash": {"type": "string"},
+                    "durationMs": {"type": "integer"},
+                    "exitCode": {"type": ["integer", "null"]},
+                    "outputTruncated": {"type": "boolean"},
+                    "stdoutPreviewReturned": {"const": false},
+                    "stderrPreviewReturned": {"const": false},
+                    "rawOutputReturned": {"const": false}
+                }
+            },
+            "projection": {
+                "type": "object",
+                "properties": {
+                    "rawCommandReturned": {"const": false},
+                    "workingDirectoryReturned": {"const": false},
+                    "authorityReturned": {"const": false},
+                    "stdoutPreviewReturned": {"const": false},
+                    "stderrPreviewReturned": {"const": false},
+                    "rawOutputReturned": {"const": false}
+                }
+            }
+        }
     })
 }
 
@@ -1175,6 +1409,12 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         "module_runtime_inspect" => vec!["operation", "moduleRuntimeResourceId"],
         "web_fetch" => vec!["operation", "url"],
         "web_robots_check" => vec!["operation", "url"],
+        "job_start" => vec!["operation", "command", "idempotencyKey"],
+        "job_status" | "job_log" => vec!["operation", "jobResourceId"],
+        "job_list" => vec!["operation"],
+        "job_cancel" => vec!["operation", "jobResourceId", "idempotencyKey"],
+        "job_cleanup" => vec!["operation", "idempotencyKey"],
+        "process_run" => vec!["operation", "command"],
         "web_source_inspect" => vec!["operation", "webSourceResourceId"],
         "web_research_request_inspect" => vec!["operation", "webResearchRequestResourceId"],
         "web_research_review_inspect" => vec!["operation", "webResearchReviewResourceId"],
@@ -2890,6 +3130,133 @@ mod tests {
                 .as_str()
                 .expect("fail closed guidance")
                 .contains("before target network I/O")
+        );
+    }
+
+    #[test]
+    fn catalog_inspect_projects_closed_job_operation_contracts() {
+        let start = execute_operation_inspect_projection("job_start", "execute::job_start");
+        assert_eq!(
+            start["schema"]["requiredPayloadFields"],
+            json!(["operation", "command", "idempotencyKey"])
+        );
+        assert_eq!(
+            start["inputSchema"]["required"],
+            json!(["operation", "command", "idempotencyKey"])
+        );
+        assert_eq!(start["inputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            start["inputSchema"]["properties"]["operation"]["const"],
+            "job_start"
+        );
+        assert_eq!(
+            start["inputSchema"]["properties"]["command"]["type"],
+            "string"
+        );
+        assert!(
+            start["inputSchema"]["properties"]["idempotencyKey"]["description"]
+                .as_str()
+                .expect("idempotency description")
+                .contains("provider-visible in the tool-call payload")
+        );
+        assert!(
+            execute_operation_invocation_guidance("job_start")
+                .contains("job_status, job_log, job_list, and trace projections redact")
+        );
+
+        for operation in ["job_status", "job_log"] {
+            let discovery =
+                execute_operation_inspect_projection(operation, &format!("execute::{operation}"));
+            assert_eq!(
+                discovery["schema"]["requiredPayloadFields"],
+                json!(["operation", "jobResourceId"])
+            );
+            assert_eq!(
+                discovery["inputSchema"]["required"],
+                json!(["operation", "jobResourceId"])
+            );
+            assert_eq!(discovery["inputSchema"]["additionalProperties"], false);
+            assert_eq!(
+                discovery["inputSchema"]["properties"]["jobResourceId"]["description"],
+                json!(
+                    "Exact durable job_process resource id returned by job_start or job_list for the current session scope."
+                )
+            );
+            assert!(
+                execute_operation_invocation_guidance(operation)
+                    .contains("job_status/list return provider-safe lifecycle/output refs")
+            );
+        }
+        let status = execute_operation_inspect_projection("job_status", "execute::job_status");
+        assert_eq!(
+            status["outputSchema"]["properties"]["details"]["description"],
+            json!(
+                "Provider-safe durable job lifecycle projection. Raw commands, working directories, authority/grant ids, raw idempotency keys, stdout, stderr, and raw job/output payloads are excluded."
+            )
+        );
+        assert_eq!(
+            status["outputSchema"]["properties"]["details"]["properties"]["jobs"]["properties"]["job"]
+                ["properties"]["projection"]["properties"]["rawCommandReturned"]["const"],
+            false
+        );
+
+        let list = execute_operation_inspect_projection("job_list", "execute::job_list");
+        assert_eq!(
+            list["schema"]["requiredPayloadFields"],
+            json!(["operation"])
+        );
+        assert_eq!(list["inputSchema"]["required"], json!(["operation"]));
+        assert_eq!(list["inputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            list["inputSchema"]["properties"]["state"]["enum"],
+            json!([
+                "running",
+                "completed",
+                "failed",
+                "timed_out",
+                "cancelled",
+                "archived"
+            ])
+        );
+
+        let cancel = execute_operation_inspect_projection("job_cancel", "execute::job_cancel");
+        assert_eq!(
+            cancel["schema"]["requiredPayloadFields"],
+            json!(["operation", "jobResourceId", "idempotencyKey"])
+        );
+        assert_eq!(cancel["inputSchema"]["additionalProperties"], false);
+
+        let cleanup = execute_operation_inspect_projection("job_cleanup", "execute::job_cleanup");
+        assert_eq!(
+            cleanup["schema"]["requiredPayloadFields"],
+            json!(["operation", "idempotencyKey"])
+        );
+        assert_eq!(cleanup["inputSchema"]["additionalProperties"], false);
+    }
+
+    #[test]
+    fn catalog_inspect_projects_closed_process_run_contract() {
+        let process = execute_operation_inspect_projection("process_run", "execute::process_run");
+        assert_eq!(
+            process["schema"]["requiredPayloadFields"],
+            json!(["operation", "command"])
+        );
+        assert_eq!(
+            process["inputSchema"]["required"],
+            json!(["operation", "command"])
+        );
+        assert_eq!(process["inputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            process["inputSchema"]["properties"]["timeoutMs"]["maximum"],
+            json!(120000)
+        );
+        assert_eq!(
+            process["inputSchema"]["properties"]["maxOutputBytes"]["maximum"],
+            json!(200000)
+        );
+        assert!(
+            execute_operation_invocation_guidance("process_run")
+                .contains("prefer job_start followed by job_status/job_log")
         );
     }
 

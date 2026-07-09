@@ -483,7 +483,11 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     .to_string();
 
     let mut args = serde_json::Map::new();
-    args.insert("value".to_owned(), Value::String("hello".to_owned()));
+    args.insert(
+        "operation".to_owned(),
+        Value::String("catalog_search".to_owned()),
+    );
+    args.insert("text".to_owned(), Value::String("hello".to_owned()));
     let call = CapabilityInvocationDraft::new("capability-invocation-1", "execute", args);
     let result = execute_capability_invocation(&call, "session-1", &working_directory, &ctx).await;
 
@@ -537,7 +541,7 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
         "execute",
         &working_directory,
         None,
-        &json!({"value": "hello"}),
+        &json!({"operation": "catalog_search", "text": "hello"}),
     );
     let expected_key = format!(
         "model-capability-invocation:v1:{}",

@@ -24,13 +24,13 @@
 //! domain owns process-job semantics over those primitives. `process_run`
 //! remains the short synchronous primitive; durable jobs are a separate
 //! resource-backed lifecycle and must keep network policy fail-closed.
-//! Module-owned program execution may delegate to this domain for supervised
-//! non-interactive jobs, but that path must use redacted status/cleanup
+//! Public job status/list and module-owned program execution use redacted
 //! projections that expose job/output refs, fingerprints, durations,
 //! truncation, exit, timeout, cancellation, and cleanup metadata only. Raw
-//! command text, canonical working directories, grant ids, stdout/stderr
-//! previews, and raw job/output payloads stay out of provider-facing module
-//! results.
+//! command text, canonical working directories, grant ids, idempotency keys,
+//! stdout/stderr previews, and raw job/output payloads stay out of those
+//! provider-facing lifecycle projections. `job_log` is the bounded preview
+//! surface for stdout/stderr when the task explicitly needs output text.
 //! On domain startup and before lifecycle reads/cleanup, persisted `running`
 //! job resources from before the current service instance are reconciled:
 //! owned jobs continue under their runtime handle, while non-owned stale jobs

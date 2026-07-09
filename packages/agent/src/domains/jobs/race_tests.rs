@@ -64,12 +64,10 @@ async fn cancel_request_version_conflict_does_not_drop_runtime_terminal_output()
     let status = fixture.wait_for_state(&job_resource_id, "cancelled").await;
     let job = &jobs_details(&status)["job"];
     assert_eq!(job["terminal"]["cancelled"], json!(true));
-    assert_eq!(
-        job["cancellation"]["reason"],
-        json!("force stale finalization retry")
-    );
-    assert_eq!(job["output"]["stdoutPreview"], json!("race-start"));
-    assert!(job["output"]["outputResourceId"].as_str().is_some());
+    assert_eq!(job["cancellation"]["reasonRedacted"], json!(true));
+    assert_eq!(job["cancellation"]["rawReasonReturned"], json!(false));
+    assert_eq!(job["output"]["stdoutPreviewReturned"], json!(false));
+    assert!(job["output"]["resourceId"].as_str().is_some());
 
     let log = fixture
         .invoke_ok(json!({

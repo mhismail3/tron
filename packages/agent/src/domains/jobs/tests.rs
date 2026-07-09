@@ -158,12 +158,8 @@ async fn stale_running_job_is_reconciled_after_restart_before_status_list_and_cl
     assert_eq!(status_job["state"], json!("failed"));
     assert_eq!(status_job["terminal"]["exitCode"], Value::Null);
     assert_eq!(status_job["terminal"]["cancelled"], json!(false));
-    assert!(
-        status_job["terminal"]["error"]
-            .as_str()
-            .unwrap()
-            .contains("ownership unknown after jobs domain restart")
-    );
+    assert_eq!(status_job["terminal"]["errorRedacted"], json!(true));
+    assert_eq!(status_job["terminal"]["rawErrorReturned"], json!(false));
     assert_eq!(status_job["output"], Value::Null);
 
     let running = fixture
@@ -349,8 +345,8 @@ async fn job_start_completes_and_records_bounded_output() {
     let job_resource_id = job_resource_id(&start);
     let status = fixture.wait_for_state(&job_resource_id, "completed").await;
     let job = &jobs_details(&status)["job"];
-    assert!(job["output"]["outputResourceId"].as_str().is_some());
-    assert_eq!(job["output"]["stdoutPreview"], json!("hello"));
+    assert!(job["output"]["resourceId"].as_str().is_some());
+    assert_eq!(job["output"]["stdoutPreviewReturned"], json!(false));
     assert_eq!(job["output"]["outputTruncated"], json!(false));
 
     let log = fixture
@@ -406,8 +402,15 @@ async fn job_output_is_bounded_and_cancel_is_terminal_idempotent() {
     let bounded_id = job_resource_id(&bounded);
     let bounded_status = fixture.wait_for_state(&bounded_id, "completed").await;
     let bounded_job = &jobs_details(&bounded_status)["job"];
-    assert_eq!(bounded_job["output"]["stdoutPreview"], json!("1234"));
+    assert_eq!(bounded_job["output"]["stdoutPreviewReturned"], json!(false));
     assert_eq!(bounded_job["output"]["outputTruncated"], json!(true));
+    let bounded_log = fixture
+        .invoke_ok(json!({
+            "operation": "job_log",
+            "jobResourceId": bounded_id
+        }))
+        .await;
+    assert_eq!(jobs_details(&bounded_log)["stdoutPreview"], json!("1234"));
 
     let start = fixture
         .invoke_ok(json!({
@@ -430,7 +433,7 @@ async fn job_output_is_bounded_and_cancel_is_terminal_idempotent() {
     assert_eq!(jobs_details(&cancel)["status"], json!("cancel_requested"));
     let cancelled = fixture.wait_for_state(&job_resource_id, "cancelled").await;
     assert!(
-        jobs_details(&cancelled)["job"]["output"]["outputResourceId"]
+        jobs_details(&cancelled)["job"]["output"]["resourceId"]
             .as_str()
             .is_some()
     );
@@ -477,8 +480,14 @@ async fn job_timeout_records_terminal_output_evidence() {
     let status = fixture.wait_for_state(&job_resource_id, "timed_out").await;
     let job = &jobs_details(&status)["job"];
     assert_eq!(job["terminal"]["timedOut"], json!(true));
-    assert_eq!(job["output"]["stdoutPreview"], json!("before-timeout"));
-    assert!(job["output"]["outputResourceId"].as_str().is_some());
+    assert!(job["output"]["resourceId"].as_str().is_some());
+    let log = fixture
+        .invoke_ok(json!({
+            "operation": "job_log",
+            "jobResourceId": job_resource_id
+        }))
+        .await;
+    assert_eq!(jobs_details(&log)["stdoutPreview"], json!("before-timeout"));
 }
 
 #[tokio::test]
@@ -507,7 +516,13 @@ async fn background_child_inherited_pipe_is_killed_at_timeout() {
         "background inherited-pipe job should not wait for the child sleep"
     );
     let job = &jobs_details(&status)["job"];
-    assert_eq!(job["output"]["stdoutPreview"], json!("parent-done"));
+    let log = fixture
+        .invoke_ok(json!({
+            "operation": "job_log",
+            "jobResourceId": job_resource_id
+        }))
+        .await;
+    assert_eq!(jobs_details(&log)["stdoutPreview"], json!("parent-done"));
     assert_eq!(job["terminal"]["timedOut"], json!(true));
 }
 
@@ -554,8 +569,17 @@ async fn cancel_after_process_exit_preserves_completion_and_output() {
     let job = &jobs_details(&status)["job"];
     assert_eq!(job["state"], json!("completed"));
     assert_eq!(job["terminal"]["cancelled"], json!(false));
-    assert_eq!(job["output"]["stdoutPreview"].as_str().unwrap().len(), 64);
-    assert!(job["output"]["outputResourceId"].as_str().is_some());
+    assert!(job["output"]["resourceId"].as_str().is_some());
+    let log = fixture
+        .invoke_ok(json!({
+            "operation": "job_log",
+            "jobResourceId": job_resource_id
+        }))
+        .await;
+    assert_eq!(
+        jobs_details(&log)["stdoutPreview"].as_str().unwrap().len(),
+        64
+    );
 }
 
 #[tokio::test]
@@ -615,8 +639,18 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     let status = fixture.wait_for_state(&job_resource_id, "cancelled").await;
     let job = &jobs_details(&status)["job"];
     assert_eq!(job["terminal"]["cancelled"], json!(true));
-    assert_eq!(job["cancellation"]["reason"], json!("server_shutdown"));
-    assert_eq!(job["output"]["stdoutPreview"], json!("shutdown-started"));
+    assert_eq!(job["cancellation"]["reasonRedacted"], json!(true));
+    assert_eq!(job["cancellation"]["rawReasonReturned"], json!(false));
+    let log = fixture
+        .invoke_ok(json!({
+            "operation": "job_log",
+            "jobResourceId": job_resource_id
+        }))
+        .await;
+    assert_eq!(
+        jobs_details(&log)["stdoutPreview"],
+        json!("shutdown-started")
+    );
 }
 
 struct ExecuteFixture<'a> {

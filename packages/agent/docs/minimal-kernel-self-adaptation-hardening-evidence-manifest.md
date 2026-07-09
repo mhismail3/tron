@@ -29,6 +29,8 @@ runtime behavior.
 | Session event log | `packages/agent/src/domains/session/event_store/mod.rs` |
 | Redaction | `packages/agent/src/shared/foundation/redaction.rs` |
 | Catalog discovery | `packages/agent/src/domains/catalog_discovery/mod.rs` |
+| Capability catalog projections | `packages/agent/src/domains/capability/operations/catalog.rs` |
+| Durable jobs domain | `packages/agent/src/domains/jobs/mod.rs`; `packages/agent/src/domains/jobs/service.rs` |
 | Transport boundary | `packages/agent/src/transport/engine/mod.rs` |
 | iOS cockpit state/UI | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift` |
 | Canonical README | `README.md` |
@@ -45,6 +47,7 @@ runtime behavior.
 | User visibility is server-owned. | `capability_binding::cockpit_overview` projects route stories, operation state, route events, failed-closed/disabled/rolled-back state, and rollback controls from scoped resources; iOS renders those facts without raw IDs. |
 | Agent-native zero-evidence paths are terminal. | `catalog_search` now points shadow/readiness queries to one targeted cockpit inspection, keeps adapter invocation/schema inspection out of the actionable readiness match list, and targeted `capability_binding_cockpit_overview` rows tell the model to answer immediately when no scoped evidence refs, shadow runs, route bindings, or route events exist. The evidence inspector remains exposed only when an exact evidence resource id is returned. |
 | Trace evidence contracts are inspectable before invocation. | `catalog_inspect` for `execute::trace_list` and `execute::trace_get` now projects the provider-safe trace record output schema, including trusted current-session scoping guidance, safe engine ref semantics, status summaries, request/result hashes, per-record projection/redaction proof booleans, and the explicit list of raw provider invocation ids, grant ids, idempotency keys, paths, commands, logs, and file contents that are not projected. Live-session hardening also makes whole-session trace proof explicitly terminal or qualified: agents must call `trace_list` after the operations being audited, or say it only covers records visible at projection time. Final answers must say provider transcript tool-call ids may still be visible in provider message history for protocol threading, while provider-safe trace projections exclude raw trace `providerInvocationId` fields; agents must not report transcript call ids as absent when only trace projection safety was checked. |
+| Durable job workflows are schema-led and projection-safe. | `catalog_inspect` now projects closed operation-specific schemas for `job_start`, `job_status`, `job_list`, `job_log`, `job_cancel`, `job_cleanup`, and `process_run`, including required payload fields, bounds, and idempotency/projection guidance. Public `job_status` and `job_list` return redacted lifecycle/output-ref projections without raw commands, canonical working directories, authority/grant ids, raw idempotency keys, stdout, stderr, or raw job/output payloads; `job_log` remains the explicit bounded stdout/stderr preview surface. |
 | The foundation is honest. | Dynamic replacement scorecard states the first route target is read-only `git_status` and does not claim arbitrary live module-code execution or full autonomous self-update across all operations. |
 
 ## Validation Commands
@@ -62,6 +65,9 @@ CARGO_TARGET_DIR=/tmp/tron-agent-target-minimal-kernel cargo test --manifest-pat
 cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_search_returns_agent_readiness_plan_for_multi_intent_queries -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --lib cockpit_overview_filters_exact_operation_and_returns_agent_native_path -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_inspect_projects_trace_output_record_schema -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_inspect_projects_closed_job_operation_contracts -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_inspect_projects_closed_process_run_contract -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --lib job_start_completes_and_records_bounded_output -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --lib extract_result_content_projects_trace_projection_proof_for_agent -- --nocapture
 scripts/personal-info-guard.sh
 git diff --check

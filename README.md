@@ -1380,9 +1380,9 @@ Current primitive operations:
 | `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
 | `git_branch_start` | Slice 6D operation that creates one new local branch at `expectedHead`, moves symbolic `HEAD` to it after a guarded ref/OID check without checkout, preserves index/worktree content, and records branch-start resource and stream evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
-| `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
-| `job_status` | Inspect one durable `job_process` resource in the current session scope. |
-| `job_list` | List durable `job_process` resources in the current session scope, optionally filtered by lifecycle state. |
+| `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, fail-closed `networkPolicy: none`, and an explicit caller idempotency key. |
+| `job_status` | Inspect one durable `job_process` resource in the current session scope through a redacted lifecycle projection: job/output refs, limits, exit/timeout/cancellation metadata, and no raw command, working directory, authority, idempotency key, stdout, or stderr. |
+| `job_list` | List durable `job_process` resources in the current session scope with the same redacted lifecycle projection, optionally filtered by lifecycle state. |
 | `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
 | `job_cancel` | Request cancellation for a running durable job; runtime finalization records terminal cancellation with bounded output evidence after signalling the owned process group. |
 | `module_program_execution_start` | Slice 24B operation that starts a module-owned supervised non-interactive job after enabled lifecycle/runtime authorization, records content-free `program_execution_record` evidence, delegates process execution to durable jobs, and returns only runtime/program/job/output refs plus bounded safety metadata without raw command, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, PTY, package install, or network behavior. |

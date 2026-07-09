@@ -200,8 +200,8 @@ pub(crate) async fn status_job_value(
     Ok(json!({
         "schemaVersion": JOB_SCHEMA_VERSION,
         "status": record.state.as_str(),
-        "job": job_summary(&inspection.resource, &version_id, &record),
-        "resourceRefs": [resource_ref(&inspection.resource, "job_process")]
+        "job": redacted_job_summary(&inspection.resource, &version_id, &record),
+        "resourceRefs": redacted_job_resource_refs(&inspection.resource, &record)
     }))
 }
 
@@ -231,7 +231,11 @@ pub(crate) async fn list_jobs_value(
             .map_err(engine_error)?
         {
             let (version_id, record) = job_record(&inspection)?;
-            jobs.push(job_summary(&inspection.resource, &version_id, &record));
+            jobs.push(redacted_job_summary(
+                &inspection.resource,
+                &version_id,
+                &record,
+            ));
         }
     }
     Ok(json!({
@@ -1068,29 +1072,6 @@ async fn output_resource_version(
         .into_iter()
         .find(|version| &version.version_id == version_id)
         .ok_or_else(|| internal("execution output current version was not found"))
-}
-
-fn job_summary(resource: &EngineResource, version_id: &str, record: &JobProcessRecord) -> Value {
-    json!({
-        "jobResourceId": resource.resource_id,
-        "jobVersionId": version_id,
-        "state": record.state.as_str(),
-        "command": {
-            "kind": record.command.kind.clone(),
-            "workingDirectory": record.command.working_directory.canonical_path.clone(),
-            "networkPolicy": record.command.network_policy.clone()
-        },
-        "limits": record.limits.clone(),
-        "createdAt": record.created_at,
-        "startedAt": record.started_at,
-        "completedAt": record.completed_at,
-        "cancellation": record.cancellation.clone(),
-        "terminal": record.terminal.clone(),
-        "output": record.output.clone(),
-        "traceRefs": record.trace_refs.clone(),
-        "replayRefs": record.replay_refs.clone(),
-        "revision": record.revision
-    })
 }
 
 fn redacted_job_summary(
