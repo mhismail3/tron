@@ -16,7 +16,9 @@
 //! guessing resource ids.
 //! Catalog projections expose the merged inspect target list, including
 //! effect-excluded matches, so the model can inspect non-invocable operations
-//! without needing to reconstruct hidden search state.
+//! without needing to reconstruct hidden search state. Inspection-target
+//! projections intentionally omit direct invocation arguments for effect-excluded
+//! operations; allowed invocation arguments remain in `executeOperationMatches`.
 //! Broad cockpit projections are a compact operation directory by default;
 //! exact `targetOperation` cockpit calls keep the deep readiness, preflight,
 //! binding, shadow, route, rollback, and agent-path detail. This keeps the
@@ -170,12 +172,48 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
     copy_key(&mut projected, discovery, "agentUsage");
     copy_key(&mut projected, discovery, "schema");
     copy_key(&mut projected, discovery, "executeOperationSearch");
-    copy_key(&mut projected, discovery, "allDiscoveredInspectTargets");
-    copy_key(
-        &mut projected,
-        discovery,
-        "effectClassExcludedOperationMatches",
-    );
+    if let Some(targets) = discovery
+        .get("allDiscoveredInspectTargets")
+        .and_then(Value::as_array)
+    {
+        projected.insert(
+            "allDiscoveredInspectTargets".to_owned(),
+            Value::Array(
+                targets
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_discovered_inspect_target)
+                    .collect(),
+            ),
+        );
+        if targets.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+            projected.insert(
+                "allDiscoveredInspectTargetsOmitted".to_owned(),
+                json!(targets.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            );
+        }
+    }
+    if let Some(excluded) = discovery
+        .get("effectClassExcludedOperationMatches")
+        .and_then(Value::as_array)
+    {
+        projected.insert(
+            "effectClassExcludedOperationMatches".to_owned(),
+            Value::Array(
+                excluded
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(project_effect_class_excluded_operation_match)
+                    .collect(),
+            ),
+        );
+        if excluded.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS {
+            projected.insert(
+                "effectClassExcludedOperationMatchesOmitted".to_owned(),
+                json!(excluded.len() - MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            );
+        }
+    }
     copy_key(&mut projected, discovery, "agentNextStep");
     copy_key(&mut projected, discovery, "unsupportedOperationCandidate");
     copy_key(&mut projected, discovery, "unsupportedOperationRecovery");
@@ -289,6 +327,57 @@ fn project_execute_operation_match(operation: &Value) -> Value {
     ] {
         copy_key(&mut projected, operation, key);
     }
+    Value::Object(projected)
+}
+
+fn project_discovered_inspect_target(target: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "operation",
+        "tool",
+        "catalogInspectId",
+        "inspectOperation",
+        "inspectArguments",
+        "readOnlyInspectionSafe",
+        "excludedFromImmediateInvocation",
+        "agentGuidance",
+        "exclusionReason",
+    ] {
+        copy_key(&mut projected, target, key);
+    }
+    if target
+        .get("excludedFromImmediateInvocation")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        projected.insert(
+            "invokeArgumentsOmitted".to_owned(),
+            json!("excluded_by_active_effect_filter"),
+        );
+    }
+    Value::Object(projected)
+}
+
+fn project_effect_class_excluded_operation_match(operation: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "operation",
+        "tool",
+        "catalogInspectId",
+        "schemaInspection",
+        "matchKind",
+        "score",
+        "capabilityPool",
+        "agentUsage",
+        "excludedByEffectClass",
+        "exclusionReason",
+    ] {
+        copy_key(&mut projected, operation, key);
+    }
+    projected.insert(
+        "invokeArgumentsOmitted".to_owned(),
+        json!("excluded_by_active_effect_filter"),
+    );
     Value::Object(projected)
 }
 

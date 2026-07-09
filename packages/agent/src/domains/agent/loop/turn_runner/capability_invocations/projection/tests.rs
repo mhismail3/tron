@@ -133,6 +133,7 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
                         "kind": "function",
                         "id": "execute::question_inspect"
                     },
+                    "invokeArguments": {"operation": "question_inspect"},
                     "excludedFromImmediateInvocation": false
                 }, {
                     "operation": "question_answer",
@@ -142,11 +143,13 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
                         "kind": "function",
                         "id": "execute::question_answer"
                     },
+                    "invokeArguments": {"operation": "question_answer"},
                     "excludedFromImmediateInvocation": true
                 }],
                 "effectClassExcludedOperationMatches": [{
                     "operation": "question_answer",
                     "catalogInspectId": "execute::question_answer",
+                    "arguments": {"operation": "question_answer"},
                     "exclusionReason": "Supported operation exists but was excluded from immediate invocation by the requested effect class."
                 }]
             }
@@ -164,6 +167,40 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
     assert!(text.contains("execute::question_inspect"));
     assert!(text.contains("execute::question_answer"));
     assert!(text.contains("excludedFromImmediateInvocation"));
+    let json_start = text.find("\n\n{").expect("model context evidence JSON") + 2;
+    let evidence: Value =
+        serde_json::from_str(&text[json_start..]).expect("model context evidence parses");
+    let context = &evidence["modelContextEvidence"];
+    let targets = context["allDiscoveredInspectTargets"]
+        .as_array()
+        .expect("inspect targets");
+    assert!(
+        targets
+            .iter()
+            .all(|target| target.get("invokeArguments").is_none()),
+        "inspect-target projection must not expose direct invoke args: {targets:#?}"
+    );
+    let excluded_target = targets
+        .iter()
+        .find(|target| target["operation"] == "question_answer")
+        .expect("excluded inspect target");
+    assert_eq!(
+        excluded_target["invokeArgumentsOmitted"],
+        json!("excluded_by_active_effect_filter")
+    );
+    let excluded_matches = context["effectClassExcludedOperationMatches"]
+        .as_array()
+        .expect("effect-class excluded operation matches");
+    assert!(
+        excluded_matches
+            .iter()
+            .all(|target| target.get("arguments").is_none()),
+        "effect-excluded projection must not expose direct execute args: {excluded_matches:#?}"
+    );
+    assert_eq!(
+        excluded_matches[0]["invokeArgumentsOmitted"],
+        json!("excluded_by_active_effect_filter")
+    );
 }
 
 #[test]
