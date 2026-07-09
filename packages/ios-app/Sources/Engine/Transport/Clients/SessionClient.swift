@@ -41,7 +41,7 @@ final class SessionClient: EngineDomainClient {
     func list(
         workingDirectory: String? = nil,
         limit: Int = 50,
-        offset: Int = 0,
+        cursor: String? = nil,
         includeArchived: Bool = false
     ) async throws -> SessionListResult {
         _ = try requireTransport().requireConnection()
@@ -49,7 +49,7 @@ final class SessionClient: EngineDomainClient {
         let params = SessionListParams(
             workingDirectory: workingDirectory,
             limit: limit,
-            offset: offset,
+            cursor: cursor,
             includeArchived: includeArchived
         )
 

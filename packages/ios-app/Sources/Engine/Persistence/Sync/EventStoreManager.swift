@@ -476,7 +476,12 @@ final class EventStoreManager {
 
     /// Get sorted sessions (most recent first)
     var sortedSessions: [CachedSession] {
-        sessions.sorted { $0.lastActivityAt > $1.lastActivityAt }
+        sessions.sorted {
+            if $0.lastActivityAt != $1.lastActivityAt {
+                return $0.lastActivityAt > $1.lastActivityAt
+            }
+            return $0.id > $1.id
+        }
     }
 
     /// Get active session

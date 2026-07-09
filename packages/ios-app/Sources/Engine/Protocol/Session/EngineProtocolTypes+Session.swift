@@ -36,7 +36,7 @@ struct SessionCreateResult: Decodable {
 struct SessionListParams: Encodable {
     let workingDirectory: String?
     let limit: Int?
-    let offset: Int?
+    let cursor: String?
     let includeArchived: Bool?
 }
 
@@ -118,6 +118,7 @@ struct SessionListResult: Decodable {
     let sessions: [SessionInfo]
     let totalCount: Int?
     let hasMore: Bool?
+    let nextCursor: String?
 }
 
 struct SessionResumeParams: Encodable {

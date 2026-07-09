@@ -32,12 +32,25 @@ pub(crate) async fn session_list_value(
         .and_then(|p| p.get("offset"))
         .and_then(Value::as_u64)
         .map(|value| value as usize);
+    let cursor = opt_string(params, "cursor")
+        .map(|cursor| {
+            serde_json::from_str(&cursor).map_err(|_| CapabilityError::InvalidParams {
+                message: "cursor must be a session::list cursor returned by the server".into(),
+            })
+        })
+        .transpose()?;
+    if cursor.is_some() && offset.is_some() {
+        return Err(CapabilityError::InvalidParams {
+            message: "session::list accepts either cursor or offset, not both".into(),
+        });
+    }
     crate::domains::session::query::SessionQueryService::list(
         deps,
         include_archived,
         limit,
         working_directory,
         offset,
+        cursor,
     )
     .await
 }

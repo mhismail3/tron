@@ -49,6 +49,44 @@ struct SessionListWorkspaceExpansion: Equatable {
     }
 }
 
+struct SessionListSessionExpansion: Equatable {
+    static let pageSize = 10
+
+    private(set) var visibleCountsByGroupId: [String: Int] = [:]
+
+    func visibleCount(for groupId: String, totalCount: Int) -> Int {
+        min(totalCount, visibleCountsByGroupId[groupId] ?? Self.pageSize)
+    }
+
+    func visibleSessions(in group: SessionListWorkspaceGroup) -> [CachedSession] {
+        Array(group.sessions.prefix(visibleCount(for: group.id, totalCount: group.sessions.count)))
+    }
+
+    func canViewMore(groupId: String, totalCount: Int) -> Bool {
+        visibleCount(for: groupId, totalCount: totalCount) < totalCount
+    }
+
+    func canViewLess(groupId: String, totalCount: Int) -> Bool {
+        visibleCountsByGroupId[groupId] != nil && totalCount > Self.pageSize
+    }
+
+    mutating func revealMore(groupId: String, totalCount: Int) {
+        let currentCount = visibleCount(for: groupId, totalCount: totalCount)
+        visibleCountsByGroupId[groupId] = min(totalCount, currentCount + Self.pageSize)
+    }
+
+    mutating func showLess(groupId: String) {
+        visibleCountsByGroupId.removeValue(forKey: groupId)
+    }
+
+    mutating func reconcile(groupCounts: [String: Int]) {
+        let validGroupIds = Set(groupCounts.keys)
+        visibleCountsByGroupId = visibleCountsByGroupId.filter { groupId, _ in
+            validGroupIds.contains(groupId) && (groupCounts[groupId] ?? 0) > Self.pageSize
+        }
+    }
+}
+
 enum SessionListLayout {
     static let rowContainerHorizontalInset: CGFloat = 16
     static let rowContentHorizontalPadding: CGFloat = 12
@@ -76,6 +114,8 @@ enum SessionListLayout {
     static let headerChevronSize: CGFloat = 10
     static let headerTitleSize: CGFloat = TronTypography.sizeBodyLG
     static let rowTitleSize: CGFloat = TronTypography.sizeBody3
+    static let expansionControlTitleSize: CGFloat = TronTypography.sizeBody3
+    static let expansionControlMinimumHeight: CGFloat = 44
     static let expansionAnimation = Animation.snappy(duration: 0.14)
 
     static var headerInsets: EdgeInsets {
@@ -247,6 +287,66 @@ struct SessionListRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+struct SessionListExpansionControls: View {
+    let projectName: String
+    let canViewLess: Bool
+    let canViewMore: Bool
+    let onViewLess: () -> Void
+    let onViewMore: () -> Void
+
+    var body: some View {
+        HStack(spacing: SessionListLayout.iconTextSpacing) {
+            if canViewLess {
+                expansionButton(
+                    title: "View less",
+                    symbolName: "chevron.up",
+                    hint: "Shows only the latest 10 sessions in \(projectName)",
+                    action: onViewLess
+                )
+            }
+
+            if canViewMore {
+                expansionButton(
+                    title: "View more",
+                    symbolName: "chevron.down",
+                    hint: "Shows 10 more older sessions in \(projectName)",
+                    action: onViewMore
+                )
+            }
+        }
+    }
+
+    private func expansionButton(
+        title: String,
+        symbolName: String,
+        hint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: SessionListLayout.iconTextSpacing) {
+                Text(title)
+                    .font(
+                        TronTypography.sans(
+                            size: SessionListLayout.expansionControlTitleSize,
+                            weight: .semibold
+                        )
+                    )
+
+                Image(systemName: symbolName)
+                    .font(.system(size: SessionListLayout.headerChevronSize, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(.tronEmerald)
+            .frame(maxWidth: .infinity, minHeight: SessionListLayout.expansionControlMinimumHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(title) sessions in \(projectName)")
+        .accessibilityHint(hint)
     }
 }
 

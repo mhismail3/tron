@@ -16,7 +16,7 @@ final class MockSessionClientForRepository {
     var listCallCount = 0
     var lastListWorkingDirectory: String?
     var lastListLimit: Int?
-    var lastListOffset: Int?
+    var lastListCursor: String?
     var lastListIncludeArchived: Bool?
     var listResultToReturn: [SessionInfo] = []
     var listError: Error?
@@ -59,16 +59,21 @@ final class MockSessionClientForRepository {
         return createResultToReturn ?? createMockCreateResult()
     }
 
-    func list(workingDirectory: String? = nil, limit: Int = 50, offset: Int = 0, includeArchived: Bool = false) async throws -> SessionListResult {
+    func list(workingDirectory: String? = nil, limit: Int = 50, cursor: String? = nil, includeArchived: Bool = false) async throws -> SessionListResult {
         listCallCount += 1
         lastListWorkingDirectory = workingDirectory
         lastListLimit = limit
-        lastListOffset = offset
+        lastListCursor = cursor
         lastListIncludeArchived = includeArchived
         if let error = listError {
             throw error
         }
-        return SessionListResult(sessions: listResultToReturn, totalCount: listResultToReturn.count, hasMore: false)
+        return SessionListResult(
+            sessions: listResultToReturn,
+            totalCount: listResultToReturn.count,
+            hasMore: false,
+            nextCursor: nil
+        )
     }
 
     func resume(sessionId: String) async throws {
@@ -196,13 +201,18 @@ final class DefaultSessionRepositoryTests: XCTestCase {
         mockClient.listResultToReturn = [createMockSession(sessionId: "session-1")]
 
         // When
-        let result = try await mockClient.list(workingDirectory: "/path", limit: 25, offset: 5, includeArchived: true)
+        let result = try await mockClient.list(
+            workingDirectory: "/path",
+            limit: 25,
+            cursor: "cursor-5",
+            includeArchived: true
+        )
 
         // Then
         XCTAssertEqual(mockClient.listCallCount, 1)
         XCTAssertEqual(mockClient.lastListWorkingDirectory, "/path")
         XCTAssertEqual(mockClient.lastListLimit, 25)
-        XCTAssertEqual(mockClient.lastListOffset, 5)
+        XCTAssertEqual(mockClient.lastListCursor, "cursor-5")
         XCTAssertEqual(mockClient.lastListIncludeArchived, true)
         XCTAssertEqual(result.sessions.count, 1)
     }

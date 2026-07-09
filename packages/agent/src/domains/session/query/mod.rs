@@ -1,5 +1,10 @@
 //! Shared query-side services for session read capabilities.
+//!
+//! `session::list` clamps every page to 200 rows and returns an opaque cursor
+//! over the deterministic activity/session-ID ordering. Clients can assemble a
+//! generous bounded snapshot without one unbounded database read.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
@@ -7,6 +12,16 @@ use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
 
 pub(crate) struct SessionQueryService;
+
+const SESSION_LIST_DEFAULT_LIMIT: usize = 50;
+const SESSION_LIST_MAX_LIMIT: usize = 200;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionListCursor {
+    last_activity_at: String,
+    session_id: String,
+}
 
 mod operations;
 
@@ -44,24 +59,47 @@ impl SessionQueryService {
         limit: Option<usize>,
         working_directory: Option<String>,
         offset: Option<usize>,
+        cursor: Option<SessionListCursor>,
     ) -> Result<Value, CapabilityError> {
+        let limit = limit
+            .unwrap_or(SESSION_LIST_DEFAULT_LIMIT)
+            .clamp(1, SESSION_LIST_MAX_LIMIT);
+        let fetch_limit = limit.saturating_add(1);
         let filter = crate::domains::agent::r#loop::SessionFilter {
             workspace_path: working_directory,
             include_archived,
-            limit,
+            limit: Some(fetch_limit),
             offset,
+            before_last_activity_at: cursor
+                .as_ref()
+                .map(|cursor| cursor.last_activity_at.clone()),
+            before_session_id: cursor.as_ref().map(|cursor| cursor.session_id.clone()),
             ..Default::default()
         };
         let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let orchestrator = deps.orchestrator.clone();
         run_blocking_task("session.list", move || {
-            let sessions =
+            let mut sessions =
                 session_manager
                     .list_sessions(&filter)
                     .map_err(|error| CapabilityError::Internal {
                         message: error.to_string(),
                     })?;
+
+            let has_more = sessions.len() > limit;
+            sessions.truncate(limit);
+            let next_cursor = if has_more {
+                sessions.last().map(|session| {
+                    serde_json::to_string(&SessionListCursor {
+                        last_activity_at: session.last_activity_at.clone(),
+                        session_id: session.id.clone(),
+                    })
+                    .expect("session list cursor serialization cannot fail")
+                })
+            } else {
+                None
+            };
 
             let session_ids: Vec<&str> = sessions.iter().map(|session| session.id.as_str()).collect();
             let previews = event_store
@@ -106,7 +144,11 @@ impl SessionQueryService {
                 })
                 .collect();
 
-            Ok(json!({ "sessions": items }))
+            Ok(json!({
+                "sessions": items,
+                "hasMore": has_more,
+                "nextCursor": next_cursor,
+            }))
         })
         .await
     }
@@ -482,11 +524,33 @@ mod tests {
             Some(1),
             None,
             Some(0),
+            None,
         )
         .await
         .unwrap();
         let sessions = result["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 1);
+        assert_eq!(result["hasMore"].as_bool(), Some(true));
+        let cursor: SessionListCursor =
+            serde_json::from_str(result["nextCursor"].as_str().unwrap()).unwrap();
+
+        let next = SessionQueryService::list(
+            &Deps::from_test_context(&ctx),
+            false,
+            Some(1),
+            None,
+            None,
+            Some(cursor),
+        )
+        .await
+        .unwrap();
+        let next_sessions = next["sessions"].as_array().unwrap();
+        assert_eq!(next_sessions.len(), 1);
+        assert_ne!(
+            sessions[0]["sessionId"].as_str(),
+            next_sessions[0]["sessionId"].as_str()
+        );
+        assert_eq!(next["hasMore"].as_bool(), Some(false));
 
         let filtered = SessionQueryService::list(
             &Deps::from_test_context(&ctx),
@@ -494,6 +558,7 @@ mod tests {
             None,
             Some("/tmp/a".to_string()),
             Some(0),
+            None,
         )
         .await
         .unwrap();
@@ -501,5 +566,25 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["sessionId"].as_str().unwrap(), first);
         assert_ne!(sessions[0]["sessionId"].as_str().unwrap(), second);
+    }
+
+    #[tokio::test]
+    async fn list_rejects_mixed_cursor_and_offset_pagination() {
+        let ctx = make_test_context();
+        let cursor = serde_json::to_string(&SessionListCursor {
+            last_activity_at: "2026-07-01T12:00:00Z".into(),
+            session_id: "sess_cursor".into(),
+        })
+        .unwrap();
+        let params = json!({
+            "limit": 20,
+            "offset": 0,
+            "cursor": cursor,
+        });
+
+        let error = session_list_value(Some(&params), &Deps::from_test_context(&ctx))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
     }
 }

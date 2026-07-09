@@ -28,8 +28,8 @@ final class DefaultSessionRepository: NetworkSessionRepository {
         )
     }
 
-    func list(workingDirectory: String? = nil, limit: Int = 50, offset: Int = 0, includeArchived: Bool = false) async throws -> SessionListResult {
-        try await sessionClient.list(workingDirectory: workingDirectory, limit: limit, offset: offset, includeArchived: includeArchived)
+    func list(workingDirectory: String? = nil, limit: Int = 50, cursor: String? = nil, includeArchived: Bool = false) async throws -> SessionListResult {
+        try await sessionClient.list(workingDirectory: workingDirectory, limit: limit, cursor: cursor, includeArchived: includeArchived)
     }
 
     func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {

@@ -62,6 +62,95 @@ final class SessionListPresentationTests: XCTestCase {
         XCTAssertTrue(expansion.isExpanded("workspace"))
     }
 
+    func testEachProjectShowsExactlyTenSessionsByDefault() {
+        let groups = SessionListWorkspaceGroup.groups(from: makeSessions(count: 24, project: "Workspace"))
+        let expansion = SessionListSessionExpansion()
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(expansion.visibleSessions(in: groups[0]).count, 10)
+        XCTAssertEqual(expansion.visibleSessions(in: groups[0]).map(\.id), (0..<10).map { "Workspace-\($0)" })
+        XCTAssertTrue(expansion.canViewMore(groupId: groups[0].id, totalCount: 24))
+        XCTAssertFalse(expansion.canViewLess(groupId: groups[0].id, totalCount: 24))
+    }
+
+    func testViewMoreProgressesByTenAndViewLessReturnsToLatestTen() {
+        let group = SessionListWorkspaceGroup.groups(from: makeSessions(count: 25, project: "Workspace"))[0]
+        var expansion = SessionListSessionExpansion()
+
+        expansion.revealMore(groupId: group.id, totalCount: group.sessions.count)
+        XCTAssertEqual(expansion.visibleSessions(in: group).count, 20)
+        XCTAssertTrue(expansion.canViewMore(groupId: group.id, totalCount: 25))
+        XCTAssertTrue(expansion.canViewLess(groupId: group.id, totalCount: 25))
+
+        expansion.revealMore(groupId: group.id, totalCount: group.sessions.count)
+        XCTAssertEqual(expansion.visibleSessions(in: group).count, 25)
+        XCTAssertFalse(expansion.canViewMore(groupId: group.id, totalCount: 25))
+        XCTAssertTrue(expansion.canViewLess(groupId: group.id, totalCount: 25))
+
+        expansion.showLess(groupId: group.id)
+        XCTAssertEqual(expansion.visibleSessions(in: group).count, 10)
+        XCTAssertTrue(expansion.canViewMore(groupId: group.id, totalCount: 25))
+        XCTAssertFalse(expansion.canViewLess(groupId: group.id, totalCount: 25))
+    }
+
+    func testNoExpansionControlAtTenOrFewerSessions() {
+        let expansion = SessionListSessionExpansion()
+
+        for count in [0, 1, 10] {
+            XCTAssertFalse(expansion.canViewMore(groupId: "workspace", totalCount: count))
+            XCTAssertFalse(expansion.canViewLess(groupId: "workspace", totalCount: count))
+        }
+    }
+
+    func testSessionExpansionIsIndependentAcrossProjects() {
+        let groups = SessionListWorkspaceGroup.groups(
+            from: makeSessions(count: 22, project: "Workspace") + makeSessions(count: 13, project: "Tron")
+        )
+        var expansion = SessionListSessionExpansion()
+
+        expansion.revealMore(groupId: groups[0].id, totalCount: groups[0].sessions.count)
+
+        XCTAssertEqual(expansion.visibleSessions(in: groups[0]).count, 20)
+        XCTAssertEqual(expansion.visibleSessions(in: groups[1]).count, 10)
+        XCTAssertTrue(expansion.canViewLess(groupId: groups[0].id, totalCount: 22))
+        XCTAssertFalse(expansion.canViewLess(groupId: groups[1].id, totalCount: 13))
+    }
+
+    func testExpansionHandlesRefreshNewArchiveAndProjectCollapsePredictably() {
+        var sessions = makeSessions(count: 25, project: "Workspace")
+        var group = SessionListWorkspaceGroup.groups(from: sessions)[0]
+        var sessionExpansion = SessionListSessionExpansion()
+        var workspaceExpansion = SessionListWorkspaceExpansion()
+        sessionExpansion.revealMore(groupId: group.id, totalCount: group.sessions.count)
+
+        let newSession = makeSession(
+            id: "Workspace-new",
+            workingDirectory: group.path,
+            title: "Newest"
+        )
+        sessions.insert(newSession, at: 0)
+        group = SessionListWorkspaceGroup.groups(from: sessions)[0]
+        XCTAssertEqual(sessionExpansion.visibleSessions(in: group).count, 20)
+        XCTAssertEqual(sessionExpansion.visibleSessions(in: group).first?.id, "Workspace-new")
+        XCTAssertEqual(Set(sessionExpansion.visibleSessions(in: group).map(\.id)).count, 20)
+
+        sessions.removeAll { $0.id == "Workspace-3" }
+        group = SessionListWorkspaceGroup.groups(from: sessions)[0]
+        XCTAssertEqual(sessionExpansion.visibleSessions(in: group).count, 20)
+        XCTAssertEqual(Set(sessionExpansion.visibleSessions(in: group).map(\.id)).count, 20)
+
+        workspaceExpansion.toggle(group.id)
+        XCTAssertFalse(workspaceExpansion.isExpanded(group.id))
+        XCTAssertTrue(sessionExpansion.canViewLess(groupId: group.id, totalCount: group.sessions.count))
+        workspaceExpansion.toggle(group.id)
+        XCTAssertTrue(workspaceExpansion.isExpanded(group.id))
+        XCTAssertEqual(sessionExpansion.visibleSessions(in: group).count, 20)
+
+        sessionExpansion.reconcile(groupCounts: [group.id: 9])
+        XCTAssertFalse(sessionExpansion.canViewLess(groupId: group.id, totalCount: 9))
+        XCTAssertEqual(sessionExpansion.visibleCount(for: group.id, totalCount: 9), 9)
+    }
+
     func testListLayoutAlignsHeaderAndSessionColumns() {
         XCTAssertEqual(SessionListLayout.headerInsets.leading, 0)
         XCTAssertEqual(SessionListLayout.headerInsets.trailing, 0)
@@ -90,6 +179,7 @@ final class SessionListPresentationTests: XCTestCase {
         XCTAssertEqual(SessionListLayout.listBottomContentMargin, 92)
         XCTAssertEqual(SessionListLayout.floatingButtonSize, 56)
         XCTAssertEqual(SessionListLayout.rowContainerCornerRadius, 12)
+        XCTAssertEqual(SessionListLayout.expansionControlMinimumHeight, 44)
     }
 
     private func makeSession(
@@ -122,5 +212,15 @@ final class SessionListPresentationTests: XCTestCase {
             isFork: isFork,
             source: title == "Chat" ? "chat" : nil
         )
+    }
+
+    private func makeSessions(count: Int, project: String) -> [CachedSession] {
+        (0..<count).map { index in
+            makeSession(
+                id: "\(project)-\(index)",
+                workingDirectory: "/tmp/tron-fixtures/\(project)",
+                title: "Session \(index)"
+            )
+        }
     }
 }

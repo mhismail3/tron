@@ -2924,8 +2924,12 @@ packages/ios-app/Sources/
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session
-  titles before prompt-derived labels, and show untitled rows as `New Session`,
-  server-backed new-session workspace selection with configured/recent
+  titles before prompt-derived labels, and show untitled rows as `New Session`.
+  Session refresh reads stable 200-row server cursor pages into a generous
+  bounded snapshot instead of truncating the dashboard at 50 rows; each
+  workspace shows its latest 10 sessions by default and independently reveals
+  older rows in 10-session increments with full-width View more/View less controls.
+  The shell also keeps server-backed new-session workspace selection with configured/recent
   shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
   inline folder creation, prompt input with clearable
   device-local recent-input reuse, the

@@ -21,10 +21,10 @@ protocol NetworkSessionRepository: AnyObject {
     /// - Parameters:
     ///   - workingDirectory: Optional filter by working directory
     ///   - limit: Maximum number of sessions to return
-    ///   - offset: Offset for pagination
+    ///   - cursor: Stable cursor returned by the preceding page
     ///   - includeArchived: Whether to include archived sessions
     /// - Returns: Session list result with pagination info
-    func list(workingDirectory: String?, limit: Int, offset: Int, includeArchived: Bool) async throws -> SessionListResult
+    func list(workingDirectory: String?, limit: Int, cursor: String?, includeArchived: Bool) async throws -> SessionListResult
 
     /// Resume an existing session.
     /// - Parameter sessionId: The session ID to resume

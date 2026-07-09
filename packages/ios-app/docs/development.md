@@ -116,6 +116,16 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+For dashboard session-list loading and per-workspace disclosure changes, run:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SessionListPageLoaderTests \
+  -only-testing:TronMobileTests/SessionListPresentationTests \
+  -only-testing:TronMobileTests/SessionListExpansionAccessibilityTests
+```
+
 For Engine Cockpit capability visibility or `WorkerLifecycleRepository` protocol
 changes, run the focused cockpit state/view-model set:
 
