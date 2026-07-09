@@ -20,7 +20,7 @@ pub(super) async fn catalog_search(
 ) -> Result<CapabilityResult, CapabilityError> {
     let mut discovery =
         service::search_catalog_value(&deps.engine_host, invocation, &invocation.payload).await?;
-    annotate_model_facing_invocation(&mut discovery);
+    annotate_model_facing_invocation(&mut discovery, &invocation.payload);
     annotate_execute_operation_matches(&mut discovery, &invocation.payload);
     let content = catalog_search_content(&discovery);
     Ok(ok_result(
@@ -138,7 +138,7 @@ pub(super) async fn catalog_inspect(
             object.insert("aliasResolvedFrom".to_owned(), Value::String(alias));
         }
     }
-    annotate_model_facing_invocation(&mut discovery);
+    annotate_model_facing_invocation(&mut discovery, &json!({}));
     let kind = discovery["kind"].as_str().unwrap_or("item");
     let id = discovery["id"].as_str().unwrap_or("unknown");
     Ok(ok_result(
@@ -1187,7 +1187,9 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         .collect()
 }
 
-fn annotate_model_facing_invocation(discovery: &mut Value) {
+fn annotate_model_facing_invocation(discovery: &mut Value, payload: &Value) {
+    let supported_execute_operations = supported_operation_names_for_guidance(payload);
+    let supported_execute_operation_filter = supported_operation_guidance_filter(payload);
     if let Some(object) = discovery.as_object_mut() {
         object.insert(
             "modelFacingGuidance".to_owned(),
@@ -1197,7 +1199,8 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
                 "operationSearch": "If executeOperationMatches is present, use those operation names directly with capability::execute. They are provider-visible operations, not separate catalog functions.",
                 "executeSchemaInspection": "Before invoking a provider-visible operation, inspect execute::<operation> with catalog_inspect to get exact top-level payload fields. Backing catalog function ids are secondary diagnostics.",
                 "internalDiscovery": "Internal catalog functions are inspect-only by default. Request diagnostics or kernel-evolution context before using them to reason about engine internals.",
-                "supportedExecuteOperations": supported_operation_names()
+                "supportedExecuteOperations": supported_execute_operations,
+                "supportedExecuteOperationsFilter": supported_execute_operation_filter
             }),
         );
     }
@@ -1275,6 +1278,28 @@ fn annotate_model_facing_invocation(discovery: &mut Value) {
             }
         }
     }
+}
+
+fn supported_operation_names_for_guidance(payload: &Value) -> Vec<&'static str> {
+    if catalog_search_requests_read_only(payload) {
+        return supported_operation_names()
+            .iter()
+            .copied()
+            .filter(|operation| operation_is_read_only_inspection_safe(operation))
+            .collect();
+    }
+    supported_operation_names().iter().copied().collect()
+}
+
+fn supported_operation_guidance_filter(payload: &Value) -> Value {
+    if catalog_search_requests_read_only(payload) {
+        return json!({
+            "effectClass": "pure_read",
+            "mode": "read_only_inspection_safe",
+            "reason": "Filtered by the active read-only discovery request so generic fallback guidance does not suggest mutating operations."
+        });
+    }
+    json!({"effectClass": "all", "mode": "unfiltered"})
 }
 
 fn annotate_execute_operation_matches(discovery: &mut Value, payload: &Value) {
@@ -3381,7 +3406,7 @@ mod tests {
             ]
         });
 
-        annotate_model_facing_invocation(&mut discovery);
+        annotate_model_facing_invocation(&mut discovery, &json!({}));
 
         assert_eq!(
             discovery["functions"][0]["modelFacingInvocation"]["operation"],
@@ -3453,6 +3478,42 @@ mod tests {
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>(),
             supported_operation_names().to_vec()
+        );
+    }
+
+    #[test]
+    fn catalog_search_read_only_guidance_filters_generic_supported_operations() {
+        let mut discovery = json!({"functions": []});
+
+        annotate_model_facing_invocation(&mut discovery, &json!({"effectClass": "pure_read"}));
+
+        let operations = discovery["modelFacingGuidance"]["supportedExecuteOperations"]
+            .as_array()
+            .expect("operations")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(operations.contains(&"catalog_search"));
+        assert!(operations.contains(&"catalog_inspect"));
+        assert!(operations.contains(&"git_status"));
+        assert!(operations.contains(&"capability_binding_cockpit_overview"));
+        for mutating in [
+            "state_set",
+            "filesystem_write",
+            "filesystem_edit",
+            "filesystem_apply_patch",
+            "git_stage",
+            "git_commit",
+            "capability_route_activate",
+        ] {
+            assert!(
+                !operations.contains(&mutating),
+                "pure-read supported-operation guidance must not include {mutating}"
+            );
+        }
+        assert_eq!(
+            discovery["modelFacingGuidance"]["supportedExecuteOperationsFilter"]["mode"],
+            "read_only_inspection_safe"
         );
     }
 

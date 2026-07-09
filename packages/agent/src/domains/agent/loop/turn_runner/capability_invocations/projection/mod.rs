@@ -281,16 +281,19 @@ fn project_model_facing_guidance(guidance: &Value) -> Value {
             .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
             .map(|operation| Value::String(operation.to_owned()))
             .collect::<Vec<_>>();
-        projected.insert(
-            "supportedExecuteOperations".to_owned(),
-            json!({
-                "total": operations.len(),
-                "returned": returned,
-                "truncated": operations.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
-                "omitted": operations.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
-                "maxItems": MODEL_CONTEXT_ARRAY_MAX_ITEMS
-            }),
-        );
+        let mut supported = json!({
+            "total": operations.len(),
+            "returned": returned,
+            "truncated": operations.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
+            "omitted": operations.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+            "maxItems": MODEL_CONTEXT_ARRAY_MAX_ITEMS
+        });
+        if let Some(filter) = guidance.get("supportedExecuteOperationsFilter") {
+            if let Some(object) = supported.as_object_mut() {
+                object.insert("filter".to_owned(), filter.clone());
+            }
+        }
+        projected.insert("supportedExecuteOperations".to_owned(), supported);
     }
     Value::Object(projected)
 }

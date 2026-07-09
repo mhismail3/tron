@@ -120,7 +120,8 @@
 //! accepts the safe read-only `effectClass` aliases `read`, `read_only`, and
 //! `inspect` as `pure_read` so natural discovery filters do not become invalid
 //! calls; read-only searches must return only operations whose agent-usage
-//! metadata proves they are inspection-safe and non-mutating, so broad resource
+//! metadata proves they are inspection-safe and non-mutating in both immediate
+//! matches and generic supported-operation fallback guidance, so broad resource
 //! discovery queries cannot steer the model into write or record operations.
 //! Supported operations excluded by the requested read-only effect class are
 //! reported separately with bounded operation metadata and an explicit

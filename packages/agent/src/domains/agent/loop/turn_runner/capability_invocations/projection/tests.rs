@@ -228,6 +228,61 @@ fn extract_result_content_projects_catalog_inspect_targets_for_model_context() {
 }
 
 #[test]
+fn extract_result_content_projects_read_only_supported_operation_filter() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Catalog search found no operation matches.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "catalog_search",
+            "status": "ok",
+            "catalogDiscovery": {
+                "executeOperationSearch": {
+                    "query": "missing_operation",
+                    "totalMatches": 0
+                },
+                "modelFacingGuidance": {
+                    "catalogInspect": "inspect",
+                    "capabilityExecute": "execute",
+                    "operationSearch": "search",
+                    "executeSchemaInspection": "schema",
+                    "internalDiscovery": "internal",
+                    "supportedExecuteOperations": [
+                        "catalog_search",
+                        "catalog_inspect",
+                        "git_status",
+                        "trace_list"
+                    ],
+                    "supportedExecuteOperationsFilter": {
+                        "effectClass": "pure_read",
+                        "mode": "read_only_inspection_safe",
+                        "reason": "Filtered by the active read-only discovery request."
+                    }
+                }
+            }
+        })),
+    );
+
+    let content = extract_result_content(&exec);
+
+    let CapabilityResultMessageContent::Text(text) = content else {
+        panic!("expected text result");
+    };
+    let json_start = text.find("\n\n{").expect("model context evidence JSON") + 2;
+    let evidence: Value =
+        serde_json::from_str(&text[json_start..]).expect("model context evidence parses");
+    let supported =
+        &evidence["modelContextEvidence"]["modelFacingGuidance"]["supportedExecuteOperations"];
+    assert_eq!(
+        supported["filter"]["mode"],
+        json!("read_only_inspection_safe")
+    );
+    assert_eq!(supported["returned"][0], json!("catalog_search"));
+    assert!(!text.contains("filesystem_write"));
+    assert!(!text.contains("git_commit"));
+}
+
+#[test]
 fn extract_result_content_projects_catalog_operation_truncation_metadata() {
     let operations = (0..25)
         .map(|index| json!(format!("operation_{index}")))
