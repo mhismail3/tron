@@ -12,6 +12,9 @@
 //! calls: `catalog_search` and `catalog_inspect` derive only the execute wrapper
 //! authority plus a `catalog_discovery` selector and no session-state
 //! primitives, because discovery must not carry write authority it cannot use.
+//! Diagnostic read calls such as `trace_list` follow the same exact-target
+//! grant rule: they can inspect trusted engine projections without inheriting
+//! scratch-state read/write delegation.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the

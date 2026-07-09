@@ -8,7 +8,9 @@
 //! lifecycle/status, refs, truncation metadata, preflight selectors, required
 //! fields, and schema failure coordinates are useful to the model; raw content,
 //! local paths, commands, secrets, grant ids, and authority ids stay out of this
-//! channel.
+//! channel. Trace projections also preserve bounded top-level proof metadata so
+//! the model can verify redaction and status semantics without inferring from
+//! missing raw fields.
 
 use std::sync::LazyLock;
 
@@ -802,6 +804,8 @@ fn project_trace_evidence(details: &Value) -> Option<Value> {
     let mut projected = Map::new();
     copy_key(&mut projected, details, "primitiveOperation");
     copy_key(&mut projected, details, "status");
+    copy_key(&mut projected, details, "projectionBoundary");
+    copy_key(&mut projected, details, "statusSummary");
     if let Some(records) = details.get("records").and_then(Value::as_array) {
         projected.insert(
             "records".to_owned(),

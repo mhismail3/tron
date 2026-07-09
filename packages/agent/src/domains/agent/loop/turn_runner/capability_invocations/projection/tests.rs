@@ -1024,6 +1024,17 @@ fn extract_result_content_projects_trace_projection_proof_for_agent() {
         Some(json!({
             "primitiveOperation": "trace_list",
             "status": "ok",
+            "projectionBoundary": {
+                "providerVisibleProjection": true,
+                "safeEngineRefsOnly": true,
+                "rawAuditFieldsProjected": false,
+                "traceGetUse": "Use trace_get only for one focused trace record."
+            },
+            "statusSummary": {
+                "okCount": 1,
+                "failedCount": 0,
+                "inProgressCount": 0
+            },
             "records": [{
                 "id": "019f-safe-record",
                 "traceId": "trace_safe",
@@ -1085,6 +1096,9 @@ fn extract_result_content_projects_trace_projection_proof_for_agent() {
     assert!(text.contains("rawAuditFieldsProjected"));
     assert!(text.contains("rawStoredInProjection"));
     assert!(text.contains("rawAuthorityGrantIdStored"));
+    assert!(text.contains("statusSummary"));
+    assert!(text.contains("failedCount"));
+    assert!(text.contains("traceGetUse"));
     assert!(text.contains("request_hash_safe"));
     assert!(text.contains("result_hash_safe"));
     assert!(text.contains("scopeCount"));

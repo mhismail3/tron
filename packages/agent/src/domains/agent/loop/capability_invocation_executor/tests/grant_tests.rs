@@ -564,6 +564,90 @@ async fn catalog_discovery_runtime_grant_has_no_state_authority() {
 }
 
 #[tokio::test]
+async fn diagnostic_read_runtime_grant_has_no_state_authority() {
+    for (payload, expected_kind) in [
+        (
+            json!({
+                "operation": "trace_list",
+                "limit": 25,
+                "idempotencyKey": "trace-list-grant"
+            }),
+            "trace_record",
+        ),
+        (
+            json!({
+                "operation": "trace_get",
+                "traceRecordId": "trace_record:runtime-grant",
+                "idempotencyKey": "trace-get-grant"
+            }),
+            "trace_record",
+        ),
+        (
+            json!({
+                "operation": "log_recent",
+                "limit": 25,
+                "idempotencyKey": "log-recent-grant"
+            }),
+            "log_entry",
+        ),
+        (
+            json!({
+                "operation": "replay_manifest",
+                "idempotencyKey": "replay-manifest-grant"
+            }),
+            "session",
+        ),
+    ] {
+        let operation = payload
+            .get("operation")
+            .and_then(Value::as_str)
+            .expect("operation");
+        let operation = operation.to_owned();
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_eq!(grant.network_policy, "none");
+        assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+        assert_eq!(grant.allowed_authority_scopes, vec!["capability.execute"]);
+        assert_eq!(
+            grant.allowed_resource_kinds,
+            vec![expected_kind.to_owned()],
+            "{operation} must derive only its own evidence resource kind"
+        );
+        assert_eq!(
+            grant.resource_selectors,
+            vec![format!("kind:{expected_kind}")],
+            "{operation} must derive only its own evidence resource selector"
+        );
+        assert_invocation_scopes(&invocation, &["capability.execute"]);
+        assert!(
+            !grant
+                .allowed_resource_kinds
+                .contains(&"agent_state".to_owned()),
+            "{operation} must not inherit agent_state authority"
+        );
+        for forbidden in ["state::get", "state::set", "state::list"] {
+            assert!(
+                !grant.allowed_capabilities.contains(&forbidden.to_owned()),
+                "{operation} grant must not include {forbidden}"
+            );
+        }
+        for forbidden in ["state.read", "state.write"] {
+            assert!(
+                !grant
+                    .allowed_authority_scopes
+                    .contains(&forbidden.to_owned()),
+                "{operation} grant must not include {forbidden}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_list",

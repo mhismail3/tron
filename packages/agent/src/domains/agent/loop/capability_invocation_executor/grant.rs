@@ -124,15 +124,8 @@ pub(super) async fn derive_capability_runtime_grant(
         "subagent_launch" | "subagent_status" | "subagent_result" | "subagent_cancel"
     );
     let file_git_module_operation = is_file_git_module_operation(operation);
-    let notification_push_requested = operation == "notification_send"
-        && effective_args
-            .get("pushRequested")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-    let web_fetch_uses_robots_policy = operation == "web_fetch"
-        && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
-        && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
-    let mut allowed_capabilities = if module_registry_read_operation
+    let diagnostic_read_operation = is_diagnostic_read_operation(operation);
+    let exact_target_runtime_operation = module_registry_read_operation
         || module_authoring_operation
         || module_validation_operation
         || module_install_operation
@@ -149,7 +142,16 @@ pub(super) async fn derive_capability_runtime_grant(
         || delegated_subagent_operation
         || file_git_module_operation
         || catalog_discovery_operation
-    {
+        || diagnostic_read_operation;
+    let notification_push_requested = operation == "notification_send"
+        && effective_args
+            .get("pushRequested")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    let web_fetch_uses_robots_policy = operation == "web_fetch"
+        && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
+        && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
+    let mut allowed_capabilities = if exact_target_runtime_operation {
         vec![target_function_id.as_str().to_owned()]
     } else {
         vec![
@@ -162,24 +164,7 @@ pub(super) async fn derive_capability_runtime_grant(
     allowed_capabilities.sort();
     allowed_capabilities.dedup();
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    if !module_registry_read_operation
-        && !module_authoring_operation
-        && !module_validation_operation
-        && !module_install_operation
-        && !module_dependencies_operation
-        && !capability_binding_operation
-        && !capability_route_operation
-        && !web_research_operation
-        && !module_lifecycle_operation
-        && !module_runtime_operation
-        && !context_control_operation
-        && !module_program_execution_operation
-        && !procedural_module_operation
-        && !memory_module_operation
-        && !delegated_subagent_operation
-        && !file_git_module_operation
-        && !catalog_discovery_operation
-    {
+    if !exact_target_runtime_operation {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     }
     if matches!(
@@ -646,30 +631,15 @@ pub(super) async fn derive_capability_runtime_grant(
     } else {
         "none"
     };
-    let mut allowed_resource_kinds = if module_registry_read_operation
-        || module_authoring_operation
-        || module_validation_operation
-        || module_install_operation
-        || module_dependencies_operation
-        || capability_binding_operation
-        || capability_route_operation
-        || web_research_operation
-        || module_lifecycle_operation
-        || module_runtime_operation
-        || context_control_operation
-        || module_program_execution_operation
-        || procedural_module_operation
-        || memory_module_operation
-        || delegated_subagent_operation
-        || file_git_module_operation
-        || catalog_discovery_operation
-    {
+    let mut allowed_resource_kinds = if exact_target_runtime_operation {
         Vec::new()
     } else {
         vec!["agent_state".to_owned()]
     };
     if catalog_discovery_operation {
         allowed_resource_kinds.push("catalog_discovery".to_owned());
+    } else if diagnostic_read_operation {
+        allowed_resource_kinds.extend(diagnostic_read_resource_kinds(operation));
     } else if matches!(
         operation,
         "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel"
@@ -1126,6 +1096,22 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
 
 fn is_catalog_discovery_operation(operation: &str) -> bool {
     matches!(operation, "catalog_search" | "catalog_inspect")
+}
+
+fn is_diagnostic_read_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "trace_list" | "trace_get" | "log_recent" | "replay_manifest"
+    )
+}
+
+fn diagnostic_read_resource_kinds(operation: &str) -> Vec<String> {
+    match operation {
+        "trace_list" | "trace_get" => vec!["trace_record".to_owned()],
+        "log_recent" => vec!["log_entry".to_owned()],
+        "replay_manifest" => vec!["session".to_owned()],
+        _ => Vec::new(),
+    }
 }
 
 fn is_file_git_module_operation(operation: &str) -> bool {
