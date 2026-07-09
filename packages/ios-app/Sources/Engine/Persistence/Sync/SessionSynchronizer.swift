@@ -121,10 +121,11 @@ final class SessionSynchronizer {
         return events.count
     }
 
-    /// Fetch sessions from server for a given origin.
-    func fetchServerSessions() async throws -> [SessionInfo] {
-        let result = try await engineClient.session.list()
-        return result.sessions
+    /// Fetch a bounded, cursor-paginated session snapshot from the server.
+    func fetchServerSessions() async throws -> ServerSessionListSnapshot {
+        try await SessionListPageLoader().load { [engineClient] limit, cursor in
+            try await engineClient.session.list(limit: limit, cursor: cursor)
+        }
     }
 
     /// Check if a session exists locally with a different origin.

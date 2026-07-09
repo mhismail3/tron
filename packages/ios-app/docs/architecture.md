@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-04 (Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-09 (dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -75,7 +75,10 @@ and matching database/event/settings/dependency work.
   server-owned context/evidence policy, and inspect local diagnostics.
 - Grouped session dashboard with scoped Agent Briefing and Engine Cockpit bands, collapsible
   workspace headers and compact
-  inset liquid-glass one-line session rows, session creation/fork/resume,
+  inset liquid-glass one-line session rows. Each workspace shows its latest 10
+  sessions initially and exposes native View more/View less controls for
+  independent 10-row progressive disclosure without reordering groups. The
+  retained session actions include creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
   recent session workspaces, and manual Mac paths, prompt composer with a
   local recent-input picker, a functional-only native attachment menu that
@@ -429,9 +432,12 @@ Tests and diagnostics harnesses may create explicit isolated database paths, but
 those paths are not production recovery modes.
 
 `EventStoreManager` and `SessionSynchronizer` rebuild local session/event
-projections from server session lists and event-sync APIs. Server-missing
-sessions are removed from the local cache, full session sync clears and
-refetches event rows, and fork ancestor rows remain source-session history
+projections from server session lists and event-sync APIs. Session-list refresh
+uses deterministic server cursors in 200-row pages with a 2,000-session safety
+cap; IDs are deduplicated across page races, and a cap-limited partial snapshot
+never deletes older cached rows as if they were server-missing. Server-missing
+sessions are removed from the local cache only after a complete snapshot. Full
+session sync clears and refetches event rows, and fork ancestor rows remain source-session history
 rather than copied client truth. Engine stream cursors are stored per server
 origin/topic/filter for ACK coalescing and diagnostics only; session history is
 reconstructed through server APIs, not replayed from cursor storage.
@@ -439,8 +445,11 @@ Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
 prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
 composes the dashboard surface and shell actions; `SessionList.swift` owns
-workspace grouping, expansion state, row status mapping, interactive row
-liquid-glass containers, and header/row presentation metrics.
+workspace grouping, per-workspace header collapse and session-row expansion as
+separate state, row status mapping, interactive row liquid-glass containers,
+and header/row presentation metrics. Session expansion is count-based and
+derived from each refreshed server group, so new or archived rows cannot leave
+stale counts; disappearing or <=10-row groups shed obsolete expansion state.
 `NewSessionFlow` owns the new-session sheet workflow and presents with medium
 and large detents so the sheet starts compactly while still allowing expansion
 for workspace and model selection.

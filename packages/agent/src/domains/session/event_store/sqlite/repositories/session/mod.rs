@@ -4,7 +4,9 @@
 //! (event count, token usage, cost) for efficient queries.
 //!
 //! Session-list projections live in `session/projections.rs`; this root stays
-//! on session lifecycle, listing, counters, and head/root mutation.
+//! on session lifecycle, listing, counters, and head/root mutation. Listings
+//! order by activity then session ID so keyset pages cannot duplicate or skip
+//! equal-timestamp rows.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -51,6 +53,10 @@ pub struct ListSessionsOptions<'a> {
     pub limit: Option<i64>,
     /// Skip results.
     pub offset: Option<i64>,
+    /// Stable keyset boundary: return rows older than this activity timestamp.
+    pub before_last_activity_at: Option<&'a str>,
+    /// Stable keyset boundary tie-breaker paired with `before_last_activity_at`.
+    pub before_session_id: Option<&'a str>,
 }
 
 /// Counters to increment atomically.
@@ -175,7 +181,19 @@ impl SessionRepo {
                 sql.push_str(" AND ended_at IS NULL");
             }
         }
-        sql.push_str(" ORDER BY last_activity_at DESC");
+        if let (Some(last_activity_at), Some(session_id)) =
+            (opts.before_last_activity_at, opts.before_session_id)
+        {
+            let timestamp_param = param_values.len() + 1;
+            let session_param = timestamp_param + 1;
+            let _ = write!(
+                sql,
+                " AND (last_activity_at < ?{timestamp_param} OR (last_activity_at = ?{timestamp_param} AND id < ?{session_param}))"
+            );
+            param_values.push(Box::new(last_activity_at.to_string()));
+            param_values.push(Box::new(session_id.to_string()));
+        }
+        sql.push_str(" ORDER BY last_activity_at DESC, id DESC");
         if let Some(limit) = opts.limit {
             let _ = write!(sql, " LIMIT {limit}");
         } else if opts.offset.is_some() {

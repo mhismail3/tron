@@ -557,7 +557,7 @@ private final class TestSessionRepository: NetworkSessionRepository {
     func list(
         workingDirectory: String?,
         limit: Int,
-        offset: Int,
+        cursor: String?,
         includeArchived: Bool
     ) async throws -> SessionListResult {
         throw EngineConnectionError.invalidResponse

@@ -12,7 +12,8 @@ extension EventStoreManager {
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
         do {
-            let serverSessions = try await sessionSynchronizer.fetchServerSessions()
+            let snapshot = try await sessionSynchronizer.fetchServerSessions()
+            let serverSessions = snapshot.sessions
             let serverSessionIds = Set(serverSessions.map(\.sessionId))
             logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
 
@@ -33,18 +34,26 @@ extension EventStoreManager {
                 try await eventDB.sessions.insert(cachedSession)
             }
 
-            // Remove local sessions that no longer exist on the server
-            let localSessions = try await eventDB.sessions.getByOrigin(serverOrigin)
-            var removedCount = 0
-            for local in localSessions {
-                if !serverSessionIds.contains(local.id) {
-                    try await eventDB.events.deleteBySession(local.id)
-                    try await eventDB.sessions.delete(local.id)
-                    removedCount += 1
+            // Remove server-missing sessions only after a complete snapshot. A
+            // bounded partial snapshot means older rows were not queried, not deleted.
+            if snapshot.isComplete {
+                let localSessions = try await eventDB.sessions.getByOrigin(serverOrigin)
+                var removedCount = 0
+                for local in localSessions {
+                    if !serverSessionIds.contains(local.id) {
+                        try await eventDB.events.deleteBySession(local.id)
+                        try await eventDB.sessions.delete(local.id)
+                        removedCount += 1
+                    }
                 }
-            }
-            if removedCount > 0 {
-                logger.info("Removed \(removedCount) stale local sessions", category: .session)
+                if removedCount > 0 {
+                    logger.info("Removed \(removedCount) stale local sessions", category: .session)
+                }
+            } else {
+                logger.warning(
+                    "Session refresh reached the \(SessionListPageLoader.maximumSessionCount)-session safety cap; preserving older cached rows",
+                    category: .session
+                )
             }
 
             loadSessions()

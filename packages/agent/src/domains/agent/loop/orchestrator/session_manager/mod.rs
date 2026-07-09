@@ -75,6 +75,10 @@ pub struct SessionFilter {
     pub limit: Option<usize>,
     /// Skip results.
     pub offset: Option<usize>,
+    /// Stable keyset boundary activity timestamp.
+    pub before_last_activity_at: Option<String>,
+    /// Stable keyset boundary session ID tie-breaker.
+    pub before_session_id: Option<String>,
 }
 
 /// Session manager.
@@ -268,6 +272,8 @@ impl SessionManager {
             limit: filter.limit.map(|l| l as i64),
             #[allow(clippy::cast_possible_wrap)]
             offset: filter.offset.map(|o| o as i64),
+            before_last_activity_at: filter.before_last_activity_at.as_deref(),
+            before_session_id: filter.before_session_id.as_deref(),
         };
         self.event_store
             .list_sessions(&opts)

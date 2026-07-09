@@ -20,7 +20,7 @@ struct SessionClientTests {
         var listCallCount = 0
         var listWorkingDirectory: String?
         var listLimit: Int?
-        var listOffset: Int?
+        var listCursor: String?
         var listIncludeArchived: Bool?
         var listResult: [SessionInfo] = []
         var listShouldThrow = false
@@ -71,14 +71,19 @@ struct SessionClientTests {
             return try! JSONDecoder().decode(SessionCreateResult.self, from: json.data(using: .utf8)!)
         }
 
-        func list(workingDirectory: String?, limit: Int, offset: Int, includeArchived: Bool) async throws -> SessionListResult {
+        func list(workingDirectory: String?, limit: Int, cursor: String?, includeArchived: Bool) async throws -> SessionListResult {
             listCallCount += 1
             listWorkingDirectory = workingDirectory
             listLimit = limit
-            listOffset = offset
+            listCursor = cursor
             listIncludeArchived = includeArchived
             if listShouldThrow { throw TestError.mockError }
-            return SessionListResult(sessions: listResult, totalCount: listResult.count, hasMore: false)
+            return SessionListResult(
+                sessions: listResult,
+                totalCount: listResult.count,
+                hasMore: false,
+                nextCursor: nil
+            )
         }
 
         func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
@@ -183,7 +188,7 @@ struct SessionClientTests {
         #expect(mock.listCallCount == 1)
         #expect(mock.listWorkingDirectory == nil)
         #expect(mock.listLimit == 50)
-        #expect(mock.listOffset == 0)
+        #expect(mock.listCursor == nil)
         #expect(mock.listIncludeArchived == false)
     }
 
@@ -191,12 +196,38 @@ struct SessionClientTests {
     func testList_withCustomParams() async throws {
         let mock = MockSessionClient()
 
-        _ = try await mock.list(workingDirectory: "/test", limit: 100, offset: 10, includeArchived: true)
+        _ = try await mock.list(workingDirectory: "/test", limit: 100, cursor: "cursor-10", includeArchived: true)
 
         #expect(mock.listWorkingDirectory == "/test")
         #expect(mock.listLimit == 100)
-        #expect(mock.listOffset == 10)
+        #expect(mock.listCursor == "cursor-10")
         #expect(mock.listIncludeArchived == true)
+    }
+
+    @Test("Concrete list request sends stable cursor parameters")
+    func testConcreteListSendsCursor() async throws {
+        let transport = makeConnectedTransport()
+        let client = SessionClient(transport: transport)
+        transport.readHandler = { functionId, payload, _ in
+            #expect(functionId.rawValue == "session::list")
+            let params = try #require(payload as? SessionListParams)
+            #expect(params.workingDirectory == "/tmp/project")
+            #expect(params.limit == 200)
+            #expect(params.cursor == "opaque-cursor")
+            #expect(params.includeArchived == false)
+            return SessionListResult(
+                sessions: [],
+                totalCount: nil,
+                hasMore: false,
+                nextCursor: nil
+            )
+        }
+
+        _ = try await client.list(
+            workingDirectory: "/tmp/project",
+            limit: 200,
+            cursor: "opaque-cursor"
+        )
     }
 
     // MARK: - Resume Tests

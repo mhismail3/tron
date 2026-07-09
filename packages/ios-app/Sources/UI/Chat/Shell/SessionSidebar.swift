@@ -9,6 +9,7 @@ struct SessionSidebar: View {
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
     @State private var workspaceExpansion = SessionListWorkspaceExpansion()
+    @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var agentBriefing = AgentBriefingViewModel()
     @State private var engineCockpit = AgentCockpitViewModel()
     @State private var showAgentBriefing = false
@@ -21,6 +22,10 @@ struct SessionSidebar: View {
 
     private var workspaceGroups: [SessionListWorkspaceGroup] {
         SessionListWorkspaceGroup.groups(from: eventStoreManager.sortedSessions)
+    }
+
+    private var workspaceGroupCounts: [String: Int] {
+        Dictionary(uniqueKeysWithValues: workspaceGroups.map { ($0.id, $0.sessions.count) })
     }
 
     private var briefingSessionId: String? {
@@ -71,8 +76,40 @@ struct SessionSidebar: View {
                 ForEach(workspaceGroups) { group in
                     Section {
                         if workspaceExpansion.isExpanded(group.id) {
-                            ForEach(group.sessions) { session in
+                            ForEach(sessionExpansion.visibleSessions(in: group)) { session in
                                 sessionRow(session)
+                            }
+
+                            let canViewMore = sessionExpansion.canViewMore(
+                                groupId: group.id,
+                                totalCount: group.sessions.count
+                            )
+                            let canViewLess = sessionExpansion.canViewLess(
+                                groupId: group.id,
+                                totalCount: group.sessions.count
+                            )
+                            if canViewMore || canViewLess {
+                                SessionListExpansionControls(
+                                    projectName: group.name,
+                                    canViewLess: canViewLess,
+                                    canViewMore: canViewMore,
+                                    onViewLess: {
+                                        withAnimation(SessionListLayout.expansionAnimation) {
+                                            sessionExpansion.showLess(groupId: group.id)
+                                        }
+                                    },
+                                    onViewMore: {
+                                        withAnimation(SessionListLayout.expansionAnimation) {
+                                            sessionExpansion.revealMore(
+                                                groupId: group.id,
+                                                totalCount: group.sessions.count
+                                            )
+                                        }
+                                    }
+                                )
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(SessionListLayout.rowInsets)
                             }
                         }
                     } header: {
@@ -121,6 +158,9 @@ struct SessionSidebar: View {
                 .toolbar(removing: .sidebarToggle)
         .toolbar {
             ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
+        }
+        .onChange(of: workspaceGroupCounts, initial: true) { _, groupCounts in
+            sessionExpansion.reconcile(groupCounts: groupCounts)
         }
         .task(id: briefingRefreshKey) {
             await refreshBriefing()

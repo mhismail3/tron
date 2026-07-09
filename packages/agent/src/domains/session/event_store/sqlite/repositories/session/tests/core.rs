@@ -41,6 +41,62 @@ fn list_sessions() {
 }
 
 #[test]
+fn list_sessions_uses_stable_activity_and_id_keyset_order() {
+    let (conn, ws_id) = setup();
+    let timestamp = "2026-07-01T12:00:00Z";
+
+    for id in ["sess_a", "sess_c", "sess_b"] {
+        SessionRepo::create_with_identity(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "model",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+            },
+            &crate::domains::session::event_store::SessionIdentity::new(id, timestamp),
+        )
+        .unwrap();
+    }
+
+    let first_page = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            limit: Some(2),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        first_page
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["sess_c", "sess_b"]
+    );
+
+    let second_page = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            before_last_activity_at: Some(timestamp),
+            before_session_id: Some("sess_b"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        second_page
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["sess_a"]
+    );
+}
+
+#[test]
 fn list_by_workspace() {
     let (conn, ws_id) = setup();
     create_default_session(&conn, &ws_id);
