@@ -511,6 +511,59 @@ async fn module_registry_inspect_runtime_grant_is_read_only_and_resource_scoped(
 }
 
 #[tokio::test]
+async fn catalog_discovery_runtime_grant_has_no_state_authority() {
+    for payload in [
+        json!({
+            "operation": "catalog_search",
+            "text": "git_status",
+            "idempotencyKey": "catalog-search-grant"
+        }),
+        json!({
+            "operation": "catalog_inspect",
+            "kind": "function",
+            "id": "execute::git_status",
+            "idempotencyKey": "catalog-inspect-grant"
+        }),
+    ] {
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+
+        assert_eq!(grant.network_policy, "none");
+        assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+        assert_eq!(grant.allowed_authority_scopes, vec!["capability.execute"]);
+        assert_eq!(
+            grant.allowed_resource_kinds,
+            vec!["catalog_discovery"],
+            "catalog discovery must use its own catalog-scoped resource kind"
+        );
+        assert_eq!(
+            grant.resource_selectors,
+            vec!["kind:catalog_discovery"],
+            "catalog discovery must use its own catalog-scoped selector"
+        );
+        assert_invocation_scopes(&invocation, &["capability.execute"]);
+        for forbidden in ["state::get", "state::set", "state::list"] {
+            assert!(
+                !grant.allowed_capabilities.contains(&forbidden.to_owned()),
+                "catalog discovery grant must not include {forbidden}"
+            );
+        }
+        for forbidden in ["state.read", "state.write"] {
+            assert!(
+                !grant
+                    .allowed_authority_scopes
+                    .contains(&forbidden.to_owned()),
+                "catalog discovery grant must not include {forbidden}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_list",

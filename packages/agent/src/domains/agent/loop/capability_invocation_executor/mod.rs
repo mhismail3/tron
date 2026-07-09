@@ -8,6 +8,10 @@
 //! placed in the engine causal context for `capability::execute` so downstream
 //! domains can enforce goal, prompt-artifact, program-execution, resource,
 //! filesystem, and Git contracts without wildcard selectors.
+//! Catalog discovery calls are intentionally narrower than generic execute
+//! calls: `catalog_search` and `catalog_inspect` derive only the execute wrapper
+//! authority plus a `catalog_discovery` selector and no session-state
+//! primitives, because discovery must not carry write authority it cannot use.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the

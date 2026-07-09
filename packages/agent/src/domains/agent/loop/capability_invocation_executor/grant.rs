@@ -35,6 +35,7 @@ pub(super) async fn derive_capability_runtime_grant(
         .get("operation")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let catalog_discovery_operation = is_catalog_discovery_operation(operation);
     let module_registry_read_operation = matches!(operation, "module_list" | "module_inspect");
     let module_authoring_operation = matches!(
         operation,
@@ -146,6 +147,7 @@ pub(super) async fn derive_capability_runtime_grant(
         || memory_module_operation
         || delegated_subagent_operation
         || file_git_module_operation
+        || catalog_discovery_operation
     {
         vec![target_function_id.as_str().to_owned()]
     } else {
@@ -175,6 +177,7 @@ pub(super) async fn derive_capability_runtime_grant(
         && !memory_module_operation
         && !delegated_subagent_operation
         && !file_git_module_operation
+        && !catalog_discovery_operation
     {
         allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     }
@@ -657,12 +660,15 @@ pub(super) async fn derive_capability_runtime_grant(
         || memory_module_operation
         || delegated_subagent_operation
         || file_git_module_operation
+        || catalog_discovery_operation
     {
         Vec::new()
     } else {
         vec!["agent_state".to_owned()]
     };
-    if matches!(
+    if catalog_discovery_operation {
+        allowed_resource_kinds.push("catalog_discovery".to_owned());
+    } else if matches!(
         operation,
         "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel"
     ) {
@@ -1114,6 +1120,10 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
         .get(field)
         .and_then(Value::as_str)
         .is_some_and(|item| !item.trim().is_empty())
+}
+
+fn is_catalog_discovery_operation(operation: &str) -> bool {
+    matches!(operation, "catalog_search" | "catalog_inspect")
 }
 
 fn is_file_git_module_operation(operation: &str) -> bool {

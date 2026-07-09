@@ -2235,7 +2235,10 @@ idempotency key. Message ids are correlation ids only.
 Public clients cannot become the agent actor by invoking `capability::execute`
 directly. Trusted agent runtime paths must use a derived least-privilege grant
 and trusted working-directory runtime metadata; bootstrap grants are rejected by
-the primitive worker. Public wire context does not accept `authorityScopes` or
+the primitive worker. Catalog discovery operations (`catalog_search` and
+`catalog_inspect`) derive discovery-only execute grants without session-state
+read/write authority, so operation search and schema inspection cannot carry
+scratch-state write privileges. Public wire context does not accept `authorityScopes` or
 `runtimeMetadata`; runtime metadata is reserved for trusted engine and
 agent-owned execution paths. `execute` is the primitive operation boundary.
 
@@ -2344,11 +2347,11 @@ logs, local paths, code, file contents,
 secrets, grant ids, authority ids, and hidden reasoning stay out of provider
 context. Failure projections omit `actual` detail payloads, and metadata
 projections deny authority-bearing id/version/ref suffixes while retaining
-non-sensitive resource/version refs. Catalog discovery
-reads current
+non-sensitive resource/version refs. Catalog discovery reads current
 catalog/resource truth, supplies a bounded canonical execute operation registry
 with total/returned/truncated/omitted metadata to model guidance, marks
-metadata-only catalog targets as non-callable, and writes only append-oriented
+metadata-only catalog targets as non-callable, derives only catalog-scoped
+runtime authority for search/inspect calls, and writes only append-oriented
 `catalog_discovery_report` evidence. Tool-source inspection reads scoped
 `tool_source_proposal` and
 `tool_source_conformance_report` resources only; internal proposal/report
