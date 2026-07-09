@@ -1290,8 +1290,9 @@ trace and web operations. `execute::trace_list` and `execute::trace_get` show th
 model the safe record shape and redaction guarantees before invocation. Whole
 session trace proof is point-in-time: agents call `trace_list` after the
 operations being audited or explicitly qualify that later operations are not
-covered, and they distinguish provider transcript tool-call ids from raw trace
-`providerInvocationId` fields, which trace projections exclude.
+covered. Final answers should explicitly say provider transcript tool-call ids
+may still be visible in provider message history for protocol threading, while
+trace projections exclude raw trace `providerInvocationId` fields.
 `execute::web_robots_check` and `execute::web_fetch` show the exact top-level
 web payload fields, bounded network controls, and robots-policy freshness
 linkage needed for safe web use.
@@ -2819,8 +2820,9 @@ final answers should state that provider-visible projections expose only safe
 engine refs, exclude raw provider invocation ids and other raw internals, and
 that transcript tool-call ids may still exist in provider message history for
 protocol threading while `trace_list`/`trace_get` do not project
-`providerInvocationId`. Internal audit storage may retain raw fields for replay
-and policy.
+`providerInvocationId`; do not report transcript call ids as absent when only
+trace projection safety was checked. Internal audit storage may retain raw
+fields for replay and policy.
 Engine-internal durability may still create prompt-trace/resource/audit
 bookkeeping; safety claims should therefore say no provider-visible mutating
 capability operation was used rather than saying no mutation occurred at all. The

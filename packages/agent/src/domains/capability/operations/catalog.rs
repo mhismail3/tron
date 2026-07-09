@@ -252,7 +252,7 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
             " Copy complete repositoryRef/rootRef/headRef objects, including kind, from git_status details.git.repository.repositoryTreeSnapshotInput; passing only .id values is invalid."
         }
         "trace_list" => {
-            " Current-session scope is supplied by trusted runtime context; do not invent selector or scope fields. Optional top-level fields are limit and traceId only. When using trace_list as whole-session evidence, call it after the operations being audited; otherwise say it only covers records visible at its projection time. Provider transcript tool-call ids may exist for protocol threading and are distinct from raw trace providerInvocationId fields, which trace projections exclude."
+            " Current-session scope is supplied by trusted runtime context; do not invent selector or scope fields. Optional top-level fields are limit and traceId only. When using trace_list as whole-session evidence, call it after the operations being audited; otherwise say it only covers records visible at its projection time. Final answers must explicitly state that provider transcript tool-call ids may be visible in provider message history for protocol threading, while trace projections do not expose raw trace providerInvocationId fields."
         }
         "trace_get" => {
             " Current-session scope is supplied by trusted runtime context; pass only operation and the traceRecordId returned by trace_list."
@@ -2445,9 +2445,9 @@ fn module_governance_plan_projection(query: &OperationSearchQuery) -> Option<Val
             {"operationFamily": "capability_route_activate/disable/rollback", "reason": "Activation, disable, and rollback are governed state changes outside a read-only readiness check."},
             {"operationFamily": "module_program_execution_*", "reason": "Runtime execution is not needed to inspect governance surfaces."}
         ],
-        "completionRule": "After the listed overview/list operations, call trace_list last when the task asks for whole-session trace proof, then answer from exact operation results. Empty lists are valid evidence of no current-scope records; do not invent resource ids or call inspect operations without ids.",
+        "completionRule": "After the listed overview/list operations, call trace_list last when the task asks for whole-session trace proof, then answer from exact operation results. Empty lists are valid evidence of no current-scope records; do not invent resource ids or call inspect operations without ids. Say no provider-visible mutating capability operation was used; do not claim no internal durability/bookkeeping mutation occurred.",
         "traceEvidenceBoundary": "trace_list is a point-in-time projection. If more operations run after trace_list, do not claim trace_list evidenced those later operations; call trace_list again at the end or qualify the coverage.",
-        "finalAnswerGuidance": "Name the surfaces that were discoverable, the read-only operations used, any empty record planes, any confusing or missing guidance, and whether provider-safe trace evidence excludes raw internals. Distinguish provider transcript tool-call ids used for protocol threading from raw trace providerInvocationId fields, which trace projections exclude."
+        "finalAnswerGuidance": "Name the surfaces that were discoverable, the read-only operations used, any empty record planes, any confusing or missing guidance, and whether provider-safe trace evidence excludes raw internals. Explicitly say provider transcript tool-call ids may be visible in provider message history for protocol threading, while trace projections exclude raw trace providerInvocationId fields; do not report transcript call ids as absent when only trace projection safety was checked."
     }))
 }
 
@@ -2950,7 +2950,11 @@ mod tests {
         );
         assert!(
             execute_operation_invocation_guidance("trace_list")
-                .contains("distinct from raw trace providerInvocationId fields")
+                .contains("provider transcript tool-call ids may be visible")
+        );
+        assert!(
+            execute_operation_invocation_guidance("trace_list")
+                .contains("trace projections do not expose raw trace providerInvocationId fields")
         );
         assert!(
             trace_list["outputSchema"]["properties"]["details"]["description"]
@@ -4521,7 +4525,19 @@ mod tests {
             discovery["agentSearchPlan"]["finalAnswerGuidance"]
                 .as_str()
                 .expect("final answer guidance")
-                .contains("provider transcript tool-call ids")
+                .contains("provider transcript tool-call ids may be visible")
+        );
+        assert!(
+            discovery["agentSearchPlan"]["finalAnswerGuidance"]
+                .as_str()
+                .expect("final answer guidance")
+                .contains("do not report transcript call ids as absent")
+        );
+        assert!(
+            discovery["agentSearchPlan"]["completionRule"]
+                .as_str()
+                .expect("completion rule")
+                .contains("no provider-visible mutating capability operation")
         );
         assert!(
             discovery["agentSearchPlan"]["completionRule"]
