@@ -221,7 +221,12 @@ fn project_catalog_evidence(details: &Value) -> Option<Value> {
         );
     }
     copy_key(&mut projected, discovery, "unsupportedOperationCandidate");
-    copy_key(&mut projected, discovery, "unsupportedOperationRecovery");
+    if let Some(recovery) = discovery.get("unsupportedOperationRecovery") {
+        projected.insert(
+            "unsupportedOperationRecovery".to_owned(),
+            project_unsupported_operation_recovery(recovery),
+        );
+    }
     if let Some(functions) = discovery.get("functions").and_then(Value::as_array) {
         projected.insert(
             "functions".to_owned(),
@@ -252,6 +257,41 @@ fn project_catalog_agent_next_step(next_step: &Value) -> Value {
         projected.insert(
             "primaryInspection".to_owned(),
             bounded_model_context_value(primary),
+        );
+    }
+    Value::Object(projected)
+}
+
+fn project_unsupported_operation_recovery(recovery: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in ["query", "canonicalQuery", "supportedOperation", "guidance"] {
+        copy_key(&mut projected, recovery, key);
+    }
+    if let Some(alternatives) = recovery
+        .get("closestReadOnlyAlternatives")
+        .and_then(Value::as_array)
+    {
+        projected.insert(
+            "closestReadOnlyAlternatives".to_owned(),
+            Value::Array(
+                alternatives
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(|alternative| {
+                        let mut item = Map::new();
+                        for key in [
+                            "operation",
+                            "tool",
+                            "arguments",
+                            "readOnlyInspectionSafe",
+                            "reason",
+                        ] {
+                            copy_key(&mut item, alternative, key);
+                        }
+                        Value::Object(item)
+                    })
+                    .collect(),
+            ),
         );
     }
     Value::Object(projected)
@@ -433,6 +473,9 @@ fn project_git_evidence(details: &Value) -> Option<Value> {
 
 fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
     let cockpit = details.get("capabilityBinding")?;
+    let targeted = cockpit
+        .get("target")
+        .is_some_and(|target| !target.is_null());
     let operations = if let Some(target) = cockpit.get("target").filter(|target| !target.is_null())
     {
         vec![target]
@@ -464,18 +507,20 @@ fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
                 .count(),
         }),
     );
-    projected.insert(
-        "agentUse".to_owned(),
-        json!({
-            "primaryUse": "Treat operationDirectory as the agent-facing capability map. Choose an operation, copy its capability::execute arguments, satisfy preflight authority/resource selectors and required payload fields, then call it directly.",
-            "normalWork": "Prefer audience=session_work and callable=true operations for user tasks.",
-            "diagnostics": "Use audience=agent_diagnostics operations to inspect traces, logs, catalog state, and verification evidence.",
-            "governance": "Use audience=governance operations only for binding, shadow, route, module, or policy workflows; follow preflight exactly.",
-            "kernelEvolution": "Kernel-evolution-only operations are inspectable and improvable through source-level review/integration, not runtime-routed.",
-            "fallbackRule": "Do not infer selectors, authority scopes, or required fields from names. Use the operation entry, catalog inspection, or schema before attempting a call."
-        }),
-    );
-    if let Some(families) = cockpit.get("families").and_then(Value::as_array) {
+    if !targeted {
+        projected.insert(
+            "agentUse".to_owned(),
+            json!({
+                "primaryUse": "Treat operationDirectory as the agent-facing capability map. Choose an operation, copy its capability::execute arguments, satisfy preflight authority/resource selectors and required payload fields, then call it directly.",
+                "normalWork": "Prefer audience=session_work and callable=true operations for user tasks.",
+                "diagnostics": "Use audience=agent_diagnostics operations to inspect traces, logs, catalog state, and verification evidence.",
+                "governance": "Use audience=governance operations only for binding, shadow, route, module, or policy workflows; follow preflight exactly.",
+                "kernelEvolution": "Kernel-evolution-only operations are inspectable and improvable through source-level review/integration, not runtime-routed.",
+                "fallbackRule": "Do not infer selectors, authority scopes, or required fields from names. Use the operation entry, catalog inspection, or schema before attempting a call."
+            }),
+        );
+    }
+    if !targeted && let Some(families) = cockpit.get("families").and_then(Value::as_array) {
         projected.insert(
             "families".to_owned(),
             Value::Array(
@@ -760,8 +805,6 @@ fn project_cockpit_binding(binding: &Value) -> Value {
         "activePolicies",
         "failedReplacementAttempts",
         "latestState",
-        "lastUpdatedAt",
-        "detail",
     ] {
         copy_key(&mut projected, binding, key);
     }
@@ -780,11 +823,22 @@ fn project_cockpit_shadow_trial(shadow_trial: &Value) -> Value {
         "aborted",
         "disabled",
         "latestState",
-        "lastUpdatedAt",
+        "evidenceInspectReady",
         "availableForThisOperation",
-        "detail",
     ] {
         copy_key(&mut projected, shadow_trial, key);
+    }
+    if let Some(evidence_refs) = shadow_trial.get("evidenceRefs").and_then(Value::as_array) {
+        projected.insert(
+            "evidenceRefs".to_owned(),
+            Value::Array(
+                evidence_refs
+                    .iter()
+                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+                    .map(bounded_model_context_value)
+                    .collect(),
+            ),
+        );
     }
     Value::Object(projected)
 }
@@ -804,10 +858,7 @@ fn project_cockpit_route(route: &Value) -> Value {
         "rollbackAvailable",
         "disableAvailable",
         "latestState",
-        "lastUpdatedAt",
         "state",
-        "label",
-        "detail",
     ] {
         copy_key(&mut projected, route, key);
     }
@@ -816,13 +867,7 @@ fn project_cockpit_route(route: &Value) -> Value {
 
 fn project_cockpit_rollback(rollback: &Value) -> Value {
     let mut projected = Map::new();
-    for key in [
-        "available",
-        "disableAvailable",
-        "abortAvailable",
-        "boundary",
-        "detail",
-    ] {
+    for key in ["available", "disableAvailable", "abortAvailable"] {
         copy_key(&mut projected, rollback, key);
     }
     Value::Object(projected)
@@ -833,39 +878,6 @@ fn project_cockpit_agent_path(agent_path: &Value) -> Value {
     copy_key(&mut projected, agent_path, "purpose");
     copy_key(&mut projected, agent_path, "adapterExecutionGuidance");
     copy_key(&mut projected, agent_path, "evidenceGuidance");
-    if let Some(primary) = agent_path.get("primaryInspection") {
-        projected.insert(
-            "primaryInspection".to_owned(),
-            project_cockpit_agent_path_step(primary),
-        );
-    }
-    if let Some(sequence) = agent_path.get("readOnlySequence").and_then(Value::as_array) {
-        projected.insert(
-            "readOnlySequence".to_owned(),
-            Value::Array(
-                sequence
-                    .iter()
-                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
-                    .map(project_cockpit_agent_path_step)
-                    .collect(),
-            ),
-        );
-    }
-    if let Some(unavailable) = agent_path
-        .get("unavailableSurfaces")
-        .and_then(Value::as_array)
-    {
-        projected.insert(
-            "unavailableSurfaces".to_owned(),
-            Value::Array(
-                unavailable
-                    .iter()
-                    .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
-                    .map(project_cockpit_unavailable_surface)
-                    .collect(),
-            ),
-        );
-    }
     if let Some(completion) = agent_path.get("completion") {
         projected.insert(
             "completion".to_owned(),
@@ -877,16 +889,22 @@ fn project_cockpit_agent_path(agent_path: &Value) -> Value {
 
 fn project_cockpit_agent_path_completion(completion: &Value) -> Value {
     let mut projected = Map::new();
-    for key in [
-        "state",
-        "action",
-        "reason",
-        "stopWhen",
-        "finalAnswerGuidance",
-        "readinessVerdict",
-        "readOnlyBoundary",
-    ] {
+    for key in ["state", "action", "finalAnswerGuidance", "readinessVerdict"] {
         copy_key(&mut projected, completion, key);
+    }
+    if let Some(boundary) = completion.get("readOnlyBoundary") {
+        let mut projected_boundary = Map::new();
+        for key in [
+            "capabilityRequestedMutation",
+            "engineAuditPersistence",
+            "requiredFinalAnswerSuffix",
+        ] {
+            copy_key(&mut projected_boundary, boundary, key);
+        }
+        projected.insert(
+            "readOnlyBoundary".to_owned(),
+            Value::Object(projected_boundary),
+        );
     }
     if let Some(steps) = completion
         .get("governedNextSteps")
@@ -898,7 +916,13 @@ fn project_cockpit_agent_path_completion(completion: &Value) -> Value {
                 steps
                     .iter()
                     .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
-                    .map(bounded_model_context_value)
+                    .map(|step| {
+                        let mut projected_step = Map::new();
+                        for key in ["order", "operation", "effect", "requiresApproval"] {
+                            copy_key(&mut projected_step, step, key);
+                        }
+                        Value::Object(projected_step)
+                    })
                     .collect(),
             ),
         );
@@ -914,28 +938,6 @@ fn project_cockpit_agent_path_completion(completion: &Value) -> Value {
                     .collect(),
             ),
         );
-    }
-    Value::Object(projected)
-}
-
-fn project_cockpit_agent_path_step(step: &Value) -> Value {
-    let mut projected = Map::new();
-    for key in [
-        "label",
-        "operation",
-        "payload",
-        "readOnlyInspectionSafe",
-        "reason",
-    ] {
-        copy_key(&mut projected, step, key);
-    }
-    Value::Object(projected)
-}
-
-fn project_cockpit_unavailable_surface(surface: &Value) -> Value {
-    let mut projected = Map::new();
-    for key in ["operation", "reason", "alternative"] {
-        copy_key(&mut projected, surface, key);
     }
     Value::Object(projected)
 }

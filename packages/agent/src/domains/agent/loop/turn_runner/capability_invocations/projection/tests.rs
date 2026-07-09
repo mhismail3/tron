@@ -462,6 +462,29 @@ fn extract_result_content_projects_compact_catalog_next_step() {
                         "operation": "must_not_project",
                         "schema": {"large": oversized_durable_plan}
                     }]
+                },
+                "unsupportedOperationCandidate": true,
+                "unsupportedOperationRecovery": {
+                    "query": "capability_shadow_trial_request_list",
+                    "canonicalQuery": "capability_shadow_trial_request_list",
+                    "supportedOperation": false,
+                    "guidance": "Do not call the queried name.",
+                    "closestReadOnlyAlternatives": [{
+                        "operation": "capability_binding_cockpit_overview",
+                        "tool": "capability::execute",
+                        "arguments": {
+                            "operation": "capability_binding_cockpit_overview",
+                            "targetOperation": "git_status"
+                        },
+                        "readOnlyInspectionSafe": true,
+                        "reason": "Inspect readiness for the exact operation.",
+                        "agentUsage": {
+                            "preflight": {
+                                "authorityScopes": ["must_not_project"],
+                                "resourceSelectors": ["must_not_project"]
+                            }
+                        }
+                    }]
                 }
             }
         })),
@@ -475,11 +498,16 @@ fn extract_result_content_projects_compact_catalog_next_step() {
     assert!(text.contains("git_status"));
     assert!(text.contains("primaryInspection"));
     assert!(text.contains("capability_binding_cockpit_overview"));
+    assert!(text.contains("unsupportedOperationRecovery"));
+    assert!(text.contains("Do not call the queried name"));
+    assert!(text.contains("Inspect readiness for the exact operation"));
     assert!(text.contains("no current-scope replacement evidence exists"));
     assert!(text.contains("\"score\": 18"));
     assert!(!text.contains("agentSearchPlan"));
     assert!(!text.contains("contextualWriteOperations"));
     assert!(!text.contains("must_not_project"));
+    assert!(!text.contains("authorityScopes"));
+    assert!(!text.contains("resourceSelectors"));
     assert!(
         text.len() < 16_000,
         "catalog search projection must fit the provider tool-result boundary: {} bytes",
@@ -933,6 +961,7 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
 
 #[test]
 fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
+    let oversized_pre_cockpit_path = "x".repeat(30_000);
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             "Targeted cockpit for git_status.",
@@ -973,6 +1002,19 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
                             "authorityGrantId": "targeted_grant_must_not_project"
                         }
                     },
+                    "shadowTrial": {
+                        "runs": 1,
+                        "evidenceInspectReady": true,
+                        "evidenceRefs": [{
+                            "resourceId": "capability_shadow_trial_evidence:test",
+                            "inspectOperation": "capability_shadow_trial_evidence_inspect",
+                            "inspectPayload": {
+                                "operation": "capability_shadow_trial_evidence_inspect",
+                                "capabilityShadowTrialEvidenceResourceId": "capability_shadow_trial_evidence:test"
+                            }
+                        }],
+                        "detail": "must_not_project_shadow_detail"
+                    },
                     "agentPath": {
                         "purpose": "Inspect replacement readiness for git_status without invoking the adapter.",
                         "primaryInspection": {
@@ -984,6 +1026,10 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
                             "readOnlyInspectionSafe": true,
                             "reason": "Exact operation row."
                         },
+                        "readOnlySequence": [{
+                            "operation": "must_not_project",
+                            "reason": oversized_pre_cockpit_path
+                        }],
                         "completion": {
                             "state": "answer_now_no_current_scope_evidence",
                             "action": "stop_after_targeted_cockpit",
@@ -1007,14 +1053,24 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
         panic!("expected text result");
     };
     assert!(text.contains("\"agentPath\""));
-    assert!(text.contains("\"primaryInspection\""));
     assert!(text.contains("\"completion\""));
     assert!(text.contains("capabilityRequestedMutation=false; engineAuditPersistence=true"));
     assert!(text.contains("capability_replacement_candidate_record"));
+    assert!(text.contains("capability_shadow_trial_evidence:test"));
+    assert!(text.contains("capability_shadow_trial_evidence_inspect"));
     assert!(text.contains("\"operationsReturned\": 1"));
     assert!(text.contains("\"returned\": 1"));
     assert!(text.contains("\"requiredPayloadFields\""));
     assert!(text.contains("git.read"));
+    assert!(!text.contains("\"primaryInspection\""));
+    assert!(!text.contains("\"readOnlySequence\""));
+    assert!(!text.contains("must_not_project"));
+    assert!(!text.contains("must_not_project_shadow_detail"));
+    assert!(
+        text.len() < 16_000,
+        "targeted cockpit projection must fit provider output: {} bytes",
+        text.len()
+    );
     assert!(!text.contains("authorityGrantId"));
     assert!(!text.contains("targeted_grant_must_not_project"));
 }

@@ -87,8 +87,11 @@
 //! targeted content summary with the safe read-only path and unavailable-surface
 //! guidance, while the full projection remains durable UI/audit data. The turn
 //! runner reads the compact durable `target` row for targeted calls and projects
-//! its completion verdict, exact governed next steps, and required final-answer
-//! suffix. Broad calls append a bounded provider-visible directory with coverage
+//! only its operation role/effect, current readiness and evidence state,
+//! completion verdict, exact governed next steps, and required final-answer
+//! suffix. The already-consumed discovery sequence remains durable audit data
+//! rather than being repeated after the targeted call. Broad calls append a
+//! bounded provider-visible directory with coverage
 //! counts, family summaries, and representative operation samples so the agent
 //! can verify the pool without guessing or calling internal catalog functions
 //! directly.
