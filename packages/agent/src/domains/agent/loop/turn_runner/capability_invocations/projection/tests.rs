@@ -898,6 +898,8 @@ fn extract_result_content_projects_context_action_list_inspect_arguments() {
     assert!(text.contains("\"operation\": \"context_control_action_inspect\""));
     assert!(text.contains("\"resourceId\": \"context_control_action:abc\""));
     assert!(text.contains("\"versionId\": \"ver_context_action_abc\""));
+    assert!(!text.contains("compact-model-capability-invocation:v1:abc"));
+    assert!(!text.contains("\"actionId\""));
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("grant_top_level_must_not_project"));
     assert!(!text.contains("authorityGrantId"));

@@ -1015,7 +1015,6 @@ fn project_context_control_evidence(operation: &str, details: &Value) -> Option<
 fn project_context_control_action_summary(action: &Value) -> Value {
     let mut projected = Map::new();
     for key in [
-        "actionId",
         "state",
         "kind",
         "reason",
