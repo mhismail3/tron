@@ -301,6 +301,170 @@ async fn normalized_streamed_text_call_text_keeps_block_boundaries() {
 }
 
 #[tokio::test]
+async fn terminal_thinking_snapshot_after_call_is_not_duplicated_and_normalizes_stop_reason() {
+    let thinking = "Inspect the current capability state.";
+    let arguments = {
+        let mut args = serde_json::Map::new();
+        let _ = args.insert("operation".into(), serde_json::json!("catalog_search"));
+        args
+    };
+    let capability_invocation =
+        CapabilityInvocationDraft::new("call_after_thinking", "execute", arguments.clone());
+    let provider_events = vec![
+        StreamEvent::Start,
+        StreamEvent::ThinkingStart,
+        StreamEvent::ThinkingDelta {
+            delta: thinking.into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        },
+        StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "call_after_thinking".into(),
+            name: "execute".into(),
+        },
+        StreamEvent::CapabilityInvocationDraftDelta {
+            invocation_id: "call_after_thinking".into(),
+            arguments_delta: r#"{"operation":"catalog_search"}"#.into(),
+        },
+        StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: capability_invocation.clone(),
+        },
+        StreamEvent::ThinkingEnd {
+            thinking: thinking.into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: Some("final-signature".into()),
+        },
+        StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![
+                    AssistantContent::Thinking {
+                        thinking: thinking.into(),
+                        kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+                        signature: Some("final-signature".into()),
+                    },
+                    AssistantContent::CapabilityInvocation {
+                        id: "call_after_thinking".into(),
+                        name: "execute".into(),
+                        arguments,
+                        thought_signature: None,
+                    },
+                    AssistantContent::Thinking {
+                        thinking: thinking.into(),
+                        kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+                        signature: Some("final-signature".into()),
+                    },
+                ],
+                token_usage: None,
+            },
+            stop_reason: "end_turn".into(),
+        },
+    ];
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        stream_from_provider_events(provider_events),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.message.content.len(), 2);
+    assert!(matches!(
+        &result.message.content[0],
+        AssistantContent::Thinking {
+            thinking: current,
+            signature,
+            ..
+        } if current == thinking && signature.as_deref() == Some("final-signature")
+    ));
+    assert!(matches!(
+        &result.message.content[1],
+        AssistantContent::CapabilityInvocation { id, .. } if id == "call_after_thinking"
+    ));
+}
+
+#[tokio::test]
+async fn distinct_thinking_after_call_remains_a_separate_ordered_block() {
+    let provider_events = vec![
+        StreamEvent::Start,
+        StreamEvent::ThinkingStart,
+        StreamEvent::ThinkingDelta {
+            delta: "before".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        },
+        StreamEvent::ThinkingEnd {
+            thinking: "before".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: None,
+        },
+        StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: "call_between_thinking".into(),
+            name: "execute".into(),
+        },
+        StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: CapabilityInvocationDraft::new(
+                "call_between_thinking",
+                "execute",
+                serde_json::Map::new(),
+            ),
+        },
+        StreamEvent::ThinkingStart,
+        StreamEvent::ThinkingDelta {
+            delta: "after".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+        },
+        StreamEvent::ThinkingEnd {
+            thinking: "after".into(),
+            kind: crate::shared::protocol::content::ThinkingContentKind::Thinking,
+            signature: None,
+        },
+        StreamEvent::Done {
+            message: AssistantMessage {
+                content: Vec::new(),
+                token_usage: None,
+            },
+            stop_reason: "end_turn".into(),
+        },
+    ];
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        stream_from_provider_events(provider_events),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.stop_reason, "capability_invocation");
+    assert_eq!(result.message.content.len(), 3);
+    assert!(matches!(
+        &result.message.content[0],
+        AssistantContent::Thinking { thinking, .. } if thinking == "before"
+    ));
+    assert!(matches!(
+        &result.message.content[1],
+        AssistantContent::CapabilityInvocation { id, .. } if id == "call_between_thinking"
+    ));
+    assert!(matches!(
+        &result.message.content[2],
+        AssistantContent::Thinking { thinking, .. } if thinking == "after"
+    ));
+}
+
+#[tokio::test]
 async fn pure_text_response() {
     let emitter = make_emitter();
     let cancel = CancellationToken::new();

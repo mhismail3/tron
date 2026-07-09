@@ -4,6 +4,9 @@
 //! accumulators and `handle_normal_event` / `handle_drain_event` classify each
 //! `StreamEvent` into a `StreamAction`. This module provides the public
 //! `process_stream` entry point that drives the `tokio::select!` loop.
+//! Final results normalize provider terminal metadata against accumulated
+//! content so persisted replay cannot claim `end_turn` while carrying a
+//! finalized capability invocation.
 
 use std::collections::HashSet;
 use std::sync::Arc;

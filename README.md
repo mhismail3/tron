@@ -1349,7 +1349,12 @@ fields such as `agent.runtime`, `agent.loop`, `agent.turn`, `agent.provider`,
 lifecycle boundaries and include session/workspace/run/turn/trace/invocation
 IDs where available. TRACE logs add high-volume sequencing and size metadata for
 stream deltas and argument deltas without logging prompt text, generated text,
-tool arguments, or file content. The SQLite log transport redacts known
+tool arguments, or file content. The provider-neutral stream accumulator keeps
+text, thinking, and capability blocks in observed order, treats repeated
+terminal thinking snapshots as finalization rather than new content, and
+normalizes any completed turn carrying a capability invocation to the
+`capability_invocation` stop reason so live events and durable replay agree. The
+SQLite log transport redacts known
 credential/token patterns from server-side messages, structured data, and error
 fields before persistence, but call sites still treat logs as lifecycle metadata
 rather than content storage. Authorized content and effect evidence remain in

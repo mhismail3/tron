@@ -6,6 +6,10 @@
 //! deltas or capability starts are observed; provider `Done` messages remain
 //! canonical for final-only responses whose providers synthesize close events
 //! immediately before `Done`.
+//! Finalization also enforces provider-neutral terminal invariants: a terminal
+//! thinking snapshot updates its matching streamed block without reopening it,
+//! and any finalized capability invocation makes `capability_invocation` the
+//! canonical stop reason even when a provider reports a contradictory reason.
 //! Two handler methods—`handle_normal_event` and `handle_drain_event`—classify
 //! each `StreamEvent` into a `StreamAction` that the caller (`process_stream`)
 //! uses to drive the select loop.
@@ -388,7 +392,7 @@ impl StreamState {
     pub(super) fn finalize_stream_result(
         mut self,
         final_message: Option<AssistantMessage>,
-        stop_reason: String,
+        mut stop_reason: String,
     ) -> crate::domains::agent::r#loop::types::StreamResult {
         if let Some(draft) = finalize_capability_invocation(
             &mut self.capability_invocations,
@@ -415,6 +419,10 @@ impl StreamState {
                     .and_then(|message| message.token_usage.clone()),
             )
         };
+
+        if !self.capability_invocations.is_empty() {
+            stop_reason = "capability_invocation".into();
+        }
 
         crate::domains::agent::r#loop::types::StreamResult {
             message,

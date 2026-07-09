@@ -119,7 +119,23 @@ impl OrderedAssistantContent {
         signature: Option<String>,
     ) {
         if self.active_thinking_index.is_none() {
-            self.start_thinking(kind);
+            // Some providers emit a terminal full-snapshot ThinkingEnd after
+            // they have already started a capability invocation. The
+            // invocation closes the active block to preserve ordering, so
+            // finalize the matching streamed block instead of appending the
+            // same thinking again after the invocation.
+            self.active_thinking_index = self.blocks.iter().rposition(|block| {
+                matches!(
+                    block,
+                    OrderedContentBlock::Thinking {
+                        thinking: current,
+                        ..
+                    } if current == thinking
+                )
+            });
+            if self.active_thinking_index.is_none() {
+                self.start_thinking(kind);
+            }
         }
         if let Some(idx) = self.active_thinking_index.take()
             && let Some(OrderedContentBlock::Thinking {
