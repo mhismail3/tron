@@ -257,6 +257,9 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
         "trace_get" => {
             " Current-session scope is supplied by trusted runtime context; pass only operation and the traceRecordId returned by trace_list."
         }
+        "context_control_status" => {
+            " Current-session scope is supplied by trusted runtime context; pass only operation. Do not include sessionId or selector fields. The result content summarizes epoch, token budget, composition blocks, and freshness proof without recording a snapshot or action."
+        }
         _ => "",
     }
 }
@@ -928,7 +931,7 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         "memory_inspect" => vec!["operation", "recordResourceId"],
         "memory_query_inspect" => vec!["operation", "queryResourceId"],
         "memory_decision_inspect" => vec!["operation", "decisionResourceId"],
-        "context_control_status" => vec!["operation", "sessionId"],
+        "context_control_status" => vec!["operation"],
         "context_control_action_inspect" => vec!["operation", "contextControlActionResourceId"],
         "media_inspect" => vec!["operation", "mediaResourceId"],
         "import_history_inspect" => vec!["operation", "importHistoryResourceId"],
@@ -3170,7 +3173,23 @@ mod tests {
 
         assert_eq!(
             discovery["schema"]["requiredPayloadFields"],
-            json!(["operation", "sessionId"])
+            json!(["operation"])
+        );
+        assert_eq!(discovery["inputSchema"]["required"], json!(["operation"]));
+        assert!(
+            discovery["inputSchema"]["properties"]
+                .as_object()
+                .expect("input schema properties")
+                .get("sessionId")
+                .is_none(),
+            "model-facing context status schema must rely on trusted current-session scope"
+        );
+        assert!(
+            discovery["modelFacingInvocation"]["arguments"]
+                .as_object()
+                .expect("model invocation arguments")
+                .get("sessionId")
+                .is_none()
         );
         assert_eq!(
             discovery["agentUsage"]["effect"]["readOnlyInspectionSafe"],
@@ -3181,6 +3200,9 @@ mod tests {
             discovery["agentUsage"]["preflight"]["networkPolicy"],
             "none"
         );
+        let guidance = execute_operation_invocation_guidance("context_control_status");
+        assert!(guidance.contains("pass only operation"));
+        assert!(guidance.contains("Do not include sessionId"));
     }
 
     #[test]

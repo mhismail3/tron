@@ -190,8 +190,7 @@ fn context_control_resource_types_are_registered_with_metadata_only_bounds() {
 async fn status_returns_current_provider_safe_composition_without_recording_snapshot() {
     let fixture = Fixture::new("context-control-status").await;
     let payload = json!({
-        "operation": "context_control_status",
-        "sessionId": fixture.session_id
+        "operation": "context_control_status"
     });
     let invocation = fixture.read_invocation("status-1", "context_control_status", payload.clone());
     let before = fixture
