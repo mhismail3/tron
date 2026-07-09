@@ -55,7 +55,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         )
         .visibility(VisibilityScope::System)
         .domain_module("capability")
-        .request_schema(execute_model_request_schema())
+        .request_schema(execute_host_request_schema())
         .response_schema(primitive_result_schema())
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .build()?,
@@ -79,14 +79,56 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                             "Capability-binding operations record/list/inspect metadata-only binding requests, decisions, and policies for future shadow/extend/replace proposals with exact selectors, no wildcard authority, `networkPolicy: none`, stale-version guards, rollback/disable refs, provider-safe projections, and no dispatch mutation, module activation, hot-swap, package-manager, dependency restore, network, agent_state inheritance, raw grant ids, or raw authority ids; `capability_binding_cockpit_overview` returns the same read-only capability-pool and route-state projection used by native Engine Cockpit clients, including agent usage and preflight guidance, without changing routing or autonomy behavior; capability-shadow-trial operations record the governed `git_status` request/decision/run/evidence path, compare built-in and deterministic candidate provider-safe projections, require exact selectors, rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`, and never execute candidate modules; capability route operations record/activate/disable/rollback explicit scoped `git_status` route resources after candidate, shadow, approval, authority, and rollback evidence, annotate routed invocations with route events, route active invocations through the supervised module-runtime provider-safe projection boundary using accepted shadow-trial evidence, and fail closed without built-in success substitution when route records, lifecycle/runtime refs, scope, or projections are unsafe. Subagent lifecycle operations require explicit workerKind/modulePackId selection, summary-only handoff refs, exact subagent and module runtime authority, networkPolicy none, runtime/job association validation, and return merge proposals instead of silently mutating parent conversation state. ",
                     "Choose one operation per call. For read-only capability discovery, use catalog_search, catalog_inspect, list, inspect, status, trace, log, or overview operations. catalog_conformance is not a read-only inspection operation: it creates an idempotent durable catalog_discovery_report resource and should only be called when the task explicitly asks for a verification/conformance report. Catalog discovery operations never execute discovered capabilities. Import-preview operations store refs, path metadata, counts, summaries, and fingerprints only; they never execute/apply imports, mutate Git, visualize repositories, or store raw import payloads, preview payloads, file contents, or blob bytes. Program-execution operations store runtime/language metadata, I/O refs or fingerprints, resource-limit policy, lifecycle evidence, and idempotency fingerprints only; they never store raw code, command strings, shell snippets, raw stdin/stdout/stderr, launch processes, install runtimes, perform network behavior, write files, or execute programs. Module program-execution operations require an enabled module lifecycle, delegate non-interactive process execution to the jobs domain under networkPolicy none, and return only bounded job/program/runtime/output refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata; they never return raw commands, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, or raw job_process/execution_output payloads. Prompt-artifact operations store explicit opt-in artifact metadata, content refs/fingerprints, retention state, lifecycle evidence, and idempotency fingerprints only; they never store raw prompt bodies, provider-visible raw prompt payloads, automatic prompt history, prompt injection, learned behavior, native snippet UI, or prompt-context inclusion. Update diagnostic operations store signed-release/provenance metadata only; they never perform live network checks, install, restart, deploy, register packages, or store production endpoint details/package bytes. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
-                "parameters": execute_model_request_schema()
+                "parameters": execute_provider_request_schema()
             }
         }),
         _ => serde_json::Value::Null,
     }
 }
 
-fn execute_model_request_schema() -> serde_json::Value {
+fn execute_provider_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["operation"],
+        "properties": {
+            "operation": {
+                "type": "string",
+                "description": "Exact capability::execute operation. Never guess operation names: use catalog_search, then catalog_inspect with kind=function and id=execute::<operation>."
+            },
+            "text": {
+                "type": "string",
+                "description": "Bounded natural-language query for catalog_search."
+            },
+            "kind": {
+                "type": "string",
+                "description": "Catalog item kind for catalog_inspect; use function for execute-operation contracts."
+            },
+            "id": {
+                "type": "string",
+                "description": "Exact catalog inspect id; use execute::<operation> for provider-visible operations."
+            },
+            "effectClass": {
+                "type": "string",
+                "description": "Optional catalog_search effect filter. Use pure_read for read-only discovery."
+            },
+            "namespacePrefix": {
+                "type": "string",
+                "description": "Optional catalog_search family or namespace filter."
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Optional bounded catalog result limit."
+            },
+            "includeOutputSchema": {
+                "type": "boolean",
+                "description": "Set true on catalog_inspect only when the operation output contract is needed."
+            }
+        },
+        "additionalProperties": true
+    })
+}
+
+fn execute_host_request_schema() -> serde_json::Value {
     let mut properties = Map::new();
     properties.insert(
         "operation".to_owned(),
@@ -671,6 +713,13 @@ fn execute_model_request_schema() -> serde_json::Value {
         Some(32_000),
         Some("Maximum serialized schema preview bytes for tool_source_inspect."),
     );
+    properties.insert(
+        "includeOutputSchema".to_owned(),
+        json!({
+            "type": "boolean",
+            "description": "Optional catalog_inspect flag that includes the operation output schema; false by default to keep discovery results compact."
+        }),
+    );
     insert_integer(
         &mut properties,
         "maxLifecycleItems",
@@ -790,7 +839,7 @@ mod tests {
         assert!(!description.contains("file_read"));
         assert!(!description.contains("file_write"));
 
-        let schema = execute_model_request_schema();
+        let schema = execute_host_request_schema();
         assert_eq!(schema["required"], json!(["operation"]));
         assert_eq!(
             schema["additionalProperties"],
@@ -1083,9 +1132,25 @@ mod tests {
         let metadata = model_metadata(EXECUTE_FUNCTION_ID);
         let schema = &metadata["capabilitySchema"]["parameters"];
         assert_eq!(schema["type"], json!("object"));
-        // DESI static guard marker for successor-runtime fields:
-        // schema["properties"].get("target").is_none()
-        // schema["properties"].get("constraints").is_none()
+        assert_eq!(schema["required"], json!(["operation"]));
+        assert_eq!(schema["additionalProperties"], json!(true));
+        assert!(schema["properties"].get("operation").is_some());
+        assert!(schema["properties"].get("text").is_some());
+        assert!(schema["properties"].get("kind").is_some());
+        assert!(schema["properties"].get("id").is_some());
+        assert!(schema["properties"].get("effectClass").is_some());
+        assert!(schema["properties"].get("namespacePrefix").is_some());
+        assert!(schema["properties"].get("limit").is_some());
+        assert!(schema["properties"].get("includeOutputSchema").is_some());
+        assert!(schema["properties"].get("command").is_none());
+        assert!(schema["properties"].get("authorityConstraints").is_none());
+        assert!(
+            serde_json::to_vec(schema)
+                .expect("provider schema serializes")
+                .len()
+                < 2_000,
+            "provider bootstrap schema must stay compact"
+        );
         assert_provider_schema_has_no_unsupported_keywords(schema, "$");
     }
 

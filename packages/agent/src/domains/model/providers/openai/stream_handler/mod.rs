@@ -271,12 +271,13 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     {
         return events;
     }
-    events.extend(state.acc.mark_thinking_started());
     if let Some(summary) = &item.summary {
         for part in summary {
             if part.content_type == "summary_text"
                 && let Some(text) = &part.text
+                && !text.is_empty()
             {
+                events.extend(state.acc.mark_thinking_started());
                 let _ = state.seen_thinking_texts.insert(text.clone());
                 state.thinking_kind = ThinkingContentKind::ReasoningSummary;
                 let delta = reasoning_summary_part_delta(&state.acc.accumulated_thinking, text);

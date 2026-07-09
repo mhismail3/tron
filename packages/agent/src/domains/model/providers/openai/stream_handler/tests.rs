@@ -371,6 +371,26 @@ fn output_item_done_joins_multiple_reasoning_summary_parts() {
 }
 
 #[test]
+fn output_item_done_with_empty_reasoning_summary_does_not_start_thinking() {
+    let mut state = create_stream_state();
+    let event = ResponsesSseEvent {
+        event_type: SseEventType::OutputItemDone,
+        item: Some(ResponsesOutputItem {
+            item_type: OutputItemType::Reasoning,
+            summary: Some(Vec::new()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let events = process_stream_event(&event, &mut state);
+
+    assert!(events.is_empty());
+    assert!(!state.acc.thinking_started);
+    assert!(state.acc.accumulated_thinking.is_empty());
+}
+
+#[test]
 fn skips_output_item_done_if_already_accumulated() {
     let mut state = create_stream_state();
     state.acc.accumulated_thinking = "Already accumulated".into();

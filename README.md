@@ -1206,6 +1206,17 @@ operation values behind that single `execute` provider surface:
 |---------------|-----------------|---------|
 | `execute` | `capability::execute` | Run one primitive host operation and return a bounded observation/result to the turn loop. |
 
+The registered host contract retains the complete closed request-field union for
+engine validation. Provider metadata exposes only the compact discovery
+bootstrap (`operation`, `catalog_search`, and `catalog_inspect` fields) and keeps
+operation-specific payloads open for the provider transport; callers discover
+the exact input contract through `catalog_inspect`, while the host remains the safety
+boundary. This avoids sending the complete cross-operation field union on every
+model request without creating a second capability surface. Operation output
+schemas are opt-in through `includeOutputSchema: true`; ordinary inspection
+returns one input schema rather than duplicating input/output contracts across
+multiple result fields.
+
 Capability modularity is tracked in
 `packages/agent/docs/capability-modularity-scorecard.md`, with the
 machine-readable inventory in

@@ -138,10 +138,10 @@
 //! operations such as context policy lists even when names differ.
 //! `catalog_inspect` accepts
 //! `execute::<supported_operation>` and supported-operation ids directly; those
-//! aliases return operation-specific call contracts, preflight guidance, and
-//! required top-level payload fields in both normalized `inputSchema` /
-//! `outputSchema` slots and the operation-specific schema block instead of the
-//! generic `capability::execute` wrapper. Inspect operations must expose their
+//! aliases return one operation-specific input contract, preflight guidance, and
+//! required top-level payload fields instead of the generic `capability::execute`
+//! wrapper. Output schemas are omitted unless `includeOutputSchema` is true, so
+//! normal discovery does not duplicate large result contracts. Inspect operations must expose their
 //! exact resource-id field names; placeholder fields are rejected because they
 //! force the model to infer hidden request syntax. Runtime-routable operations
 //! keep their capability-pool classification, but operation inspection also includes a
@@ -185,7 +185,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `contract` | Single `capability::execute` contract and provider schema |
+//! | `contract` | Single `capability::execute` host contract and compact provider bootstrap schema |
 //! | `capability_binding_contract` | Capability-binding and shadow-trial schema fields |
 //! | `context_control_contract` | Context-control snapshot/action/epoch schema fields |
 //! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
@@ -204,9 +204,13 @@
 //! can only appear later as agent-owned state or generated helper substrate, not
 //! as checked-in target functions.
 //! Supported `execute` operation spellings live in the operations registry and
-//! are reused by provider schema descriptions, provider guidance, catalog
+//! are reused by provider guidance, catalog
 //! discovery, unsupported-operation diagnostics, and stream/UI operation
 //! identity. Do not duplicate freehand operation lists elsewhere.
+//! Host validation keeps the complete closed request union, while providers see
+//! only the catalog bootstrap fields plus an open operation payload. Exact
+//! operation fields remain discoverable through `catalog_inspect`; the compact
+//! bootstrap must not become a second operation-contract registry.
 //! File access through this tool must use the hardened `filesystem_*` operation
 //! package registered in the operations registry.
 //! Agent-launched executions persist trace provider ownership and canonical

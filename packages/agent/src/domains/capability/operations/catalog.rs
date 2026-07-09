@@ -94,7 +94,16 @@ pub(super) async fn catalog_inspect(
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
     if let Some((operation, alias)) = execute_operation_inspect_target(&invocation.payload) {
-        let discovery = execute_operation_inspect_projection(&operation, &alias);
+        let include_output_schema = invocation
+            .payload
+            .get("includeOutputSchema")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let discovery = execute_operation_inspect_projection_with_options(
+            &operation,
+            &alias,
+            include_output_schema,
+        );
         let kind = discovery["kind"].as_str().unwrap_or("execute_operation");
         let id = discovery["id"].as_str().unwrap_or("unknown");
         let required_fields = discovery
@@ -111,8 +120,13 @@ pub(super) async fn catalog_inspect(
             .unwrap_or_else(|| "operation".to_owned());
         return Ok(ok_result(
             format!(
-                "Catalog {kind} inspected: {id}. Required top-level payload fields: {required_fields}.{}",
-                execute_operation_invocation_guidance(&operation)
+                "Catalog {kind} inspected: {id}. Required top-level payload fields: {required_fields}.{}{}",
+                execute_operation_invocation_guidance(&operation),
+                if include_output_schema {
+                    " Output schema included."
+                } else {
+                    " Output schema omitted by default; repeat catalog_inspect with includeOutputSchema=true only when the result contract is needed."
+                }
             ),
             json!({
                 "primitiveOperation": "catalog_inspect",
@@ -165,7 +179,16 @@ fn execute_operation_inspect_target(payload: &Value) -> Option<(String, String)>
     }
 }
 
+#[cfg(test)]
 fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
+    execute_operation_inspect_projection_with_options(operation, alias, false)
+}
+
+fn execute_operation_inspect_projection_with_options(
+    operation: &str,
+    alias: &str,
+    include_output_schema: bool,
+) -> Value {
     let id = format!("execute::{operation}");
     let agent_usage = operation_agent_usage_projection(operation).unwrap_or_else(|| {
         json!({
@@ -193,7 +216,6 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
     let effect = agent_usage.get("effect").cloned();
     let preflight = agent_usage.get("preflight").cloned();
     let input_schema = execute_operation_input_schema(operation, &required_payload_field_names);
-    let output_schema = execute_operation_output_schema(operation);
     let capability_pool = operation_pool_metadata(operation).map(|metadata| {
         operation_contextual_pool_projection(
             operation,
@@ -218,7 +240,6 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
         "providerCallable": true,
         "providerCallableReason": "Invoke through the single provider-visible capability::execute tool with this operation value.",
         "inputSchema": input_schema.clone(),
-        "outputSchema": output_schema.clone(),
         "modelFacingInvocation": model_facing_invocation,
         "capabilityPool": capability_pool,
         "agentUsage": agent_usage,
@@ -227,14 +248,18 @@ fn execute_operation_inspect_projection(operation: &str, alias: &str) -> Value {
             "operation": operation,
             "arguments": {"operation": operation},
             "requiredPayloadFields": required_payload_fields,
-            "inputSchema": input_schema,
-            "outputSchema": output_schema,
             "payloadPlacement": "Put operation-specific fields at the top level of the capability::execute payload.",
             "schemaCompleteness": "operation_specific_contract",
             "effect": effect,
             "preflight": preflight
         }
     });
+    if include_output_schema && let Some(object) = projection.as_object_mut() {
+        object.insert(
+            "outputSchema".to_owned(),
+            execute_operation_output_schema(operation),
+        );
+    }
     if alias != projection["id"].as_str().unwrap_or_default() {
         if let Some(object) = projection.as_object_mut() {
             object.insert(
@@ -2708,7 +2733,13 @@ fn module_governance_plan_query(query: &OperationSearchQuery) -> bool {
     {
         return false;
     }
+    if !query.display.chars().any(char::is_whitespace)
+        || !supported_operations_in_query(query).is_empty()
+    {
+        return false;
+    }
     let terms = query_terms(query);
+    let asks_explicit_plan = terms.contains("governance") || terms.contains("readiness");
     let asks_module_governance = terms.contains("governance")
         || terms.contains("module")
         || terms.contains("registry")
@@ -2727,7 +2758,9 @@ fn module_governance_plan_query(query: &OperationSearchQuery) -> bool {
         || terms.contains("policy")
         || terms.contains("request")
         || terms.contains("decision");
-    (asks_module_governance || asks_capability_governance) && asks_read_only_overview
+    asks_explicit_plan
+        && (asks_module_governance || asks_capability_governance)
+        && asks_read_only_overview
 }
 
 fn default_list_payload(operation: &str) -> Value {
@@ -2941,7 +2974,7 @@ mod tests {
         assert_eq!(operation, "capability_shadow_trial_evidence_inspect");
         assert_eq!(alias, "execute::capability_shadow_trial_evidence_inspect");
 
-        let discovery = execute_operation_inspect_projection(&operation, &alias);
+        let discovery = execute_operation_inspect_projection_with_options(&operation, &alias, true);
         assert_eq!(discovery["kind"], "execute_operation");
         assert_eq!(
             discovery["id"],
@@ -2974,10 +3007,6 @@ mod tests {
             "string"
         );
         assert_eq!(
-            discovery["schema"]["inputSchema"]["required"],
-            json!(["operation", "capabilityShadowTrialEvidenceResourceId"])
-        );
-        assert_eq!(
             discovery["outputSchema"]["properties"]["details"]["properties"]["primitiveOperation"]
                 ["const"],
             "capability_shadow_trial_evidence_inspect"
@@ -2986,6 +3015,33 @@ mod tests {
             discovery["agentUsage"]["effect"]["readOnlyInspectionSafe"],
             true
         );
+    }
+
+    #[test]
+    fn catalog_inspect_defaults_to_one_compact_input_contract() {
+        let discovery = execute_operation_inspect_projection_with_options(
+            "git_status",
+            "execute::git_status",
+            false,
+        );
+
+        assert!(discovery.get("inputSchema").is_some());
+        assert!(discovery.get("outputSchema").is_none());
+        assert!(discovery["schema"].get("inputSchema").is_none());
+        assert!(discovery["schema"].get("outputSchema").is_none());
+        assert_eq!(discovery["inputSchema"]["required"], json!(["operation"]));
+    }
+
+    #[test]
+    fn catalog_inspect_includes_output_contract_only_when_requested() {
+        let discovery = execute_operation_inspect_projection_with_options(
+            "git_status",
+            "execute::git_status",
+            true,
+        );
+
+        assert!(discovery.get("outputSchema").is_some());
+        assert!(discovery["schema"].get("outputSchema").is_none());
     }
 
     #[test]
@@ -3051,8 +3107,11 @@ mod tests {
 
     #[test]
     fn catalog_inspect_projects_web_operation_contracts() {
-        let robots =
-            execute_operation_inspect_projection("web_robots_check", "execute::web_robots_check");
+        let robots = execute_operation_inspect_projection_with_options(
+            "web_robots_check",
+            "execute::web_robots_check",
+            true,
+        );
         assert_eq!(
             robots["schema"]["requiredPayloadFields"],
             json!(["operation", "url"])
@@ -3096,7 +3155,11 @@ mod tests {
             ])
         );
 
-        let fetch = execute_operation_inspect_projection("web_fetch", "execute::web_fetch");
+        let fetch = execute_operation_inspect_projection_with_options(
+            "web_fetch",
+            "execute::web_fetch",
+            true,
+        );
         assert_eq!(
             fetch["schema"]["requiredPayloadFields"],
             json!(["operation", "url"])
@@ -3232,7 +3295,11 @@ mod tests {
                     .contains("job_status/list return provider-safe lifecycle/output refs")
             );
         }
-        let status = execute_operation_inspect_projection("job_status", "execute::job_status");
+        let status = execute_operation_inspect_projection_with_options(
+            "job_status",
+            "execute::job_status",
+            true,
+        );
         assert_eq!(
             status["outputSchema"]["properties"]["details"]["description"],
             json!(
@@ -3307,7 +3374,11 @@ mod tests {
 
     #[test]
     fn catalog_inspect_projects_trace_output_record_schema() {
-        let trace_list = execute_operation_inspect_projection("trace_list", "execute::trace_list");
+        let trace_list = execute_operation_inspect_projection_with_options(
+            "trace_list",
+            "execute::trace_list",
+            true,
+        );
 
         assert_eq!(
             trace_list["schema"]["requiredPayloadFields"],
@@ -3396,7 +3467,11 @@ mod tests {
                 .any(|field| field == "providerInvocationId")
         );
 
-        let trace_get = execute_operation_inspect_projection("trace_get", "execute::trace_get");
+        let trace_get = execute_operation_inspect_projection_with_options(
+            "trace_get",
+            "execute::trace_get",
+            true,
+        );
         assert_eq!(
             trace_get["schema"]["requiredPayloadFields"],
             json!(["operation", "traceRecordId"])
@@ -3769,7 +3844,11 @@ mod tests {
 
     #[test]
     fn catalog_inspect_documents_git_status_evidence_contract() {
-        let discovery = execute_operation_inspect_projection("git_status", "execute::git_status");
+        let discovery = execute_operation_inspect_projection_with_options(
+            "git_status",
+            "execute::git_status",
+            true,
+        );
 
         assert_eq!(discovery["inputSchema"]["additionalProperties"], true);
         assert_eq!(discovery["inputSchema"]["required"], json!(["operation"]));
