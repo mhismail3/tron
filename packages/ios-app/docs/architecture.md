@@ -433,10 +433,14 @@ those paths are not production recovery modes.
 
 `EventStoreManager` and `SessionSynchronizer` rebuild local session/event
 projections from server session lists and event-sync APIs. Session-list refresh
-uses deterministic server cursors in 200-row pages with a 2,000-session safety
-cap; IDs are deduplicated across page races, and a cap-limited partial snapshot
-never deletes older cached rows as if they were server-missing. Server-missing
-sessions are removed from the local cache only after a complete snapshot. Full
+uses immutable creation-key server cursors in 200-row pages beneath one
+`snapshotAsOf` boundary, with independent page/no-progress limits and a
+2,000-session safety cap. The sync requests active and archived sessions
+together so archive transitions cannot change membership mid-snapshot. Cursor
+cycles, inconsistent boundaries, and cap-limited results are partial and never
+delete cached rows. A complete unfiltered snapshot is applied in one SQLite
+transaction; server-missing sessions at or before its boundary are removed
+with their events while newer local rows and all retained events survive. Full
 session sync clears and refetches event rows, and fork ancestor rows remain source-session history
 rather than copied client truth. Engine stream cursors are stored per server
 origin/topic/filter for ACK coalescing and diagnostics only; session history is

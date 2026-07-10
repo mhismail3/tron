@@ -27,7 +27,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("session::list", "session", EffectClass::PureRead, RiskLevel::Low, Some("session.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"includeArchived":{"type":"boolean"},"limit":{"type":"integer"},"offset":{"type":"integer"},"sessionId":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"cursor":{"type":"string"},"includeArchived":{"type":"boolean"},"limit":{"maximum":200,"minimum":1,"type":"integer"},"offset":{"minimum":0,"type":"integer"},"sessionId":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("session::delete", "session", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("session.write"))
@@ -87,4 +87,34 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_list_contract_accepts_a_server_issued_page_two_cursor() {
+        let list = capabilities()
+            .expect("session contracts")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "session::list")
+            .expect("session::list contract");
+        let schema = list
+            .request_schema
+            .as_ref()
+            .expect("session::list request schema");
+
+        crate::engine::kernel::schema::validate_payload(
+            &list.function_id,
+            "request",
+            schema,
+            &json!({
+                "cursor": "opaque-server-cursor",
+                "includeArchived": true,
+                "limit": 200
+            }),
+        )
+        .expect("page-two payload must pass the actual closed engine contract");
+    }
 }

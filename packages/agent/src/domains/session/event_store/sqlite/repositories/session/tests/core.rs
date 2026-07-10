@@ -81,7 +81,8 @@ fn list_sessions_uses_stable_activity_and_id_keyset_order() {
     let second_page = SessionRepo::list(
         &conn,
         &ListSessionsOptions {
-            before_last_activity_at: Some(timestamp),
+            snapshot_created_at: Some(timestamp),
+            before_created_at: Some(timestamp),
             before_session_id: Some("sess_b"),
             ..Default::default()
         },
@@ -93,6 +94,108 @@ fn list_sessions_uses_stable_activity_and_id_keyset_order() {
             .map(|session| session.id.as_str())
             .collect::<Vec<_>>(),
         vec!["sess_a"]
+    );
+}
+
+#[test]
+fn immutable_creation_keyset_does_not_skip_a_session_when_activity_moves() {
+    let (conn, ws_id) = setup();
+    for (id, created_at) in [
+        ("sess_new", "2026-07-01T12:00:03Z"),
+        ("sess_middle", "2026-07-01T12:00:02Z"),
+        ("sess_old", "2026-07-01T12:00:01Z"),
+    ] {
+        SessionRepo::create_with_identity(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "model",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+            },
+            &crate::domains::session::event_store::SessionIdentity::new(id, created_at),
+        )
+        .unwrap();
+    }
+
+    let first = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            limit: Some(1),
+            snapshot_created_at: Some("2026-07-01T12:00:04Z"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(first[0].id, "sess_new");
+
+    SessionRepo::update_head_at(
+        &conn,
+        "sess_old",
+        "evt_new_activity",
+        "2026-07-01T13:00:00Z",
+    )
+    .unwrap();
+
+    let rest = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            snapshot_created_at: Some("2026-07-01T12:00:04Z"),
+            before_created_at: Some(&first[0].created_at),
+            before_session_id: Some(&first[0].id),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        rest.iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["sess_middle", "sess_old"]
+    );
+}
+
+#[test]
+fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
+    let (conn, ws_id) = setup();
+    for (id, created_at) in [
+        ("sess_at_boundary", "2026-07-01T12:00:00Z"),
+        ("sess_after_boundary", "2026-07-01T12:00:00.500Z"),
+    ] {
+        SessionRepo::create_with_identity(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "model",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+            },
+            &crate::domains::session::event_store::SessionIdentity::new(id, created_at),
+        )
+        .unwrap();
+    }
+
+    let sessions = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            snapshot_created_at: Some("2026-07-01T12:00:00Z"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["sess_at_boundary"]
     );
 }
 

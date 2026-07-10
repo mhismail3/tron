@@ -32,13 +32,27 @@ pub(crate) async fn session_list_value(
         .and_then(|p| p.get("offset"))
         .and_then(Value::as_u64)
         .map(|value| value as usize);
-    let cursor = opt_string(params, "cursor")
+    let cursor: Option<super::SessionListCursor> = opt_string(params, "cursor")
         .map(|cursor| {
             serde_json::from_str(&cursor).map_err(|_| CapabilityError::InvalidParams {
                 message: "cursor must be a session::list cursor returned by the server".into(),
             })
         })
         .transpose()?;
+    if let Some(cursor) = cursor.as_ref() {
+        if cursor.version != 1 {
+            return Err(CapabilityError::InvalidParams {
+                message: "session::list cursor version is not supported".into(),
+            });
+        }
+        if cursor.include_archived != include_archived
+            || cursor.working_directory != working_directory
+        {
+            return Err(CapabilityError::InvalidParams {
+                message: "session::list cursor must be reused with the same filters".into(),
+            });
+        }
+    }
     if cursor.is_some() && offset.is_some() {
         return Err(CapabilityError::InvalidParams {
             message: "session::list accepts either cursor or offset, not both".into(),

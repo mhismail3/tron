@@ -5,6 +5,41 @@ import SQLite3
 /// Extracted from EventDatabase for single responsibility.
 final class SessionRepository: @unchecked Sendable {
 
+    private static let upsertSQL = """
+        INSERT INTO sessions
+        (id, workspace_id, root_event_id, head_event_id, title, latest_model,
+         working_directory, created_at, last_activity_at, archived_at, event_count,
+         turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
+         cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
+         activity_lines_json, source, profile)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            workspace_id = excluded.workspace_id,
+            root_event_id = excluded.root_event_id,
+            head_event_id = excluded.head_event_id,
+            title = excluded.title,
+            latest_model = excluded.latest_model,
+            working_directory = excluded.working_directory,
+            created_at = excluded.created_at,
+            last_activity_at = excluded.last_activity_at,
+            archived_at = excluded.archived_at,
+            event_count = excluded.event_count,
+            turn_count = excluded.turn_count,
+            message_count = excluded.message_count,
+            input_tokens = excluded.input_tokens,
+            output_tokens = excluded.output_tokens,
+            last_turn_input_tokens = excluded.last_turn_input_tokens,
+            cache_read_tokens = excluded.cache_read_tokens,
+            cache_creation_tokens = excluded.cache_creation_tokens,
+            cost = excluded.cost,
+            is_fork = excluded.is_fork,
+            is_processing = excluded.is_processing,
+            server_origin = excluded.server_origin,
+            activity_lines_json = excluded.activity_lines_json,
+            source = excluded.source,
+            profile = excluded.profile
+    """
+
     private weak var transport: (any DatabaseTransport)?
 
     init(transport: any DatabaseTransport) {
@@ -20,58 +55,127 @@ final class SessionRepository: @unchecked Sendable {
         }
 
         try await transport.withDB { db in
-            let sql = """
-                INSERT OR REPLACE INTO sessions
-                (id, workspace_id, root_event_id, head_event_id, title, latest_model,
-                 working_directory, created_at, last_activity_at, archived_at, event_count,
-                 turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                 cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
-                 activity_lines_json, source, profile)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            guard sqlite3_prepare_v2(db, Self.upsertSQL, -1, &stmt, nil) == SQLITE_OK else {
                 throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
             }
             defer { sqlite3_finalize(stmt) }
 
-            sqlite3_bind_text(stmt, 1, session.id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 2, session.workspaceId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqliteBindOptionalText(stmt, 3, session.rootEventId)
-            sqliteBindOptionalText(stmt, 4, session.headEventId)
-            sqliteBindOptionalText(stmt, 5, session.title)
-            sqlite3_bind_text(stmt, 6, session.latestModel, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 7, session.workingDirectory, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 8, session.createdAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 9, session.lastActivityAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqliteBindOptionalText(stmt, 10, session.archivedAt)
-            sqlite3_bind_int(stmt, 11, Int32(session.eventCount))
-            sqlite3_bind_int(stmt, 12, Int32(session.turnCount))
-            sqlite3_bind_int(stmt, 13, Int32(session.messageCount))
-            sqlite3_bind_int(stmt, 14, Int32(session.inputTokens))
-            sqlite3_bind_int(stmt, 15, Int32(session.outputTokens))
-            sqlite3_bind_int(stmt, 16, Int32(session.lastTurnInputTokens))
-            sqlite3_bind_int(stmt, 17, Int32(session.cacheReadTokens))
-            sqlite3_bind_int(stmt, 18, Int32(session.cacheCreationTokens))
-            sqlite3_bind_double(stmt, 19, session.cost)
-            sqlite3_bind_int(stmt, 20, Int32(session.isFork == true ? 1 : 0))
-            sqlite3_bind_int(stmt, 21, Int32(session.isProcessing == true ? 1 : 0))
-            sqliteBindOptionalText(stmt, 22, session.serverOrigin)
-
-            // Persist activity lines as JSON
-            if let lines = session.lastActivityLines,
-                let data = try? JSONEncoder().encode(lines),
-                let json = String(data: data, encoding: .utf8) {
-                sqlite3_bind_text(stmt, 23, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            } else {
-                sqlite3_bind_null(stmt, 23)
-            }
-            sqliteBindOptionalText(stmt, 24, session.source)
-            sqliteBindOptionalText(stmt, 25, session.profile)
+            Self.bind(session, to: stmt)
 
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
+            }
+        }
+    }
+
+    /// Apply one server session snapshot in a single SQLite transaction.
+    ///
+    /// `authoritativeSessionIds` is supplied only for a complete, unfiltered
+    /// server snapshot. Deletion is additionally bounded by `snapshotAsOf`, so
+    /// sessions created after the snapshot began cannot be mistaken for stale
+    /// rows. Event rows are deleted only for sessions proven absent.
+    @discardableResult
+    func reconcileServerSnapshot(
+        upserting sessions: [CachedSession],
+        serverOrigin: String,
+        authoritativeSessionIds: Set<String>?,
+        snapshotAsOf: String?
+    ) async throws -> Int {
+        guard let transport = transport else {
+            throw EventDatabaseError.executeFailed("Database transport not available")
+        }
+
+        return try await transport.withDB { db in
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil) == SQLITE_OK else {
+                throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
+            }
+            do {
+                var upsertStatement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, Self.upsertSQL, -1, &upsertStatement, nil) == SQLITE_OK else {
+                    throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+                }
+                defer { sqlite3_finalize(upsertStatement) }
+
+                for session in sessions {
+                    sqlite3_reset(upsertStatement)
+                    sqlite3_clear_bindings(upsertStatement)
+                    Self.bind(session, to: upsertStatement)
+                    guard sqlite3_step(upsertStatement) == SQLITE_DONE else {
+                        throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
+                    }
+                }
+
+                var staleSessionIds: [String] = []
+                if let authoritativeSessionIds, let snapshotAsOf {
+                    var selectStatement: OpaquePointer?
+                    let selectSQL = """
+                        SELECT id FROM sessions
+                        WHERE server_origin = ? AND julianday(created_at) <= julianday(?)
+                    """
+                    guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStatement, nil) == SQLITE_OK else {
+                        throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+                    }
+                    sqlite3_bind_text(selectStatement, 1, serverOrigin, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                    sqlite3_bind_text(selectStatement, 2, snapshotAsOf, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                    var selectStep = sqlite3_step(selectStatement)
+                    while selectStep == SQLITE_ROW {
+                        let id = String(cString: sqlite3_column_text(selectStatement, 0))
+                        if !authoritativeSessionIds.contains(id) {
+                            staleSessionIds.append(id)
+                        }
+                        selectStep = sqlite3_step(selectStatement)
+                    }
+                    guard selectStep == SQLITE_DONE else {
+                        sqlite3_finalize(selectStatement)
+                        throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
+                    }
+                    sqlite3_finalize(selectStatement)
+
+                    var deleteEventsStatement: OpaquePointer?
+                    var deleteSessionStatement: OpaquePointer?
+                    guard sqlite3_prepare_v2(
+                        db,
+                        "DELETE FROM events WHERE session_id = ?",
+                        -1,
+                        &deleteEventsStatement,
+                        nil
+                    ) == SQLITE_OK,
+                    sqlite3_prepare_v2(
+                        db,
+                        "DELETE FROM sessions WHERE id = ?",
+                        -1,
+                        &deleteSessionStatement,
+                        nil
+                    ) == SQLITE_OK else {
+                        sqlite3_finalize(deleteEventsStatement)
+                        sqlite3_finalize(deleteSessionStatement)
+                        throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+                    }
+                    defer {
+                        sqlite3_finalize(deleteEventsStatement)
+                        sqlite3_finalize(deleteSessionStatement)
+                    }
+
+                    for id in staleSessionIds {
+                        for statement in [deleteEventsStatement, deleteSessionStatement] {
+                            sqlite3_reset(statement)
+                            sqlite3_clear_bindings(statement)
+                            sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                            guard sqlite3_step(statement) == SQLITE_DONE else {
+                                throw EventDatabaseError.deleteFailed(sqliteErrorMessage(db))
+                            }
+                        }
+                    }
+                }
+
+                guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                    throw EventDatabaseError.executeFailed(sqliteErrorMessage(db))
+                }
+                return staleSessionIds.count
+            } catch {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                throw error
             }
         }
     }
@@ -322,6 +426,41 @@ final class SessionRepository: @unchecked Sendable {
     }
 
     // MARK: - Private Helpers
+
+    private static func bind(_ session: CachedSession, to stmt: OpaquePointer?) {
+        sqlite3_bind_text(stmt, 1, session.id, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 2, session.workspaceId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqliteBindOptionalText(stmt, 3, session.rootEventId)
+        sqliteBindOptionalText(stmt, 4, session.headEventId)
+        sqliteBindOptionalText(stmt, 5, session.title)
+        sqlite3_bind_text(stmt, 6, session.latestModel, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 7, session.workingDirectory, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 8, session.createdAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqlite3_bind_text(stmt, 9, session.lastActivityAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        sqliteBindOptionalText(stmt, 10, session.archivedAt)
+        sqlite3_bind_int(stmt, 11, Int32(session.eventCount))
+        sqlite3_bind_int(stmt, 12, Int32(session.turnCount))
+        sqlite3_bind_int(stmt, 13, Int32(session.messageCount))
+        sqlite3_bind_int(stmt, 14, Int32(session.inputTokens))
+        sqlite3_bind_int(stmt, 15, Int32(session.outputTokens))
+        sqlite3_bind_int(stmt, 16, Int32(session.lastTurnInputTokens))
+        sqlite3_bind_int(stmt, 17, Int32(session.cacheReadTokens))
+        sqlite3_bind_int(stmt, 18, Int32(session.cacheCreationTokens))
+        sqlite3_bind_double(stmt, 19, session.cost)
+        sqlite3_bind_int(stmt, 20, Int32(session.isFork == true ? 1 : 0))
+        sqlite3_bind_int(stmt, 21, Int32(session.isProcessing == true ? 1 : 0))
+        sqliteBindOptionalText(stmt, 22, session.serverOrigin)
+
+        if let lines = session.lastActivityLines,
+           let data = try? JSONEncoder().encode(lines),
+           let json = String(data: data, encoding: .utf8) {
+            sqlite3_bind_text(stmt, 23, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+        } else {
+            sqlite3_bind_null(stmt, 23)
+        }
+        sqliteBindOptionalText(stmt, 24, session.source)
+        sqliteBindOptionalText(stmt, 25, session.profile)
+    }
 
     private static func parseSessionRow(_ stmt: OpaquePointer?) -> CachedSession? {
         let id = String(cString: sqlite3_column_text(stmt, 0))

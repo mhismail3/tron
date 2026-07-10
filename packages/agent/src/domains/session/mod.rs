@@ -23,8 +23,9 @@
 //! - The prompt context is owned by the agent runtime and primitive state; this
 //!   domain does not preload external policy planes.
 //! `session::list` is the server-owned session-list query for clients and
-//! supports bounded, stable `(last_activity_at, id)` keyset pagination through
-//! the session event store (with offset retained for older clients). Its
+//! supports bounded `(created_at, id)` keyset pagination beneath one opaque
+//! server-issued `snapshotAsOf` boundary (with offset retained for older
+//! clients). Mutable activity never controls page membership. Its
 //! user-visible filter intentionally hides abandoned chat drafts
 //! that contain only the root `session.start` event, while preserving direct
 //! reconstruction and export by session ID.

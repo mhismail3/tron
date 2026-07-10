@@ -2925,8 +2925,12 @@ packages/ios-app/Sources/
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session
   titles before prompt-derived labels, and show untitled rows as `New Session`.
-  Session refresh reads stable 200-row server cursor pages into a generous
-  bounded snapshot instead of truncating the dashboard at 50 rows; each
+  Session refresh reads immutable creation-key 200-row server cursor pages
+  beneath one snapshot boundary into a generous bounded snapshot instead of
+  truncating the dashboard at 50 rows. Page/cursor/no-progress limits fail
+  non-destructively, and complete snapshots reconcile metadata and stale event
+  rows in one local transaction while preserving sessions newer than the
+  boundary. Each
   workspace shows its latest 10 sessions by default and independently reveals
   older rows in 10-session increments with full-width View more/View less controls.
   The shell also keeps server-backed new-session workspace selection with configured/recent
