@@ -14,12 +14,6 @@ pub const DEFAULT_PLATFORM_BASE_URL: &str = "https://api.openai.com";
 #[cfg(test)]
 pub const DEFAULT_MODEL: &str = "gpt-5.5";
 
-/// Maximum length for capability result output strings (16 KB).
-///
-/// The Codex endpoint has a per-output size limit. Results exceeding this
-/// threshold are truncated with a `[truncated]` marker.
-pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // API Endpoint
 // ─────────────────────────────────────────────────────────────────────────────

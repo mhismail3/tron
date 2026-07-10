@@ -7,7 +7,7 @@
 //! - User messages → `input_text` / `input_image` content
 //! - Assistant text → `output_text` content
 //! - Capability invocations → `function_call` items with remapped IDs
-//! - Capability results → `function_call_output` items (truncated at 16k)
+//! - Capability results → byte-preserved `function_call_output` items
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
 use crate::domains::capability::operation_list_text;
@@ -20,9 +20,7 @@ use crate::shared::protocol::messages::{
 };
 use crate::shared::protocol::model_capabilities::ModelCapability;
 
-use super::types::{
-    MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
-};
+use super::types::{MessageContent, ResponsesInputItem, ResponsesToolEntry};
 
 /// Convert Tron messages to Responses API input format.
 ///
@@ -301,19 +299,10 @@ fn convert_capability_result(
             .join("\n"),
     };
 
-    // Truncate long outputs (Codex has 16k limit per output)
-    let truncated = if output_text.len() > TOOL_RESULT_MAX_LENGTH {
-        let mut t = output_text[..TOOL_RESULT_MAX_LENGTH].to_string();
-        t.push_str("\n... [truncated]");
-        t
-    } else {
-        output_text
-    };
-
     let remapped_id = remap_invocation_id(invocation_id, id_mapping).to_string();
     input.push(ResponsesInputItem::FunctionCallOutput {
         call_id: remapped_id,
-        output: truncated,
+        output: output_text,
     });
 }
 

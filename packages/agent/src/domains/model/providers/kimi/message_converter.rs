@@ -595,4 +595,22 @@ mod tests {
         let result = convert_messages(&msgs, true);
         assert_eq!(result[1].content.as_ref().unwrap(), "line1\nline2");
     }
+
+    #[test]
+    fn capability_result_text_is_transport_exact() {
+        let output_envelope = format!(
+            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "safe-évidence-".repeat(1_400)
+        );
+        let msgs = vec![Message::CapabilityResult {
+            invocation_id: "call_1".into(),
+            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+            is_error: None,
+        }];
+        let result = convert_messages(&msgs, true);
+        assert_eq!(
+            result[0].content.as_ref().and_then(Value::as_str),
+            Some(output_envelope.as_str())
+        );
+    }
 }

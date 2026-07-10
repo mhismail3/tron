@@ -464,9 +464,6 @@ pub use models::{
 /// Default API base URL (used for both API key and OAuth authentication).
 pub const DEFAULT_API_KEY_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
-/// Maximum capability result content length before truncation.
-pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
-
 /// Default max output tokens when model info is not available.
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 4096;
 

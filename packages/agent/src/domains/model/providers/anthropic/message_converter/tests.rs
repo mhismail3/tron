@@ -142,13 +142,20 @@ fn convert_assistant_capability_invocation_remaps_openai_id() {
 
 #[test]
 fn convert_capability_result_text() {
-    let content = CapabilityResultMessageContent::Text("output".into());
+    let output_envelope = format!(
+        "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+        "safe-évidence-".repeat(1_400)
+    );
+    let content = CapabilityResultMessageContent::Text(output_envelope.clone());
     let id_mapping = HashMap::new();
     let param = convert_capability_result("toolu_01abc", &content, None, &id_mapping);
     assert_eq!(param.role, "user");
     assert_eq!(param.content[0]["type"], "tool_result");
     assert_eq!(param.content[0]["tool_use_id"], "toolu_01abc");
-    assert_eq!(param.content[0]["content"][0]["text"], "output");
+    assert_eq!(
+        param.content[0]["content"][0]["text"].as_str(),
+        Some(output_envelope.as_str())
+    );
     assert!(param.content[0].get("is_error").is_none());
 }
 

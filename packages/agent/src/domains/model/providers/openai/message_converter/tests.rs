@@ -210,18 +210,20 @@ fn converts_capability_result_content_blocks() {
 }
 
 #[test]
-fn truncates_long_capability_results() {
-    let long_output = "x".repeat(20000);
+fn preserves_capability_result_bytes_exactly() {
+    let output_envelope = format!(
+        "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+        "safe-évidence-".repeat(1_400)
+    );
     let messages = vec![Message::CapabilityResult {
         invocation_id: "call_abc".into(),
-        content: CapabilityResultMessageContent::Text(long_output),
+        content: CapabilityResultMessageContent::Text(output_envelope.clone()),
         is_error: None,
     }];
 
     let result = convert_to_responses_input(&messages);
     if let ResponsesInputItem::FunctionCallOutput { output, .. } = &result[0] {
-        assert!(output.len() <= TOOL_RESULT_MAX_LENGTH + 20);
-        assert!(output.contains("[truncated]"));
+        assert_eq!(output.as_bytes(), output_envelope.as_bytes());
     }
 }
 

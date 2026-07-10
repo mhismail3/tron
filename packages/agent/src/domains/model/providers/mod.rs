@@ -9,6 +9,10 @@
 //! capability invocation drafts, results, and history. Provider modules must
 //! reject malformed or non-object capability arguments at the stream boundary
 //! instead of projecting them as empty canonical invocations.
+//! Canonical capability result envelopes are already redacted and structurally
+//! bounded by the capability domain; provider converters transport their text
+//! bytes unchanged and may only adapt invocation ids and provider-native wire
+//! wrappers.
 //!
 //! - [`shared::provider`] — Core [`shared::provider::Provider`] trait, [`shared::provider::ProviderStreamOptions`], [`shared::provider::ProviderError`]
 //! - [`crate::domains::model::routing::models`] — Model registry, ID constants, provider detection, capability queries
@@ -55,6 +59,8 @@
 //! - Provider-native wire formats are converted before they reach canonical
 //!   capability history.
 //! - Malformed provider capability arguments fail closed at the stream boundary.
+//! - Provider converters never truncate or rewrite canonical capability result
+//!   envelope text.
 //!
 //! ## Test Ownership
 //!

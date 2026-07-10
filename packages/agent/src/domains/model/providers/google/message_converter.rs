@@ -14,7 +14,7 @@ use crate::shared::protocol::model_capabilities::ModelCapability;
 
 use super::types::{
     FunctionCallData, FunctionDeclaration, FunctionResponseData, GeminiContent, GeminiPart,
-    GeminiTool, InlineDataContent, TOOL_RESULT_MAX_LENGTH,
+    GeminiTool, InlineDataContent,
 };
 
 /// Placeholder thought signature for historical function calls from other providers.
@@ -125,7 +125,6 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
             } => {
                 let remapped_id = remap_invocation_id(invocation_id, &id_mapping);
                 let result_text = extract_capability_result_text(content);
-                let truncated = truncate_capability_result(&result_text);
 
                 contents.push(GeminiContent {
                     role: "user".into(),
@@ -133,7 +132,7 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                         function_response: FunctionResponseData {
                             name: "capability_result".into(),
                             response: serde_json::json!({
-                                "result": truncated,
+                                "result": result_text,
                                 "invocation_id": remapped_id,
                             }),
                         },
@@ -270,17 +269,6 @@ pub fn sanitize_schema_for_gemini(schema: &serde_json::Value) -> serde_json::Val
     }
 }
 
-/// Truncate capability result content if it exceeds the max length.
-fn truncate_capability_result(content: &str) -> String {
-    if content.len() <= TOOL_RESULT_MAX_LENGTH {
-        content.to_string()
-    } else {
-        let truncated =
-            crate::shared::foundation::text::truncate_str(content, TOOL_RESULT_MAX_LENGTH);
-        format!("{truncated}\n\n[Content truncated — {TOOL_RESULT_MAX_LENGTH} char limit]")
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -400,9 +388,13 @@ mod tests {
 
     #[test]
     fn converts_capability_result() {
+        let output_envelope = format!(
+            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "safe-évidence-".repeat(1_400)
+        );
         let context = ctx(vec![Message::CapabilityResult {
             invocation_id: "call_abc".into(),
-            content: CapabilityResultMessageContent::Text("result text".into()),
+            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
             is_error: None,
         }]);
         let contents = convert_messages(&context);
@@ -413,6 +405,10 @@ mod tests {
                 function_response, ..
             } => {
                 assert_eq!(function_response.name, "capability_result");
+                assert_eq!(
+                    function_response.response["result"].as_str(),
+                    Some(output_envelope.as_str())
+                );
             }
             _ => panic!("Expected function response"),
         }
@@ -527,21 +523,5 @@ mod tests {
                 .get("additionalProperties")
                 .is_none()
         );
-    }
-
-    // ── truncate_capability_result ─────────────────────────────────────────
-
-    #[test]
-    fn short_result_not_truncated() {
-        let result = truncate_capability_result("short");
-        assert_eq!(result, "short");
-    }
-
-    #[test]
-    fn long_result_truncated() {
-        let long_text = "x".repeat(TOOL_RESULT_MAX_LENGTH + 100);
-        let result = truncate_capability_result(&long_text);
-        assert!(result.len() < long_text.len());
-        assert!(result.contains("[Content truncated"));
     }
 }

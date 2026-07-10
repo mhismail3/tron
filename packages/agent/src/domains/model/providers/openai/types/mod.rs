@@ -15,8 +15,7 @@ mod tests;
 #[cfg(test)]
 pub(crate) use crate::domains::model::providers::shared::provider::ReasoningEffort;
 pub(crate) use config::{
-    ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, TOOL_RESULT_MAX_LENGTH,
-    api_endpoint_for_auth_path,
+    ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, api_endpoint_for_auth_path,
 };
 #[cfg(test)]
 pub(crate) use config::{DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_PLATFORM_BASE_URL};

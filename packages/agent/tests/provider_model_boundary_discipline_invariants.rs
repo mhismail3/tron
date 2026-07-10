@@ -377,6 +377,65 @@ fn provider_family_stream_and_catalog_tests_remain_present() {
 }
 
 #[test]
+fn provider_capability_result_transport_does_not_rewrite_canonical_output() {
+    let output_owner = read_repo_file(
+        "packages/agent/src/domains/capability/operations/operation_contract/output.rs",
+    );
+    assert!(output_owner.contains("PROVIDER_OUTPUT_MAX_BYTES"));
+    assert!(output_owner.contains("fit_output_budget"));
+    assert!(output_owner.contains("validate_provider_output"));
+
+    for path in [
+        "packages/agent/src/domains/model/providers/openai/message_converter/mod.rs",
+        "packages/agent/src/domains/model/providers/google/message_converter.rs",
+        "packages/agent/src/domains/model/providers/anthropic/message_converter/mod.rs",
+        "packages/agent/src/domains/model/providers/kimi/message_converter.rs",
+        "packages/agent/src/domains/model/providers/ollama/message_converter/mod.rs",
+    ] {
+        let source = read_repo_file(path);
+        for forbidden in [
+            "TOOL_RESULT_MAX_LENGTH",
+            "truncate_capability_result",
+            "[Content truncated",
+            "... [truncated]",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must transport canonical capability output without `{forbidden}`"
+            );
+        }
+    }
+
+    for (path, proof) in [
+        (
+            "packages/agent/src/domains/model/providers/openai/message_converter/tests.rs",
+            "preserves_capability_result_bytes_exactly",
+        ),
+        (
+            "packages/agent/src/domains/model/providers/google/message_converter.rs",
+            "converts_capability_result",
+        ),
+        (
+            "packages/agent/src/domains/model/providers/anthropic/message_converter/tests.rs",
+            "convert_capability_result_text",
+        ),
+        (
+            "packages/agent/src/domains/model/providers/kimi/message_converter.rs",
+            "capability_result_text_is_transport_exact",
+        ),
+        (
+            "packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs",
+            "capability_result_text_is_transport_exact",
+        ),
+    ] {
+        assert!(
+            read_repo_file(path).contains(proof),
+            "{path} missing exact capability-result transport proof `{proof}`"
+        );
+    }
+}
+
+#[test]
 fn predecessor_inventory_rows_record_pmbd_as_current_original_slice() {
     for (path, required) in [
         (
