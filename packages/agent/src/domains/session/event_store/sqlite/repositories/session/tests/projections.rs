@@ -170,6 +170,46 @@ fn get_message_previews_multiple_sessions() {
     );
 }
 
+#[test]
+fn activity_summary_batch_matches_single_queries_and_uses_one_json_parameter() {
+    let (conn, ws_id) = setup();
+    let first = create_default_session(&conn, &ws_id);
+    let second = create_default_session(&conn, &ws_id);
+    insert_event(
+        &conn,
+        &first.id,
+        &ws_id,
+        1,
+        "message.user",
+        r#"{"content":"first"}"#,
+    );
+    insert_event(
+        &conn,
+        &second.id,
+        &ws_id,
+        1,
+        "message.user",
+        r#"{"content":"second"}"#,
+    );
+
+    let ids = [first.id.as_str(), second.id.as_str()];
+    let batch = SessionRepo::get_activity_summaries_batch(&conn, &ids).unwrap();
+    for session_id in ids {
+        assert_eq!(
+            batch.get(session_id).unwrap(),
+            &SessionRepo::get_activity_summaries(&conn, session_id).unwrap()
+        );
+    }
+
+    let many_ids = (0..2_000)
+        .map(|index| format!("missing-{index}"))
+        .collect::<Vec<_>>();
+    let many_refs = many_ids.iter().map(String::as_str).collect::<Vec<_>>();
+    let empty = SessionRepo::get_activity_summaries_batch(&conn, &many_refs).unwrap();
+    assert_eq!(empty.len(), 2_000);
+    assert!(empty.values().all(Vec::is_empty));
+}
+
 // ── Text extraction helper ───────────────────────────────────────
 
 #[test]

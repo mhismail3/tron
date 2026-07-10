@@ -187,7 +187,7 @@ impl SessionRepo {
         if let Some(snapshot_created_at) = opts.snapshot_created_at {
             let _ = write!(
                 sql,
-                " AND rfc3339_unix_nanos(created_at) <= rfc3339_unix_nanos(?{})",
+                " AND rfc3339_sort_key(created_at) <= rfc3339_sort_key(?{})",
                 param_values.len() + 1
             );
             param_values.push(Box::new(snapshot_created_at.to_string()));
@@ -199,13 +199,13 @@ impl SessionRepo {
             let session_param = timestamp_param + 1;
             let _ = write!(
                 sql,
-                " AND (rfc3339_unix_nanos(created_at) < rfc3339_unix_nanos(?{timestamp_param}) OR (rfc3339_unix_nanos(created_at) = rfc3339_unix_nanos(?{timestamp_param}) AND id < ?{session_param}))"
+                " AND (rfc3339_sort_key(created_at) < rfc3339_sort_key(?{timestamp_param}) OR (rfc3339_sort_key(created_at) = rfc3339_sort_key(?{timestamp_param}) AND id < ?{session_param}))"
             );
             param_values.push(Box::new(created_at.to_string()));
             param_values.push(Box::new(session_id.to_string()));
         }
         if opts.snapshot_created_at.is_some() || opts.before_created_at.is_some() {
-            sql.push_str(" ORDER BY rfc3339_unix_nanos(created_at) DESC, id DESC");
+            sql.push_str(" ORDER BY rfc3339_sort_key(created_at) DESC, id DESC");
         } else {
             sql.push_str(" ORDER BY last_activity_at DESC, id DESC");
         }

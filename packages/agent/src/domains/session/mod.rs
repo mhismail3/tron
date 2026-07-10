@@ -28,7 +28,8 @@
 //! clients). Snapshot and cursor ordering compares RFC 3339 instants at their
 //! full nanosecond precision; SQLite floating-point date helpers are forbidden
 //! on these boundaries because they can collapse distinct sessions. Mutable
-//! activity never controls page membership. Its
+//! activity never controls page membership, and list activity is projected by
+//! one bounded batch query rather than one query per session. Its
 //! user-visible filter intentionally hides abandoned chat drafts
 //! that contain only the root `session.start` event, while preserving direct
 //! reconstruction and export by session ID.

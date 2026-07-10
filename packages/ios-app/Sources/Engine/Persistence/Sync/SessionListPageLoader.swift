@@ -7,18 +7,27 @@ struct ServerSessionListSnapshot: Equatable {
 }
 
 enum SessionListPageLoadingError: LocalizedError, Equatable {
+    case missingHasMore
+    case missingSnapshotProof
     case missingCursor
     case repeatedCursor
     case inconsistentSnapshot
+    case oversizedPage(requested: Int, received: Int)
 
     var errorDescription: String? {
         switch self {
+        case .missingHasMore:
+            "The server omitted the required session pagination state."
+        case .missingSnapshotProof:
+            "The server omitted the required session snapshot proof."
         case .missingCursor:
             "The server reported more sessions without returning a pagination cursor."
         case .repeatedCursor:
             "The server repeated a session pagination cursor."
         case .inconsistentSnapshot:
             "The server changed the session snapshot boundary between pages."
+        case let .oversizedPage(requested, received):
+            "The server returned \(received) sessions after \(requested) were requested."
         }
     }
 }
@@ -51,25 +60,37 @@ struct SessionListPageLoader {
         while sessions.count < Self.maximumSessionCount,
               pageCount < Self.maximumPageCount {
             let remaining = Self.maximumSessionCount - sessions.count
-            let result = try await fetchPage(min(Self.pageSize, remaining), cursor)
+            let requestedLimit = min(Self.pageSize, remaining)
+            let result = try await fetchPage(requestedLimit, cursor)
             pageCount += 1
 
-            if let pageSnapshotAsOf = result.snapshotAsOf, !pageSnapshotAsOf.isEmpty {
-                if let snapshotAsOf, snapshotAsOf != pageSnapshotAsOf {
-                    throw SessionListPageLoadingError.inconsistentSnapshot
-                }
-                snapshotAsOf = pageSnapshotAsOf
-            } else {
-                canReconcile = false
+            guard result.sessions.count <= requestedLimit else {
+                throw SessionListPageLoadingError.oversizedPage(
+                    requested: requestedLimit,
+                    received: result.sessions.count
+                )
             }
-            canReconcile = canReconcile && result.snapshotCanReconcile == true
+            guard let hasMore = result.hasMore else {
+                throw SessionListPageLoadingError.missingHasMore
+            }
+            guard let pageSnapshotAsOf = result.snapshotAsOf,
+                  !pageSnapshotAsOf.isEmpty,
+                  let pageCanReconcile = result.snapshotCanReconcile else {
+                throw SessionListPageLoadingError.missingSnapshotProof
+            }
+
+            if let snapshotAsOf, snapshotAsOf != pageSnapshotAsOf {
+                throw SessionListPageLoadingError.inconsistentSnapshot
+            }
+            snapshotAsOf = pageSnapshotAsOf
+            canReconcile = canReconcile && pageCanReconcile
 
             let priorCount = sessions.count
             for session in result.sessions where seenSessionIds.insert(session.sessionId).inserted {
                 sessions.append(session)
             }
 
-            if sessions.count == priorCount, result.hasMore == true {
+            if sessions.count == priorCount, hasMore {
                 noProgressPageCount += 1
                 if noProgressPageCount >= Self.maximumNoProgressPageCount {
                     return ServerSessionListSnapshot(
@@ -82,10 +103,10 @@ struct SessionListPageLoader {
                 noProgressPageCount = 0
             }
 
-            guard result.hasMore == true else {
+            guard hasMore else {
                 return ServerSessionListSnapshot(
                     sessions: sessions,
-                    isComplete: canReconcile && snapshotAsOf != nil,
+                    isComplete: canReconcile,
                     snapshotAsOf: snapshotAsOf
                 )
             }

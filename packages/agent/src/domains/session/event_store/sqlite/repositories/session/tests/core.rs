@@ -201,6 +201,67 @@ fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
 }
 
 #[test]
+fn keyset_orders_offsets_pre_epoch_far_dates_and_nanoseconds() {
+    let (conn, ws_id) = setup();
+    for (id, created_at) in [
+        ("far_future", "9999-12-31T23:59:59.999999999Z"),
+        ("offset_same", "2026-07-01T14:00:00.000000001+02:00"),
+        ("utc_same", "2026-07-01T12:00:00.000000001Z"),
+        ("epoch", "1970-01-01T00:00:00Z"),
+        ("pre_epoch", "1969-12-31T23:59:59.999999999Z"),
+        ("far_past", "0001-01-01T00:00:00Z"),
+    ] {
+        SessionRepo::create_with_identity(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "model",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+            },
+            &crate::domains::session::event_store::SessionIdentity::new(id, created_at),
+        )
+        .unwrap();
+    }
+
+    let sessions = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            snapshot_created_at: Some("9999-12-31T23:59:59.999999999Z"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "far_future",
+            "utc_same",
+            "offset_same",
+            "epoch",
+            "pre_epoch",
+            "far_past"
+        ]
+    );
+
+    let error = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            snapshot_created_at: Some("2026-07-01T12:00:00.Z"),
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("premature end") || error.to_string().contains("input"));
+}
+
+#[test]
 fn list_by_workspace() {
     let (conn, ws_id) = setup();
     create_default_session(&conn, &ws_id);

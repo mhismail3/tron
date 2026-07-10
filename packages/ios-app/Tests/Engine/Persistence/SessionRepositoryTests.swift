@@ -331,6 +331,56 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertTrue(futureEventExists)
     }
 
+    func testInvalidSnapshotTimestampRollsBackEarlierUpserts() async throws {
+        let origin = "prod:8080"
+        try await database.sessions.insert(makeSession(id: "existing", serverOrigin: origin))
+
+        do {
+            _ = try await database.sessions.reconcileServerSnapshot(
+                upserting: [makeSession(id: "new-upsert", serverOrigin: origin)],
+                serverOrigin: origin,
+                authoritativeSessionIds: [],
+                snapshotAsOf: "2026-04-02T00:00:00.Z"
+            )
+            XCTFail("Expected invalid snapshot timestamp")
+        } catch {
+            let newSession = try await database.sessions.get("new-upsert")
+            let existingSession = try await database.sessions.get("existing")
+            XCTAssertNil(newSession)
+            XCTAssertNotNil(existingSession)
+        }
+    }
+
+    func testInvalidCachedTimestampRollsBackUpsertsAndPreservesDeletionCandidates() async throws {
+        let origin = "prod:8080"
+        try await database.sessions.insert(
+            makeSession(id: "stale-candidate", createdAt: "2026-04-01T00:00:00Z", serverOrigin: origin)
+        )
+        try await database.sessions.insert(
+            makeSession(id: "malformed", createdAt: "2026-04-01T00:00:00.Z", serverOrigin: origin)
+        )
+        try await database.events.insert(
+            makeEvent(id: "candidate-event", sessionId: "stale-candidate", type: "message.user")
+        )
+
+        do {
+            _ = try await database.sessions.reconcileServerSnapshot(
+                upserting: [makeSession(id: "new-upsert", serverOrigin: origin)],
+                serverOrigin: origin,
+                authoritativeSessionIds: [],
+                snapshotAsOf: "2026-04-02T00:00:00Z"
+            )
+            XCTFail("Expected invalid cached timestamp")
+        } catch {
+            let newSession = try await database.sessions.get("new-upsert")
+            let staleCandidate = try await database.sessions.get("stale-candidate")
+            let candidateEventExists = try await database.events.exists("candidate-event")
+            XCTAssertNil(newSession)
+            XCTAssertNotNil(staleCandidate)
+            XCTAssertTrue(candidateEventExists)
+        }
+    }
+
     func testPartialServerSnapshotNeverDeletesMissingSessions() async throws {
         let origin = "prod:8080"
         let existing = makeSession(id: "existing", serverOrigin: origin)

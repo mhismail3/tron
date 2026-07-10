@@ -72,27 +72,33 @@ impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer
     }
 }
 
-/// Register exact RFC 3339 comparison support on one SQLite connection.
+/// Return a fixed-width lexicographically sortable key for an RFC 3339 instant.
 ///
-/// SQLite's built-in `julianday` rounds fractional seconds and is therefore
-/// not safe for snapshot/keyset boundaries. Converting through Chrono keeps
-/// nanosecond ordering without changing the durable text representation.
+/// Biasing signed epoch seconds into unsigned order preserves Chrono's full
+/// RFC 3339 range without floating point or the much narrower nanosecond epoch
+/// range. Nine fractional digits retain exact subsecond ordering.
+fn rfc3339_sort_key(value: &str) -> std::result::Result<String, chrono::ParseError> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(value)?;
+    let seconds = parsed.timestamp();
+    let biased_seconds = (seconds as u64) ^ (1_u64 << 63);
+    Ok(format!(
+        "{biased_seconds:020}{:09}",
+        parsed.timestamp_subsec_nanos()
+    ))
+}
+
+/// Register exact RFC 3339 comparison support on one SQLite connection.
 pub(crate) fn register_timestamp_functions(
     conn: &Connection,
 ) -> std::result::Result<(), rusqlite::Error> {
     conn.create_scalar_function(
-        "rfc3339_unix_nanos",
+        "rfc3339_sort_key",
         1,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |context: &Context<'_>| {
             let value = context.get::<String>(0)?;
-            let parsed = chrono::DateTime::parse_from_rfc3339(&value)
-                .map_err(|error| SqliteError::UserFunctionError(Box::new(error)))?;
-            parsed.timestamp_nanos_opt().ok_or_else(|| {
-                SqliteError::UserFunctionError(
-                    format!("RFC 3339 timestamp is outside nanosecond range: {value}").into(),
-                )
-            })
+            rfc3339_sort_key(&value)
+                .map_err(|error| SqliteError::UserFunctionError(Box::new(error)))
         },
     )
 }
@@ -203,6 +209,40 @@ mod tests {
         );
         assert!(pragmas.foreign_keys_enabled);
         assert_eq!(pragmas.busy_timeout_ms, config.busy_timeout_ms);
+        let ordered: i64 = conn
+            .query_row(
+                "SELECT rfc3339_sort_key('1969-12-31T23:59:59.999999999Z') < rfc3339_sort_key('1970-01-01T00:00:00Z')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            ordered, 1,
+            "pooled connections must register timestamp ordering"
+        );
+    }
+
+    #[test]
+    fn rfc3339_sort_key_is_lossless_across_offsets_and_full_supported_range() {
+        let same_instant = [
+            "2026-07-01T12:00:00.123456789Z",
+            "2026-07-01T14:00:00.123456789+02:00",
+            "2026-07-01T07:00:00.123456789-05:00",
+        ]
+        .map(|value| rfc3339_sort_key(value).unwrap());
+        assert!(same_instant.windows(2).all(|pair| pair[0] == pair[1]));
+
+        let ordered = [
+            "0001-01-01T00:00:00Z",
+            "1969-12-31T23:59:59.999999999Z",
+            "1970-01-01T00:00:00Z",
+            "1970-01-01T00:00:00.000000001Z",
+            "9999-12-31T23:59:59.999999999Z",
+        ]
+        .map(|value| rfc3339_sort_key(value).unwrap());
+        assert!(ordered.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(rfc3339_sort_key("2026-07-01T12:00:00.Z").is_err());
+        assert!(rfc3339_sort_key("not-a-timestamp").is_err());
     }
 
     #[test]

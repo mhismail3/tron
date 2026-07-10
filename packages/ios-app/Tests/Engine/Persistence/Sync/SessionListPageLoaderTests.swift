@@ -173,18 +173,73 @@ final class SessionListPageLoaderTests: XCTestCase {
         XCTAssertEqual(requestCount, SessionListPageLoader.maximumPageCount)
     }
 
-    func testUnverifiedSnapshotNeverAuthorizesReconciliation() async throws {
+    func testMissingSnapshotProofFailsClosed() async {
+        do {
+            _ = try await SessionListPageLoader().load { _, _ in
+                SessionListResult(
+                    sessions: [makeSessionInfo(index: 0, project: 0)],
+                    totalCount: 1,
+                    hasMore: false,
+                    nextCursor: nil
+                )
+            }
+            XCTFail("Expected missing snapshot proof error")
+        } catch {
+            XCTAssertEqual(error as? SessionListPageLoadingError, .missingSnapshotProof)
+        }
+    }
+
+    func testExplicitlyNonAuthoritativeSnapshotRemainsPartial() async throws {
         let snapshot = try await SessionListPageLoader().load { _, _ in
             SessionListResult(
                 sessions: [makeSessionInfo(index: 0, project: 0)],
                 totalCount: 1,
                 hasMore: false,
-                nextCursor: nil
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotCanReconcile: false
             )
         }
-
         XCTAssertFalse(snapshot.isComplete)
-        XCTAssertNil(snapshot.snapshotAsOf)
+    }
+
+    func testMissingHasMoreFailsClosed() async {
+        do {
+            _ = try await SessionListPageLoader().load { _, _ in
+                SessionListResult(
+                    sessions: [],
+                    totalCount: 0,
+                    hasMore: nil,
+                    nextCursor: nil,
+                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotCanReconcile: true
+                )
+            }
+            XCTFail("Expected missing pagination state error")
+        } catch {
+            XCTAssertEqual(error as? SessionListPageLoadingError, .missingHasMore)
+        }
+    }
+
+    func testOversizedPageFailsClosedBeforeSafetyCap() async {
+        do {
+            _ = try await SessionListPageLoader().load { limit, _ in
+                SessionListResult(
+                    sessions: (0...limit).map { self.makeSessionInfo(index: $0, project: 0) },
+                    totalCount: limit + 1,
+                    hasMore: false,
+                    nextCursor: nil,
+                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotCanReconcile: true
+                )
+            }
+            XCTFail("Expected oversized page error")
+        } catch {
+            XCTAssertEqual(
+                error as? SessionListPageLoadingError,
+                .oversizedPage(requested: SessionListPageLoader.pageSize, received: SessionListPageLoader.pageSize + 1)
+            )
+        }
     }
 
     func testRejectsSnapshotBoundaryChangeBetweenPages() async {

@@ -437,8 +437,9 @@ uses immutable creation-key server cursors in 200-row pages beneath one
 `snapshotAsOf` boundary, with independent page/no-progress limits and a
 2,000-session safety cap. The sync requests active and archived sessions
 together so archive transitions cannot change membership mid-snapshot. Cursor
-cycles, inconsistent boundaries, and cap-limited results are partial and never
-delete cached rows. A complete unfiltered snapshot is applied in one SQLite
+cycles and cap-limited results are partial and never delete cached rows;
+missing pagination/proof fields, inconsistent boundaries, and oversized pages
+fail closed before local mutation. A complete unfiltered snapshot is applied in one SQLite
 transaction; server-missing sessions at or before its boundary are removed
 with their events while newer local rows and all retained events survive.
 Destructive boundary checks compare RFC 3339 instants at full nanosecond

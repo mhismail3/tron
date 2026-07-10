@@ -217,6 +217,7 @@ final class SessionRepository: @unchecked Sendable {
         if let fractionSeparator {
             wholeTimestamp = localTimestamp[..<fractionSeparator]
             fraction = localTimestamp[localTimestamp.index(after: fractionSeparator)...]
+            guard !fraction.isEmpty else { return nil }
         } else {
             wholeTimestamp = localTimestamp
             fraction = ""
