@@ -522,8 +522,6 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("explicit opt-in artifact kind"));
     assert!(result.contains("raw prompt bodies"));
     assert!(result.contains("contentFingerprint"));
-    assert!(result.contains("device_register"));
-    assert!(result.contains("device_unregister"));
     assert!(result.contains("device_list"));
     assert!(result.contains("device_inspect"));
     assert!(result.contains("notification_send"));
@@ -532,7 +530,6 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("notification_mark_read"));
     assert!(result.contains("notification_mark_all_read"));
     assert!(result.contains("live APNs transport disabled"));
-    assert!(result.contains("hash-only APNs token custody"));
     assert!(result.contains("subagent_launch"));
     assert!(result.contains("subagent_status"));
     assert!(result.contains("subagent_result"));

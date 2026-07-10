@@ -38,6 +38,8 @@ pub(crate) const CAPABILITY_ROUTE_ROLLBACK_SCHEMA_VERSION: &str =
     crate::engine::CAPABILITY_ROUTE_ROLLBACK_PAYLOAD_SCHEMA_VERSION;
 pub(crate) const COCKPIT_VISIBILITY_SCHEMA_VERSION: &str =
     "tron.capability_binding.cockpit_overview.v1";
+/// Shared provider/native bound for one broad cockpit operation projection.
+pub(crate) const COCKPIT_OVERVIEW_MAX_LIMIT: usize = 200;
 
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
@@ -65,7 +67,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 200
+                    "maximum": COCKPIT_OVERVIEW_MAX_LIMIT
                 },
                 "targetOperation": {
                     "type": "string",

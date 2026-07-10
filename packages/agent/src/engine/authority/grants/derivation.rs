@@ -33,12 +33,12 @@ pub(super) fn ensure_child_narrows_parent(parent: &EngineGrant, child: &DeriveGr
         &parent.allowed_authority_scopes,
         &child.allowed_authority_scopes,
     )?;
-    ensure_list_narrows(
+    ensure_optional_list_narrows(
         "resource kinds",
         &parent.allowed_resource_kinds,
         &child.allowed_resource_kinds,
     )?;
-    ensure_list_narrows(
+    ensure_optional_list_narrows(
         "resource selectors",
         &parent.resource_selectors,
         &child.resource_selectors,
@@ -137,6 +137,13 @@ fn ensure_list_narrows(label: &str, parent: &[String], child: &[String]) -> Resu
     Ok(())
 }
 
+fn ensure_optional_list_narrows(label: &str, parent: &[String], child: &[String]) -> Result<()> {
+    if child.is_empty() {
+        return Ok(());
+    }
+    ensure_list_narrows(label, parent, child)
+}
+
 fn ensure_file_roots_narrow(parent: &[String], child: &[String]) -> Result<()> {
     if child.is_empty() {
         return Err(EngineError::PolicyViolation(
@@ -181,8 +188,8 @@ pub(super) fn validate_derive_request(request: &DeriveGrant) -> Result<()> {
     validate_non_empty_list("allowedCapabilities", &request.allowed_capabilities)?;
     validate_non_empty_list("allowedNamespaces", &request.allowed_namespaces)?;
     validate_non_empty_list("allowedAuthorityScopes", &request.allowed_authority_scopes)?;
-    validate_non_empty_list("allowedResourceKinds", &request.allowed_resource_kinds)?;
-    validate_non_empty_list("resourceSelectors", &request.resource_selectors)?;
+    validate_optional_list("allowedResourceKinds", &request.allowed_resource_kinds)?;
+    validate_optional_list("resourceSelectors", &request.resource_selectors)?;
     validate_non_empty_list("fileRoots", &request.file_roots)?;
     let _ = network_rank(&request.network_policy)?;
     if let Some(expires_at) = request.expires_at
@@ -199,6 +206,15 @@ fn validate_non_empty_list(field: &str, values: &[String]) -> Result<()> {
     if values.is_empty() || values.iter().any(|value| value.trim().is_empty()) {
         return Err(EngineError::PolicyViolation(format!(
             "{field} must contain non-empty values"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_list(field: &str, values: &[String]) -> Result<()> {
+    if values.iter().any(|value| value.trim().is_empty()) {
+        return Err(EngineError::PolicyViolation(format!(
+            "{field} must not contain empty values"
         )));
     }
     Ok(())

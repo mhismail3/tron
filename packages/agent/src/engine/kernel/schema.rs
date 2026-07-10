@@ -47,6 +47,28 @@ fn validate_schema_node(
         validate_type_keyword(function_id, direction, schema_type, path)?;
     }
 
+    if let (Some(constant), Some(schema_type)) = (object.get("const"), object.get("type"))
+        && !matches_schema_type(schema_type, constant)
+    {
+        return Err(invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.const does not match the declared type"),
+        ));
+    }
+
+    let minimum = validate_numeric_keyword(function_id, direction, object, path, "minimum")?;
+    let maximum = validate_numeric_keyword(function_id, direction, object, path, "maximum")?;
+    if let (Some(minimum), Some(maximum)) = (minimum, maximum)
+        && minimum > maximum
+    {
+        return Err(invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.minimum must not exceed maximum"),
+        ));
+    }
+
     if let Some(required) = object.get("required") {
         let Some(items) = required.as_array() else {
             return Err(invalid_schema(
@@ -132,6 +154,25 @@ fn validate_schema_node(
     Ok(())
 }
 
+fn validate_numeric_keyword(
+    function_id: &FunctionId,
+    direction: &'static str,
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    keyword: &str,
+) -> Result<Option<f64>> {
+    let Some(value) = object.get(keyword) else {
+        return Ok(None);
+    };
+    value.as_f64().map(Some).ok_or_else(|| {
+        invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.{keyword} must be a number"),
+        )
+    })
+}
+
 fn validate_type_keyword(
     function_id: &FunctionId,
     direction: &'static str,
@@ -190,6 +231,16 @@ fn validate_payload_node(
     path: &str,
 ) -> Result<()> {
     let object = schema.as_object().expect("schema definition was validated");
+    if let Some(constant) = object.get("const")
+        && constant != payload
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            "value does not match const".to_owned(),
+        ));
+    }
     if let Some(schema_type) = object.get("type") {
         if !matches_schema_type(schema_type, payload) {
             return Err(schema_violation(
@@ -222,6 +273,29 @@ fn validate_payload_node(
             path,
             format!("string shorter than minLength {min_length}"),
         ));
+    }
+
+    if let Some(number) = payload.as_f64() {
+        if let Some(minimum) = object.get("minimum").and_then(Value::as_f64)
+            && number < minimum
+        {
+            return Err(schema_violation(
+                function_id,
+                direction,
+                path,
+                format!("number is below minimum {minimum}"),
+            ));
+        }
+        if let Some(maximum) = object.get("maximum").and_then(Value::as_f64)
+            && number > maximum
+        {
+            return Err(schema_violation(
+                function_id,
+                direction,
+                path,
+                format!("number exceeds maximum {maximum}"),
+            ));
+        }
     }
 
     if let Some(required) = object.get("required").and_then(Value::as_array) {
@@ -413,6 +487,70 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("minLength must be a non-negative integer")
+        );
+    }
+
+    #[test]
+    fn const_and_numeric_bounds_are_enforced() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation", "limit"],
+            "properties": {
+                "operation": {"type": "string", "const": "catalog_search"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500}
+            }
+        });
+
+        let wrong_operation = validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"operation": "catalog_inspect", "limit": 10}),
+        )
+        .unwrap_err();
+        assert!(wrong_operation.to_string().contains("does not match const"));
+
+        let below = validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"operation": "catalog_search", "limit": 0}),
+        )
+        .unwrap_err();
+        assert!(below.to_string().contains("below minimum 1"));
+
+        let above = validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"operation": "catalog_search", "limit": 501}),
+        )
+        .unwrap_err();
+        assert!(above.to_string().contains("exceeds maximum 500"));
+
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"operation": "catalog_search", "limit": 500}),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn numeric_bounds_must_be_numbers_and_ordered() {
+        let non_numeric = json!({"type": "integer", "minimum": "1"});
+        let error =
+            validate_schema_definition(&function_id(), "request", &non_numeric).unwrap_err();
+        assert!(error.to_string().contains("minimum must be a number"));
+
+        let reversed = json!({"type": "integer", "minimum": 10, "maximum": 1});
+        let error = validate_schema_definition(&function_id(), "request", &reversed).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("minimum must not exceed maximum")
         );
     }
 }

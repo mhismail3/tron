@@ -22,14 +22,12 @@ pub(super) fn notification_delivery_module_manifest() -> Value {
             "name": "Notifications And Device Delivery Module Pack",
             "kind": "module_pack",
             "owner": "domains::device+domains::notifications",
-            "summary": "Metadata-only notification inbox, device registration, and delivery-evidence manifest for existing server-owned resources",
+            "summary": "Metadata-only notification inbox, redacted device inspection, and delivery-evidence manifest for existing server-owned resources",
             "version": "phase3-slice24g"
         },
         "capabilityDeclarations": [
             {"operation": "device_list", "effect": "read", "providerVisible": true, "description": "List redacted server-owned device registration projections"},
             {"operation": "device_inspect", "effect": "read", "providerVisible": true, "description": "Inspect one redacted device registration projection"},
-            {"operation": "device_register", "effect": "write", "providerVisible": false, "description": "Trusted system/admin registration with explicit APNs environment label and hash-only token custody"},
-            {"operation": "device_unregister", "effect": "write", "providerVisible": false, "description": "Trusted system/admin unregister workflow with exact device registration selector"},
             {"operation": "notification_send", "effect": "write", "providerVisible": true, "description": "Record durable notification inbox and delivery evidence while live APNs transport remains disabled"},
             {"operation": "notification_list", "effect": "read", "providerVisible": true, "description": "List bounded notification inbox projections"},
             {"operation": "notification_inspect", "effect": "read", "providerVisible": true, "description": "Inspect one notification with redacted delivery summaries"},
@@ -43,11 +41,10 @@ pub(super) fn notification_delivery_module_manifest() -> Value {
         ],
         "authorityNeeds": [
             {"scope": contract::DEVICE_READ_SCOPE, "purpose": "inspect redacted device registration projections", "resourceKinds": [DEVICE_REGISTRATION_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}")]},
-            {"scope": device_contract::WRITE_SCOPE, "purpose": "trusted system/admin device register and unregister authority", "resourceKinds": [DEVICE_REGISTRATION_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}"), "resource:<device_registration_id>"]},
             {"scope": contract::READ_SCOPE, "purpose": "inspect notification inbox and delivery evidence projections", "resourceKinds": [NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]},
             {"scope": contract::WRITE_SCOPE, "purpose": "record notification read state, badge, inbox, and delivery evidence", "resourceKinds": [NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}"), "resource:<notification_id>"]},
             {"scope": contract::RESOURCE_READ_SCOPE, "purpose": "inspect device registration, notification, and notification delivery resource versions under kind selectors", "resourceKinds": [DEVICE_REGISTRATION_KIND, NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}"), format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]},
-            {"scope": contract::RESOURCE_WRITE_SCOPE, "purpose": "append server-owned device, notification, and delivery evidence under kind selectors", "resourceKinds": [DEVICE_REGISTRATION_KIND, NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{DEVICE_REGISTRATION_KIND}"), format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]}
+            {"scope": contract::RESOURCE_WRITE_SCOPE, "purpose": "append server-owned notification and delivery evidence under kind selectors", "resourceKinds": [NOTIFICATION_KIND, NOTIFICATION_DELIVERY_KIND], "selectors": [format!("kind:{NOTIFICATION_KIND}"), format!("kind:{NOTIFICATION_DELIVERY_KIND}")]}
         ],
         "settingsDeclarations": [],
         "dependencyIntents": [],
@@ -55,14 +52,9 @@ pub(super) fn notification_delivery_module_manifest() -> Value {
             "status": "pending_review",
             "checks": [
                 {
-                    "id": "apns_custody_gate",
-                    "status": "implementation-candidate",
-                    "summary": "APNs credential custody and raw device-token handling remain pending gates; stored registration resources keep hash-only token custody"
-                },
-                {
-                    "id": "environment_entitlement_device_gate",
-                    "status": "implementation-candidate",
-                    "summary": "APNs environment labels, entitlement proof, and physical-device validation evidence are required before live delivery acceptance"
+                    "id": "registration_transport_absent",
+                    "status": "passed",
+                    "summary": "The production module exposes no device-registration write and accepts no APNs token input; registration fixtures are test-only"
                 },
                 {
                     "id": "delivery_failure_evidence",

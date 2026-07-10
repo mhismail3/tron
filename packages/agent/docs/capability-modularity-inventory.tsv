@@ -82,8 +82,6 @@ prompt_artifact_inspect	prompt_artifacts	domains::capability::operations::prompt
 update_diagnostic_record	update_diagnostics	domains::capability::operations::update_diagnostics + domains::update_diagnostics	record_plane	modules_may_add_diagnostics_but_not_bypass_update_diagnostic_records	2	3	3	3	2	0	0	2	2	document
 update_diagnostic_list	update_diagnostics	domains::capability::operations::update_diagnostics + domains::update_diagnostics	record_plane	modules_may_add_diagnostics_but_not_bypass_update_diagnostic_records	2	3	3	3	2	0	0	2	2	document
 update_diagnostic_inspect	update_diagnostics	domains::capability::operations::update_diagnostics + domains::update_diagnostics	record_plane	modules_may_add_diagnostics_but_not_bypass_update_diagnostic_records	2	3	3	3	2	0	0	2	2	document
-device_register	device	domains::capability::operations::device + domains::device	governance_locked	device_token_custody_requires_trusted_internal_transport	2	3	3	3	2	0	0	1	2	document
-device_unregister	device	domains::capability::operations::device + domains::device	governance_locked	device_token_custody_requires_trusted_internal_transport	2	3	3	3	2	0	0	1	2	document
 device_list	device	domains::capability::operations::device + domains::device	record_plane	modules_may_inspect_redacted_device_evidence_but_not_bypass_token_custody	2	3	3	3	2	0	0	1	2	document
 device_inspect	device	domains::capability::operations::device + domains::device	record_plane	modules_may_inspect_redacted_device_evidence_but_not_bypass_token_custody	2	3	3	3	2	0	0	1	2	document
 notification_send	notifications	domains::capability::operations::notifications + domains::notifications	governance_locked	delivery_policy_stays_server_governed_until_push_transport_policy_exists	2	3	3	3	2	0	0	1	2	document

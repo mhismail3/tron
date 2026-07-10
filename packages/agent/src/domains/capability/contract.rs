@@ -77,7 +77,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                             "It can also export the current session replay manifest without side effects and inspect redacted memory status, record, query, and decision audit evidence. Context-control operations record/list/inspect bounded context snapshots, compact/clear action records, and epochs for the current session with exact session/resource selectors, durable preflight, timeline events, provider-safe projections, and `networkPolicy: none`; they never expose raw prompt bodies, hidden system/soul prompt text, hidden chain-of-thought, secrets, local paths, commands, logs, grant ids, authority ids, or raw file contents. Scheduler operations create explicit durable records and never execute feature work directly; media operations store blob refs and bounded metadata only, never raw audio bytes, and never send raw audio to providers without an explicit future resource authorization; import-history operations store bounded generic graph lineage refs only, keep render hints generic, and never store raw import payloads, repository trees, or native tree UI state; notification operations create durable inbox/read/badge/delivery evidence with live APNs transport disabled, while device token registration is trusted internal-only and never returns raw APNs tokens or full token hashes. ",
                             "Memory query/decision execute operations are read-only inspection of metadata evidence and never perform retrieval, embeddings, ranking, summarization, prompt inclusion, automatic retention, or raw memory body exposure. Tool-source, worker-package, and module-manifest operations never install, activate, trigger, inject prompts, learn behavior, launch, register, resolve dependencies, access networks, or execute proposed external tools, packages, or modules; procedural operations record/list/inspect metadata-only skills, rules, hooks, procedures, activation requests, and activation decisions without firing hooks, registering triggers, injecting prompts, learning behavior, restoring dependencies, touching repo-managed skills, or executing code; module-authoring operations record/list/inspect inert module proposal metadata without installing, activating, executing, restoring dependencies, touching repo-managed skills, creating module workspace directories, or exposing raw prompt/proposal bodies; module-validation operations record/list/inspect bounded module contract validation reports without running commands or module code, storing raw logs/commands/env/code/file contents, installing, activating, resolving dependencies, touching repo-managed skills, or accessing networks; module-install operations record/list/inspect metadata-only review requests and install-candidate/rejected decisions linked to passed validation reports, current approval freshness evidence, dependency policy refs, and rollback proof refs without installing, enabling, executing, restoring dependencies, running package managers, touching repo-managed skills, or accessing networks. ",
                             "Capability-binding operations record/list/inspect metadata-only binding requests, decisions, and policies for future shadow/extend/replace proposals with exact selectors, no wildcard authority, `networkPolicy: none`, stale-version guards, rollback/disable refs, provider-safe projections, and no dispatch mutation, module activation, hot-swap, package-manager, dependency restore, network, agent_state inheritance, raw grant ids, or raw authority ids; `capability_binding_cockpit_overview` returns the same read-only capability-pool and route-state projection used by native Engine Cockpit clients, including agent usage and preflight guidance, without changing routing or autonomy behavior; capability-shadow-trial operations record the governed `git_status` request/decision/run/evidence path, compare built-in and deterministic candidate provider-safe projections, require exact selectors, rollback/disable/abort refs, stale evidence guards, and `networkPolicy: none`, and never execute candidate modules; capability route operations record/activate/disable/rollback explicit scoped `git_status` route resources after candidate, shadow, approval, authority, and rollback evidence, annotate routed invocations with route events, route active invocations through the supervised module-runtime provider-safe projection boundary using accepted shadow-trial evidence, and fail closed without built-in success substitution when route records, lifecycle/runtime refs, scope, or projections are unsafe. Subagent lifecycle operations require explicit workerKind/modulePackId selection, summary-only handoff refs, exact subagent and module runtime authority, networkPolicy none, runtime/job association validation, and return merge proposals instead of silently mutating parent conversation state. ",
-                    "Choose one operation per call. For read-only capability discovery, use catalog_search, catalog_inspect, list, inspect, status, trace, log, or overview operations. catalog_conformance is not a read-only inspection operation: it creates an idempotent durable catalog_discovery_report resource and should only be called when the task explicitly asks for a verification/conformance report. Catalog discovery operations never execute discovered capabilities. Import-preview operations store refs, path metadata, counts, summaries, and fingerprints only; they never execute/apply imports, mutate Git, visualize repositories, or store raw import payloads, preview payloads, file contents, or blob bytes. Program-execution operations store runtime/language metadata, I/O refs or fingerprints, resource-limit policy, lifecycle evidence, and idempotency fingerprints only; they never store raw code, command strings, shell snippets, raw stdin/stdout/stderr, launch processes, install runtimes, perform network behavior, write files, or execute programs. Module program-execution operations require an enabled module lifecycle, delegate non-interactive process execution to the jobs domain under networkPolicy none, and return only bounded job/program/runtime/output refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata; they never return raw commands, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, or raw job_process/execution_output payloads. Prompt-artifact operations store explicit opt-in artifact metadata, content refs/fingerprints, retention state, lifecycle evidence, and idempotency fingerprints only; they never store raw prompt bodies, provider-visible raw prompt payloads, automatic prompt history, prompt injection, learned behavior, native snippet UI, or prompt-context inclusion. Update diagnostic operations store signed-release/provenance metadata only; they never perform live network checks, install, restart, deploy, register packages, or store production endpoint details/package bytes. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
+                    "Choose one operation per call. For read-only capability discovery, use catalog_search, catalog_inspect, list, inspect, status, trace, log, or overview operations. catalog_conformance is not a read-only inspection operation: it creates an idempotent durable catalog_discovery_report resource and requires a stable idempotencyKey; call it only when the task explicitly asks for a verification/conformance report. Catalog discovery operations never execute discovered capabilities. Import-preview operations store refs, path metadata, counts, summaries, and fingerprints only; they never execute/apply imports, mutate Git, visualize repositories, or store raw import payloads, preview payloads, file contents, or blob bytes. Program-execution operations store runtime/language metadata, I/O refs or fingerprints, resource-limit policy, lifecycle evidence, and idempotency fingerprints only; they never store raw code, command strings, shell snippets, raw stdin/stdout/stderr, launch processes, install runtimes, perform network behavior, write files, or execute programs. Module program-execution operations require an enabled module lifecycle, delegate non-interactive process execution to the jobs domain under networkPolicy none, and return only bounded job/program/runtime/output refs, fingerprints, truncation, duration, exit, timeout, cancellation, and cleanup metadata; they never return raw commands, code, stdin/stdout/stderr, logs, paths, env, pids, grant ids, or raw job_process/execution_output payloads. Prompt-artifact operations store explicit opt-in artifact metadata, content refs/fingerprints, retention state, lifecycle evidence, and idempotency fingerprints only; they never store raw prompt bodies, provider-visible raw prompt payloads, automatic prompt history, prompt injection, learned behavior, native snippet UI, or prompt-context inclusion. Update diagnostic operations store signed-release/provenance metadata only; they never perform live network checks, install, restart, deploy, register packages, or store production endpoint details/package bytes. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_provider_request_schema()
             }
@@ -380,49 +380,7 @@ fn execute_host_request_schema() -> serde_json::Value {
     insert_string(
         &mut properties,
         "deviceRegistrationResourceId",
-        "Durable device_registration resource id for device_inspect, device_unregister, or push delivery evidence.",
-    );
-    insert_string(
-        &mut properties,
-        "expectedDeviceRegistrationVersionId",
-        "Expected current device_registration version id for device_unregister freshness.",
-    );
-    insert_string(
-        &mut properties,
-        "deviceId",
-        "Trusted caller device identifier for device_register.",
-    );
-    insert_string(
-        &mut properties,
-        "platform",
-        "Device platform for device_register; currently ios.",
-    );
-    insert_string(
-        &mut properties,
-        "apnsEnvironment",
-        "Explicit APNs environment for device_register: development or production.",
-    );
-    insert_string(
-        &mut properties,
-        "apnsToken",
-        "Trusted internal APNs token input for device_register; never returned by provider-visible projections.",
-    );
-    insert_string(
-        &mut properties,
-        "label",
-        "Optional bounded human label for device_register.",
-    );
-    properties.insert(
-        "pushOptIn".to_owned(),
-        json!({"type": "boolean", "description": "Explicit user opt-in flag for device_register; defaults false."}),
-    );
-    properties.insert(
-        "pushEnabled".to_owned(),
-        json!({"type": "boolean", "description": "Explicit push enable flag for device_register; requires pushOptIn true and live transport still stays disabled."}),
-    );
-    properties.insert(
-        "eventFamilies".to_owned(),
-        json!({"type": "array", "description": "Bounded notification event-family tokens for device registration policy."}),
+        "Durable device_registration resource id for device_inspect or push delivery evidence.",
     );
     insert_string(
         &mut properties,
@@ -881,7 +839,7 @@ mod tests {
             "capability_binding_request_record capability_binding_request_list capability_binding_request_inspect capability_binding_decision_record capability_binding_decision_list capability_binding_decision_inspect capability_binding_policy_activate capability_binding_policy_list capability_binding_policy_inspect capability_binding_cockpit_overview ",
             "capability_shadow_trial_request_record capability_shadow_trial_decision_record capability_shadow_trial_run_record capability_shadow_trial_evidence_inspect ",
             "module_program_execution_start module_program_execution_status module_program_execution_cancel module_program_execution_cleanup ",
-            "device_register device_unregister device_list device_inspect notification_send notification_list ",
+            "device_list device_inspect notification_send notification_list ",
             "notification_inspect notification_mark_read notification_mark_all_read tool_source_list ",
             "tool_source_inspect subagent_launch subagent_status subagent_result subagent_cancel ",
             "subagent_task_list subagent_task_inspect worker_package_list worker_package_inspect",
@@ -1003,13 +961,6 @@ mod tests {
         assert!(schema["properties"].get("handoffRefs").is_some());
         for property in [
             "deviceRegistrationResourceId",
-            "expectedDeviceRegistrationVersionId",
-            "deviceId",
-            "apnsEnvironment",
-            "apnsToken",
-            "pushOptIn",
-            "pushEnabled",
-            "eventFamilies",
             "notificationResourceId",
             "expectedNotificationVersionId",
             "notificationId",

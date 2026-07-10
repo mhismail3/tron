@@ -6,13 +6,11 @@ async fn repository_tree_read_runtime_grants_are_read_only_and_selector_bounded(
         let payload = if operation == "repository_tree_inspect" {
             json!({
                 "operation": operation,
-                "repositoryTreeResourceId": "repository_tree_snapshot:runtime-grant",
-                "idempotencyKey": format!("{operation}-grant")
+                "repositoryTreeResourceId": "repository_tree_snapshot:runtime-grant"
             })
         } else {
             json!({
-                "operation": operation,
-                "idempotencyKey": format!("{operation}-grant")
+                "operation": operation
             })
         };
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;

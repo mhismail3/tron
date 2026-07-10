@@ -48,6 +48,7 @@ mod module_program_execution;
 mod module_runtime;
 mod module_validation;
 mod notifications;
+mod operation_contract;
 mod procedural;
 mod process;
 mod program_execution;
@@ -76,6 +77,7 @@ use context::validate_execute_context;
 use replay::replay_manifest;
 use trace::{complete_trace_record, started_trace_record};
 
+pub(crate) use operation_contract::validate_payload as validate_operation_payload;
 pub(crate) use registry::supported_operation_names;
 pub(crate) use registry::{
     OperationBindingMetadata, is_supported_operation, operation_binding_metadata,
@@ -86,6 +88,7 @@ pub(crate) async fn execute_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    operation_contract::validate_payload(&invocation.payload)?;
     let operation = required_str(&invocation.payload, "operation")?.to_owned();
     validate_execute_context(invocation, &operation)?;
     info!(

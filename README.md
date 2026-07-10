@@ -97,7 +97,7 @@ Current living entry points:
   kernel-locked, governance-locked, record-plane, adapter-replaceable,
   module-owned, or deferred so future modular replacement work is measurable.
 - `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 190-row inventory for the capability modularity scorecard.
+  machine-readable 188-row inventory for the capability modularity scorecard.
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
@@ -1228,7 +1228,7 @@ Capability modularity is tracked in
 machine-readable inventory in
 `packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
 in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 190
+`capability_modularity_scorecard_invariants` test locks the current 188
 operation baseline, registry/dispatch parity, and the ownership classes used for
 future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
 `adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
@@ -1560,10 +1560,18 @@ Current primitive operations:
 | `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments plus a preferred `catalog_inspect` step for `execute::<operation>` so the agent inspects the provider-visible schema before backing engine-substrate functions, preferred next-step guidance includes immediate invoke arguments only for read-only non-mutating matches and emits blocked-invoke guidance for write-like matches, `namespacePrefix` also matches capability-pool family/owner metadata so related operations can be found even when names do not share the literal prefix, readiness and trace/evidence searches retain deterministic full `agentSearchPlan` records in durable audit details while the provider projection receives only exact matches and one compact `agentNextStep`, avoiding duplicated plans and contextual write schemas, broad module-governance readiness/list/inspect searches preserve the exact read-only module registry/lifecycle/runtime/dependency, binding, candidate, route, and route-event plan with default payloads marked complete, empty lists documented as valid evidence, and activation/rollback/write surfaces excluded, `effectClass` accepts canonical values plus safe read-only aliases (`read`, `read_only`, `inspect`) for `pure_read`, supported operations excluded by the requested read-only effect class are returned separately with bounded metadata and a clear non-invocation reason, `allDiscoveredInspectTargets` gives durable audit data one merged list of exact `catalog_inspect` arguments for both immediate read-only matches and effect-class-excluded supported operations, the model-facing summary states whether the execute-operation search was complete or truncated, unsupported operation-like names stay recovery-guidance results instead of fuzzy near matches, and generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation. |
-| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, required top-level payload fields, and current-invocation guidance that keeps normal read-only/session calls separate from explicit replacement, shadow, route, disable, and rollback workflows. |
+| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, required top-level payload fields, and current-invocation guidance that keeps normal read-only/session calls separate from explicit replacement, shadow, route, disable, and rollback workflows. `inputSchema.schemaCompleteness` distinguishes closed `exact_structural_contract` families from `domain_validated_contract` families still owned by their domain service, so the agent is never told an incomplete schema is exact. Exact families are structurally validated before authority-grant derivation and again at direct execution. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks; this is verification-report evidence, not passive read-only inspection. |
 
 File access goes through the hardened `filesystem_*` operation package.
+
+The execute-operation contract migration is fail-closed and incremental. The
+catalog bootstrap, cockpit overview, repository-tree custody, durable jobs,
+short process execution, and trace inspection currently have closed structural
+contracts. Other operation families retain their existing domain-owned semantic
+and authority validation until their complete accepted field set is promoted;
+promotion requires focused schema/runtime parity tests and removes permissive
+cross-operation fields for that family.
 
 Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
@@ -1653,13 +1661,14 @@ domains own execution, and hidden cron tables, autonomous planning, public
 schedule UI, and result merge remain deferred.
 The accepted Slice 13 foundation adds `domains/device` and
 `domains/notifications` as server-owned resource foundations behind the same
-single `capability::execute` primitive. `domains/device` owns durable
-`device_registration` records, explicit APNs environment handling, hash-only
-token custody, opt-in push policy, 90-day/500-record retention defaults,
-redacted list/inspect projections, and `device.lifecycle` stream evidence.
-Trusted system/admin calls can use `device_register` and `device_unregister`;
-provider-visible reads use `device_list` and `device_inspect`. Raw APNs tokens
-and full token hashes are never returned.
+single `capability::execute` primitive. `domains/device` owns the durable
+`device_registration` schema and production redacted list/inspect projections.
+Only `device_list` and `device_inspect` are model-facing. Production registers
+no device writer or lifecycle publisher; registration/unregistration fixtures
+are test-only and verify the deferred trusted transport's hash-only token,
+environment, opt-in, retention, and lifecycle contract. The production engine
+accepts no APNs token input, and raw APNs tokens or full token hashes are never
+returned.
 `domains/notifications` owns durable `notification` inbox/read-state records,
 `notification_delivery` evidence, unread-count badge semantics, trace/replay
 refs, retention defaults, and `notifications.lifecycle` stream evidence.

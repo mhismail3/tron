@@ -257,13 +257,9 @@ fn execute_operation_inspect_projection_with_options(
             .cloned()
             .unwrap_or(operation_required_payload_fields)
     };
-    let required_payload_field_names = required_payload_fields
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
     let effect = agent_usage.get("effect").cloned();
     let preflight = agent_usage.get("preflight").cloned();
-    let input_schema = execute_operation_input_schema(operation, &required_payload_field_names);
+    let input_schema = execute_operation_input_schema(operation);
     let capability_pool = operation_pool_metadata(operation).map(|metadata| {
         operation_contextual_pool_projection(
             operation,
@@ -321,6 +317,9 @@ fn execute_operation_inspect_projection_with_options(
 
 fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
     match operation {
+        "catalog_conformance" => {
+            " This creates an idempotent durable catalog_discovery_report. Pass a stable bounded idempotencyKey and call it only when durable verification evidence is required; use catalog_search or catalog_inspect for read-only discovery."
+        }
         "repository_tree_snapshot" => {
             " Copy complete repositoryRef/rootRef/headRef objects, including kind, from git_status details.git.repository.repositoryTreeSnapshotInput; passing only .id values is invalid."
         }
@@ -338,9 +337,6 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
         }
         "job_cancel" => {
             " Pass operation, exact jobResourceId, bounded reason, and a stable bounded idempotencyKey. The caller key is provider-visible in the tool-call payload but redacted from status/list/log/trace projections."
-        }
-        "job_cleanup" => {
-            " Pass operation, optional olderThanSeconds/limit, and a stable bounded idempotencyKey. Cleanup archives terminal job resources only; it does not expose raw command, path, authority, stdout, stderr, or idempotency payloads."
         }
         "process_run" => {
             " Use process_run only for short synchronous no-network commands. For inspectable durable execution, prefer job_start followed by job_status/job_log. process_run returns bounded stdout/stderr previews directly and is not a durable job lifecycle."
@@ -388,7 +384,15 @@ fn operation_contextual_pool_projection(operation: &str, mut projection: Value) 
     projection
 }
 
-fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> Value {
+pub(super) fn execute_operation_input_schema(operation: &str) -> Value {
+    if let Some(schema) = super::operation_contract::exact_input_schema(operation) {
+        return schema;
+    }
+    let required_payload_fields = operation_required_payload_fields(operation);
+    let required_fields = required_payload_fields
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
     let mut properties = serde_json::Map::new();
     properties.insert(
         "operation".to_owned(),
@@ -398,7 +402,7 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
             "description": "Exact capability::execute operation selector."
         }),
     );
-    for field in required_fields {
+    for field in &required_fields {
         if *field == "operation" {
             continue;
         }
@@ -409,28 +413,13 @@ fn execute_operation_input_schema(operation: &str, required_fields: &[&str]) -> 
     }
 
     add_operation_specific_optional_fields(operation, &mut properties);
-    let additional_properties = !matches!(
-        operation,
-        "repository_tree_snapshot"
-            | "repository_tree_list"
-            | "repository_tree_inspect"
-            | "job_start"
-            | "job_status"
-            | "job_list"
-            | "job_log"
-            | "job_cancel"
-            | "job_cleanup"
-            | "process_run"
-            | "trace_list"
-            | "trace_get"
-    );
     json!({
         "type": "object",
         "required": required_fields,
         "properties": properties,
-        "additionalProperties": additional_properties,
+        "additionalProperties": true,
         "payloadPlacement": "top_level_capability_execute_payload",
-        "schemaCompleteness": "operation_specific_contract"
+        "schemaCompleteness": "domain_validated_contract"
     })
 }
 
@@ -475,46 +464,6 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
         | ("capability_shadow_trial_run_record", "candidateProjection") => {
             shadow_git_status_projection_schema(field)
         }
-        ("repository_tree_snapshot", "repositoryRef") => json!({
-            "type": "object",
-            "description": "Required bounded repository reference; copy the complete repositoryTreeSnapshotInput.repositoryRef object from git_status when available, including kind. Passing only .id is invalid."
-        }),
-        ("repository_tree_snapshot", "rootRef") => json!({
-            "type": "object",
-            "description": "Required bounded workspace/repository-root reference; copy the complete repositoryTreeSnapshotInput.rootRef object from git_status when available, including kind. Passing only .id is invalid."
-        }),
-        ("repository_tree_snapshot", "treeObjectRef") => json!({
-            "type": "string",
-            "description": "Required bounded tree object token; copy repositoryTreeSnapshotInput.treeObjectRef from git_status when available. Never pass raw tree contents."
-        }),
-        ("repository_tree_snapshot", "idempotencyKey") => json!({
-            "type": "string",
-            "description": "Required stable bounded idempotency key for this metadata-only snapshot write."
-        }),
-        ("job_start", "command") | ("process_run", "command") => json!({
-            "type": "string",
-            "description": "Bounded shell command executed from the trusted working directory supplied by runtime context. Do not include secrets, credentials, package installs, network access, or personal information."
-        }),
-        ("job_start" | "job_cancel" | "job_cleanup", "idempotencyKey") => json!({
-            "type": "string",
-            "description": "Required stable bounded caller idempotency key for this write. It is provider-visible in the tool-call payload because the model supplies it; status/list/log/trace projections redact raw idempotency keys."
-        }),
-        ("job_status" | "job_log" | "job_cancel", "jobResourceId") => json!({
-            "type": "string",
-            "description": "Exact durable job_process resource id returned by job_start or job_list for the current session scope."
-        }),
-        ("repository_tree_inspect", "repositoryTreeResourceId") => json!({
-            "type": "string",
-            "description": "Exact repository_tree_snapshot resource id returned by repository_tree_snapshot or repository_tree_list."
-        }),
-        ("repository_tree_list", "repositoryRefId") => json!({
-            "type": "string",
-            "description": "Optional bounded repository ref id filter; unsupported aliases are rejected."
-        }),
-        ("trace_get", "traceRecordId") => json!({
-            "type": "string",
-            "description": "Exact provider-safe trace record id returned in details.records[].id by trace_list for the current session."
-        }),
         (_, "sessionId") => json!({
             "type": "string",
             "description": "Current trusted session id. If supplied, it must match the invocation session context."
@@ -573,13 +522,6 @@ fn add_operation_specific_optional_fields(
     properties: &mut serde_json::Map<String, Value>,
 ) {
     let optional_fields: Vec<(&str, Value)> = match operation {
-        "capability_binding_cockpit_overview" => vec![(
-            "targetOperation",
-            json!({
-                "type": "string",
-                "description": "Optional exact provider-visible operation name. When set, returns one compact cockpit row with role, replacement, binding, shadow, route, rollback, and scoped evidence facts for that operation."
-            }),
-        )],
         "web_robots_check" => vec![
             (
                 "userAgent",
@@ -668,155 +610,11 @@ fn add_operation_specific_optional_fields(
                 json!({"type": "string", "description": "Optional stable bounded idempotency key when not supplied by invocation context."}),
             ),
         ],
-        "repository_tree_snapshot" => vec![
-            (
-                "snapshotId",
-                json!({"type": "string", "description": "Optional caller-visible snapshot id for idempotent resource identity."}),
-            ),
-            (
-                "headRef",
-                json!({"type": "object", "description": "Optional bounded commit/head reference; copy the complete repositoryTreeSnapshotInput.headRef object from git_status when available, including kind."}),
-            ),
-            (
-                "snapshotLabel",
-                json!({"type": "string", "description": "Optional bounded short label for the repository tree snapshot."}),
-            ),
-            (
-                "snapshotSummary",
-                json!({"type": "string", "description": "Optional bounded summary for the repository tree snapshot."}),
-            ),
-            (
-                "pathEntries",
-                json!({"type": "array", "description": "Optional bounded normalized relative path metadata only; never raw file contents."}),
-            ),
-            (
-                "sourceRefs",
-                json!({"type": "array", "description": "Optional bounded source refs for provider-safe custody evidence."}),
-            ),
-            (
-                "evidenceRefs",
-                json!({"type": "array", "description": "Optional bounded evidence refs for trace/resource proof."}),
-            ),
-            (
-                "reason",
-                json!({"type": "string", "description": "Optional bounded reason for the custody snapshot."}),
-            ),
-            ("networkPolicy", network_policy_none_schema()),
-            (
-                "maxAgeDays",
-                json!({"type": "integer", "description": "Optional retention limit in days."}),
-            ),
-            (
-                "totalEntries",
-                json!({"type": "integer", "description": "Optional bounded aggregate tree entry count."}),
-            ),
-            (
-                "fileCount",
-                json!({"type": "integer", "description": "Optional bounded aggregate file count."}),
-            ),
-            (
-                "directoryCount",
-                json!({"type": "integer", "description": "Optional bounded aggregate directory count."}),
-            ),
-            (
-                "symlinkCount",
-                json!({"type": "integer", "description": "Optional bounded aggregate symlink count."}),
-            ),
-            (
-                "submoduleCount",
-                json!({"type": "integer", "description": "Optional bounded aggregate submodule count."}),
-            ),
-            (
-                "maxDepth",
-                json!({"type": "integer", "description": "Optional bounded maximum path depth."}),
-            ),
-        ],
-        "repository_tree_list" => vec![
-            (
-                "limit",
-                json!({"type": "integer", "description": "Optional bounded result limit."}),
-            ),
-            (
-                "includeArchived",
-                json!({"type": "boolean", "description": "Optional archived snapshot inclusion flag."}),
-            ),
-            (
-                "repositoryRefId",
-                json!({"type": "string", "description": "Optional bounded repository ref id filter; unsupported aliases are rejected."}),
-            ),
-            ("networkPolicy", network_policy_none_schema()),
-        ],
-        "repository_tree_inspect" => vec![("networkPolicy", network_policy_none_schema())],
-        "job_start" => vec![
-            (
-                "timeoutMs",
-                json!({"type": "integer", "minimum": 1, "maximum": 120000, "description": "Maximum runtime before the durable job is timed out."}),
-            ),
-            (
-                "maxOutputBytes",
-                json!({"type": "integer", "minimum": 1, "maximum": 200000, "description": "Maximum captured output bytes. job_status/list expose refs/fingerprints; job_log exposes bounded previews."}),
-            ),
-            (
-                "cleanupAfterSeconds",
-                json!({"type": "integer", "minimum": 0, "description": "Optional retention hint for terminal job cleanup."}),
-            ),
-        ],
-        "job_list" => vec![
-            (
-                "state",
-                json!({"type": "string", "enum": ["running", "completed", "failed", "timed_out", "cancelled", "archived"], "description": "Optional lifecycle filter for current-session durable jobs."}),
-            ),
-            (
-                "limit",
-                json!({"type": "integer", "minimum": 1, "description": "Optional bounded maximum number of current-session durable jobs to return."}),
-            ),
-        ],
-        "job_cancel" => vec![(
-            "reason",
-            json!({"type": "string", "description": "Optional bounded cancellation reason. Provider-facing status/list/log projections redact the raw reason."}),
-        )],
-        "job_cleanup" => vec![
-            (
-                "olderThanSeconds",
-                json!({"type": "integer", "minimum": 0, "description": "Optional terminal-age filter before cleanup archives matching job resources."}),
-            ),
-            (
-                "limit",
-                json!({"type": "integer", "minimum": 1, "description": "Optional bounded maximum number of terminal job resources to archive."}),
-            ),
-        ],
-        "process_run" => vec![
-            (
-                "timeoutMs",
-                json!({"type": "integer", "minimum": 1, "maximum": 120000, "description": "Maximum runtime before the short synchronous process is timed out."}),
-            ),
-            (
-                "maxOutputBytes",
-                json!({"type": "integer", "minimum": 1, "maximum": 200000, "description": "Maximum provider-visible stdout/stderr preview bytes returned directly by process_run."}),
-            ),
-        ],
-        "trace_list" => vec![
-            (
-                "limit",
-                json!({"type": "integer", "minimum": 1, "description": "Optional bounded maximum number of current-session trace records to return."}),
-            ),
-            (
-                "traceId",
-                json!({"type": "string", "description": "Optional provider-safe engine trace id filter. Omit for whole-session evidence."}),
-            ),
-        ],
         _ => Vec::new(),
     };
     for (field, schema) in optional_fields {
         properties.entry(field.to_owned()).or_insert(schema);
     }
-}
-
-fn network_policy_none_schema() -> Value {
-    json!({
-        "const": "none",
-        "description": "Optional explicit no-network policy proof; only `none` is accepted."
-    })
 }
 
 fn execute_operation_output_schema(operation: &str) -> Value {
@@ -1381,6 +1179,7 @@ fn normalize_catalog_inspect_payload(payload: &Value) -> (Value, Option<String>)
 
 fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
     let fields = match operation {
+        "catalog_inspect" => vec!["operation", "kind", "id"],
         "repository_tree_snapshot" => vec![
             "operation",
             "repositoryRef",
@@ -1498,7 +1297,6 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
         "job_status" | "job_log" => vec!["operation", "jobResourceId"],
         "job_list" => vec!["operation"],
         "job_cancel" => vec!["operation", "jobResourceId", "idempotencyKey"],
-        "job_cleanup" => vec!["operation", "idempotencyKey"],
         "process_run" => vec!["operation", "command"],
         "web_source_inspect" => vec!["operation", "webSourceResourceId"],
         "web_research_request_inspect" => vec!["operation", "webResearchRequestResourceId"],
@@ -1855,8 +1653,7 @@ fn discovered_inspect_target_projection(
         "inspectArguments": {
             "operation": "catalog_inspect",
             "kind": "function",
-            "id": catalog_inspect_id,
-            "maxSchemaBytes": 8000
+            "id": catalog_inspect_id
         },
         "invokeArguments": {"operation": operation},
         "readOnlyInspectionSafe": read_only_inspection_safe,
@@ -2256,8 +2053,7 @@ fn execute_schema_inspection_step(operation: &str) -> Value {
         "arguments": {
             "operation": "catalog_inspect",
             "kind": "function",
-            "id": format!("execute::{operation}"),
-            "maxSchemaBytes": 8000
+            "id": format!("execute::{operation}")
         },
         "readOnlyInspectionSafe": true,
         "reason": "Inspect the provider-visible execute-operation schema and required top-level payload fields before invoking."
@@ -2527,7 +2323,7 @@ fn operation_search_plan_projection(query: &OperationSearchQuery) -> Option<Valu
         "adapterInvocationSchemaInspection": {
             "tool": "capability::execute",
             "operation": "catalog_inspect",
-            "arguments": {"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000},
+            "arguments": {"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}")},
             "readOnlyInspectionSafe": true,
             "useOnlyWhen": "Only inspect the target adapter schema when the task explicitly needs to invoke the adapter effect. Do not use this as replacement, shadow, route, or evidence proof.",
             "notPartOfReadinessCompletion": true
@@ -2593,7 +2389,7 @@ fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value>
     let (target, query_terms) = trace_evidence_plan_target(query)?;
     let mut read_only_sequence = vec![recovery_alternative(
         "catalog_inspect",
-        json!({"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000}),
+        json!({"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}")}),
         "Inspect the exact provider-visible request schema for the target operation before invoking it.",
     )];
 
@@ -2611,7 +2407,7 @@ fn trace_evidence_plan_projection(query: &OperationSearchQuery) -> Option<Value>
         "primaryInspection": {
             "tool": "capability::execute",
             "operation": "catalog_inspect",
-            "arguments": {"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}"), "maxSchemaBytes": 8000},
+            "arguments": {"operation": "catalog_inspect", "kind": "function", "id": format!("execute::{target}")},
             "readOnlyInspectionSafe": true,
             "reason": "Returns the exact provider-visible schema and top-level payload fields for the target operation."
         },
@@ -3133,6 +2929,25 @@ mod tests {
     }
 
     #[test]
+    fn catalog_bootstrap_contracts_are_closed_and_complete() {
+        let inspect = execute_operation_inspect_projection("catalog_inspect", "catalog_inspect");
+        assert_eq!(
+            inspect["inputSchema"]["required"],
+            json!(["operation", "kind", "id"])
+        );
+        assert_eq!(inspect["inputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            inspect["inputSchema"]["schemaCompleteness"],
+            "exact_structural_contract"
+        );
+
+        let search = execute_operation_inspect_projection("catalog_search", "catalog_search");
+        assert_eq!(search["inputSchema"]["additionalProperties"], false);
+        assert!(search["inputSchema"]["properties"].get("text").is_some());
+        assert!(search["inputSchema"]["properties"].get("command").is_none());
+    }
+
+    #[test]
     fn catalog_inspect_includes_output_contract_only_when_requested() {
         let discovery = execute_operation_inspect_projection_with_options(
             "git_status",
@@ -3437,13 +3252,6 @@ mod tests {
             json!(["operation", "jobResourceId", "idempotencyKey"])
         );
         assert_eq!(cancel["inputSchema"]["additionalProperties"], false);
-
-        let cleanup = execute_operation_inspect_projection("job_cleanup", "execute::job_cleanup");
-        assert_eq!(
-            cleanup["schema"]["requiredPayloadFields"],
-            json!(["operation", "idempotencyKey"])
-        );
-        assert_eq!(cleanup["inputSchema"]["additionalProperties"], false);
     }
 
     #[test]
@@ -4395,6 +4203,18 @@ mod tests {
                 .as_str()
                 .expect("effect instruction")
                 .contains("do not call during read-only inspection")
+        );
+        let inspect = execute_operation_inspect_projection(
+            "catalog_conformance",
+            "execute::catalog_conformance",
+        );
+        assert_eq!(
+            inspect["inputSchema"]["required"],
+            json!(["operation", "idempotencyKey"])
+        );
+        assert!(
+            execute_operation_invocation_guidance("catalog_conformance")
+                .contains("idempotent durable catalog_discovery_report")
         );
     }
 

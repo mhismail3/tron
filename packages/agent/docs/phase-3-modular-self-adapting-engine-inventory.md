@@ -432,12 +432,12 @@ re-review. It adds a pending-review `notification_delivery_module` manifest
 seed for the existing server-owned `domains/device` and `domains/notifications`
 substrate. The manifest covers only existing `device_registration`,
 `notification`, and `notification_delivery` resources and existing
-`capability::execute` operation values for device list/inspect/register/
-unregister and notification send/list/inspect/mark-read/mark-all-read.
+`capability::execute` operation values for device list/inspect and notification
+send/list/inspect/mark-read/mark-all-read.
 
-The accepted slice preserves the trusted system/admin split for
-`device_register` and `device_unregister`, declares device, notification, and
-resource authority needs bounded to the existing resource kinds with
+The accepted slice preserves the trusted system/admin split in test-only
+device registration fixtures while production APNs transport remains deferred,
+and declares device, notification, and resource authority needs bounded to the existing resource kinds with
 `kind:device_registration`, `kind:notification`, and
 `kind:notification_delivery` selectors, and keeps `networkPolicy: none`,
 `installable: false`, `executable: false`, and manifest lifecycle

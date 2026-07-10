@@ -49,53 +49,6 @@ async fn device_read_runtime_grants_are_read_only_and_selector_bounded() {
 }
 
 #[tokio::test]
-async fn provider_device_write_operations_do_not_gain_device_write_authority() {
-    for operation in ["device_register", "device_unregister"] {
-        let payload = if operation == "device_register" {
-            json!({
-                "operation": operation,
-                "deviceId": "runtime-grant-device",
-                "apnsEnvironment": "development",
-                "apnsToken": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-                "idempotencyKey": format!("{operation}-grant")
-            })
-        } else {
-            json!({
-                "operation": operation,
-                "deviceRegistrationResourceId": "device_registration:runtime-grant",
-                "reason": "test",
-                "idempotencyKey": format!("{operation}-grant")
-            })
-        };
-        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
-        let grant = engine_host
-            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-            .await
-            .expect("inspect grant")
-            .expect("derived grant");
-
-        for forbidden_scope in ["device.read", "device.write", "resource.write"] {
-            assert!(
-                !grant
-                    .allowed_authority_scopes
-                    .contains(&forbidden_scope.to_owned()),
-                "provider device write operation must not include {forbidden_scope}"
-            );
-        }
-        assert!(
-            !grant
-                .allowed_resource_kinds
-                .contains(&"device_registration".to_owned())
-        );
-        assert!(
-            !grant
-                .resource_selectors
-                .contains(&"kind:device_registration".to_owned())
-        );
-    }
-}
-
-#[tokio::test]
 async fn notification_read_runtime_grants_are_selector_bounded() {
     for operation in ["notification_list", "notification_inspect"] {
         let payload = if operation == "notification_inspect" {

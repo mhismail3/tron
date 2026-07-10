@@ -38,7 +38,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
-use crate::domains::capability::is_supported_operation;
+use crate::domains::capability::{is_supported_operation, validate_operation_payload};
 use crate::engine::{
     ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -428,6 +428,19 @@ async fn execute_capability_primitive_via_engine(
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
+    if model_primitive_name == "execute"
+        && let Err(error) = validate_operation_payload(&effective_args)
+    {
+        return capability_failure_result(
+            error.to_failure(FailureOrigin::Capability),
+            model_primitive_name,
+            invocation_id,
+            session_id,
+            inherited_trace_id,
+            parent_invocation_id,
+            None,
+        );
+    }
     let working_directory =
         match crate::shared::foundation::paths::normalize_working_directory(working_directory) {
             Ok(path) => path.display().to_string(),

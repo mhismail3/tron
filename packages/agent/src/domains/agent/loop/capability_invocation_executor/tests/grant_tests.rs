@@ -497,8 +497,7 @@ async fn capability_binding_cockpit_overview_runtime_grant_authorizes_governance
 {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "capability_binding_cockpit_overview",
-        "targetOperation": "git_status",
-        "idempotencyKey": "capability-binding-cockpit-overview-runtime-grant"
+        "targetOperation": "git_status"
     }))
     .await;
     let grant = engine_host
@@ -837,14 +836,12 @@ async fn catalog_discovery_runtime_grant_has_no_state_authority() {
     for payload in [
         json!({
             "operation": "catalog_search",
-            "text": "git_status",
-            "idempotencyKey": "catalog-search-grant"
+            "text": "git_status"
         }),
         json!({
             "operation": "catalog_inspect",
             "kind": "function",
-            "id": "execute::git_status",
-            "idempotencyKey": "catalog-inspect-grant"
+            "id": "execute::git_status"
         }),
     ] {
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
@@ -856,7 +853,10 @@ async fn catalog_discovery_runtime_grant_has_no_state_authority() {
 
         assert_eq!(grant.network_policy, "none");
         assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
-        assert_eq!(grant.allowed_authority_scopes, vec!["capability.execute"]);
+        assert_eq!(
+            grant.allowed_authority_scopes,
+            vec!["capability.execute", "catalog_discovery.read"]
+        );
         assert_eq!(
             grant.allowed_resource_kinds,
             vec!["catalog_discovery"],
@@ -867,7 +867,10 @@ async fn catalog_discovery_runtime_grant_has_no_state_authority() {
             vec!["kind:catalog_discovery"],
             "catalog discovery must use its own catalog-scoped selector"
         );
-        assert_invocation_scopes(&invocation, &["capability.execute"]);
+        assert_invocation_scopes(
+            &invocation,
+            &["capability.execute", "catalog_discovery.read"],
+        );
         for forbidden in ["state::get", "state::set", "state::list"] {
             assert!(
                 !grant.allowed_capabilities.contains(&forbidden.to_owned()),
@@ -886,21 +889,133 @@ async fn catalog_discovery_runtime_grant_has_no_state_authority() {
 }
 
 #[tokio::test]
+async fn catalog_conformance_runtime_grant_authorizes_exact_report_write() {
+    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+        "operation": "catalog_conformance",
+        "reason": "Verify the current visible capability catalog",
+        "idempotencyKey": "catalog-conformance-runtime-grant"
+    }))
+    .await;
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_eq!(grant.network_policy, "none");
+    assert_no_state_inheritance(&grant);
+    assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+    assert_eq!(
+        grant.allowed_authority_scopes,
+        vec![
+            "capability.execute",
+            "catalog_discovery.write",
+            "resource.write"
+        ]
+    );
+    assert_eq!(
+        grant.allowed_resource_kinds,
+        vec![crate::engine::CATALOG_DISCOVERY_REPORT_KIND]
+    );
+    assert_eq!(
+        grant.resource_selectors,
+        vec![format!(
+            "kind:{}",
+            crate::engine::CATALOG_DISCOVERY_REPORT_KIND
+        )]
+    );
+    assert_invocation_scopes(
+        &invocation,
+        &[
+            "capability.execute",
+            "catalog_discovery.write",
+            "resource.write",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn promoted_exact_contracts_reach_runtime_grant_derivation() {
+    let payloads = [
+        json!({"operation": "catalog_search"}),
+        json!({
+            "operation": "catalog_conformance",
+            "idempotencyKey": "promoted-catalog-conformance"
+        }),
+        json!({
+            "operation": "catalog_inspect",
+            "kind": "function",
+            "id": "execute::git_status"
+        }),
+        json!({"operation": "capability_binding_cockpit_overview"}),
+        json!({
+            "operation": "repository_tree_snapshot",
+            "repositoryRef": {"kind": "repository", "id": "repository"},
+            "rootRef": {"kind": "workspace", "id": "root"},
+            "treeObjectRef": "tree-object",
+            "idempotencyKey": "promoted-repository-snapshot"
+        }),
+        json!({"operation": "repository_tree_list"}),
+        json!({
+            "operation": "repository_tree_inspect",
+            "repositoryTreeResourceId": "repository_tree_snapshot:session:test"
+        }),
+        json!({
+            "operation": "job_start",
+            "command": "printf test",
+            "idempotencyKey": "promoted-job-start"
+        }),
+        json!({"operation": "job_status", "jobResourceId": "job_process:test"}),
+        json!({"operation": "job_list"}),
+        json!({"operation": "job_log", "jobResourceId": "job_process:test"}),
+        json!({
+            "operation": "job_cancel",
+            "jobResourceId": "job_process:test",
+            "idempotencyKey": "promoted-job-cancel"
+        }),
+        json!({"operation": "process_run", "command": "printf test"}),
+        json!({"operation": "trace_list"}),
+        json!({"operation": "trace_get", "traceRecordId": "trace_record:test"}),
+    ];
+
+    for payload in payloads {
+        let operation = payload["operation"].as_str().expect("operation").to_owned();
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
+        let grant = engine_host
+            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+            .await
+            .expect("inspect grant")
+            .expect("derived grant");
+        assert!(
+            grant
+                .allowed_capabilities
+                .contains(&"capability::execute".to_owned()),
+            "{operation} must reach the canonical execute handler"
+        );
+        assert!(
+            !grant
+                .resource_selectors
+                .iter()
+                .any(|selector| selector == "*"),
+            "{operation} must not derive wildcard resource authority"
+        );
+    }
+}
+
+#[tokio::test]
 async fn diagnostic_read_runtime_grant_has_no_state_authority() {
     for (payload, expected_kind) in [
         (
             json!({
                 "operation": "trace_list",
-                "limit": 25,
-                "idempotencyKey": "trace-list-grant"
+                "limit": 25
             }),
             "trace_record",
         ),
         (
             json!({
                 "operation": "trace_get",
-                "traceRecordId": "trace_record:runtime-grant",
-                "idempotencyKey": "trace-get-grant"
+                "traceRecordId": "trace_record:runtime-grant"
             }),
             "trace_record",
         ),
@@ -1145,42 +1260,16 @@ async fn subagent_followup_grant_reads_existing_task_for_exact_delegated_refs() 
     );
 }
 
-#[tokio::test]
-async fn unsupported_subagent_task_operation_does_not_gain_lifecycle_authority() {
-    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
+#[test]
+fn unsupported_subagent_task_operation_is_rejected_before_grant_derivation() {
+    let error = validate_operation_payload(&json!({
         "operation": "subagent_task_create",
         "idempotencyKey": "subagent-task-create-no-grant"
     }))
-    .await;
-    let grant = engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-        .await
-        .expect("inspect grant")
-        .expect("derived grant");
+    .expect_err("unsupported operations must fail before runtime authority derivation");
 
-    for forbidden_scope in [
-        "subagents.read",
-        "subagents.write",
-        "resource.read",
-        "resource.write",
-    ] {
-        assert!(
-            !grant
-                .allowed_authority_scopes
-                .contains(&forbidden_scope.to_owned()),
-            "unsupported subagent operation must not include {forbidden_scope}"
-        );
-    }
-    assert!(
-        !grant
-            .allowed_resource_kinds
-            .contains(&"subagent_task".to_owned())
-    );
-    assert!(
-        !grant
-            .resource_selectors
-            .contains(&"kind:subagent_task".to_owned())
-    );
+    assert!(error.to_string().contains("subagent_task_create"));
+    assert!(error.to_string().contains("catalog_search"));
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

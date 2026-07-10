@@ -147,7 +147,11 @@ async fn catalog_target_requires_engine_host_for_execution() {
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let ctx = capability_exec_ctx(&surface, &emitter, &cancel);
-    let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
+    let call = CapabilityInvocationDraft::new(
+        "tc1",
+        "execute",
+        payload_object(&json!({"operation": "observe", "input": "failure probe"})),
+    );
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
     assert!(result.result.is_error.unwrap_or(false));
     assert_failure_code(&result.result, CAPABILITY_ENGINE_HOST_UNAVAILABLE);
@@ -328,7 +332,11 @@ async fn engine_handler_failure_returns_canonical_capability_result() {
     let cancel = CancellationToken::new();
     let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     ctx.engine_host = Some(&engine_host);
-    let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
+    let call = CapabilityInvocationDraft::new(
+        "tc1",
+        "execute",
+        payload_object(&json!({"operation": "catalog_search", "text": "handler failure probe"})),
+    );
 
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
 
@@ -399,11 +407,11 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
     let tempdir = tempfile::tempdir().expect("working directory");
     let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
 
-    let call = CapabilityInvocationDraft::new("capability-invocation-1", "execute", {
-        let mut args = serde_json::Map::new();
-        args.insert("mode".to_owned(), json!("invoke"));
-        args
-    });
+    let call = CapabilityInvocationDraft::new(
+        "capability-invocation-1",
+        "execute",
+        payload_object(&json!({"operation": "catalog_search", "text": "stop-turn probe"})),
+    );
     let result = execute_capability_invocation(&call, "session-1", working_directory, &ctx).await;
 
     assert!(result.result.is_error.unwrap_or(false));
@@ -622,9 +630,9 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     .to_string();
 
     let payload = json!({
-        "operation": "observe",
-        "input": "wrapper idempotency proof",
-        "idempotencyKey": "manual-observe-explicit-001"
+        "operation": "goal_create",
+        "objective": "wrapper idempotency proof",
+        "idempotencyKey": "manual-goal-create-explicit-001"
     });
     let first_call =
         CapabilityInvocationDraft::new("provider-call-id-1", "execute", payload_object(&payload));
@@ -640,8 +648,8 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     let second_result =
         execute_capability_invocation(&second_call, "session-1", &working_directory, &ctx).await;
 
-    assert_eq!(first_result.result.is_error, None);
-    assert_eq!(second_result.result.is_error, None);
+    assert_eq!(first_result.result.is_error, None, "{first_result:?}");
+    assert_eq!(second_result.result.is_error, None, "{second_result:?}");
     let captured = captured.lock().clone();
     assert_eq!(
         captured.len(),
@@ -693,7 +701,11 @@ fn assert_invocation_scopes(invocation: &Invocation, expected_scopes: &[&str]) {
     }
 }
 
-async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostHandle, Invocation) {
+async fn capturing_execute_surface() -> (
+    EngineHostHandle,
+    ResolvedPrimitiveSurface,
+    Arc<Mutex<Option<Invocation>>>,
+) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
     engine_host
         .register_worker(
@@ -747,6 +759,46 @@ async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostH
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),
     };
+    (engine_host, surface, captured)
+}
+
+#[tokio::test]
+async fn malformed_exact_payload_stops_before_engine_handler() {
+    let (engine_host, surface, captured) = capturing_execute_surface().await;
+    let emitter = Arc::new(EventEmitter::new());
+    let cancel = CancellationToken::new();
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
+    ctx.engine_host = Some(&engine_host);
+    let call = CapabilityInvocationDraft::new(
+        "provider-call-invalid-contract",
+        "execute",
+        payload_object(&json!({
+            "operation": "catalog_search",
+            "text": "git status",
+            "command": "must not reach authority or handler"
+        })),
+    );
+
+    let result = execute_capability_invocation(&call, "session-contract", "/tmp", &ctx).await;
+
+    assert_eq!(result.result.is_error, Some(true));
+    assert_eq!(
+        result.result.details.as_ref().unwrap()["failure"]["category"],
+        "invalid_request"
+    );
+    assert!(
+        result.result.details.as_ref().unwrap()["failure"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("additional property is not allowed"))
+    );
+    assert!(
+        captured.lock().is_none(),
+        "malformed payload must not reach the engine capability handler"
+    );
+}
+
+async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostHandle, Invocation) {
+    let (engine_host, surface, captured) = capturing_execute_surface().await;
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
     let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
@@ -763,7 +815,11 @@ async fn captured_execute_invocation_for_payload(payload: Value) -> (EngineHostH
 
     let result =
         execute_capability_invocation(&call, "session-grant", &working_directory, &ctx).await;
-    assert_eq!(result.result.is_error, None, "{:?}", result.result);
+    assert_eq!(
+        result.result.is_error, None,
+        "payload {payload:?} failed: {:?}",
+        result.result
+    );
     let invocation = captured
         .lock()
         .clone()

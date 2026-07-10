@@ -155,8 +155,6 @@ pub(super) async fn execute_operation(
         }
         "update_diagnostic_list" => update_diagnostic_list(invocation, deps).await?,
         "update_diagnostic_inspect" => update_diagnostic_inspect(invocation, deps).await?,
-        "device_register" => device_register(invocation, deps, operation_at).await?,
-        "device_unregister" => device_unregister(invocation, deps, operation_at).await?,
         "device_list" => device_list(invocation, deps).await?,
         "device_inspect" => device_inspect(invocation, deps).await?,
         "notification_send" => notification_send(invocation, deps, operation_at).await?,

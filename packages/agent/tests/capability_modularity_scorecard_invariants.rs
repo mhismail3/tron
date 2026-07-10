@@ -15,7 +15,7 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-
 const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const README_PATH: &str = "README.md";
-const EXPECTED_OPERATION_COUNT: usize = 190;
+const EXPECTED_OPERATION_COUNT: usize = 188;
 
 const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";
 
@@ -245,7 +245,6 @@ fn expected_family_and_class(operation: &str) -> (&'static str, &'static str) {
         operation if operation.starts_with("update_diagnostic_") => {
             ("update_diagnostics", "record_plane")
         }
-        "device_register" | "device_unregister" => ("device", "governance_locked"),
         operation if operation.starts_with("device_") => ("device", "record_plane"),
         "notification_send" => ("notifications", "governance_locked"),
         operation if operation.starts_with("notification_") => ("notifications", "record_plane"),
@@ -502,7 +501,7 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
                 "tool_sources",
                 "worker_packages",
             ],
-            locked_operations: &["device_register", "device_unregister", "notification_send"],
+            locked_operations: &["notification_send"],
             allowed_classes: &["governance_locked"],
         },
     ]

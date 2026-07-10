@@ -735,7 +735,7 @@ mod tests {
     fn cockpit_overview_content_names_targeted_operation() {
         let details = json!({
             "summary": {
-                "totalOperations": 190,
+                "totalOperations": 188,
                 "returnedOperations": 1
             },
             "operationList": {
@@ -783,7 +783,7 @@ mod tests {
     fn cockpit_overview_content_reports_truncated_operation_count() {
         let details = json!({
             "summary": {
-                "totalOperations": 190,
+                "totalOperations": 188,
                 "returnedOperations": 25
             },
             "operationList": {
@@ -793,7 +793,7 @@ mod tests {
 
         assert_eq!(
             cockpit_overview_content(&details),
-            "Capability cockpit overview returned 25 of 190 operation(s)."
+            "Capability cockpit overview returned 25 of 188 operation(s)."
         );
     }
 
@@ -803,7 +803,7 @@ mod tests {
             "schemaVersion": "tron.capability_binding.cockpit_visibility.v1",
             "operation": "capability_binding_cockpit_overview",
             "summary": {
-                "totalOperations": 190,
+                "totalOperations": 188,
                 "returnedOperations": 1,
                 "shadowRuns": 0,
                 "routeCandidates": 0,

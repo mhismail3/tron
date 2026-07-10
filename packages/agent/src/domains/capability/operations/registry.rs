@@ -88,8 +88,6 @@ pub(crate) const SUPPORTED_OPERATION_NAMES: &[&str] = &[
     "update_diagnostic_record",
     "update_diagnostic_list",
     "update_diagnostic_inspect",
-    "device_register",
-    "device_unregister",
     "device_list",
     "device_inspect",
     "notification_send",
@@ -294,6 +292,12 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "record_plane",
             "compaction_strategy_requires_summarizer_seam_provider_safe_summary_context_audit_records_replay_idempotency_and_rollback_disable_refs",
         ),
+        "context_control_status" => (
+            "context_control",
+            "domains::capability::operations::context_control + domains::context_control",
+            "record_plane",
+            "modules_may_consume_ephemeral_context_status_but_must_not_bypass_snapshot_epoch_action_or_policy_records",
+        ),
         operation if operation.starts_with("context_control_") => (
             "context_control",
             "domains::capability::operations::context_control + domains::context_control",
@@ -359,12 +363,6 @@ pub fn operation_binding_metadata(operation: &str) -> Option<OperationBindingMet
             "domains::capability::operations::update_diagnostics + domains::update_diagnostics",
             "record_plane",
             "modules_may_add_diagnostics_but_not_bypass_update_diagnostic_records",
-        ),
-        "device_register" | "device_unregister" => (
-            "device",
-            "domains::capability::operations::device + domains::device",
-            "governance_locked",
-            "device_token_custody_requires_trusted_internal_transport",
         ),
         operation if operation.starts_with("device_") => (
             "device",

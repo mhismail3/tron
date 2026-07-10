@@ -30,6 +30,9 @@
 //! `updateDiagnosticResourceId` broaden grant checks only when their
 //! parser-significant fields are non-empty strings; explicit nulls and empty
 //! strings are treated as absent for grant-scope expansion.
+//! INVARIANT: a child grant may carry empty resource-kind and selector lists
+//! when its capability needs no resource authority. Empty lists mean no
+//! resource access; the engine never invents a placeholder kind or wildcard.
 
 use std::collections::BTreeMap;
 use std::path::Path;

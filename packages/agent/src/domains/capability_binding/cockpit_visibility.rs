@@ -26,7 +26,6 @@ use super::{
     CAPABILITY_SHADOW_TRIAL_RUN_KIND, Deps,
 };
 
-const MAX_LIMIT: usize = 256;
 const MAX_RESOURCES_PER_KIND_SCOPE: usize = 100;
 const MAX_SHADOW_EVIDENCE_REFS: usize = 5;
 
@@ -561,7 +560,7 @@ pub(crate) async fn cockpit_overview_value(
         .and_then(Value::as_u64)
         .map(|value| value as usize)
         .unwrap_or_else(|| supported_operation_names().len())
-        .clamp(1, MAX_LIMIT);
+        .clamp(1, contract::COCKPIT_OVERVIEW_MAX_LIMIT);
     let target_operation = invocation
         .payload
         .get("targetOperation")

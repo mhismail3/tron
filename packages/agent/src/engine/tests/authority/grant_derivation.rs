@@ -102,11 +102,6 @@ async fn grant_derive_rejects_child_expansion_by_authority_dimension() {
             json!({"expiresAt": (parent_expiry + ChronoDuration::minutes(1)).to_rfc3339()}),
             "expiry",
         ),
-        (
-            "empty-selector",
-            json!({"resourceSelectors": []}),
-            "resourceSelectors",
-        ),
     ];
 
     for (case, override_fields, expected) in cases {
@@ -131,6 +126,35 @@ async fn grant_derive_rejects_child_expansion_by_authority_dimension() {
             "rejected child grant {grant_id} must not be persisted"
         );
     }
+}
+
+#[tokio::test]
+async fn grant_derivation_allows_explicit_zero_resource_authority() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let result = derive_grant(
+        &handle,
+        json!({
+            "grantId": "zero-resource-authority",
+            "parentGrantId": "grant",
+            "allowedCapabilities": ["process::run"],
+            "allowedNamespaces": ["__no_namespace_authority__"],
+            "allowedAuthorityScopes": ["process.execute"],
+            "allowedResourceKinds": [],
+            "resourceSelectors": [],
+            "fileRoots": [tmp.path().to_string_lossy()],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "canDelegate": false
+        }),
+        "zero-resource-authority",
+    )
+    .await;
+
+    assert_eq!(result.error, None, "zero-resource grant should derive");
+    let grant = &result.value.expect("grant result")["grant"];
+    assert_eq!(grant["allowedResourceKinds"], json!([]));
+    assert_eq!(grant["resourceSelectors"], json!([]));
 }
 
 #[tokio::test]

@@ -59,8 +59,8 @@ This manifest records the evidence reviewed for the capability modularity scorec
 
 | Fact | Evidence |
 |---|---|
-| Registry count | 190 entries in `SUPPORTED_OPERATION_NAMES`. |
-| Dispatch parity | 190 static dispatch arms in `execute_operation`; no missing or extra names. |
+| Registry count | 188 entries in `SUPPORTED_OPERATION_NAMES`. |
+| Dispatch parity | 188 static dispatch arms in `execute_operation`; no missing or extra names. |
 | Provider surface | One model-facing tool, `capability::execute`. |
 | Machine inventory | `packages/agent/docs/capability-modularity-inventory.tsv` lists every operation exactly once. |
 | Deterministic grouping | The invariant test maps operation prefixes to the expected family and ownership class. |

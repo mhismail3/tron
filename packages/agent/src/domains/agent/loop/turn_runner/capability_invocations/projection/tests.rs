@@ -972,13 +972,13 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
             "capabilityBinding": {
                 "summary": {
                     "title": "Capability ownership visible",
-                    "totalOperations": 190,
+                    "totalOperations": 188,
                     "returnedOperations": 1
                 },
                 "operationList": {
                     "complete": true,
                     "returnedOperations": 1,
-                    "totalOperations": 190,
+                    "totalOperations": 188,
                     "targetOperation": "git_status",
                     "filterApplied": true
                 },

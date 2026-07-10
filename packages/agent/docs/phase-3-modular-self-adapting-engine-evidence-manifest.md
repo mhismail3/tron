@@ -1203,8 +1203,8 @@ and the existing device/notification execute operations.
 
 The accepted manifest declares device, notification, and resource authority
 needs bounded to the existing resource kinds and their kind selectors,
-preserves trusted system/admin authority for `device_register` and
-`device_unregister`, keeps `networkPolicy: none`, and marks the module
+preserves trusted system/admin authority requirements in test-only device
+registration fixtures, keeps `networkPolicy: none`, and marks the module
 non-installable and non-executable. Validation checks remain pending gates for
 APNs credential custody, APNs environment labels, entitlement proof,
 hardware-device validation, delivery-failure evidence, provider redaction, and

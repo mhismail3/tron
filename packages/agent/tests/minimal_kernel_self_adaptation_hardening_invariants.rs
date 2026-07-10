@@ -305,7 +305,7 @@ fn replacement_contract_is_verifiable_not_best_effort() {
 
     for required_test in [
         "capability_execute_dispatch_routes_git_status_through_active_replacement",
-        "active_route_rejects_unsafe_adapter_projection_without_builtin_fallback",
+        "active_route_rejects_unsafe_adapter_projection_without_builtin_success_substitution",
         "route_lookup_rejects_stale_binding_or_candidate_current_versions",
         "route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs",
         "active_route_lookup_rejects_multiple_active_routes_in_scope",

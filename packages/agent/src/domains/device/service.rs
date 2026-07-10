@@ -1,15 +1,21 @@
+#[cfg(test)]
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use crate::engine::{CreateResource, Invocation, ListResources, UpdateResource};
+#[cfg(test)]
+use crate::engine::{CreateResource, UpdateResource};
+use crate::engine::{Invocation, ListResources};
 use crate::shared::server::errors::CapabilityError;
 
+#[cfg(test)]
+use super::DEVICE_REGISTRATION_SCHEMA_ID;
 use super::contract::SCHEMA_VERSION;
 use super::projection::{device_summary, inspected_device};
 use super::support::*;
 use super::validation::*;
-use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
+use super::{DEVICE_REGISTRATION_KIND, Deps};
 
+#[cfg(test)]
 pub(crate) async fn register_device_value_at(
     deps: &Deps,
     invocation: &Invocation,
@@ -207,6 +213,7 @@ pub(crate) async fn register_device_value_at(
     }))
 }
 
+#[cfg(test)]
 pub(crate) async fn unregister_device_value_at(
     deps: &Deps,
     invocation: &Invocation,

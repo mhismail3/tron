@@ -743,7 +743,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "current_baseline",
         &[
             "Accepted Slice 13 adds server-owned `domains/device`",
-            "device_register",
             "device_registration",
             "raw APNs tokens never provider-visible",
         ],

@@ -1,24 +1,30 @@
 use serde_json::{Value, json};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
 use crate::engine::{
-    ActorKind, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceScope,
-    EngineResourceVersion, Invocation, PublishStreamEvent, WorkerId,
-    is_bootstrap_authority_grant_id,
+    ActorKind, EngineResource, PublishStreamEvent, WorkerId, is_bootstrap_authority_grant_id,
+};
+use crate::engine::{
+    EngineGrant, EngineResourceInspection, EngineResourceScope, EngineResourceVersion, Invocation,
 };
 use crate::shared::server::errors::CapabilityError;
 
+#[cfg(test)]
 use super::contract::{
-    DEVICE_LIFECYCLE_TOPIC, READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, SCHEMA_VERSION,
-    WORKER, WRITE_SCOPE,
+    DEVICE_LIFECYCLE_TOPIC, RESOURCE_WRITE_SCOPE, SCHEMA_VERSION, WORKER, WRITE_SCOPE,
 };
+use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE};
 use super::validation::*;
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
 
+#[cfg(test)]
 const DEFAULT_EVENT_FAMILIES: &[&str] = &[
     "approval", "question", "goal", "schedule", "web", "git", "job", "subagent", "memory", "system",
 ];
 
+#[cfg(test)]
 pub(super) struct RegistrationRecordInput<'a> {
     pub(super) state: &'a str,
     pub(super) device_id: &'a str,
@@ -38,6 +44,7 @@ pub(super) struct RegistrationRecordInput<'a> {
     pub(super) revision: u64,
 }
 
+#[cfg(test)]
 pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
     json!({
         "schemaVersion": SCHEMA_VERSION,
@@ -81,6 +88,7 @@ pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
     })
 }
 
+#[cfg(test)]
 pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityError> {
     let values = optional_string_array(payload, "eventFamilies")?.unwrap_or_else(|| {
         DEFAULT_EVENT_FAMILIES
@@ -109,6 +117,7 @@ pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityE
     Ok(families)
 }
 
+#[cfg(test)]
 pub(super) fn retention_policy(payload: &Value) -> Result<Value, CapabilityError> {
     let max_age_days = optional_u64(payload, "maxAgeDays")?
         .unwrap_or(DEFAULT_RETENTION_DAYS)
@@ -124,6 +133,7 @@ pub(super) fn retention_policy(payload: &Value) -> Result<Value, CapabilityError
     }))
 }
 
+#[cfg(test)]
 pub(super) async fn ensure_internal_write_authority(
     deps: &Deps,
     invocation: &Invocation,
@@ -309,6 +319,7 @@ pub(super) fn validate_device_resource_id(value: &str) -> Result<(), CapabilityE
     bounded_token("deviceRegistrationResourceId", value, 256).map(|_| ())
 }
 
+#[cfg(test)]
 pub(super) async fn publish_lifecycle_event(
     deps: &Deps,
     invocation: &Invocation,
@@ -340,6 +351,7 @@ pub(super) async fn publish_lifecycle_event(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn resource_policy() -> Value {
     json!({
         "owner": WORKER,
@@ -350,6 +362,7 @@ pub(super) fn resource_policy() -> Value {
     })
 }
 
+#[cfg(test)]
 fn authority_record(invocation: &Invocation) -> Value {
     json!({
         "grantId": invocation.causal_context.authority_grant_id.as_str(),
@@ -359,6 +372,7 @@ fn authority_record(invocation: &Invocation) -> Value {
     })
 }
 
+#[cfg(test)]
 fn trace_refs(invocation: &Invocation) -> Vec<Value> {
     vec![json!({
         "traceId": invocation.causal_context.trace_id.as_str(),
@@ -367,6 +381,7 @@ fn trace_refs(invocation: &Invocation) -> Vec<Value> {
     })]
 }
 
+#[cfg(test)]
 fn replay_refs(invocation: &Invocation) -> Vec<Value> {
     vec![json!({
         "kind": "engine_invocation",
@@ -379,6 +394,7 @@ pub(super) fn scope_ref(scope: &EngineResourceScope) -> Value {
     json!({"kind": scope.kind(), "value": scope.value()})
 }
 
+#[cfg(test)]
 pub(super) fn resource_ref(resource: &EngineResource, role: &str) -> Value {
     json!({
         "resourceId": resource.resource_id,
@@ -388,6 +404,7 @@ pub(super) fn resource_ref(resource: &EngineResource, role: &str) -> Value {
     })
 }
 
+#[cfg(test)]
 pub(super) fn version_ref(
     resource: &EngineResource,
     version: &EngineResourceVersion,
@@ -402,6 +419,7 @@ pub(super) fn version_ref(
     })
 }
 
+#[cfg(test)]
 pub(super) fn device_resource_id(
     scope: &EngineResourceScope,
     platform: &str,
@@ -424,6 +442,7 @@ pub(super) fn device_resource_id(
     )
 }
 
+#[cfg(test)]
 pub(super) fn assert_no_raw_token(payload: &Value, raw_token: &str) -> Result<(), CapabilityError> {
     let serialized = serde_json::to_string(payload)
         .map_err(|error| invalid(format!("serialize device record: {error}")))?;
@@ -433,10 +452,12 @@ pub(super) fn assert_no_raw_token(payload: &Value, raw_token: &str) -> Result<()
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+#[cfg(test)]
 pub(super) fn worker_id() -> Result<WorkerId, CapabilityError> {
     WorkerId::new(WORKER).map_err(engine_error)
 }
@@ -447,6 +468,7 @@ pub(super) fn engine_error(error: crate::engine::EngineError) -> CapabilityError
     }
 }
 
+#[cfg(test)]
 fn policy(message: impl Into<String>) -> CapabilityError {
     CapabilityError::Custom {
         code: "DEVICE_POLICY_DENIED".to_owned(),

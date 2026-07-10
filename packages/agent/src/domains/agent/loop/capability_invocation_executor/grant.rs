@@ -1,6 +1,6 @@
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
-    SUBAGENT_TASK_KIND, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CATALOG_DISCOVERY_REPORT_KIND, CausalContext,
+    EngineHostHandle, FunctionId, Invocation, SUBAGENT_TASK_KIND, TraceId,
 };
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
@@ -37,6 +37,7 @@ pub(super) async fn derive_capability_runtime_grant(
         .unwrap_or_default();
     let state_operation = matches!(operation, "state_get" | "state_set" | "state_list");
     let catalog_discovery_operation = is_catalog_discovery_operation(operation);
+    let catalog_conformance_operation = operation == "catalog_conformance";
     let capability_binding_operation = is_capability_binding_operation(operation);
     let capability_route_operation = is_capability_route_operation(operation);
     let capability_shadow_trial_operation = is_capability_shadow_trial_operation(operation);
@@ -84,7 +85,14 @@ pub(super) async fn derive_capability_runtime_grant(
             _ => {}
         }
     }
-    if matches!(
+    if catalog_conformance_operation {
+        allowed_authority_scopes.extend([
+            "catalog_discovery.write".to_owned(),
+            "resource.write".to_owned(),
+        ]);
+    } else if catalog_discovery_operation {
+        allowed_authority_scopes.push("catalog_discovery.read".to_owned());
+    } else if matches!(
         operation,
         "goal_create" | "goal_cancel" | "question_create" | "question_answer"
     ) {
@@ -569,6 +577,8 @@ pub(super) async fn derive_capability_runtime_grant(
         // State is the only execute operation family allowed to carry the
         // scratch-state resource kind. Every other operation must declare its
         // own resource custody below.
+    } else if catalog_conformance_operation {
+        allowed_resource_kinds.push(CATALOG_DISCOVERY_REPORT_KIND.to_owned());
     } else if catalog_discovery_operation {
         allowed_resource_kinds.push("catalog_discovery".to_owned());
     } else if diagnostic_read_operation {
@@ -1030,7 +1040,10 @@ fn has_non_empty_string(value: &Value, field: &str) -> bool {
 }
 
 fn is_catalog_discovery_operation(operation: &str) -> bool {
-    matches!(operation, "catalog_search" | "catalog_inspect")
+    matches!(
+        operation,
+        "catalog_search" | "catalog_inspect" | "catalog_conformance"
+    )
 }
 
 fn is_diagnostic_read_operation(operation: &str) -> bool {
