@@ -200,18 +200,9 @@ pub(super) async fn derive_capability_runtime_grant(
         })?;
     let grant_id = AuthorityGrantId::new(grant_id.to_owned())
         .map_err(|error| engine_error_to_failure(&error))?;
-    let causal_authority_scopes = resolved
-        .allowed_authority_scopes
-        .into_iter()
-        .filter(|scope| {
-            matches!(scope.as_str(), "capability.execute")
-                || operation.starts_with("state_")
-                || !matches!(scope.as_str(), "state.read" | "state.write")
-        })
-        .collect();
     Ok(CapabilityRuntimeGrant {
         grant_id,
-        authority_scopes: causal_authority_scopes,
+        authority_scopes: resolved.allowed_authority_scopes,
     })
 }
 

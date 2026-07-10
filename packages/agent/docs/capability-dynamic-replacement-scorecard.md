@@ -33,7 +33,7 @@ Successful routed invocations report route state
 
 Source of truth:
 
-- Registry: `packages/agent/src/domains/capability/operations/registry.rs`
+- Registry: `packages/agent/src/domains/capability/operations/operation_contract.rs`
 - Dispatcher seam: `packages/agent/src/domains/capability/operations/git.rs`
 - Route governance: `packages/agent/src/domains/capability_binding/route.rs`
 - Resource definitions: `packages/agent/src/engine/durability/resources/capability_binding_definitions.rs`

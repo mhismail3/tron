@@ -6,7 +6,7 @@ Current score: **100/100**
 
 The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now executes through the supervised module-runtime provider-safe adapter projection boundary; broader operation coverage stays governed by the dynamic replacement scorecard.
 
-Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`
+Source of truth: `packages/agent/src/domains/capability/operations/operation_contract.rs`
 
 Provider-visible surface: one tool, `capability::execute`
 
@@ -175,7 +175,7 @@ The Cockpit Visibility slice makes the scorecard inspectable from Engine Cockpit
 | Projection | Evidence |
 |---|---|
 | `capability_binding::cockpit_overview` | System-visible pure-read function registered by the `capability_binding` domain with `capability_binding.read`, low risk, and no write capability. |
-| Operation ownership | Joins `SUPPORTED_OPERATION_NAMES` and authoritative `operation_binding_metadata` with scoped binding/shadow-trial resources, so each operation reports a redacted current owner label, ownership status, built-in/module/locked flags, replacement/shadow/extension eligibility, redacted replacement target, readiness/next-action labels, and governance boundary from server truth. `capability_binding` is identified only as the cockpit projection source, not as the operation owner. |
+| Operation ownership | Joins `OperationId::ALL_NAMES` and authoritative `operation_binding_metadata` with scoped binding/shadow-trial resources, so each operation reports a redacted current owner label, ownership status, built-in/module/locked flags, replacement/shadow/extension eligibility, redacted replacement target, readiness/next-action labels, and governance boundary from server truth. `capability_binding` is identified only as the cockpit projection source, not as the operation owner. |
 | Scoped activity | Counts current-session/workspace binding requests, approvals, rejections, active policies, failed replacement attempts, shadow requests/approvals/rejections/runs/results, active route state, route events, routed invocations, failed-closed routes, route rollbacks, and rollback/disable/abort controls without returning raw resource IDs. The response separately reports total operations, returned operations, operation-list truncation, and bounded resource-scan completeness so small limits and capped scans cannot appear complete. |
 | Redaction and side effects | Response policy declares projection-only, metadata-only, server-owned truth with no dispatch-table mutation, hot swap, module activation/execution, package-manager, dependency, network, raw local material, grants, authority IDs, trace IDs, invocation IDs, token-like material, or hidden chain-of-thought. |
 | iOS rendering | Engine Cockpit keeps top-level summary compact and shows owner/status, replacement, attempts, rollback, and verification details only inside capability group and operation detail drill-down. |

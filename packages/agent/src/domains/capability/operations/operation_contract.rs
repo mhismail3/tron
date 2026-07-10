@@ -6,12 +6,12 @@
 //! this structural gate.
 
 use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
 
-use super::registry::is_supported_operation;
 #[cfg(test)]
-use super::registry::supported_operation_names;
-use crate::engine::FunctionId;
-use crate::engine::kernel::schema;
+use crate::engine::validate_engine_schema_definition;
+use crate::engine::{FunctionId, validate_engine_schema_payload};
+use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
 mod authority;
@@ -23,6 +23,231 @@ mod output;
 mod policy;
 mod records;
 
+macro_rules! define_operation_ids {
+    ($($variant:ident => $name:literal,)+) => {
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub(crate) enum OperationId {
+            $($variant,)+
+        }
+
+        impl OperationId {
+            pub(crate) const ALL_NAMES: &'static [&'static str] = &[$($name,)+];
+
+            pub(crate) fn parse(value: &str) -> Option<Self> {
+                match value {
+                    $($name => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+
+            pub(crate) const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $name,)+
+                }
+            }
+        }
+    };
+}
+
+define_operation_ids! {
+    Observe => "observe",
+    StateGet => "state_get",
+    StateSet => "state_set",
+    StateList => "state_list",
+    FilesystemRead => "filesystem_read",
+    FilesystemList => "filesystem_list",
+    FilesystemFind => "filesystem_find",
+    FilesystemGlob => "filesystem_glob",
+    FilesystemSearchText => "filesystem_search_text",
+    FilesystemDiff => "filesystem_diff",
+    FilesystemWrite => "filesystem_write",
+    FilesystemEdit => "filesystem_edit",
+    FilesystemApplyPatch => "filesystem_apply_patch",
+    GitStatus => "git_status",
+    GitDiff => "git_diff",
+    GitBranchInventory => "git_branch_inventory",
+    GitStage => "git_stage",
+    GitUnstage => "git_unstage",
+    GitCommit => "git_commit",
+    GitBranchStart => "git_branch_start",
+    ProcessRun => "process_run",
+    JobStart => "job_start",
+    JobStatus => "job_status",
+    JobList => "job_list",
+    JobLog => "job_log",
+    JobCancel => "job_cancel",
+    GoalCreate => "goal_create",
+    GoalList => "goal_list",
+    GoalInspect => "goal_inspect",
+    GoalCancel => "goal_cancel",
+    QuestionCreate => "question_create",
+    QuestionList => "question_list",
+    QuestionInspect => "question_inspect",
+    QuestionAnswer => "question_answer",
+    TraceList => "trace_list",
+    TraceGet => "trace_get",
+    LogRecent => "log_recent",
+    ReplayManifest => "replay_manifest",
+    CatalogSearch => "catalog_search",
+    CatalogInspect => "catalog_inspect",
+    CatalogConformance => "catalog_conformance",
+    MemoryStatus => "memory_status",
+    MemoryList => "memory_list",
+    MemoryInspect => "memory_inspect",
+    MemoryQueryList => "memory_query_list",
+    MemoryQueryInspect => "memory_query_inspect",
+    MemoryDecisionList => "memory_decision_list",
+    MemoryDecisionInspect => "memory_decision_inspect",
+    ContextControlStatus => "context_control_status",
+    ContextControlSnapshot => "context_control_snapshot",
+    ContextControlCompact => "context_control_compact",
+    ContextControlClear => "context_control_clear",
+    ContextControlActionList => "context_control_action_list",
+    ContextControlActionInspect => "context_control_action_inspect",
+    ContextSurvivorRecord => "context_survivor_record",
+    ContextSurvivorList => "context_survivor_list",
+    ContextSurvivorDisable => "context_survivor_disable",
+    ContextExclusionRecord => "context_exclusion_record",
+    ContextExclusionList => "context_exclusion_list",
+    ContextExclusionDisable => "context_exclusion_disable",
+    ContextPolicySnapshot => "context_policy_snapshot",
+    MediaCreate => "media_create",
+    MediaList => "media_list",
+    MediaInspect => "media_inspect",
+    MediaArchive => "media_archive",
+    ImportHistoryRecord => "import_history_record",
+    ImportHistoryList => "import_history_list",
+    ImportHistoryInspect => "import_history_inspect",
+    RepositoryTreeSnapshot => "repository_tree_snapshot",
+    RepositoryTreeList => "repository_tree_list",
+    RepositoryTreeInspect => "repository_tree_inspect",
+    ImportPreviewRecord => "import_preview_record",
+    ImportPreviewList => "import_preview_list",
+    ImportPreviewInspect => "import_preview_inspect",
+    ProgramExecutionRecord => "program_execution_record",
+    ProgramExecutionList => "program_execution_list",
+    ProgramExecutionInspect => "program_execution_inspect",
+    PromptArtifactRecord => "prompt_artifact_record",
+    PromptArtifactList => "prompt_artifact_list",
+    PromptArtifactInspect => "prompt_artifact_inspect",
+    UpdateDiagnosticRecord => "update_diagnostic_record",
+    UpdateDiagnosticList => "update_diagnostic_list",
+    UpdateDiagnosticInspect => "update_diagnostic_inspect",
+    DeviceList => "device_list",
+    DeviceInspect => "device_inspect",
+    NotificationSend => "notification_send",
+    NotificationList => "notification_list",
+    NotificationInspect => "notification_inspect",
+    NotificationMarkRead => "notification_mark_read",
+    NotificationMarkAllRead => "notification_mark_all_read",
+    ProceduralDefinitionRecord => "procedural_definition_record",
+    ProceduralStateList => "procedural_state_list",
+    ProceduralStateInspect => "procedural_state_inspect",
+    ProceduralActivationRequestRecord => "procedural_activation_request_record",
+    ProceduralActivationRequestList => "procedural_activation_request_list",
+    ProceduralActivationRequestInspect => "procedural_activation_request_inspect",
+    ProceduralActivationDecisionRecord => "procedural_activation_decision_record",
+    ProceduralActivationDecisionList => "procedural_activation_decision_list",
+    ProceduralActivationDecisionInspect => "procedural_activation_decision_inspect",
+    ScheduleCreate => "schedule_create",
+    ScheduleList => "schedule_list",
+    ScheduleInspect => "schedule_inspect",
+    ScheduleCancel => "schedule_cancel",
+    ScheduleFireDue => "schedule_fire_due",
+    ToolSourceList => "tool_source_list",
+    ToolSourceInspect => "tool_source_inspect",
+    SubagentLaunch => "subagent_launch",
+    SubagentStatus => "subagent_status",
+    SubagentResult => "subagent_result",
+    SubagentCancel => "subagent_cancel",
+    SubagentTaskList => "subagent_task_list",
+    SubagentTaskInspect => "subagent_task_inspect",
+    WorkerPackageList => "worker_package_list",
+    WorkerPackageInspect => "worker_package_inspect",
+    ModuleList => "module_list",
+    ModuleInspect => "module_inspect",
+    ModuleProposalRecord => "module_proposal_record",
+    ModuleProposalList => "module_proposal_list",
+    ModuleProposalInspect => "module_proposal_inspect",
+    ModuleValidationRecord => "module_validation_record",
+    ModuleValidationList => "module_validation_list",
+    ModuleValidationInspect => "module_validation_inspect",
+    ModuleInstallRequestRecord => "module_install_request_record",
+    ModuleInstallRequestList => "module_install_request_list",
+    ModuleInstallRequestInspect => "module_install_request_inspect",
+    ModuleInstallDecisionRecord => "module_install_decision_record",
+    ModuleInstallDecisionList => "module_install_decision_list",
+    ModuleInstallDecisionInspect => "module_install_decision_inspect",
+    ModuleDependencyRequestRecord => "module_dependency_request_record",
+    ModuleDependencyRequestList => "module_dependency_request_list",
+    ModuleDependencyRequestInspect => "module_dependency_request_inspect",
+    ModuleDependencyDecisionRecord => "module_dependency_decision_record",
+    ModuleDependencyDecisionList => "module_dependency_decision_list",
+    ModuleDependencyDecisionInspect => "module_dependency_decision_inspect",
+    ModuleDependencyPolicyActivate => "module_dependency_policy_activate",
+    ModuleDependencyPolicyList => "module_dependency_policy_list",
+    ModuleDependencyPolicyInspect => "module_dependency_policy_inspect",
+    CapabilityBindingRequestRecord => "capability_binding_request_record",
+    CapabilityBindingRequestList => "capability_binding_request_list",
+    CapabilityBindingRequestInspect => "capability_binding_request_inspect",
+    CapabilityBindingDecisionRecord => "capability_binding_decision_record",
+    CapabilityBindingDecisionList => "capability_binding_decision_list",
+    CapabilityBindingDecisionInspect => "capability_binding_decision_inspect",
+    CapabilityBindingPolicyActivate => "capability_binding_policy_activate",
+    CapabilityBindingPolicyList => "capability_binding_policy_list",
+    CapabilityBindingPolicyInspect => "capability_binding_policy_inspect",
+    CapabilityBindingCockpitOverview => "capability_binding_cockpit_overview",
+    CapabilityShadowTrialRequestRecord => "capability_shadow_trial_request_record",
+    CapabilityShadowTrialDecisionRecord => "capability_shadow_trial_decision_record",
+    CapabilityShadowTrialRunRecord => "capability_shadow_trial_run_record",
+    CapabilityShadowTrialEvidenceInspect => "capability_shadow_trial_evidence_inspect",
+    CapabilityReplacementCandidateRecord => "capability_replacement_candidate_record",
+    CapabilityReplacementCandidateList => "capability_replacement_candidate_list",
+    CapabilityReplacementCandidateInspect => "capability_replacement_candidate_inspect",
+    CapabilityRouteBindingRecord => "capability_route_binding_record",
+    CapabilityRouteBindingList => "capability_route_binding_list",
+    CapabilityRouteBindingInspect => "capability_route_binding_inspect",
+    CapabilityRouteActivate => "capability_route_activate",
+    CapabilityRouteDisable => "capability_route_disable",
+    CapabilityRouteRollback => "capability_route_rollback",
+    CapabilityRouteEventList => "capability_route_event_list",
+    CapabilityRouteEventInspect => "capability_route_event_inspect",
+    ModuleLifecycleRequest => "module_lifecycle_request",
+    ModuleLifecycleDecision => "module_lifecycle_decision",
+    ModuleLifecycleList => "module_lifecycle_list",
+    ModuleLifecycleInspect => "module_lifecycle_inspect",
+    ModuleProgramExecutionStart => "module_program_execution_start",
+    ModuleProgramExecutionStatus => "module_program_execution_status",
+    ModuleProgramExecutionCancel => "module_program_execution_cancel",
+    ModuleProgramExecutionCleanup => "module_program_execution_cleanup",
+    ModuleRuntimeRequest => "module_runtime_request",
+    ModuleRuntimeList => "module_runtime_list",
+    ModuleRuntimeInspect => "module_runtime_inspect",
+    ModuleRuntimeCancel => "module_runtime_cancel",
+    WebFetch => "web_fetch",
+    WebRobotsCheck => "web_robots_check",
+    WebSourceList => "web_source_list",
+    WebSourceInspect => "web_source_inspect",
+    WebSourceArchive => "web_source_archive",
+    WebResearchRequestRecord => "web_research_request_record",
+    WebResearchRequestList => "web_research_request_list",
+    WebResearchRequestInspect => "web_research_request_inspect",
+    WebResearchReviewRecord => "web_research_review_record",
+    WebResearchReviewList => "web_research_review_list",
+    WebResearchReviewInspect => "web_research_review_inspect",
+    WebResearchSourceRecord => "web_research_source_record",
+    WebResearchSourceList => "web_research_source_list",
+    WebResearchSourceInspect => "web_research_source_inspect",
+}
+
+pub(crate) const fn supported_operation_names() -> &'static [&'static str] {
+    OperationId::ALL_NAMES
+}
+
+pub(crate) fn is_supported_operation(operation: &str) -> bool {
+    OperationId::parse(operation).is_some()
+}
+
 pub(crate) use authority::{
     AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
     ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
@@ -32,49 +257,89 @@ pub(crate) use authority::{
 pub(super) use policy::InvocationScope;
 pub(crate) use policy::OperationEffect;
 
-/// One authoritative provider-visible structural contract.
+/// One authoritative contract for a provider-visible execute operation.
 #[derive(Clone, Debug)]
 pub(super) struct OperationContract {
     /// Closed top-level payload schema consumed by catalog and runtime.
     pub(super) input_schema: Value,
+    /// Provider-safe result schema consumed by catalog and runtime validation.
+    pub(super) output_schema: Value,
+    /// Ownership and governed-evolution classification.
+    pub(super) binding: OperationBindingMetadata,
+    /// Invocation scope required before domain dispatch.
+    pub(super) invocation_scope: InvocationScope,
+    /// Whether the caller must provide a stable idempotency key.
+    pub(super) requires_idempotency: bool,
+    /// Canonical operation effect used by grants and model guidance.
+    pub(super) effect: OperationEffect,
+    /// Maximum risk admitted by the single execute wrapper contract.
+    pub(super) risk: &'static str,
+    /// Static least-privilege authority policy resolved before dispatch.
+    pub(super) authority: AuthorityPolicy,
 }
 
-pub(super) fn binding_metadata(
-    operation: &str,
-) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
-    metadata::metadata(operation).map(|metadata| {
-        (
-            metadata.family,
-            metadata.current_owner,
-            metadata.ownership_class,
-            metadata.replacement_target,
-        )
-    })
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OperationBindingMetadata {
+    pub operation: &'static str,
+    pub family: &'static str,
+    pub current_owner: &'static str,
+    pub ownership_class: &'static str,
+    pub replacement_target: &'static str,
 }
 
-pub(super) fn invocation_scope(operation: &str) -> policy::InvocationScope {
-    policy::invocation_scope(operation)
+pub(crate) fn binding_metadata(operation: &str) -> Option<OperationBindingMetadata> {
+    contract(operation).map(|contract| contract.binding)
+}
+
+pub(super) fn invocation_scope(operation: &str) -> InvocationScope {
+    contract(operation)
+        .map(|contract| contract.invocation_scope)
+        .unwrap_or(InvocationScope::None)
 }
 
 pub(super) fn requires_idempotency(operation: &str) -> bool {
-    policy::requires_idempotency(operation)
+    contract(operation).is_some_and(|contract| contract.requires_idempotency)
 }
 
 pub(crate) fn effect(operation: &str) -> Option<OperationEffect> {
-    policy::effect(operation)
+    contract(operation).map(|contract| contract.effect)
+}
+
+pub(crate) fn risk(operation: &str) -> Option<&'static str> {
+    contract(operation).map(|contract| contract.risk)
 }
 
 pub(crate) fn authority_policy(operation: &str) -> Option<AuthorityPolicy> {
-    authority::policy(operation)
+    contract(operation).map(|contract| contract.authority)
 }
 
 /// Return the complete provider-visible contract for one supported operation.
 pub(super) fn contract(operation: &str) -> Option<OperationContract> {
+    let operation = OperationId::parse(operation)?.as_str();
     let input_schema = capability_binding::input_schema(operation)
         .or_else(|| governance::input_schema(operation))
         .or_else(|| records::input_schema(operation))
         .or_else(|| direct::input_schema(operation))?;
-    Some(OperationContract { input_schema })
+    let requires_idempotency = input_schema["required"]
+        .as_array()
+        .is_some_and(|required| required.contains(&json!("idempotencyKey")));
+    let metadata = metadata::metadata(operation)?;
+    Some(OperationContract {
+        input_schema,
+        output_schema: output::output_schema(operation)?,
+        binding: OperationBindingMetadata {
+            operation,
+            family: metadata.family,
+            current_owner: metadata.current_owner,
+            ownership_class: metadata.ownership_class,
+            replacement_target: metadata.replacement_target,
+        },
+        invocation_scope: policy::invocation_scope(operation),
+        requires_idempotency,
+        effect: policy::effect(operation)?,
+        risk: "medium",
+        authority: authority::policy(operation)?,
+    })
 }
 
 /// Return the exact schema for catalog projection or runtime validation.
@@ -83,7 +348,90 @@ pub(super) fn exact_input_schema(operation: &str) -> Option<Value> {
 }
 
 pub(super) fn exact_output_schema(operation: &str) -> Option<Value> {
-    output::output_schema(operation)
+    contract(operation).map(|contract| contract.output_schema)
+}
+
+/// Build the engine-facing host union mechanically from the exact operation
+/// contracts. The union is intentionally permissive only across operations;
+/// [`validate_payload`] still applies the selected operation's closed schema
+/// before authority derivation or dispatch.
+pub(crate) fn host_request_schema() -> Value {
+    let mut field_variants = BTreeMap::<String, Vec<Value>>::new();
+    for operation in supported_operation_names() {
+        let contract = contract(operation)
+            .unwrap_or_else(|| panic!("{operation} must have one canonical contract"));
+        let properties = contract.input_schema["properties"]
+            .as_object()
+            .expect("canonical operation schema properties");
+        for (field, field_schema) in properties {
+            if field == "operation" {
+                continue;
+            }
+            let variants = field_variants.entry(field.clone()).or_default();
+            if !variants.contains(field_schema) {
+                variants.push(field_schema.clone());
+            }
+        }
+    }
+
+    let mut properties = Map::new();
+    properties.insert(
+        "operation".to_owned(),
+        json!({
+            "type": "string",
+            "enum": supported_operation_names(),
+            "description": format!(
+                "One exact capability::execute operation. Never guess an operation name: use catalog_search, then catalog_inspect. Supported operations: {}.",
+                operation_list_text()
+            )
+        }),
+    );
+    for (field, mut variants) in field_variants {
+        let schema = if variants.len() == 1 {
+            variants.pop().expect("one schema variant")
+        } else {
+            json!({
+                "anyOf": variants,
+                "description": "Operation-specific field; catalog_inspect returns the exact selected-operation contract."
+            })
+        };
+        properties.insert(field, schema);
+    }
+
+    json!({
+        "type": "object",
+        "required": ["operation"],
+        "properties": properties,
+        "additionalProperties": false,
+        "schemaCompleteness": "mechanical_union_of_exact_operation_contracts"
+    })
+}
+
+pub(crate) fn operation_list_text() -> String {
+    match supported_operation_names() {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        names => {
+            let (last, rest) = names.split_last().expect("non-empty operation names");
+            format!("{}, or {}", rest.join(", "), last)
+        }
+    }
+}
+
+pub(crate) fn required_payload_fields(operation: &str) -> Option<Vec<String>> {
+    contract(operation).map(|contract| {
+        contract.input_schema["required"]
+            .as_array()
+            .expect("canonical operation schema required fields")
+            .iter()
+            .map(|field| {
+                field
+                    .as_str()
+                    .expect("canonical required field is a string")
+                    .to_owned()
+            })
+            .collect()
+    })
 }
 
 /// Validate membership and the operation's closed payload shape.
@@ -107,7 +455,7 @@ pub(crate) fn validate_payload(payload: &Value) -> Result<(), CapabilityError> {
         .expect("supported capability operation must have one canonical structural contract");
     let function_id =
         FunctionId::new("capability::execute").expect("canonical capability function id is valid");
-    schema::validate_payload(
+    validate_engine_schema_payload(
         &function_id,
         "operation request",
         &contract.input_schema,
@@ -115,6 +463,31 @@ pub(crate) fn validate_payload(payload: &Value) -> Result<(), CapabilityError> {
     )
     .map_err(|error| CapabilityError::InvalidParams {
         message: format!("Invalid {operation} payload: {error}"),
+    })
+}
+
+/// Validate the selected operation's serialized provider-safe result before it
+/// is committed to trace evidence or returned to the model.
+pub(crate) fn validate_output(
+    operation: &str,
+    result: &CapabilityResult,
+) -> Result<(), CapabilityError> {
+    let contract = contract(operation).ok_or_else(|| CapabilityError::Internal {
+        message: format!("missing canonical output contract for {operation}"),
+    })?;
+    let value = serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
+        message: format!("serialize {operation} result for validation: {error}"),
+    })?;
+    let function_id =
+        FunctionId::new("capability::execute").expect("canonical capability function id is valid");
+    validate_engine_schema_payload(
+        &function_id,
+        "operation result",
+        &contract.output_schema,
+        &value,
+    )
+    .map_err(|error| CapabilityError::Internal {
+        message: format!("invalid provider-safe output contract for {operation}: {error}"),
     })
 }
 
@@ -191,7 +564,7 @@ mod tests {
                 contract.input_schema["properties"]["operation"]["const"],
                 operation
             );
-            schema::validate_schema_definition(
+            validate_engine_schema_definition(
                 &FunctionId::new("capability::execute").expect("function id"),
                 "operation request",
                 &contract.input_schema,
@@ -244,6 +617,43 @@ mod tests {
                 "catalog and pre-authority runtime schema drifted for {operation}"
             );
         }
+    }
+
+    #[test]
+    fn host_union_is_derived_exactly_from_canonical_contract_fields() {
+        let host = host_request_schema();
+        let host_properties = host["properties"].as_object().expect("host properties");
+        assert_eq!(
+            host["schemaCompleteness"],
+            "mechanical_union_of_exact_operation_contracts"
+        );
+        assert_eq!(host["additionalProperties"], false);
+        assert_eq!(
+            host_properties["operation"]["enum"]
+                .as_array()
+                .expect("operation enum")
+                .len(),
+            supported_operation_names().len()
+        );
+
+        let mut expected_fields = std::collections::BTreeSet::new();
+        for operation in supported_operation_names() {
+            let schema = exact_input_schema(operation).expect("canonical input schema");
+            for field in schema["properties"]
+                .as_object()
+                .expect("operation properties")
+                .keys()
+            {
+                expected_fields.insert(field.clone());
+            }
+        }
+        assert_eq!(
+            host_properties
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected_fields
+        );
     }
 
     #[test]

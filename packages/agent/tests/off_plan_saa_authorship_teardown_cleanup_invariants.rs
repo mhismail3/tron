@@ -408,7 +408,7 @@ fn provider_visible_execute_surface_is_renarrowed() {
     let operations_dispatch =
         read_repo_file("packages/agent/src/domains/capability/operations/dispatch.rs");
     let operations_registry =
-        read_repo_file("packages/agent/src/domains/capability/operations/registry.rs");
+        read_repo_file("packages/agent/src/domains/capability/operations/operation_contract.rs");
 
     assert!(
         contract.contains("operation_list_text()"),

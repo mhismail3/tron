@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 const SCORECARD_PATH: &str = "packages/agent/docs/capability-modularity-scorecard.md";
 const INVENTORY_PATH: &str = "packages/agent/docs/capability-modularity-inventory.tsv";
 const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-manifest.md";
-const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
+const REGISTRY_PATH: &str =
+    "packages/agent/src/domains/capability/operations/operation_contract.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const README_PATH: &str = "README.md";
 const EXPECTED_OPERATION_COUNT: usize = 188;
@@ -106,18 +107,18 @@ fn registry_operations() -> Vec<String> {
     let mut in_registry = false;
     let mut operations = Vec::new();
     for line in registry.lines() {
-        if line.contains("SUPPORTED_OPERATION_NAMES") {
+        if line.trim() == "define_operation_ids! {" {
             in_registry = true;
             continue;
         }
-        if in_registry && line.trim() == "];" {
+        if in_registry && line.trim() == "}" {
             break;
         }
         if !in_registry {
             continue;
         }
         let trimmed = line.trim();
-        if trimmed.starts_with('"') {
+        if trimmed.contains("=> \"") {
             let operation = trimmed
                 .split('"')
                 .nth(1)
@@ -130,6 +131,17 @@ fn registry_operations() -> Vec<String> {
 
 fn dispatch_operations() -> Vec<String> {
     let dispatch = read_repo_file(DISPATCH_PATH);
+    let registry = read_repo_file(REGISTRY_PATH);
+    let names_by_variant: BTreeMap<_, _> = registry
+        .lines()
+        .skip_while(|line| line.trim() != "define_operation_ids! {")
+        .skip(1)
+        .take_while(|line| line.trim() != "}")
+        .filter_map(|line| {
+            let (variant, name) = line.trim().split_once(" => \"")?;
+            Some((variant.to_owned(), name.trim_end_matches("\",").to_owned()))
+        })
+        .collect();
     let mut in_match = false;
     let mut operations = Vec::new();
     for line in dispatch.lines() {
@@ -137,19 +149,22 @@ fn dispatch_operations() -> Vec<String> {
             in_match = true;
             continue;
         }
-        if in_match && line.contains("other => return Err(unsupported_operation(other))") {
+        if in_match && line.trim() == "})" {
             break;
         }
         if !in_match {
             continue;
         }
         let trimmed = line.trim();
-        if trimmed.starts_with('"') {
-            let operation = trimmed
-                .split('"')
-                .nth(1)
+        if let Some(rest) = trimmed.strip_prefix("OperationId::") {
+            let variant = rest
+                .split_whitespace()
+                .next()
                 .unwrap_or_else(|| panic!("dispatch operation row is malformed: {line}"));
-            operations.push(operation.to_owned());
+            let name = names_by_variant
+                .get(variant)
+                .unwrap_or_else(|| panic!("dispatch variant is not registered: {variant}"));
+            operations.push(name.clone());
         }
     }
     operations
@@ -721,7 +736,7 @@ fn capability_modularity_artifacts_are_linked_and_described() {
     for required in [
         "# Capability Modularity Scorecard",
         "Current score:",
-        "Source of truth: `packages/agent/src/domains/capability/operations/registry.rs`",
+        "Source of truth: `packages/agent/src/domains/capability/operations/operation_contract.rs`",
         "Provider-visible surface: one tool, `capability::execute`",
         "| CMS-0 | Registry/dispatch baseline |",
         "| CMS-8 | Docs and static gates |",

@@ -1,6 +1,6 @@
 //! Canonical ownership and evolution metadata for provider-visible operations.
 
-use super::super::registry::is_supported_operation;
+use super::OperationId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct OperationMetadata {
@@ -11,7 +11,7 @@ pub(super) struct OperationMetadata {
 }
 
 pub(super) fn metadata(operation: &str) -> Option<OperationMetadata> {
-    if !is_supported_operation(operation) {
+    if OperationId::parse(operation).is_none() {
         return None;
     }
     let values = match operation {
@@ -309,7 +309,7 @@ pub(super) fn metadata(operation: &str) -> Option<OperationMetadata> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::registry::supported_operation_names;
+    use super::super::supported_operation_names;
     use super::*;
 
     #[test]

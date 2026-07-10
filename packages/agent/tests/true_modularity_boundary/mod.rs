@@ -163,7 +163,7 @@ fn boundary_inventory_covers_tracked_sources() {
             "test-support",
         ),
         (
-            "packages/agent/src/domains/capability/module_validation_contract.rs",
+            "packages/agent/src/domains/capability/operations/operation_contract.rs",
             "contract",
         ),
         (

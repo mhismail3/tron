@@ -195,29 +195,21 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` host contract and compact provider bootstrap schema |
-//! | `capability_binding_contract` | Capability-binding and shadow-trial schema fields |
-//! | `context_control_contract` | Context-control snapshot/action/epoch schema fields |
-//! | `module_dependencies_contract` | Module-dependency request/decision/policy schema fields |
-//! | `web_research_contract` | Web research request/review/source schema fields |
-//! | `module_install_contract` | Module-install review request schema fields |
-//! | `module_lifecycle_contract` | Module-lifecycle request schema fields |
-//! | `module_runtime_contract` | Module-runtime supervisor schema fields |
-//! | `module_validation_contract` | Module-validation request schema fields |
 //! | `operations` | Direct primitive operation implementations |
-//! | `operations::operation_contract` | Canonical input/output, ownership, effect, context, idempotency, and base-authority contracts for every execute operation |
+//! | `operations::operation_contract` | Canonical typed operation registry plus input/output, ownership, effect, context, idempotency, and base-authority contracts for every execute operation |
 //! | `pool` | Operation/catalog-function classification for agent-facing discovery |
-//! | `scheduler_contract` | Schedule-specific request schema fields |
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
 //! Provider integrations must expose exactly this one tool. Additional behavior
 //! can only appear later as agent-owned state or generated helper substrate, not
 //! as checked-in target functions.
-//! Supported `execute` operation spellings live in the operations registry and
-//! are reused by provider guidance, catalog
+//! Supported `execute` operation spellings live in the typed
+//! `operations::operation_contract::OperationId` registry and are reused by provider guidance, catalog
 //! discovery, unsupported-operation diagnostics, and stream/UI operation
 //! identity. Do not duplicate freehand operation lists elsewhere.
-//! Host validation keeps the complete closed request union, while providers see
+//! The host request union is generated from those exact operation contracts,
+//! while providers see
 //! only the catalog bootstrap fields plus an open operation payload. Every
 //! supported operation has one closed contract under `operations::operation_contract`;
 //! catalog inspection, pre-authority validation, context/effect classification,
@@ -246,35 +238,20 @@
 //! trace-safe before unsafe payload rejection. None expands the public
 //! `/engine` protocol.
 
-mod capability_binding_contract;
-mod context_control_contract;
 pub(crate) mod contract;
-mod import_history_contract;
-mod import_preview_contract;
-mod media_contract;
-mod module_dependencies_contract;
-mod module_install_contract;
-mod module_lifecycle_contract;
-mod module_runtime_contract;
-mod module_validation_contract;
 mod operations;
 pub(crate) mod pool;
-mod program_execution_contract;
-mod prompt_artifacts_contract;
-mod repository_tree_contract;
-mod scheduler_contract;
 
+pub(crate) use operations::execute_value;
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
     AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
     ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
     OperationBindingMetadata, ProceduralResourceSet, ResourceKindPolicy, SelectorAddition,
     SubagentResourceSet, WorkerPackageKindSource, authority_policy, is_supported_operation,
-    operation_binding_metadata, operation_list_text, validate_operation_payload,
+    operation_binding_metadata, operation_host_request_schema, operation_list_text,
+    operation_required_payload_fields, operation_risk, validate_operation_payload,
 };
-mod update_diagnostics_contract;
-mod web_research_contract;
-pub(crate) use operations::execute_value;
 
 use std::sync::Arc;
 

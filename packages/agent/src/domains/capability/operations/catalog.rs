@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::ok_result;
-use super::registry::{is_supported_operation, supported_operation_names};
+use super::{is_supported_operation, supported_operation_names};
 use crate::domains::capability::Deps;
 use crate::domains::capability::pool::{
     catalog_function_agent_usage_projection, catalog_function_pool_metadata,
@@ -238,33 +238,29 @@ fn execute_operation_inspect_projection_with_options(
     include_output_schema: bool,
 ) -> Value {
     let id = format!("execute::{operation}");
-    let agent_usage = operation_agent_usage_projection(operation).unwrap_or_else(|| {
-        json!({
-            "callable": true,
-            "tool": "capability::execute",
-            "operation": operation,
-            "arguments": {"operation": operation}
-        })
-    });
+    let agent_usage = operation_agent_usage_projection(operation)
+        .expect("supported execute operation has canonical agent usage");
     let input_schema = execute_operation_input_schema(operation);
     let required_payload_fields = input_schema
         .get("required")
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_else(|| vec![Value::String("operation".to_owned())]);
+        .expect("canonical input contract declares required payload fields");
     let effect = agent_usage.get("effect").cloned();
     let preflight = agent_usage.get("preflight").cloned();
     let schema_completeness = input_schema
         .get("schemaCompleteness")
         .cloned()
         .expect("canonical input contract declares schema completeness");
-    let capability_pool = operation_pool_metadata(operation).map(|metadata| {
-        operation_contextual_pool_projection(
-            operation,
-            serde_json::to_value(metadata.provider_projection())
-                .expect("capability pool projection serializes"),
+    let capability_pool = operation_contextual_pool_projection(
+        operation,
+        serde_json::to_value(
+            operation_pool_metadata(operation)
+                .expect("supported execute operation has canonical pool metadata")
+                .provider_projection(),
         )
-    });
+        .expect("capability pool projection serializes"),
+    );
     let model_facing_invocation = json!({
         "tool": "capability::execute",
         "operation": operation,

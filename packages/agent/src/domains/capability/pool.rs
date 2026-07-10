@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{
-    operation_binding_metadata,
+    operation_binding_metadata, operation_required_payload_fields, operation_risk,
     operations::{OperationEffect, operation_effect},
 };
 
@@ -177,6 +177,8 @@ pub(crate) struct CapabilityPoolProjection<'a> {
 
 pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolMetadata<'static>> {
     let binding = operation_binding_metadata(operation)?;
+    let effect = operation_effect(operation)?;
+    let risk = operation_risk(operation)?;
     let (audience, visibility) =
         operation_audience_and_visibility(binding.family, binding.ownership_class);
     let replacement_class = replacement_class_for_ownership(binding.ownership_class);
@@ -195,8 +197,8 @@ pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolM
         replacement_class,
         agent_default_visibility: visibility,
         purpose,
-        effect: "execute_contract",
-        risk: "execute_contract",
+        effect: effect.as_str(),
+        risk,
         authority_boundary,
         evidence_boundary,
         minimality_decision,
@@ -467,6 +469,8 @@ fn operation_starts_work(operation: &str) -> bool {
 }
 
 fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_class: &str) -> Value {
+    let required_payload_fields = operation_required_payload_fields(operation)
+        .expect("supported operation has canonical required fields");
     if operation == "capability_shadow_trial_request_record" {
         return json!({
             "authorityScopes": [
@@ -483,23 +487,7 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
             ],
             "networkPolicy": "none",
             "agentStateInherited": false,
-            "requiredPayloadFields": [
-                "operation",
-                "title",
-                "targetOperation",
-                "ownershipClass",
-                "bindingMode",
-                "candidateAdapter",
-                "authorityConstraints",
-                "contractEvidenceRefs",
-                "evidenceRefs",
-                "staleVersionGuard",
-                "rollbackRef",
-                "disableRef",
-                "abortRef",
-                "rationale",
-                "idempotencyKey"
-            ],
+            "requiredPayloadFields": required_payload_fields,
             "example": {
                 "operation": "capability_shadow_trial_request_record",
                 "targetOperation": "git_status",
@@ -534,6 +522,7 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
             "resourceSelectors": capability_binding_kind_selectors_for_operation(operation),
             "networkPolicy": "none",
             "agentStateInherited": false,
+            "requiredPayloadFields": required_payload_fields,
             "readOnlyInstruction": if operation_is_read_only_safe(operation) {
                 "safe to call during read-only inspection"
             } else {
@@ -561,6 +550,7 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
             ],
             "networkPolicy": "none",
             "agentStateInherited": false,
+            "requiredPayloadFields": required_payload_fields,
             "readOnlyInstruction": if write {
                 "do not call during read-only inspection; use context_control_status, list, or inspect operations instead"
             } else {
@@ -575,7 +565,7 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
             "authority": "derived_read_only_adapter_authority_for_exact_operation",
             "networkPolicy": if matches!(family, "web") { "declared_by_operation" } else { "none" },
             "agentStateInherited": false,
-            "requiredPayloadFields": ["operation"],
+            "requiredPayloadFields": required_payload_fields,
             "readOnlyInstruction": "safe to call during read-only session work after inspecting the execute::<operation> schema when field names are unclear",
             "beforeCalling": "Use the exact operation selector and operation-specific top-level fields only. Do not request replacement, route, shadow, binding, or rollback authority unless the user task is explicitly about replacing this operation."
         });
@@ -585,6 +575,7 @@ fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_cla
         "authority": authority_boundary_for_ownership(ownership_class),
         "evidence": evidence_boundary_for_ownership(ownership_class),
         "networkPolicy": if matches!(family, "web") { "declared_by_operation" } else { "none_unless_schema_requires_otherwise" },
+        "requiredPayloadFields": required_payload_fields,
         "beforeCalling": "Put operation-specific fields at the top level of the capability::execute payload and inspect the operation schema when required fields are unclear."
     })
 }

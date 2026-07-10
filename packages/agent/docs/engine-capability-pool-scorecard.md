@@ -60,7 +60,7 @@ diagnostic bridges such as catalog-discovery functions or the
 
 | ID | Check | Weight | Status | Evidence |
 |---|---|---:|---|---|
-| ECP-0 | Execute operation coverage | 15 | passed | Every `SUPPORTED_OPERATION_NAMES` entry has one `agent_operation` inventory row. |
+| ECP-0 | Execute operation coverage | 15 | passed | Every `OperationId::ALL_NAMES` entry has one `agent_operation` inventory row. |
 | ECP-1 | Catalog function coverage | 15 | passed | Every startup-registered catalog function has one `catalog_function` inventory row. |
 | ECP-2 | Surface distinction | 10 | passed | Discovery annotations explain when to invoke `capability::execute` versus inspect catalog substrate. |
 | ECP-3 | Replacement classification | 15 | passed | Every row is classified as `runtime_routable`, `producer_extensible`, or `kernel_evolution_only`. |

@@ -53,7 +53,6 @@ mod procedural;
 mod process;
 mod program_execution;
 mod prompt_artifacts;
-mod registry;
 mod replay;
 mod repository_tree;
 mod scheduler;
@@ -80,14 +79,13 @@ use trace::{complete_trace_record, started_trace_record};
 pub(crate) use operation_contract::validate_payload as validate_operation_payload;
 pub(crate) use operation_contract::{
     AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
-    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy, OperationEffect,
-    ProceduralResourceSet, ResourceKindPolicy, SelectorAddition, SubagentResourceSet,
-    WorkerPackageKindSource, authority_policy, effect as operation_effect,
-};
-pub(crate) use registry::supported_operation_names;
-pub(crate) use registry::{
-    OperationBindingMetadata, is_supported_operation, operation_binding_metadata,
-    operation_list_text,
+    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
+    OperationBindingMetadata, OperationEffect, OperationId, ProceduralResourceSet,
+    ResourceKindPolicy, SelectorAddition, SubagentResourceSet, WorkerPackageKindSource,
+    authority_policy, binding_metadata as operation_binding_metadata, effect as operation_effect,
+    host_request_schema as operation_host_request_schema, is_supported_operation,
+    operation_list_text, required_payload_fields as operation_required_payload_fields,
+    risk as operation_risk, supported_operation_names,
 };
 
 pub(crate) async fn execute_value(
@@ -96,6 +94,8 @@ pub(crate) async fn execute_value(
 ) -> Result<Value, CapabilityError> {
     operation_contract::validate_payload(&invocation.payload)?;
     let operation = required_str(&invocation.payload, "operation")?.to_owned();
+    let operation_id = OperationId::parse(&operation)
+        .expect("canonical payload validation guarantees a supported operation id");
     validate_execute_context(invocation, &operation)?;
     info!(
         component = "agent.execute",
@@ -125,7 +125,9 @@ pub(crate) async fn execute_value(
             session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
             "primitive execute operation bypassed trace mutation"
         );
-        return result_value(replay_manifest(invocation, deps).await?);
+        let result = replay_manifest(invocation, deps).await?;
+        operation_contract::validate_output(&operation, &result)?;
+        return result_value(result);
     }
 
     let operation_at = Utc::now();
@@ -148,7 +150,12 @@ pub(crate) async fn execute_value(
         "primitive execute trace record started"
     );
 
-    let result = dispatch::execute_operation(&operation, invocation, deps, operation_at).await;
+    let result = dispatch::execute_operation(operation_id, invocation, deps, operation_at)
+        .await
+        .and_then(|result| {
+            operation_contract::validate_output(&operation, &result)?;
+            Ok(result)
+        });
     match result {
         Ok(result) => {
             complete_trace_record(

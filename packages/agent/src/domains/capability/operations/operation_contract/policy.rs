@@ -1,6 +1,6 @@
 //! Canonical invocation-context and effect policy for provider-visible operations.
 
-use super::super::registry::is_supported_operation;
+use super::OperationId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OperationEffect {
@@ -8,6 +8,17 @@ pub(crate) enum OperationEffect {
     MetadataWrite,
     StateChange,
     StartsWork,
+}
+
+impl OperationEffect {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::MetadataWrite => "metadata_write",
+            Self::StateChange => "state_change",
+            Self::StartsWork => "starts_work",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -18,7 +29,7 @@ pub(crate) enum InvocationScope {
 }
 
 pub(super) fn invocation_scope(operation: &str) -> InvocationScope {
-    if !is_supported_operation(operation) {
+    if OperationId::parse(operation).is_none() {
         return InvocationScope::None;
     }
     if matches!(
@@ -129,59 +140,8 @@ pub(super) fn invocation_scope(operation: &str) -> InvocationScope {
     }
 }
 
-pub(super) fn requires_idempotency(operation: &str) -> bool {
-    is_supported_operation(operation)
-        && matches!(
-            operation,
-            "filesystem_write"
-                | "catalog_conformance"
-                | "filesystem_edit"
-                | "filesystem_apply_patch"
-                | "git_stage"
-                | "git_unstage"
-                | "git_commit"
-                | "git_branch_start"
-                | "job_start"
-                | "job_cancel"
-                | "goal_create"
-                | "goal_cancel"
-                | "question_create"
-                | "question_answer"
-                | "web_fetch"
-                | "web_robots_check"
-                | "web_source_archive"
-                | "media_create"
-                | "media_archive"
-                | "import_history_record"
-                | "repository_tree_snapshot"
-                | "import_preview_record"
-                | "program_execution_record"
-                | "prompt_artifact_record"
-                | "update_diagnostic_record"
-                | "module_program_execution_start"
-                | "module_program_execution_cancel"
-                | "module_program_execution_cleanup"
-                | "notification_send"
-                | "notification_mark_read"
-                | "notification_mark_all_read"
-                | "context_control_snapshot"
-                | "context_control_compact"
-                | "context_control_clear"
-                | "context_survivor_record"
-                | "context_survivor_disable"
-                | "context_exclusion_record"
-                | "context_exclusion_disable"
-                | "context_policy_snapshot"
-                | "subagent_launch"
-                | "subagent_cancel"
-                | "schedule_create"
-                | "schedule_cancel"
-                | "schedule_fire_due"
-        )
-}
-
 pub(super) fn effect(operation: &str) -> Option<OperationEffect> {
-    is_supported_operation(operation).then(|| {
+    OperationId::parse(operation).map(|_| {
         if is_read_only(operation) {
             OperationEffect::ReadOnly
         } else if starts_work(operation) {
@@ -281,7 +241,7 @@ fn starts_work(operation: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::registry::supported_operation_names;
+    use super::super::supported_operation_names;
     use super::*;
 
     #[test]

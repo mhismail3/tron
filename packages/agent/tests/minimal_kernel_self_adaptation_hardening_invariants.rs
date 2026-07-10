@@ -17,7 +17,8 @@ const MODULARITY_SCORECARD_PATH: &str = "packages/agent/docs/capability-modulari
 const MODULARITY_INVENTORY_PATH: &str = "packages/agent/docs/capability-modularity-inventory.tsv";
 const DYNAMIC_SCORECARD_PATH: &str =
     "packages/agent/docs/capability-dynamic-replacement-scorecard.md";
-const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
+const REGISTRY_PATH: &str =
+    "packages/agent/src/domains/capability/operations/operation_contract.rs";
 const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs";
 const CONTEXT_CONTROL_PATH: &str = "packages/agent/src/domains/context_control/mod.rs";
 const CONTEXT_CONTROL_TESTS_PATH: &str = "packages/agent/src/domains/context_control/tests.rs";
@@ -50,18 +51,18 @@ fn registry_operations() -> Vec<String> {
     let mut in_registry = false;
     let mut operations = Vec::new();
     for line in registry.lines() {
-        if line.contains("SUPPORTED_OPERATION_NAMES") {
+        if line.trim() == "define_operation_ids! {" {
             in_registry = true;
             continue;
         }
-        if in_registry && line.trim() == "];" {
+        if in_registry && line.trim() == "}" {
             break;
         }
         if !in_registry {
             continue;
         }
         let trimmed = line.trim();
-        if trimmed.starts_with('"') {
+        if trimmed.contains("=> \"") {
             let operation = trimmed
                 .split('"')
                 .nth(1)

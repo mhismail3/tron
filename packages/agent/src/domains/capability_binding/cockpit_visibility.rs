@@ -968,12 +968,8 @@ fn operation_visibility(
         family: metadata.family.to_owned(),
         family_label: family_label(metadata.family),
         capability_pool,
-        agent_usage: operation_agent_usage_projection(metadata.operation).unwrap_or_else(|| {
-            serde_json::json!({
-                "callable": false,
-                "reason": "Operation usage metadata is unavailable."
-            })
-        }),
+        agent_usage: operation_agent_usage_projection(metadata.operation)
+            .expect("supported operation has canonical agent usage metadata"),
         owner: owner_projection(
             metadata.family,
             metadata.current_owner,

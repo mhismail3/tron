@@ -1806,7 +1806,6 @@ packages/agent/src/domains/procedural/static_tests.rs	test	test_harness	TPC-10/P
 packages/agent/src/domains/procedural/tests.rs	test	test_harness	TPC-10/P2AER-S11A	focused Slice 11A procedural authority scope schema lifecycle bounds redaction and non-goal regression coverage
 packages/agent/src/engine/durability/resources/procedural_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S11A	built-in procedural_record resource kind and schema definition
 packages/agent/src/domains/capability/operations/scheduler.rs	implementation	capability_execute	TPC-10/P2AER-S12	provider execute adapter for durable scheduler record and explicit fire-due operations
-packages/agent/src/domains/capability/scheduler_contract.rs	implementation	capability_execute	TPC-10/P2AER-S12	scheduler request schema helper split out of the broad capability contract
 packages/agent/src/domains/scheduler/mod.rs	implementation	scheduler	TPC-10/P2AER-S12	scheduler domain docs and registration boundary
 packages/agent/src/domains/scheduler/errors.rs	implementation	scheduler	TPC-10/P2AER-S12	scheduler error helper
 packages/agent/src/domains/scheduler/planning.rs	implementation	scheduler	TPC-10/P2AER-S12	deterministic trigger due planning and missed-run policy helper
@@ -1839,7 +1838,6 @@ packages/agent/src/domains/notifications/tests/mod.rs	test	test_harness	TPC-10/P
 packages/agent/src/domains/notifications/tests/support.rs	test	test_harness	TPC-10/P2AER-S13	focused Slice 13 notification deterministic fixture grant device and leak assertion support
 packages/agent/src/domains/notifications/validation.rs	implementation	notifications	TPC-10/P2AER-S13	notification payload bounds family severity refs and retention validation helpers
 packages/agent/src/engine/durability/resources/notification_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S13	built-in device_registration notification and notification_delivery resource schemas
-packages/agent/src/domains/capability/media_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14A	media request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/media.rs	implementation	capability_execute	TPC-10/P2AER-S14A	provider execute adapter for redacted durable media_artifact create list inspect and archive operations
 packages/agent/src/domains/media/authority.rs	implementation	media	TPC-10/P2AER-S14A	media authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/media/contract.rs	implementation	media	TPC-10/P2AER-S14A	media worker contract constants retained for authority and lifecycle stream ownership
@@ -1850,7 +1848,6 @@ packages/agent/src/domains/media/tests.rs	test	test_harness	TPC-10/P2AER-S14A	fo
 packages/agent/src/domains/media/validation.rs	implementation	media	TPC-10/P2AER-S14A	media MIME size raw payload refs transcription and retention validation helpers
 packages/agent/src/engine/durability/resources/media_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14A	built-in media_artifact resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_import_history_tests.rs	test	test_harness	TPC-10/P2AER-S14B	focused Slice 14B import-history runtime grant regression coverage
-packages/agent/src/domains/capability/import_history_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14B	import-history request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/import_history.rs	implementation	capability_execute	TPC-10/P2AER-S14B	provider execute adapter for redacted durable import_history_record record list and inspect operations
 packages/agent/src/domains/import_history/authority.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/import_history/contract.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history worker contract constants retained for authority and lifecycle stream ownership
@@ -1861,7 +1858,6 @@ packages/agent/src/domains/import_history/tests.rs	test	test_harness	TPC-10/P2AE
 packages/agent/src/domains/import_history/validation.rs	implementation	import_history	TPC-10/P2AER-S14B	import-history raw-payload tree path refs idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/import_history_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14B	built-in import_history_record resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_update_diagnostics_tests.rs	test	test_harness	TPC-10/P2AER-S14C	focused Slice 14C update-diagnostics runtime grant regression coverage
-packages/agent/src/domains/capability/update_diagnostics_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14C	update-diagnostics request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/update_diagnostics.rs	implementation	capability_execute	TPC-10/P2AER-S14C	provider execute adapter for redacted durable update_diagnostic_record record list and inspect operations
 packages/agent/src/domains/update_diagnostics/authority.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/update_diagnostics/contract.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics worker contract constants retained for authority and lifecycle stream ownership
@@ -1872,7 +1868,6 @@ packages/agent/src/domains/update_diagnostics/tests.rs	test	test_harness	TPC-10/
 packages/agent/src/domains/update_diagnostics/validation.rs	implementation	update_diagnostics	TPC-10/P2AER-S14C	update-diagnostics raw-payload package endpoint command refs idempotency and retention validation helpers
 packages/agent/src/engine/durability/resources/update_diagnostics_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14C	built-in update_diagnostic_record resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_repository_tree_tests.rs	test	test_harness	TPC-10/P2AER-S14D	focused Slice 14D review-candidate repository-tree runtime grant regression coverage
-packages/agent/src/domains/capability/repository_tree_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14D	repository-tree request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/repository_tree.rs	implementation	capability_execute	TPC-10/P2AER-S14D	provider execute adapter for redacted durable repository_tree_snapshot snapshot list and inspect operations
 packages/agent/src/domains/repository_tree/authority.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/repository_tree/contract.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree worker contract constants retained for authority and lifecycle stream ownership
@@ -1883,7 +1878,6 @@ packages/agent/src/domains/repository_tree/tests.rs	test	test_harness	TPC-10/P2A
 packages/agent/src/domains/repository_tree/validation.rs	implementation	repository_tree	TPC-10/P2AER-S14D	repository-tree raw-content unsafe-path refs idempotency count and retention validation helpers
 packages/agent/src/engine/durability/resources/repository_tree_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14D	built-in repository_tree_snapshot resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_import_preview_tests.rs	test	test_harness	TPC-10/P2AER-S14E	focused Slice 14E review-candidate import-preview runtime grant regression coverage
-packages/agent/src/domains/capability/import_preview_contract.rs	implementation	capability_execute	TPC-10/P2AER-S14E	import-preview request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/import_preview.rs	implementation	capability_execute	TPC-10/P2AER-S14E	provider execute adapter for redacted durable import_preview record list and inspect operations
 packages/agent/src/domains/import_preview/authority.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/import_preview/contract.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview worker contract constants retained for authority and lifecycle stream ownership
@@ -1894,7 +1888,6 @@ packages/agent/src/domains/import_preview/tests.rs	test	test_harness	TPC-10/P2AE
 packages/agent/src/domains/import_preview/validation.rs	implementation	import_preview	TPC-10/P2AER-S14E	import-preview raw-payload unsafe-path refs idempotency count and retention validation helpers
 packages/agent/src/engine/durability/resources/import_preview_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S14E	built-in import_preview resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_program_execution_tests.rs	test	test_harness	TPC-10/P2AER-S15A	focused Slice 15A implementation-candidate program-execution runtime grant regression coverage
-packages/agent/src/domains/capability/program_execution_contract.rs	implementation	capability_execute	TPC-10/P2AER-S15A	program-execution request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/program_execution.rs	implementation	capability_execute	TPC-10/P2AER-S15A	provider execute adapter for redacted durable program_execution_record record list and inspect operations
 packages/agent/src/domains/program_execution/authority.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/program_execution/contract.rs	implementation	program_execution	TPC-10/P2AER-S15A	program-execution worker contract constants retained for authority and lifecycle stream ownership
@@ -1906,7 +1899,6 @@ packages/agent/src/domains/program_execution/validation.rs	implementation	progra
 packages/agent/src/engine/durability/resources/program_execution_definitions.rs	implementation	resource_kernel	TPC-10/P2AER-S15A	built-in program_execution_record resource schema
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_prompt_artifacts_tests.rs	test	test_harness	TPC-10/P2AER-S16A	focused Slice 16A accepted prompt-artifact runtime grant regression coverage
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_authoring_tests.rs	test	test_harness	TPC-10/P3MSA-S23B	focused Slice 23B implementation-candidate module proposal runtime grant regression coverage
-packages/agent/src/domains/capability/prompt_artifacts_contract.rs	implementation	capability_execute	TPC-10/P2AER-S16A	prompt-artifact request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/prompt_artifacts.rs	implementation	capability_execute	TPC-10/P2AER-S16A	provider execute adapter for redacted durable prompt_artifact record list and inspect operations
 packages/agent/src/domains/prompt_artifacts/authority.rs	implementation	prompt_artifacts	TPC-10/P2AER-S16A	prompt-artifact authority guard owner for exact resource kind selectors current scope isolation and networkPolicy none
 packages/agent/src/domains/prompt_artifacts/contract.rs	implementation	prompt_artifacts	TPC-10/P2AER-S16A	prompt-artifact worker contract constants retained for authority and lifecycle stream ownership
@@ -1934,7 +1926,6 @@ packages/agent/src/domains/module_authoring/tests.rs	test	test_harness	TPC-10/P3
 packages/agent/src/domains/module_authoring/validation.rs	implementation	module_authoring	TPC-10/P3MSA-S23B	module proposal bounded ref unsafe field path prompt-injection idempotency and text validation owner
 packages/agent/src/engine/durability/resources/module_authoring_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23B	built-in module_proposal resource schema for inert authoring records
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_validation_tests.rs	test	test_harness	TPC-10/P3MSA-S23C	focused Slice 23C module-validation runtime grant regression coverage
-packages/agent/src/domains/capability/module_validation_contract.rs	implementation	capability_execute	TPC-10/P3MSA-S23C	module-validation request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/module_validation.rs	implementation	capability_execute	TPC-10/P3MSA-S23C	provider execute adapter for bounded module_validation_report record list and inspect operations
 packages/agent/src/domains/module_validation/authority.rs	implementation	module_validation	TPC-10/P3MSA-S23C	module validation authority guard owner for exact resource kind selectors current scope isolation inspect resource selectors and networkPolicy none
 packages/agent/src/domains/module_validation/contract.rs	implementation	module_validation	TPC-10/P3MSA-S23C	module-validation worker contract constants retained for authority and lifecycle stream ownership
@@ -1946,7 +1937,6 @@ packages/agent/src/domains/module_validation/tests.rs	test	test_harness	TPC-10/P
 packages/agent/src/domains/module_validation/validation.rs	implementation	module_validation	TPC-10/P3MSA-S23C	module validation bounded ref unsafe field path prompt-injection shell-command-like ref idempotency and text validation owner
 packages/agent/src/engine/durability/resources/module_validation_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23C	built-in module_validation_report resource schema for inert validation records
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_install_tests.rs	test	test_harness	TPC-10/P3MSA-S23D	focused Slice 23D module-install runtime grant regression coverage
-packages/agent/src/domains/capability/module_install_contract.rs	implementation	capability_execute	TPC-10/P3MSA-S23D	module-install request and decision schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/module_install.rs	implementation	capability_execute	TPC-10/P3MSA-S23D	provider execute adapter for bounded module_install_request and module_install_decision record list and inspect operations
 packages/agent/src/domains/module_install/approval_gate.rs	implementation	module_install	TPC-10/P3MSA-S23D	module install approval freshness and derived-authority check owner
 packages/agent/src/domains/module_install/authority.rs	implementation	module_install	TPC-10/P3MSA-S23D	module install authority guard owner for exact resource kind selectors current scope isolation approval-derived authority inspect resource selectors and networkPolicy none
@@ -1962,7 +1952,6 @@ packages/agent/src/domains/module_install/tests.rs	test	test_harness	TPC-10/P3MS
 packages/agent/src/domains/module_install/validation.rs	implementation	module_install	TPC-10/P3MSA-S23D	module install bounded ref text approval dependency rollback lifecycle and idempotency validation owner
 packages/agent/src/engine/durability/resources/module_install_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23D	built-in module_install_request and module_install_decision resource schemas for inert review gate records
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_lifecycle_tests.rs	test	test_harness	TPC-10/P3MSA-S23E	focused Slice 23E module-lifecycle runtime grant regression coverage
-packages/agent/src/domains/capability/module_lifecycle_contract.rs	implementation	capability_execute	TPC-10/P3MSA-S23E	module-lifecycle request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/module_lifecycle.rs	implementation	capability_execute	TPC-10/P3MSA-S23E	provider execute adapter for bounded module_lifecycle_state request decision list and inspect operations
 packages/agent/src/domains/module_lifecycle/approval_gate.rs	implementation	module_lifecycle	TPC-10/P3MSA-S23E	module lifecycle approval freshness and derived-authority check owner
 packages/agent/src/domains/module_lifecycle/authority.rs	implementation	module_lifecycle	TPC-10/P3MSA-S23E	module lifecycle authority guard owner for exact resource kind selectors current scope isolation inspect resource selectors and networkPolicy none
@@ -1982,7 +1971,6 @@ packages/agent/docs/phase-3-modular-self-adapting-engine-evidence-manifest.md	do
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.md	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 narrative inventory for module-plane roadmap and successor-readiness classification
 packages/agent/docs/phase-3-modular-self-adapting-engine-inventory.tsv	docs	docs/static gates	TPC-10/P3MSA-S23A	Phase 3 machine-readable module-plane slice inventory
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_runtime_tests.rs	test	test_harness	TPC-10/P3MSA-S23F	focused Slice 23F module-runtime runtime grant regression coverage
-packages/agent/src/domains/capability/module_runtime_contract.rs	implementation	capability_execute	TPC-10/P3MSA-S23F	module-runtime request schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/module_runtime.rs	implementation	capability_execute	TPC-10/P3MSA-S23F	provider execute adapter for bounded module_runtime_state request list inspect and cancel operations
 packages/agent/src/domains/module_runtime/authority.rs	implementation	module_runtime	TPC-10/P3MSA-S23F	module runtime authority guard owner for exact resource kind selectors current scope isolation lifecycle selector runtime selector and networkPolicy none
 packages/agent/src/domains/module_runtime/contract.rs	implementation	module_runtime	TPC-10/P3MSA-S23F	module-runtime worker contract constants retained for authority schema and lifecycle stream ownership
@@ -1999,7 +1987,6 @@ packages/agent/src/domains/capability/operations/module_program_execution.rs	imp
 packages/agent/src/domains/capability/operations/module_program_execution_tests.rs	test	test_harness	TPC-10/P3MSA-INV-010/P3MSA-INV-011	focused Slice 24B module-owned jobs program execution coverage plus Slice 24C subagent delegation integration coverage
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_module_dependencies_tests.rs	test	test_harness	TPC-10/P3MSA-S23G	focused Slice 23G module-dependencies runtime grant regression coverage
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_file_git_tests.rs	test	test_harness	TPC-10/P3MSA-S24A	focused accepted Slice 24A file/git runtime grant regression coverage
-packages/agent/src/domains/capability/module_dependencies_contract.rs	implementation	capability_execute	TPC-10/P3MSA-S23G	module-dependencies request decision and policy schema helper split out of the broad capability contract file
 packages/agent/src/domains/capability/operations/module_dependencies.rs	implementation	capability_execute	TPC-10/P3MSA-S23G	provider execute adapter for bounded module dependency request decision and policy operations
 packages/agent/src/domains/module_dependencies/authority.rs	implementation	module_dependencies	TPC-10/P3MSA-S23G	module dependencies authority guard owner for exact resource kind selectors current scope isolation request decision policy selectors and networkPolicy none
 packages/agent/src/domains/module_dependencies/contract.rs	implementation	module_dependencies	TPC-10/P3MSA-S23G	module-dependencies worker contract constants retained for authority schema and lifecycle stream ownership
@@ -2019,7 +2006,6 @@ packages/agent/src/domains/module_activity/service.rs	implementation	module_acti
 packages/agent/src/domains/module_activity/tests.rs	test	test_harness	TPC-10/P3MSA-S23H	focused Slice 23H module activity redaction deterministic fixture state derivation and legacy-panel guard coverage
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_web_research_tests.rs	test	test_harness	TPC-10/P3MSA-INV-014	focused Slice 24F web research grant exact selector and networkPolicy none coverage
 packages/agent/src/domains/capability/operations/web_research.rs	implementation	capability_execute	TPC-10/P3MSA-INV-014	provider execute adapter for metadata-only web research request review source record list and inspect operations
-packages/agent/src/domains/capability/web_research_contract.rs	implementation	capability_execute	TPC-10/P3MSA-INV-014	web research capability operation schema and provider-visible contract constants
 packages/agent/src/domains/web_research/authority.rs	implementation	web_research	TPC-10/P3MSA-INV-014	web research exact authority and networkPolicy none guard owner
 packages/agent/src/domains/web_research/contract.rs	implementation	web_research	TPC-10/P3MSA-INV-014	web research worker id stream schema and authority constants owner
 packages/agent/src/domains/web_research/mod.rs	implementation	web_research	TPC-10/P3MSA-INV-014	web research metadata-only domain root and worker registration owner
@@ -2045,11 +2031,9 @@ packages/agent/src/domains/context_control/service.rs	implementation	context_con
 packages/agent/src/domains/context_control/snapshot.rs	implementation	context_control	TPC-10/context-control	context-control snapshot composition builder for bounded prompt blocks token counts refs and epoch lookup
 packages/agent/src/domains/context_control/tests.rs	test	test_harness	TPC-10/context-control	focused context-control redaction authority idempotency epoch and runtime compaction audit regressions
 packages/agent/src/domains/context_control/validation.rs	implementation	context_control	TPC-10/context-control	context-control bounded input idempotency unsafe-text rejection and error mapping helper owner
-packages/agent/src/domains/capability/context_control_contract.rs	implementation	capability_execute	TPC-10/context-control	context-control capability execute schema and provider-visible contract constants
 packages/agent/src/domains/capability/operations/context_control.rs	implementation	capability_execute	TPC-10/context-control	provider execute adapter for context-control snapshot compact clear action list and inspect operations
 packages/agent/src/domains/capability/operations/common.rs	implementation	capability_execute	TPC-10/HRA-5	shared primitive execute parsing result formatting and unsupported-operation helpers retained inside capability operations owner
 packages/agent/src/domains/capability/operations/module_manifest.rs	implementation	capability_execute	TPC-10/P3MSA-S23A	module manifest list and inspect execute adapter retained inside capability execute owner
-packages/agent/src/domains/capability/operations/registry.rs	implementation	capability_execute	TPC-10/context-control	primitive execute operation name registry retained for provider guidance schema tests and dispatch
 packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs	test	test_harness	TPC-10/P3MSA-S23C	compatibility retention row for Slice 23C module-validation runtime grant regression coverage path
 packages/agent/src/domains/model/providers/anthropic/stream_handler/tests/stream_handler_content_block_start_tests.rs	test	test_harness	TPC-10/AHA-9	Anthropic stream content-block-start regression coverage retained after dead-code cleanup
 packages/agent/src/domains/tool_sources/service/write_fixtures.rs	test	test_harness	TPC-10/P2AER-S9A	tool-source write-operation test fixtures retained after service fixture split
@@ -2078,7 +2062,6 @@ packages/agent/src/domains/agent_briefing/mod.rs	implementation	agent_domain	TPC
 packages/agent/src/domains/agent_briefing/projection.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
 packages/agent/src/domains/agent_briefing/service.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
 packages/agent/src/domains/agent_briefing/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
-packages/agent/src/domains/capability/capability_binding_contract.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
 packages/agent/src/domains/capability/operations/capability_binding.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
 packages/agent/src/domains/capability/operations/dispatch.rs	implementation	capability_execute	TPC-hardening	capability execute dispatcher split from operations module to preserve registry and dispatch parity ownership
 packages/agent/src/domains/capability_binding/authority.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries

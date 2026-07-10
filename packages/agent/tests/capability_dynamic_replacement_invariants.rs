@@ -13,8 +13,11 @@ const SCORECARD_PATH: &str = "packages/agent/docs/capability-dynamic-replacement
 const INVENTORY_PATH: &str = "packages/agent/docs/capability-dynamic-replacement-inventory.tsv";
 const EVIDENCE_PATH: &str =
     "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md";
-const REGISTRY_PATH: &str = "packages/agent/src/domains/capability/operations/registry.rs";
+const REGISTRY_PATH: &str =
+    "packages/agent/src/domains/capability/operations/operation_contract.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
+const METADATA_PATH: &str =
+    "packages/agent/src/domains/capability/operations/operation_contract/metadata.rs";
 const GIT_OPERATION_PATH: &str = "packages/agent/src/domains/capability/operations/git.rs";
 const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs";
 const VALIDATION_PATH: &str = "packages/agent/src/domains/capability_binding/validation.rs";
@@ -83,18 +86,18 @@ fn registry_operations() -> BTreeSet<String> {
     let mut in_registry = false;
     let mut operations = BTreeSet::new();
     for line in registry.lines() {
-        if line.contains("SUPPORTED_OPERATION_NAMES") {
+        if line.trim() == "define_operation_ids! {" {
             in_registry = true;
             continue;
         }
-        if in_registry && line.trim() == "];" {
+        if in_registry && line.trim() == "}" {
             break;
         }
         if !in_registry {
             continue;
         }
         let trimmed = line.trim();
-        if trimmed.starts_with('"') {
+        if trimmed.contains("=> \"") {
             let operation = trimmed
                 .split('"')
                 .nth(1)
@@ -103,6 +106,19 @@ fn registry_operations() -> BTreeSet<String> {
         }
     }
     operations
+}
+
+fn operation_variant(operation: &str) -> String {
+    operation
+        .split('_')
+        .map(|part| {
+            let mut characters = part.chars();
+            match characters.next() {
+                Some(first) => first.to_uppercase().chain(characters).collect(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 #[test]
@@ -219,7 +235,7 @@ fn dynamic_replacement_registry_and_dispatch_expose_route_operations_once() {
             "registry missing dynamic route operation {operation}"
         );
         assert!(
-            dispatch.contains(&format!("\"{operation}\"")),
+            dispatch.contains(&format!("OperationId::{}", operation_variant(operation))),
             "dispatch missing dynamic route operation {operation}"
         );
     }
@@ -318,7 +334,7 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
 
 #[test]
 fn dynamic_replacement_governance_operations_are_not_themselves_replaceable() {
-    let registry = read_repo_file(REGISTRY_PATH);
+    let metadata = read_repo_file(METADATA_PATH);
     let modularity_inventory =
         read_repo_file("packages/agent/docs/capability-modularity-inventory.tsv");
 
@@ -337,7 +353,7 @@ fn dynamic_replacement_governance_operations_are_not_themselves_replaceable() {
         );
     }
     assert!(
-        registry.contains("\"governance_locked\""),
+        metadata.contains("\"governance_locked\""),
         "operation metadata must continue to expose governance_locked class"
     );
 }

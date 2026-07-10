@@ -267,6 +267,9 @@ pub use kernel::ids::{
     WorkerId,
 };
 pub use kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+pub(crate) use kernel::schema::validate_payload as validate_engine_schema_payload;
+#[cfg(test)]
+pub(crate) use kernel::schema::validate_schema_definition as validate_engine_schema_definition;
 pub use kernel::types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,

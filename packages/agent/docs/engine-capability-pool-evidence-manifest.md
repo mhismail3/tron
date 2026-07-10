@@ -6,7 +6,7 @@ Status: **passed**
 
 | Area | Source |
 |---|---|
-| Execute operation registry | `packages/agent/src/domains/capability/operations/registry.rs` |
+| Execute operation registry | `packages/agent/src/domains/capability/operations/operation_contract.rs` |
 | Execute catalog bridge | `packages/agent/src/domains/capability/operations/catalog.rs` |
 | Capability-pool classification | `packages/agent/src/domains/capability/pool.rs` |
 | Domain worker startup registration | `packages/agent/src/domains/registration/mod.rs` |

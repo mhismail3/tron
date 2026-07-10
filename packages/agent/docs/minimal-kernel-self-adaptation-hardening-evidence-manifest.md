@@ -11,7 +11,7 @@ runtime behavior.
 
 | Area | File |
 |---|---|
-| Capability registry and operation ownership | `packages/agent/src/domains/capability/operations/registry.rs` |
+| Capability registry and operation ownership | `packages/agent/src/domains/capability/operations/operation_contract.rs` |
 | Capability dispatcher | `packages/agent/src/domains/capability/operations/dispatch.rs` |
 | First route seam | `packages/agent/src/domains/capability/operations/git.rs` |
 | Capability binding domain docs | `packages/agent/src/domains/capability_binding/mod.rs` |

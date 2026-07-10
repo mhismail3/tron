@@ -238,6 +238,15 @@ impl AuthorityPolicy {
 const EMPTY: &[&str] = &[];
 const CATALOG_READ: &[&str] = &["catalog_discovery.read"];
 const CATALOG_WRITE: &[&str] = &["catalog_discovery.write", "resource.write"];
+const SCHEDULER_READ: &[&str] = &["scheduler.read", "resource.read"];
+const SCHEDULER_WRITE: &[&str] = &["scheduler.write", "resource.read", "resource.write"];
+const SCHEDULER_FIRE: &[&str] = &[
+    "scheduler.fire",
+    "scheduler.write",
+    "resource.read",
+    "resource.write",
+];
+const TOOL_SOURCE_READ: &[&str] = &["tool_sources.read", "resource.read"];
 const STATE_READ: &[&str] = &["state.read"];
 const STATE_WRITE: &[&str] = &["state.write"];
 const FILESYSTEM_READ: &[&str] = &["filesystem.read", "resource.read"];
@@ -489,19 +498,8 @@ pub(crate) fn policy(operation: &str) -> Option<AuthorityPolicy> {
 
 fn base_scope_additions(operation: &str) -> Option<&'static [&'static str]> {
     let scopes = match operation {
-        "observe"
-        | "process_run"
-        | "trace_list"
-        | "trace_get"
-        | "log_recent"
-        | "replay_manifest"
-        | "schedule_create"
-        | "schedule_list"
-        | "schedule_inspect"
-        | "schedule_cancel"
-        | "schedule_fire_due"
-        | "tool_source_list"
-        | "tool_source_inspect" => EMPTY,
+        "observe" | "process_run" | "trace_list" | "trace_get" | "log_recent"
+        | "replay_manifest" => EMPTY,
         "state_get" | "state_list" => STATE_READ,
         "state_set" => STATE_WRITE,
         "filesystem_read"
@@ -521,6 +519,10 @@ fn base_scope_additions(operation: &str) -> Option<&'static [&'static str]> {
         "goal_cancel" | "question_create" | "question_answer" => GOAL_READ_WRITE,
         "catalog_search" | "catalog_inspect" => CATALOG_READ,
         "catalog_conformance" => CATALOG_WRITE,
+        "schedule_list" | "schedule_inspect" => SCHEDULER_READ,
+        "schedule_create" | "schedule_cancel" => SCHEDULER_WRITE,
+        "schedule_fire_due" => SCHEDULER_FIRE,
+        "tool_source_list" | "tool_source_inspect" => TOOL_SOURCE_READ,
         "memory_status"
         | "memory_list"
         | "memory_inspect"
@@ -768,6 +770,12 @@ fn resource_kind_policy(operation: &str) -> ResourceKindPolicy {
         "trace_list" | "trace_get" => ResourceKindPolicy::Static(&["trace_record"]),
         "log_recent" => ResourceKindPolicy::Static(&["log_entry"]),
         "replay_manifest" => ResourceKindPolicy::Static(&["session"]),
+        "schedule_create" | "schedule_list" | "schedule_inspect" | "schedule_cancel"
+        | "schedule_fire_due" => ResourceKindPolicy::Static(&["schedule", "schedule_run"]),
+        "tool_source_list" => ResourceKindPolicy::Static(&["tool_source_proposal"]),
+        "tool_source_inspect" => {
+            ResourceKindPolicy::Static(&["tool_source_proposal", "tool_source_conformance_report"])
+        }
         "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel" => {
             ResourceKindPolicy::Static(&["goal"])
         }
@@ -1122,19 +1130,19 @@ fn selector_additions(operation: &str) -> &'static [SelectorAddition] {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::registry::SUPPORTED_OPERATION_NAMES;
+    use super::super::OperationId;
     use super::*;
     use std::collections::BTreeSet;
 
     #[test]
     fn every_supported_operation_has_exactly_one_policy_and_unknowns_fail_closed() {
-        assert_eq!(SUPPORTED_OPERATION_NAMES.len(), 188);
-        let unique = SUPPORTED_OPERATION_NAMES
+        assert_eq!(OperationId::ALL_NAMES.len(), 188);
+        let unique = OperationId::ALL_NAMES
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
-        assert_eq!(unique.len(), SUPPORTED_OPERATION_NAMES.len());
-        for operation in SUPPORTED_OPERATION_NAMES {
+        assert_eq!(unique.len(), OperationId::ALL_NAMES.len());
+        for operation in OperationId::ALL_NAMES {
             assert!(
                 policy(operation).is_some(),
                 "missing authority policy for {operation}"
@@ -1150,7 +1158,7 @@ mod tests {
 
     #[test]
     fn policies_are_explicit_local_and_never_restore_agent_state_or_wildcards() {
-        for operation in SUPPORTED_OPERATION_NAMES {
+        for operation in OperationId::ALL_NAMES {
             let policy = policy(operation).expect("covered operation");
             assert!(matches!(
                 policy.network_policy(),
@@ -1187,13 +1195,6 @@ mod tests {
             "trace_get",
             "log_recent",
             "replay_manifest",
-            "schedule_create",
-            "schedule_list",
-            "schedule_inspect",
-            "schedule_cancel",
-            "schedule_fire_due",
-            "tool_source_list",
-            "tool_source_inspect",
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -1205,18 +1206,11 @@ mod tests {
             "process_run",
             "catalog_search",
             "catalog_inspect",
-            "schedule_create",
-            "schedule_list",
-            "schedule_inspect",
-            "schedule_cancel",
-            "schedule_fire_due",
-            "tool_source_list",
-            "tool_source_inspect",
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();
 
-        for operation in SUPPORTED_OPERATION_NAMES {
+        for operation in OperationId::ALL_NAMES {
             let policy = policy(operation).expect("covered operation");
             assert_eq!(
                 policy.base_scope_additions().is_empty(),
@@ -1233,7 +1227,7 @@ mod tests {
 
     #[test]
     fn network_authority_is_declared_only_for_live_web_operations() {
-        let declared = SUPPORTED_OPERATION_NAMES
+        let declared = OperationId::ALL_NAMES
             .iter()
             .copied()
             .filter(|operation| {

@@ -6,10 +6,10 @@
 
 use serde_json::{Value, json};
 
-use super::super::registry::SUPPORTED_OPERATION_NAMES;
+use super::OperationId;
 
 pub(super) fn output_schema(operation: &str) -> Option<Value> {
-    if !SUPPORTED_OPERATION_NAMES.contains(&operation) {
+    if OperationId::parse(operation).is_none() {
         return None;
     }
 
@@ -586,8 +586,8 @@ mod tests {
 
     #[test]
     fn every_supported_operation_has_one_output_contract() {
-        assert_eq!(SUPPORTED_OPERATION_NAMES.len(), 188);
-        for operation in SUPPORTED_OPERATION_NAMES {
+        assert_eq!(OperationId::ALL_NAMES.len(), 188);
+        for operation in OperationId::ALL_NAMES {
             assert!(
                 output_schema(operation).is_some(),
                 "missing output schema for {operation}"
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn every_output_contract_is_a_valid_schema_definition() {
-        for operation in SUPPORTED_OPERATION_NAMES {
+        for operation in OperationId::ALL_NAMES {
             let contract = output_schema(operation).expect("registered output schema");
             schema::validate_schema_definition(&function_id(), "operation response", &contract)
                 .unwrap_or_else(|error| panic!("invalid {operation} output schema: {error}"));
