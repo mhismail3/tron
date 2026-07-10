@@ -1,8 +1,6 @@
 use crate::domains::capability::{
-    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
-    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
-    ProceduralResourceSet, ResourceKindPolicy, SelectorAddition, SubagentResourceSet,
-    WorkerPackageKindSource, authority_policy,
+    AuthorityPolicy, ConditionalAuthority, ResourceKindPolicy, SelectorAddition,
+    WorkerPackageKindSource, authority_policy, operation_risk,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
@@ -81,6 +79,20 @@ pub(super) async fn derive_capability_runtime_grant(
             FailureOrigin::Engine,
         )
     })?;
+    let operation_risk = operation_risk(operation).ok_or_else(|| {
+        FailureEnvelope::new(
+            ENGINE_POLICY_VIOLATION,
+            FailureCategory::Engine,
+            "Capability runtime authority has no canonical risk for the requested operation",
+            false,
+            false,
+            FailureOrigin::Engine,
+        )
+    })?;
+    let grant_max_risk = match operation_risk {
+        "high" | "critical" => operation_risk,
+        _ => "medium",
+    };
     let resolution_context = RuntimeResolutionContext {
         engine_host,
         session_id,
@@ -118,11 +130,7 @@ pub(super) async fn derive_capability_runtime_grant(
     });
     let idempotency_key = format!(
         "capability-runtime-grant:v1:{}",
-        sha256_hex(
-            serde_json::to_string(&idempotency_material)
-                .unwrap_or_else(|_| "{}".to_owned())
-                .as_bytes()
-        )
+        sha256_hex(idempotency_material.to_string().as_bytes())
     );
     let derive_context = CausalContext::new(
         ActorId::new("system:capability-runtime")
@@ -144,7 +152,7 @@ pub(super) async fn derive_capability_runtime_grant(
         "resourceSelectors": resolved.resource_selectors,
         "fileRoots": [working_directory],
         "networkPolicy": resolved.network_policy,
-        "maxRisk": "medium",
+        "maxRisk": grant_max_risk,
         "budget": {
             "remainingInvocations": 2,
             "remainingProcessMs": 120000
@@ -158,6 +166,7 @@ pub(super) async fn derive_capability_runtime_grant(
             "providerInvocationId": invocation_id,
             "modelPrimitiveName": model_primitive_name,
             "operation": operation,
+            "operationRisk": operation_risk,
             "turn": turn,
             "runId": run_id,
             "workingDirectory": working_directory,
@@ -267,6 +276,16 @@ async fn resolve_runtime_authority(
             push_resource_selector(&mut resource_selectors, resource_id, operation)?;
         }
     }
+    if let Some(arguments) = context.args.as_object() {
+        for (field, value) in arguments {
+            if !(field.ends_with("ResourceId") || field.ends_with("ResourceRef")) {
+                continue;
+            }
+            if let Some(resource_id) = value.as_str() {
+                push_resource_selector(&mut resource_selectors, resource_id, operation)?;
+            }
+        }
+    }
     apply_selector_additions(
         policy.selector_additions(),
         operation,
@@ -287,13 +306,12 @@ async fn resolve_runtime_authority(
         ));
     }
 
-    let network_policy: NetworkPolicy = policy.network_policy();
     Ok(ResolvedRuntimeAuthority {
         allowed_capabilities,
         allowed_authority_scopes,
         allowed_resource_kinds,
         resource_selectors,
-        network_policy: network_policy.as_str(),
+        network_policy: policy.network_policy().as_str(),
     })
 }
 
@@ -342,19 +360,11 @@ fn resolve_dynamic_resource_kinds(
     match policy {
         ResourceKindPolicy::None
         | ResourceKindPolicy::Static(_)
-        | ResourceKindPolicy::CapabilityRouteUnion => {}
-        ResourceKindPolicy::CapabilityBinding(resources) => {
-            let _: CapabilityBindingResourceSet = resources;
-        }
-        ResourceKindPolicy::ModuleRuntime(resources) => {
-            let _: ModuleRuntimeResourceSet = resources;
-        }
-        ResourceKindPolicy::ModuleProgramExecution(resources) => {
-            let _: ModuleProgramExecutionResourceSet = resources;
-        }
-        ResourceKindPolicy::Subagent(resources) => {
-            let _: SubagentResourceSet = resources;
-        }
+        | ResourceKindPolicy::CapabilityRouteUnion
+        | ResourceKindPolicy::CapabilityBinding(_)
+        | ResourceKindPolicy::ModuleRuntime(_)
+        | ResourceKindPolicy::ModuleProgramExecution(_)
+        | ResourceKindPolicy::Subagent(_) => {}
         ResourceKindPolicy::OptionalGoal {
             field, linked_kind, ..
         } => {
@@ -376,7 +386,6 @@ fn resolve_dynamic_resource_kinds(
             kind_field,
             resources,
         } => {
-            let resources: ProceduralResourceSet = resources;
             procedural_kind(args, kind_field, operation)?;
             resource_kinds.extend(
                 resources
@@ -749,11 +758,7 @@ pub(super) fn stable_capability_invocation_material(
         "workspaceId": workspace_id,
         "arguments": effective_args
     });
-    serde_json::to_string(&payload).unwrap_or_else(|_| {
-        format!(
-            "{run_id:?}:{session_id}:{turn}:{invocation_id}:{model_primitive_name}:{working_directory}:{workspace_id:?}:{effective_args}",
-        )
-    })
+    payload.to_string()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -779,11 +784,7 @@ pub(super) fn model_capability_invocation_idempotency_key(
         });
         return format!(
             "model-capability-caller-idempotency:v1:{}",
-            sha256_hex(
-                serde_json::to_string(&material)
-                    .unwrap_or_else(|_| format!("{session_id}:{operation}:{caller_key}"))
-                    .as_bytes()
-            )
+            sha256_hex(material.to_string().as_bytes())
         );
     }
     let material = stable_capability_invocation_material(

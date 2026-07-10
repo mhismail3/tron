@@ -1,7 +1,8 @@
 use super::*;
 
-#[tokio::test]
-async fn capability_execute_inner_goal_operations_require_resource_authority() {
+const EXECUTE_FUNCTION_ID: &str = "capability::execute";
+
+fn setup_execute_handler() -> (EngineHostHandle, Arc<AtomicUsize>) {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("capability", "capability"), false)
@@ -11,168 +12,7 @@ async fn capability_execute_inner_goal_operations_require_resource_authority() {
         calls: calls.clone(),
     });
     let mut execute = FunctionDefinition::new(
-        fid("capability::execute"),
-        wid("capability"),
-        "execute",
-        VisibilityScope::System,
-        EffectClass::DelegatedInvocation,
-    )
-    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
-    execute.risk_level = RiskLevel::Medium;
-    handle
-        .register_function_for_setup(execute, Some(handler), false)
-        .unwrap();
-
-    let denied_scope_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-without-goals-write",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute"],
-            "allowedResourceKinds": ["goal"],
-            "resourceSelectors": ["kind:goal"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-inner-scope-test"}
-        }),
-    )
-    .await;
-    assert_eq!(denied_scope_grant.error, None);
-
-    let denied_scope = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "goal_create",
-                "objective": "must be denied before execute handler runs"
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-without-goals-write"),
-                trace("execute-goal-scope-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-goal-scope-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_scope.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow required authority goals.write")
-    ));
-
-    let denied_kind_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-agent-state-only",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "goals.write"],
-            "allowedResourceKinds": ["agent_state"],
-            "resourceSelectors": ["kind:agent_state"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-inner-resource-kind-test"}
-        }),
-    )
-    .await;
-    assert_eq!(denied_kind_grant.error, None);
-
-    let denied_goal = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "goal_create",
-                "objective": "must be denied before execute handler runs"
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-agent-state-only"),
-                trace("execute-goal-kind-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-goal-kind-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_goal.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow resource kind goal")
-    ));
-
-    let denied_selector_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-question-without-answer-selector",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "goals.write"],
-            "allowedResourceKinds": ["user_question", "goal_answer"],
-            "resourceSelectors": ["resource:user_question:authorized"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-inner-created-kind-selector-test"}
-        }),
-    )
-    .await;
-    assert_eq!(denied_selector_grant.error, None);
-
-    let denied_answer = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "question_answer",
-                "questionResourceId": "user_question:authorized",
-                "expectedQuestionVersionId": "ver_authorized",
-                "answerText": "selected",
-                "reason": "must be denied before execute handler runs"
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-question-without-answer-selector"),
-                trace("execute-answer-selector-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-answer-selector-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_answer.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow new resource kind goal_answer")
-    ));
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        0,
-        "inner execute resource authority denials must happen before handler execution"
-    );
-}
-
-#[tokio::test]
-async fn capability_execute_subagent_task_reads_require_read_resource_authority() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker_for_setup(worker("capability", "capability"), false)
-        .unwrap();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let handler = Arc::new(CountingResourceHandler {
-        calls: calls.clone(),
-    });
-    let mut execute = FunctionDefinition::new(
-        fid("capability::execute"),
+        fid(EXECUTE_FUNCTION_ID),
         wid("capability"),
         "execute",
         VisibilityScope::System,
@@ -184,219 +24,195 @@ async fn capability_execute_subagent_task_reads_require_read_resource_authority(
     handle
         .register_function_for_setup(execute, Some(handler), false)
         .unwrap();
+    (handle, calls)
+}
 
-    let missing_subagent_read_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-subagent-without-subagents-read",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "resource.read"],
-            "allowedResourceKinds": ["subagent_task"],
-            "resourceSelectors": ["kind:subagent_task"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-subagent-read-scope-test"}
-        }),
+fn capability_grant_payload(
+    scopes: &[&str],
+    resource_kinds: &[&str],
+    resource_selectors: &[&str],
+    file_roots: &[&str],
+) -> Value {
+    json!({
+        "allowedCapabilities": [EXECUTE_FUNCTION_ID],
+        "allowedNamespaces": ["capability"],
+        "allowedAuthorityScopes": scopes,
+        "allowedResourceKinds": resource_kinds,
+        "resourceSelectors": resource_selectors,
+        "fileRoots": file_roots,
+        "networkPolicy": "none",
+        "maxRisk": "medium",
+        "budget": {"remainingInvocations": 10},
+        "provenance": {"source": "generic-capability-authority-test"}
+    })
+}
+
+fn capability_context(grant_id: &str, key: &str) -> CausalContext {
+    CausalContext::new(
+        actor("agent:session-a"),
+        ActorKind::Agent,
+        grant(grant_id),
+        trace(key),
     )
-    .await;
-    assert_eq!(missing_subagent_read_grant.error, None);
+    .with_session_id("session-a")
+    .with_workspace_id("workspace-a")
+    .with_idempotency_key(key)
+}
 
-    let denied_scope = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "subagent_task_list",
-                "limit": 10
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-subagent-without-subagents-read"),
-                trace("execute-subagent-read-scope-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-subagent-read-scope-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_scope.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow required authority subagents.read")
-    ));
+#[test]
+fn engine_authorizer_contains_no_capability_operation_literals() {
+    let source = include_str!("../../authority/grants/authorization.rs");
 
-    let missing_resource_read_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-subagent-without-resource-read",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "subagents.read"],
-            "allowedResourceKinds": ["subagent_task"],
-            "resourceSelectors": ["kind:subagent_task"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-subagent-resource-read-test"}
-        }),
-    )
-    .await;
-    assert_eq!(missing_resource_read_grant.error, None);
-
-    let denied_resource_scope = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "subagent_task_inspect",
-                "subagentTaskResourceId": "subagent_task:authorized"
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-subagent-without-resource-read"),
-                trace("execute-subagent-resource-read-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-subagent-resource-read-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_resource_scope.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow required authority resource.read")
-    ));
-
-    let missing_kind_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-subagent-without-kind",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "subagents.read", "resource.read"],
-            "allowedResourceKinds": ["agent_state"],
-            "resourceSelectors": ["kind:agent_state"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-subagent-kind-test"}
-        }),
-    )
-    .await;
-    assert_eq!(missing_kind_grant.error, None);
-
-    let denied_kind = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "subagent_task_list",
-                "limit": 10
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-subagent-without-kind"),
-                trace("execute-subagent-kind-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-subagent-kind-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_kind.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow resource kind subagent_task")
-    ));
-
-    let missing_selector_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-subagent-without-selector",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "subagents.read", "resource.read"],
-            "allowedResourceKinds": ["subagent_task"],
-            "resourceSelectors": ["kind:agent_state"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-subagent-selector-test"}
-        }),
-    )
-    .await;
-    assert_eq!(missing_selector_grant.error, None);
-
-    let denied_selector = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({
-                "operation": "subagent_task_inspect",
-                "subagentTaskResourceId": "subagent_task:authorized"
-            }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-subagent-without-selector"),
-                trace("execute-subagent-selector-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-subagent-selector-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_selector.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow new resource kind subagent_task")
-    ));
-
-    let accepted_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-subagent-read-only",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "subagents.read", "resource.read"],
-            "allowedResourceKinds": ["subagent_task"],
-            "resourceSelectors": ["kind:subagent_task"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-subagent-accepted-test"}
-        }),
-    )
-    .await;
-    assert_eq!(accepted_grant.error, None);
-
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        0,
-        "subagent read authority denials must happen before handler execution"
+    assert!(
+        !source.contains(".get(\"operation\")"),
+        "engine authorization must not branch on the delegated operation field"
     );
+    for operation in crate::domains::capability::supported_operation_names() {
+        let literal = format!("\"{operation}\"");
+        assert!(
+            !source.contains(&literal),
+            "engine authorization contains capability operation literal {operation}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn capability_grants_reject_wildcard_scopes_kinds_and_selectors() {
+    let (handle, calls) = setup_execute_handler();
+    let cases = [
+        (
+            "wildcard-scope",
+            capability_grant_payload(&["*"], &[], &[], &["*"]),
+            "wildcard authority scopes",
+        ),
+        (
+            "wildcard-kind",
+            capability_grant_payload(
+                &["capability.execute"],
+                &["future_*"],
+                &["kind:future_*"],
+                &["*"],
+            ),
+            "wildcard resource kinds",
+        ),
+        (
+            "wildcard-selector",
+            capability_grant_payload(&["capability.execute"], &[], &["resource:future:*"], &["*"]),
+            "wildcard resource selectors",
+        ),
+    ];
+
+    for (grant_id, payload, expected) in cases {
+        let derived = derive_bootstrap_grant(&handle, grant_id, payload).await;
+        assert_eq!(derived.error, None);
+
+        let result = handle
+            .invoke(host_invocation(
+                EXECUTE_FUNCTION_ID,
+                json!({"operation": "opaque_test_operation"}),
+                capability_context(grant_id, &format!("invoke-{grant_id}")),
+            ))
+            .await;
+        assert!(
+            matches!(
+                result.error,
+                Some(EngineError::PolicyViolation(ref message)) if message.contains(expected)
+            ),
+            "{grant_id} should fail with {expected}, got {:?}",
+            result.error
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn capability_grants_require_an_exact_selector_for_every_allowed_kind() {
+    let (handle, calls) = setup_execute_handler();
+    let grant_id = "missing-exact-kind-selector";
+    let derived = derive_bootstrap_grant(
+        &handle,
+        grant_id,
+        capability_grant_payload(
+            &["capability.execute"],
+            &["future_primary", "future_secondary"],
+            &["kind:future_primary"],
+            &["*"],
+        ),
+    )
+    .await;
+    assert_eq!(derived.error, None);
+
+    let result = handle
+        .invoke(host_invocation(
+            EXECUTE_FUNCTION_ID,
+            json!({"operation": "opaque_test_operation"}),
+            capability_context(grant_id, "missing-exact-kind-selector-invoke"),
+        ))
+        .await;
+    assert!(matches!(
+        result.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("requires exact kind:future_secondary selector")
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn capability_payload_resource_suffixes_require_exact_selectors_and_fail_closed() {
+    let (handle, calls) = setup_execute_handler();
+    let grant_id = "generic-exact-resource-selectors";
+    let derived = derive_bootstrap_grant(
+        &handle,
+        grant_id,
+        capability_grant_payload(
+            &["capability.execute"],
+            &["future_record"],
+            &[
+                "kind:future_record",
+                "resource:future_record:allowed-id",
+                "resource:future_record:allowed-ref",
+                "resource:future_record:",
+            ],
+            &["*"],
+        ),
+    )
+    .await;
+    assert_eq!(derived.error, None);
+
+    for (field, value) in [
+        ("unregisteredFutureResourceId", "future_record:denied-id"),
+        ("unregisteredFutureResourceRef", "future_record:denied-ref"),
+    ] {
+        let result = handle
+            .invoke(host_invocation(
+                EXECUTE_FUNCTION_ID,
+                json!({
+                    "operation": "opaque_test_operation",
+                    field: value
+                }),
+                capability_context(grant_id, &format!("deny-{field}")),
+            ))
+            .await;
+        assert!(
+            matches!(
+                result.error,
+                Some(EngineError::PolicyViolation(ref message))
+                    if message.contains(&format!("requires exact selector for {field} resource {value}"))
+            ),
+            "{field} should fail closed despite kind and prefix selectors, got {:?}",
+            result.error
+        );
+    }
+
     let accepted = handle
         .invoke(host_invocation(
-            "capability::execute",
+            EXECUTE_FUNCTION_ID,
             json!({
-                "operation": "subagent_task_list",
-                "limit": 10
+                "operation": "opaque_test_operation",
+                "unregisteredFutureResourceId": "future_record:allowed-id",
+                "unregisteredFutureResourceRef": "future_record:allowed-ref"
             }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-subagent-read-only"),
-                trace("execute-subagent-accepted"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-subagent-accepted"),
+            capability_context(grant_id, "accept-exact-resource-selectors"),
         ))
         .await;
     assert_eq!(accepted.error, None);
@@ -404,407 +220,86 @@ async fn capability_execute_subagent_task_reads_require_read_resource_authority(
 }
 
 #[tokio::test]
-async fn capability_execute_memory_query_decision_reads_require_memory_resource_authority() {
-    let handle = EngineHostHandle::new_in_memory().unwrap();
-    handle
-        .register_worker_for_setup(worker("capability", "capability"), false)
-        .unwrap();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let handler = Arc::new(CountingResourceHandler {
-        calls: calls.clone(),
-    });
-    let mut execute = FunctionDefinition::new(
-        fid("capability::execute"),
-        wid("capability"),
-        "execute",
-        VisibilityScope::System,
-        EffectClass::DelegatedInvocation,
-    )
-    .with_required_authority(AuthorityRequirement::scope("capability.execute"))
-    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
-    execute.risk_level = RiskLevel::Medium;
-    handle
-        .register_function_for_setup(execute, Some(handler), false)
-        .unwrap();
-
-    let missing_memory_scope_grant = derive_bootstrap_grant(
+async fn capability_authorization_preserves_function_required_scopes() {
+    let (handle, calls) = setup_execute_handler();
+    let grant_id = "missing-function-required-scope";
+    let derived = derive_bootstrap_grant(
         &handle,
-        "execute-memory-query-without-memory-read",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "resource.read"],
-            "allowedResourceKinds": ["memory_query"],
-            "resourceSelectors": ["kind:memory_query"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-query-scope-test"}
-        }),
+        grant_id,
+        capability_grant_payload(&["resource.read"], &[], &[], &["*"]),
     )
     .await;
-    assert_eq!(missing_memory_scope_grant.error, None);
+    assert_eq!(derived.error, None);
 
-    let denied_memory_scope = handle
+    let result = handle
         .invoke(host_invocation(
-            "capability::execute",
-            json!({"operation": "memory_query_list"}),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-query-without-memory-read"),
-                trace("execute-memory-query-memory-read-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-query-memory-read-denied"),
+            EXECUTE_FUNCTION_ID,
+            json!({"operation": "opaque_test_operation"}),
+            capability_context(grant_id, "missing-function-required-scope-invoke"),
         ))
         .await;
     assert!(matches!(
-        denied_memory_scope.error,
+        result.error,
         Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow required authority memory.read")
+            if message.contains("does not allow required authority capability.execute")
     ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
 
-    let missing_resource_scope_grant = derive_bootstrap_grant(
+#[tokio::test]
+async fn capability_authorization_preserves_generic_file_root_checks() {
+    let (handle, calls) = setup_execute_handler();
+    let temp = tempfile::tempdir().unwrap();
+    let allowed_root = temp.path().join("allowed");
+    let denied_root = temp.path().join("denied");
+    std::fs::create_dir_all(&allowed_root).unwrap();
+    std::fs::create_dir_all(&denied_root).unwrap();
+    let allowed_file = allowed_root.join("inside.txt");
+    let denied_file = denied_root.join("outside.txt");
+    std::fs::write(&allowed_file, "allowed").unwrap();
+    std::fs::write(&denied_file, "denied").unwrap();
+    let allowed_root_string = allowed_root.to_string_lossy().to_string();
+    let allowed_roots = [allowed_root_string.as_str()];
+    let grant_id = "capability-file-root";
+    let derived = derive_bootstrap_grant(
         &handle,
-        "execute-memory-decision-without-resource-read",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "memory.read"],
-            "allowedResourceKinds": ["memory_decision"],
-            "resourceSelectors": ["kind:memory_decision"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-decision-resource-read-test"}
-        }),
+        grant_id,
+        capability_grant_payload(&["capability.execute"], &[], &[], &allowed_roots),
     )
     .await;
-    assert_eq!(missing_resource_scope_grant.error, None);
+    assert_eq!(derived.error, None);
 
-    let denied_resource_scope = handle
+    let accepted = handle
         .invoke(host_invocation(
-            "capability::execute",
-            json!({"operation": "memory_decision_list"}),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-decision-without-resource-read"),
-                trace("execute-memory-decision-resource-read-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-decision-resource-read-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_resource_scope.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("does not allow required authority resource.read")
-    ));
-
-    let missing_query_kind_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-memory-query-without-kind",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "memory.read", "resource.read"],
-            "allowedResourceKinds": ["memory_decision"],
-            "resourceSelectors": ["kind:memory_decision"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-query-kind-test"}
-        }),
-    )
-    .await;
-    assert_eq!(missing_query_kind_grant.error, None);
-
-    let denied_query_kind = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({"operation": "memory_query_list"}),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-query-without-kind"),
-                trace("execute-memory-query-kind-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-query-kind-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_query_kind.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("requires explicit kind:memory_query selector")
-    ));
-
-    let missing_decision_selector_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-memory-decision-without-selector",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "memory.read", "resource.read"],
-            "allowedResourceKinds": ["memory_decision"],
-            "resourceSelectors": ["kind:memory_query"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-decision-selector-test"}
-        }),
-    )
-    .await;
-    assert_eq!(missing_decision_selector_grant.error, None);
-
-    let denied_decision_selector = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({"operation": "memory_decision_list"}),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-decision-without-selector"),
-                trace("execute-memory-decision-selector-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-decision-selector-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_decision_selector.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("requires explicit kind:memory_decision selector")
-    ));
-
-    let wildcard_memory_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-memory-query-wildcard",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["*", "capability.execute", "memory.read", "resource.read"],
-            "allowedResourceKinds": ["memory_query"],
-            "resourceSelectors": ["kind:memory_query"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-query-wildcard-test"}
-        }),
-    )
-    .await;
-    assert_eq!(wildcard_memory_grant.error, None);
-
-    let denied_wildcard = handle
-        .invoke(host_invocation(
-            "capability::execute",
-            json!({"operation": "memory_query_list"}),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-query-wildcard"),
-                trace("execute-memory-query-wildcard-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-query-wildcard-denied"),
-        ))
-        .await;
-    assert!(matches!(
-        denied_wildcard.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("cannot use wildcard authority scopes for memory module-pack operations")
-    ));
-
-    let scoped_query_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-memory-query-scoped",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "memory.read", "resource.read"],
-            "allowedResourceKinds": ["memory_query"],
-            "resourceSelectors": ["kind:memory_query", "resource:memory_query:authorized"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-query-scoped-test"}
-        }),
-    )
-    .await;
-    assert_eq!(scoped_query_grant.error, None);
-
-    let denied_query_resource = handle
-        .invoke(host_invocation(
-            "capability::execute",
+            EXECUTE_FUNCTION_ID,
             json!({
-                "operation": "memory_query_inspect",
-                "queryResourceId": "memory_query:denied"
+                "operation": "opaque_test_operation",
+                "path": "inside.txt"
             }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-query-scoped"),
-                trace("execute-memory-query-resource-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-query-resource-denied"),
+            capability_context(grant_id, "capability-file-root-allowed").with_runtime_metadata(
+                crate::engine::invocation::model::RUNTIME_METADATA_WORKING_DIRECTORY,
+                allowed_root_string.clone(),
+            ),
         ))
         .await;
-    assert!(matches!(
-        denied_query_resource.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("requires exact selector for queryResourceId resource memory_query:denied")
-    ));
+    assert_eq!(accepted.error, None);
 
-    let scoped_decision_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-memory-decision-scoped",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "memory.read", "resource.read"],
-            "allowedResourceKinds": ["memory_decision"],
-            "resourceSelectors": ["kind:memory_decision", "resource:memory_decision:authorized"],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-decision-scoped-test"}
-        }),
-    )
-    .await;
-    assert_eq!(scoped_decision_grant.error, None);
-
-    let denied_decision_resource = handle
+    let denied = handle
         .invoke(host_invocation(
-            "capability::execute",
+            EXECUTE_FUNCTION_ID,
             json!({
-                "operation": "memory_decision_inspect",
-                "decisionResourceId": "memory_decision:denied"
+                "operation": "opaque_test_operation",
+                "path": denied_file.to_string_lossy()
             }),
-            CausalContext::new(
-                actor("agent:session-a"),
-                ActorKind::Agent,
-                grant("execute-memory-decision-scoped"),
-                trace("execute-memory-decision-resource-denied"),
-            )
-            .with_session_id("session-a")
-            .with_workspace_id("workspace-a")
-            .with_idempotency_key("execute-memory-decision-resource-denied"),
+            capability_context(grant_id, "capability-file-root-denied").with_runtime_metadata(
+                crate::engine::invocation::model::RUNTIME_METADATA_WORKING_DIRECTORY,
+                allowed_root_string,
+            ),
         ))
         .await;
     assert!(matches!(
-        denied_decision_resource.error,
-        Some(EngineError::PolicyViolation(message))
-            if message.contains("requires exact selector for decisionResourceId resource memory_decision:denied")
+        denied.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("does not allow file path")
     ));
-
-    let scoped_record_grant = derive_bootstrap_grant(
-        &handle,
-        "execute-memory-record-scoped",
-        json!({
-            "allowedCapabilities": ["capability::execute"],
-            "allowedNamespaces": ["capability"],
-            "allowedAuthorityScopes": ["capability.execute", "memory.read", "resource.read"],
-            "allowedResourceKinds": ["memory_record", "memory_policy", "memory_engine"],
-            "resourceSelectors": [
-                "kind:memory_record",
-                "resource:memory_record:authorized",
-                "kind:memory_policy",
-                "kind:memory_engine"
-            ],
-            "fileRoots": ["*"],
-            "networkPolicy": "none",
-            "maxRisk": "medium",
-            "budget": {"remainingInvocations": 5},
-            "provenance": {"source": "execute-memory-record-scoped-test"}
-        }),
-    )
-    .await;
-    assert_eq!(scoped_record_grant.error, None);
-
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        0,
-        "memory query/decision authority denials must happen before handler execution"
-    );
-
-    for (operation, extra_payload, grant_id, trace_id) in [
-        (
-            "memory_status",
-            json!({}),
-            "execute-memory-record-scoped",
-            "execute-memory-status-accepted",
-        ),
-        (
-            "memory_list",
-            json!({}),
-            "execute-memory-record-scoped",
-            "execute-memory-list-accepted",
-        ),
-        (
-            "memory_inspect",
-            json!({"recordResourceId": "memory_record:authorized"}),
-            "execute-memory-record-scoped",
-            "execute-memory-inspect-accepted",
-        ),
-        (
-            "memory_query_list",
-            json!({}),
-            "execute-memory-query-scoped",
-            "execute-memory-query-list-accepted",
-        ),
-        (
-            "memory_query_inspect",
-            json!({"queryResourceId": "memory_query:authorized"}),
-            "execute-memory-query-scoped",
-            "execute-memory-query-inspect-accepted",
-        ),
-        (
-            "memory_decision_list",
-            json!({}),
-            "execute-memory-decision-scoped",
-            "execute-memory-decision-list-accepted",
-        ),
-        (
-            "memory_decision_inspect",
-            json!({"decisionResourceId": "memory_decision:authorized"}),
-            "execute-memory-decision-scoped",
-            "execute-memory-decision-inspect-accepted",
-        ),
-    ] {
-        let mut payload = extra_payload;
-        payload["operation"] = json!(operation);
-        let accepted = handle
-            .invoke(host_invocation(
-                "capability::execute",
-                payload,
-                CausalContext::new(
-                    actor("agent:session-a"),
-                    ActorKind::Agent,
-                    grant(grant_id),
-                    trace(trace_id),
-                )
-                .with_session_id("session-a")
-                .with_workspace_id("workspace-a")
-                .with_idempotency_key(trace_id),
-            ))
-            .await;
-        assert_eq!(accepted.error, None, "{operation} should be authorized");
-    }
-    assert_eq!(calls.load(Ordering::SeqCst), 7);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

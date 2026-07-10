@@ -563,7 +563,7 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
 }
 
 #[tokio::test]
-async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped() {
+async fn caller_idempotency_rejects_changed_payload_across_provider_calls() {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
     engine_host
         .register_worker(
@@ -638,7 +638,8 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     let first_call =
         CapabilityInvocationDraft::new("provider-call-id-1", "execute", payload_object(&payload));
     let mut replay_payload = payload.clone();
-    replay_payload["reason"] = json!("same primitive operation requested from a later model turn");
+    replay_payload["objective"] =
+        json!("same primitive operation requested from a later model turn");
     let second_call = CapabilityInvocationDraft::new(
         "provider-call-id-2",
         "execute",
@@ -650,12 +651,28 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
         execute_capability_invocation(&second_call, "session-1", &working_directory, &ctx).await;
 
     assert_eq!(first_result.result.is_error, None, "{first_result:?}");
-    assert_eq!(second_result.result.is_error, None, "{second_result:?}");
+    assert_eq!(
+        second_result.result.is_error,
+        Some(true),
+        "{second_result:?}"
+    );
+    let second_text = match &second_result.result.content {
+        CapabilityResultBody::Text(text) => text.clone(),
+        CapabilityResultBody::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                CapabilityResultContent::Text { text } => Some(text.as_str()),
+                CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    assert!(second_text.contains("same key was used with a different payload"));
     let captured = captured.lock().clone();
     assert_eq!(
         captured.len(),
-        2,
-        "the wrapper forwards both calls so the primitive ledger can replay or reject conflicting reuse"
+        1,
+        "the primitive ledger must reject conflicting caller-key reuse before a second handler call"
     );
     let first_expected_key = model_capability_invocation_idempotency_key(
         Some("run-1"),
@@ -684,10 +701,6 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     assert_eq!(
         captured[0].causal_context.idempotency_key.as_deref(),
         Some(first_expected_key.as_str())
-    );
-    assert_eq!(
-        captured[1].causal_context.idempotency_key.as_deref(),
-        Some(second_expected_key.as_str())
     );
 }
 

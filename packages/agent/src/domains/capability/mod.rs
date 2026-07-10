@@ -245,10 +245,8 @@ pub(crate) mod pool;
 pub(crate) use operations::execute_value;
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
-    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
-    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
-    OperationBindingMetadata, ProceduralResourceSet, ResourceKindPolicy, SelectorAddition,
-    SubagentResourceSet, WorkerPackageKindSource, authority_policy, is_supported_operation,
+    AuthorityPolicy, ConditionalAuthority, OperationBindingMetadata, ResourceKindPolicy,
+    SelectorAddition, WorkerPackageKindSource, authority_policy, is_supported_operation,
     operation_binding_metadata, operation_host_request_schema, operation_list_text,
     operation_required_payload_fields, operation_risk, validate_operation_payload,
 };

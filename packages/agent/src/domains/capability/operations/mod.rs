@@ -73,16 +73,13 @@ use common::{
     optional_u64, required_str, result_value,
 };
 use context::validate_execute_context;
-use replay::replay_manifest;
 use trace::{complete_trace_record, started_trace_record};
 
 pub(crate) use operation_contract::validate_payload as validate_operation_payload;
 pub(crate) use operation_contract::{
-    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
-    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
-    OperationBindingMetadata, OperationEffect, OperationId, ProceduralResourceSet,
-    ResourceKindPolicy, SelectorAddition, SubagentResourceSet, WorkerPackageKindSource,
-    authority_policy, binding_metadata as operation_binding_metadata, effect as operation_effect,
+    AuthorityPolicy, ConditionalAuthority, OperationBindingMetadata, OperationEffect, OperationId,
+    ResourceKindPolicy, SelectorAddition, WorkerPackageKindSource, authority_policy,
+    binding_metadata as operation_binding_metadata, effect as operation_effect,
     host_request_schema as operation_host_request_schema, is_supported_operation,
     operation_list_text, required_payload_fields as operation_required_payload_fields,
     risk as operation_risk, supported_operation_names,
@@ -115,7 +112,8 @@ pub(crate) async fn execute_value(
         actor_id = %invocation.causal_context.actor_id.as_str(),
         "primitive execute operation started"
     );
-    if operation == "replay_manifest" {
+    let operation_at = Utc::now();
+    if operation_id == OperationId::ReplayManifest {
         info!(
             component = "agent.execute",
             agent_event = "execute_operation_trace_bypassed",
@@ -125,12 +123,12 @@ pub(crate) async fn execute_value(
             session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
             "primitive execute operation bypassed trace mutation"
         );
-        let result = replay_manifest(invocation, deps).await?;
+        let result =
+            dispatch::execute_operation(operation_id, invocation, deps, operation_at).await?;
         operation_contract::validate_output(&operation, &result)?;
         return result_value(result);
     }
 
-    let operation_at = Utc::now();
     let started_at = operation_at.to_rfc3339();
     let start = Instant::now();
     let mut trace_record = started_trace_record(invocation, deps, &operation, &started_at)?;

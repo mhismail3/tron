@@ -1620,6 +1620,35 @@ fn extract_result_content_does_not_project_unlisted_raw_details() {
 }
 
 #[test]
+fn extract_result_content_projects_canonical_metadata_without_an_operation_allowlist() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Listed 1 web source record.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "web_source_list",
+            "status": "ok",
+            "sources": [{
+                "kind": "web_source_record",
+                "status": "active",
+                "summary": "Provider-safe source evidence",
+                "absolutePath": "/Users/example/private/source.html",
+                "authorityGrantId": "grant_secret"
+            }]
+        })),
+    );
+
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
+        panic!("expected text result");
+    };
+    assert!(text.contains("web_source_list"));
+    assert!(text.contains("Provider-safe source evidence"));
+    assert!(text.contains("web_source_record"));
+    assert!(!text.contains("/Users/example/private/source.html"));
+    assert!(!text.contains("grant_secret"));
+}
+
+#[test]
 fn extract_result_content_drops_failure_actual_object_values() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(

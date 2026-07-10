@@ -4,7 +4,7 @@
 //! but providers only receive this bounded projection appended to result text.
 //! Model-facing projections are agent-first: operation results should expose the
 //! exact bounded contract data the model needs to choose the next capability call
-//! before optimizing for UI readability. Keep the allowlists narrow: ids,
+//! before optimizing for UI readability. Keep the field allowlists narrow: ids,
 //! lifecycle/status, refs, truncation metadata, preflight selectors, required
 //! fields, and schema failure coordinates are useful to the model; raw content,
 //! local paths, commands, secrets, grant ids, and authority ids stay out of this
@@ -27,15 +27,12 @@
 use std::sync::LazyLock;
 
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
+use crate::domains::capability::operation_binding_metadata;
 use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::CapabilityResultMessageContent;
 use regex::Regex;
 use serde_json::{Map, Value, json};
-
-mod metadata_operations;
-
-use self::metadata_operations::projects_metadata_operation;
 
 pub(super) fn extract_model_context_result_text(
     exec_result: &CapabilityInvocationExecutionResult,
@@ -115,22 +112,20 @@ fn model_context_evidence(details: Option<&Value>) -> Option<String> {
         .get("primitiveOperation")
         .and_then(Value::as_str)
         .or_else(|| details.get("operation").and_then(Value::as_str))?;
+    let metadata = operation_binding_metadata(operation)?;
     let projected = match operation {
         "capability_binding_cockpit_overview" => project_capability_cockpit_evidence(details),
         "catalog_search" | "catalog_inspect" => project_catalog_evidence(details),
-        operation if operation.starts_with("git_") => project_git_evidence(details),
         "log_recent" => project_log_evidence(details),
         "trace_list" | "trace_get" => project_trace_evidence(details),
-        operation if operation.starts_with("context_control_") => {
+        _ if metadata.family == "git" => project_git_evidence(details),
+        operation if metadata.family == "context_control" => {
             project_context_control_evidence(operation, details)
         }
-        operation if operation.starts_with("goal_") || operation.starts_with("question_") => {
+        operation if metadata.family == "goals_questions" => {
             project_goal_question_evidence(operation, details)
         }
-        operation if projects_metadata_operation(operation) => {
-            project_metadata_operation_evidence(operation, details)
-        }
-        _ => None,
+        operation => project_metadata_operation_evidence(operation, details),
     }?;
     render_model_context_evidence(projected)
 }
@@ -1248,6 +1243,7 @@ fn copy_error_detail_keys(projected: &mut Map<String, Value>, value: &Value) {
 
 fn project_metadata_operation_evidence(operation: &str, details: &Value) -> Option<Value> {
     let mut projected = Map::new();
+    let mut has_substantive_evidence = false;
     copy_key(&mut projected, details, "primitiveOperation");
     copy_key(&mut projected, details, "status");
     projected.insert("operation".to_owned(), json!(operation));
@@ -1257,12 +1253,13 @@ fn project_metadata_operation_evidence(operation: &str, details: &Value) -> Opti
         }
         if let Some(projected_value) = project_safe_metadata_value(key, value, 0) {
             projected.insert(key.clone(), projected_value);
+            has_substantive_evidence = true;
         }
         if projected.len() >= MODEL_CONTEXT_OBJECT_MAX_KEYS {
             break;
         }
     }
-    (projected.len() > 2).then_some(Value::Object(projected))
+    has_substantive_evidence.then_some(Value::Object(projected))
 }
 
 fn project_goal_question_evidence(operation: &str, details: &Value) -> Option<Value> {

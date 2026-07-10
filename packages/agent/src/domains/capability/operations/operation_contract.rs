@@ -249,33 +249,19 @@ pub(crate) fn is_supported_operation(operation: &str) -> bool {
 }
 
 pub(crate) use authority::{
-    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
-    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
-    ProceduralResourceSet, ResourceKindPolicy, SelectorAddition, SubagentResourceSet,
+    AuthorityPolicy, ConditionalAuthority, ResourceKindPolicy, SelectorAddition,
     WorkerPackageKindSource,
 };
 pub(super) use policy::InvocationScope;
 pub(crate) use policy::OperationEffect;
 
-/// One authoritative contract for a provider-visible execute operation.
+/// Paired provider-visible schemas for one execute operation.
 #[derive(Clone, Debug)]
-pub(super) struct OperationContract {
+pub(super) struct OperationSchemaContract {
     /// Closed top-level payload schema consumed by catalog and runtime.
     pub(super) input_schema: Value,
     /// Provider-safe result schema consumed by catalog and runtime validation.
     pub(super) output_schema: Value,
-    /// Ownership and governed-evolution classification.
-    pub(super) binding: OperationBindingMetadata,
-    /// Invocation scope required before domain dispatch.
-    pub(super) invocation_scope: InvocationScope,
-    /// Whether the caller must provide a stable idempotency key.
-    pub(super) requires_idempotency: bool,
-    /// Canonical operation effect used by grants and model guidance.
-    pub(super) effect: OperationEffect,
-    /// Maximum risk admitted by the single execute wrapper contract.
-    pub(super) risk: &'static str,
-    /// Static least-privilege authority policy resolved before dispatch.
-    pub(super) authority: AuthorityPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -288,67 +274,67 @@ pub struct OperationBindingMetadata {
 }
 
 pub(crate) fn binding_metadata(operation: &str) -> Option<OperationBindingMetadata> {
-    contract(operation).map(|contract| contract.binding)
+    let operation_id = OperationId::parse(operation)?;
+    let metadata = metadata::metadata(operation_id);
+    Some(OperationBindingMetadata {
+        operation: operation_id.as_str(),
+        family: metadata.family,
+        current_owner: metadata.current_owner,
+        ownership_class: metadata.ownership_class,
+        replacement_target: metadata.replacement_target,
+    })
 }
 
 pub(super) fn invocation_scope(operation: &str) -> InvocationScope {
-    contract(operation)
-        .map(|contract| contract.invocation_scope)
+    OperationId::parse(operation)
+        .map(policy::invocation_scope)
         .unwrap_or(InvocationScope::None)
 }
 
-pub(super) fn requires_idempotency(operation: &str) -> bool {
-    contract(operation).is_some_and(|contract| contract.requires_idempotency)
-}
-
 pub(crate) fn effect(operation: &str) -> Option<OperationEffect> {
-    contract(operation).map(|contract| contract.effect)
+    OperationId::parse(operation).map(policy::effect)
 }
 
 pub(crate) fn risk(operation: &str) -> Option<&'static str> {
-    contract(operation).map(|contract| contract.risk)
+    OperationId::parse(operation).map(|operation| policy::risk(operation).as_str())
 }
 
 pub(crate) fn authority_policy(operation: &str) -> Option<AuthorityPolicy> {
-    contract(operation).map(|contract| contract.authority)
+    let operation = OperationId::parse(operation)?;
+    authority::policy(operation.as_str())
 }
 
-/// Return the complete provider-visible contract for one supported operation.
-pub(super) fn contract(operation: &str) -> Option<OperationContract> {
-    let operation = OperationId::parse(operation)?.as_str();
-    let input_schema = capability_binding::input_schema(operation)
+fn input_schema(operation: OperationId) -> Option<Value> {
+    let operation = operation.as_str();
+    capability_binding::input_schema(operation)
         .or_else(|| governance::input_schema(operation))
         .or_else(|| records::input_schema(operation))
-        .or_else(|| direct::input_schema(operation))?;
-    let requires_idempotency = input_schema["required"]
-        .as_array()
-        .is_some_and(|required| required.contains(&json!("idempotencyKey")));
-    let metadata = metadata::metadata(operation)?;
-    Some(OperationContract {
+        .or_else(|| direct::input_schema(operation))
+}
+
+/// Return the paired provider-visible schemas for one supported operation.
+///
+/// Binding, scope, effect, risk, and authority remain typed sibling policies in
+/// this owner module and have lightweight accessors so runtime validation does
+/// not rebuild unrelated JSON schemas.
+pub(super) fn contract(operation: &str) -> Option<OperationSchemaContract> {
+    let operation_id = OperationId::parse(operation)?;
+    let operation = operation_id.as_str();
+    let input_schema = input_schema(operation_id)?;
+    Some(OperationSchemaContract {
         input_schema,
         output_schema: output::output_schema(operation)?,
-        binding: OperationBindingMetadata {
-            operation,
-            family: metadata.family,
-            current_owner: metadata.current_owner,
-            ownership_class: metadata.ownership_class,
-            replacement_target: metadata.replacement_target,
-        },
-        invocation_scope: policy::invocation_scope(operation),
-        requires_idempotency,
-        effect: policy::effect(operation)?,
-        risk: "medium",
-        authority: authority::policy(operation)?,
     })
 }
 
 /// Return the exact schema for catalog projection or runtime validation.
 pub(super) fn exact_input_schema(operation: &str) -> Option<Value> {
-    contract(operation).map(|contract| contract.input_schema)
+    input_schema(OperationId::parse(operation)?)
 }
 
 pub(super) fn exact_output_schema(operation: &str) -> Option<Value> {
-    contract(operation).map(|contract| contract.output_schema)
+    let operation = OperationId::parse(operation)?;
+    output::output_schema(operation.as_str())
 }
 
 /// Build the engine-facing host union mechanically from the exact operation
@@ -586,22 +572,6 @@ mod tests {
             .filter(|owned| *owned)
             .count();
             assert_eq!(owners, 1, "{operation} has {owners} contract family owners");
-        }
-    }
-
-    #[test]
-    fn every_idempotent_operation_requires_the_caller_key_in_its_schema() {
-        for operation in supported_operation_names() {
-            if !requires_idempotency(operation) {
-                continue;
-            }
-            let schema = exact_input_schema(operation).expect("supported operation contract");
-            assert!(
-                schema["required"]
-                    .as_array()
-                    .is_some_and(|required| required.contains(&json!("idempotencyKey"))),
-                "{operation} requires idempotency but does not require the caller key structurally"
-            );
         }
     }
 

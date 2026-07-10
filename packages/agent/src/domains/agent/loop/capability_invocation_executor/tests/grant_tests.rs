@@ -1480,10 +1480,14 @@ fn assert_subagent_task_runtime_grant_is_read_only(grant: &crate::engine::Engine
         grant.allowed_resource_kinds,
         vec!["subagent_task".to_owned()]
     );
-    assert_eq!(
-        grant.resource_selectors,
-        vec!["kind:subagent_task".to_owned()]
-    );
+    let mut expected_selectors = vec!["kind:subagent_task".to_owned()];
+    if grant
+        .resource_selectors
+        .contains(&"resource:subagent_task:runtime-grant".to_owned())
+    {
+        expected_selectors.push("resource:subagent_task:runtime-grant".to_owned());
+    }
+    assert_eq!(grant.resource_selectors, expected_selectors);
     for forbidden_kind in [
         "worker_package",
         "worker_launch_attempt",

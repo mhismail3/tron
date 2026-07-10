@@ -39,10 +39,11 @@ async fn device_read_runtime_grants_are_read_only_and_selector_bounded() {
             grant.allowed_resource_kinds,
             vec!["device_registration".to_owned()]
         );
-        assert_eq!(
-            grant.resource_selectors,
-            vec!["kind:device_registration".to_owned()]
-        );
+        let mut expected_selectors = vec!["kind:device_registration".to_owned()];
+        if operation == "device_inspect" {
+            expected_selectors.push("resource:device_registration:runtime-grant".to_owned());
+        }
+        assert_eq!(grant.resource_selectors, expected_selectors);
     }
 }
 
@@ -87,12 +88,19 @@ async fn notification_read_runtime_grants_are_selector_bounded() {
             vec!["notification".to_owned()]
         };
         assert_eq!(grant.allowed_resource_kinds, expected_kinds);
-        for selector in grant.resource_selectors.iter() {
+        assert!(
+            grant
+                .resource_selectors
+                .iter()
+                .all(|selector| !selector.contains('*')),
+            "notification grant selectors must remain exact"
+        );
+        if operation == "notification_inspect" {
             assert!(
-                selector.starts_with("kind:"),
-                "notification grant should use kind selectors only, got {selector}"
+                grant
+                    .resource_selectors
+                    .contains(&"resource:notification:runtime-grant".to_owned())
             );
-            assert_ne!(selector, "kind:*");
         }
     }
 }

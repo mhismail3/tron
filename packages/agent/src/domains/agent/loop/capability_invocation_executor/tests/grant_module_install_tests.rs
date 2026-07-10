@@ -80,6 +80,7 @@ async fn module_install_runtime_grants_are_scoped_to_install_gate_resources() {
         expected_decision_id,
     ) in cases
     {
+        let operation = payload["operation"].as_str().expect("operation").to_owned();
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
         let grant = engine_host
             .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
@@ -93,6 +94,7 @@ async fn module_install_runtime_grants_are_scoped_to_install_gate_resources() {
             expected_validation_report_id,
             expected_request_id,
             expected_decision_id,
+            &operation,
         );
     }
 }
@@ -103,6 +105,7 @@ fn assert_module_install_runtime_grant(
     expected_validation_report_id: Option<&str>,
     expected_request_id: Option<&str>,
     expected_decision_id: Option<&str>,
+    operation: &str,
 ) {
     assert_eq!(grant.network_policy, "none");
     for scope in ["module_install.read", "resource.read"] {
@@ -167,6 +170,13 @@ fn assert_module_install_runtime_grant(
     if let Some(resource_id) = expected_decision_id {
         expected_selectors.push(format!("resource:{resource_id}"));
     }
+    if operation == "module_install_decision_record" {
+        expected_selectors.extend([
+            "resource:approval_decision:runtime".to_owned(),
+            "resource:approval_request:runtime".to_owned(),
+        ]);
+    }
+    expected_selectors.sort();
     assert_eq!(grant.resource_selectors, expected_selectors);
     for forbidden_kind in [
         "module_manifest",

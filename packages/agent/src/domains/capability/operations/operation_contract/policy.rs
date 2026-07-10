@@ -22,221 +22,435 @@ impl OperationEffect {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OperationRisk {
+    Low,
+    Medium,
+    High,
+}
+
+impl OperationRisk {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InvocationScope {
     None,
     CurrentSession,
     SessionOrWorkspace,
 }
 
-pub(super) fn invocation_scope(operation: &str) -> InvocationScope {
-    if OperationId::parse(operation).is_none() {
-        return InvocationScope::None;
+pub(super) const fn invocation_scope(operation: OperationId) -> InvocationScope {
+    match operation {
+        OperationId::CatalogConformance
+        | OperationId::CatalogInspect
+        | OperationId::CatalogSearch
+        | OperationId::FilesystemApplyPatch
+        | OperationId::FilesystemDiff
+        | OperationId::FilesystemEdit
+        | OperationId::FilesystemFind
+        | OperationId::FilesystemGlob
+        | OperationId::FilesystemList
+        | OperationId::FilesystemRead
+        | OperationId::FilesystemSearchText
+        | OperationId::FilesystemWrite
+        | OperationId::GitBranchInventory
+        | OperationId::GitBranchStart
+        | OperationId::GitCommit
+        | OperationId::GitDiff
+        | OperationId::GitStage
+        | OperationId::GitStatus
+        | OperationId::GitUnstage
+        | OperationId::Observe
+        | OperationId::ProcessRun
+        | OperationId::StateGet
+        | OperationId::StateList
+        | OperationId::StateSet => InvocationScope::None,
+
+        OperationId::ContextControlActionInspect
+        | OperationId::ContextControlActionList
+        | OperationId::ContextControlClear
+        | OperationId::ContextControlCompact
+        | OperationId::ContextControlSnapshot
+        | OperationId::ContextControlStatus
+        | OperationId::ContextExclusionDisable
+        | OperationId::ContextExclusionList
+        | OperationId::ContextExclusionRecord
+        | OperationId::ContextPolicySnapshot
+        | OperationId::ContextSurvivorDisable
+        | OperationId::ContextSurvivorList
+        | OperationId::ContextSurvivorRecord
+        | OperationId::GoalCancel
+        | OperationId::GoalCreate
+        | OperationId::GoalInspect
+        | OperationId::GoalList
+        | OperationId::JobCancel
+        | OperationId::JobList
+        | OperationId::JobLog
+        | OperationId::JobStart
+        | OperationId::JobStatus
+        | OperationId::LogRecent
+        | OperationId::MemoryDecisionInspect
+        | OperationId::MemoryDecisionList
+        | OperationId::MemoryInspect
+        | OperationId::MemoryList
+        | OperationId::MemoryQueryInspect
+        | OperationId::MemoryQueryList
+        | OperationId::MemoryStatus
+        | OperationId::ModuleInspect
+        | OperationId::ModuleList
+        | OperationId::ModuleProgramExecutionCancel
+        | OperationId::ModuleProgramExecutionCleanup
+        | OperationId::ModuleProgramExecutionStart
+        | OperationId::ModuleProgramExecutionStatus
+        | OperationId::NotificationInspect
+        | OperationId::NotificationList
+        | OperationId::NotificationMarkAllRead
+        | OperationId::NotificationMarkRead
+        | OperationId::NotificationSend
+        | OperationId::ProceduralActivationDecisionInspect
+        | OperationId::ProceduralActivationDecisionList
+        | OperationId::ProceduralActivationDecisionRecord
+        | OperationId::ProceduralActivationRequestInspect
+        | OperationId::ProceduralActivationRequestList
+        | OperationId::ProceduralActivationRequestRecord
+        | OperationId::ProceduralDefinitionRecord
+        | OperationId::ProceduralStateInspect
+        | OperationId::ProceduralStateList
+        | OperationId::QuestionAnswer
+        | OperationId::QuestionCreate
+        | OperationId::QuestionInspect
+        | OperationId::QuestionList
+        | OperationId::ReplayManifest
+        | OperationId::ScheduleCancel
+        | OperationId::ScheduleCreate
+        | OperationId::ScheduleFireDue
+        | OperationId::ScheduleInspect
+        | OperationId::ScheduleList
+        | OperationId::SubagentCancel
+        | OperationId::SubagentLaunch
+        | OperationId::SubagentResult
+        | OperationId::SubagentStatus
+        | OperationId::SubagentTaskInspect
+        | OperationId::SubagentTaskList
+        | OperationId::ToolSourceInspect
+        | OperationId::ToolSourceList
+        | OperationId::TraceGet
+        | OperationId::TraceList
+        | OperationId::WebFetch
+        | OperationId::WebRobotsCheck
+        | OperationId::WebSourceArchive
+        | OperationId::WebSourceInspect
+        | OperationId::WebSourceList
+        | OperationId::WorkerPackageInspect
+        | OperationId::WorkerPackageList => InvocationScope::CurrentSession,
+
+        OperationId::CapabilityBindingCockpitOverview
+        | OperationId::CapabilityBindingDecisionInspect
+        | OperationId::CapabilityBindingDecisionList
+        | OperationId::CapabilityBindingDecisionRecord
+        | OperationId::CapabilityBindingPolicyActivate
+        | OperationId::CapabilityBindingPolicyInspect
+        | OperationId::CapabilityBindingPolicyList
+        | OperationId::CapabilityBindingRequestInspect
+        | OperationId::CapabilityBindingRequestList
+        | OperationId::CapabilityBindingRequestRecord
+        | OperationId::CapabilityReplacementCandidateInspect
+        | OperationId::CapabilityReplacementCandidateList
+        | OperationId::CapabilityReplacementCandidateRecord
+        | OperationId::CapabilityRouteActivate
+        | OperationId::CapabilityRouteBindingInspect
+        | OperationId::CapabilityRouteBindingList
+        | OperationId::CapabilityRouteBindingRecord
+        | OperationId::CapabilityRouteDisable
+        | OperationId::CapabilityRouteEventInspect
+        | OperationId::CapabilityRouteEventList
+        | OperationId::CapabilityRouteRollback
+        | OperationId::CapabilityShadowTrialDecisionRecord
+        | OperationId::CapabilityShadowTrialEvidenceInspect
+        | OperationId::CapabilityShadowTrialRequestRecord
+        | OperationId::CapabilityShadowTrialRunRecord
+        | OperationId::DeviceInspect
+        | OperationId::DeviceList
+        | OperationId::ImportHistoryInspect
+        | OperationId::ImportHistoryList
+        | OperationId::ImportHistoryRecord
+        | OperationId::ImportPreviewInspect
+        | OperationId::ImportPreviewList
+        | OperationId::ImportPreviewRecord
+        | OperationId::MediaArchive
+        | OperationId::MediaCreate
+        | OperationId::MediaInspect
+        | OperationId::MediaList
+        | OperationId::ModuleDependencyDecisionInspect
+        | OperationId::ModuleDependencyDecisionList
+        | OperationId::ModuleDependencyDecisionRecord
+        | OperationId::ModuleDependencyPolicyActivate
+        | OperationId::ModuleDependencyPolicyInspect
+        | OperationId::ModuleDependencyPolicyList
+        | OperationId::ModuleDependencyRequestInspect
+        | OperationId::ModuleDependencyRequestList
+        | OperationId::ModuleDependencyRequestRecord
+        | OperationId::ModuleInstallDecisionInspect
+        | OperationId::ModuleInstallDecisionList
+        | OperationId::ModuleInstallDecisionRecord
+        | OperationId::ModuleInstallRequestInspect
+        | OperationId::ModuleInstallRequestList
+        | OperationId::ModuleInstallRequestRecord
+        | OperationId::ModuleLifecycleDecision
+        | OperationId::ModuleLifecycleInspect
+        | OperationId::ModuleLifecycleList
+        | OperationId::ModuleLifecycleRequest
+        | OperationId::ModuleProposalInspect
+        | OperationId::ModuleProposalList
+        | OperationId::ModuleProposalRecord
+        | OperationId::ModuleRuntimeCancel
+        | OperationId::ModuleRuntimeInspect
+        | OperationId::ModuleRuntimeList
+        | OperationId::ModuleRuntimeRequest
+        | OperationId::ModuleValidationInspect
+        | OperationId::ModuleValidationList
+        | OperationId::ModuleValidationRecord
+        | OperationId::ProgramExecutionInspect
+        | OperationId::ProgramExecutionList
+        | OperationId::ProgramExecutionRecord
+        | OperationId::PromptArtifactInspect
+        | OperationId::PromptArtifactList
+        | OperationId::PromptArtifactRecord
+        | OperationId::RepositoryTreeInspect
+        | OperationId::RepositoryTreeList
+        | OperationId::RepositoryTreeSnapshot
+        | OperationId::UpdateDiagnosticInspect
+        | OperationId::UpdateDiagnosticList
+        | OperationId::UpdateDiagnosticRecord
+        | OperationId::WebResearchRequestInspect
+        | OperationId::WebResearchRequestList
+        | OperationId::WebResearchRequestRecord
+        | OperationId::WebResearchReviewInspect
+        | OperationId::WebResearchReviewList
+        | OperationId::WebResearchReviewRecord
+        | OperationId::WebResearchSourceInspect
+        | OperationId::WebResearchSourceList
+        | OperationId::WebResearchSourceRecord => InvocationScope::SessionOrWorkspace,
     }
-    if matches!(
-        operation,
-        "media_create"
-            | "media_list"
-            | "media_inspect"
-            | "media_archive"
-            | "import_history_record"
-            | "import_history_list"
-            | "import_history_inspect"
-            | "repository_tree_snapshot"
-            | "repository_tree_list"
-            | "repository_tree_inspect"
-            | "import_preview_record"
-            | "import_preview_list"
-            | "import_preview_inspect"
-            | "program_execution_record"
-            | "program_execution_list"
-            | "program_execution_inspect"
-            | "prompt_artifact_record"
-            | "prompt_artifact_list"
-            | "prompt_artifact_inspect"
-            | "update_diagnostic_record"
-            | "update_diagnostic_list"
-            | "update_diagnostic_inspect"
-            | "device_list"
-            | "device_inspect"
-    ) {
-        return InvocationScope::SessionOrWorkspace;
+}
+
+pub(super) const fn effect(operation: OperationId) -> OperationEffect {
+    match operation {
+        OperationId::CapabilityBindingCockpitOverview
+        | OperationId::CapabilityBindingDecisionInspect
+        | OperationId::CapabilityBindingDecisionList
+        | OperationId::CapabilityBindingPolicyInspect
+        | OperationId::CapabilityBindingPolicyList
+        | OperationId::CapabilityBindingRequestInspect
+        | OperationId::CapabilityBindingRequestList
+        | OperationId::CapabilityReplacementCandidateInspect
+        | OperationId::CapabilityReplacementCandidateList
+        | OperationId::CapabilityRouteBindingInspect
+        | OperationId::CapabilityRouteBindingList
+        | OperationId::CapabilityRouteEventInspect
+        | OperationId::CapabilityRouteEventList
+        | OperationId::CapabilityShadowTrialEvidenceInspect
+        | OperationId::CatalogInspect
+        | OperationId::CatalogSearch
+        | OperationId::ContextControlActionInspect
+        | OperationId::ContextControlActionList
+        | OperationId::ContextControlStatus
+        | OperationId::ContextExclusionList
+        | OperationId::ContextSurvivorList
+        | OperationId::DeviceInspect
+        | OperationId::DeviceList
+        | OperationId::FilesystemDiff
+        | OperationId::FilesystemFind
+        | OperationId::FilesystemGlob
+        | OperationId::FilesystemList
+        | OperationId::FilesystemRead
+        | OperationId::FilesystemSearchText
+        | OperationId::GitBranchInventory
+        | OperationId::GitDiff
+        | OperationId::GitStatus
+        | OperationId::GoalInspect
+        | OperationId::GoalList
+        | OperationId::ImportHistoryInspect
+        | OperationId::ImportHistoryList
+        | OperationId::ImportPreviewInspect
+        | OperationId::ImportPreviewList
+        | OperationId::JobList
+        | OperationId::JobLog
+        | OperationId::JobStatus
+        | OperationId::LogRecent
+        | OperationId::MediaInspect
+        | OperationId::MediaList
+        | OperationId::MemoryDecisionInspect
+        | OperationId::MemoryDecisionList
+        | OperationId::MemoryInspect
+        | OperationId::MemoryList
+        | OperationId::MemoryQueryInspect
+        | OperationId::MemoryQueryList
+        | OperationId::MemoryStatus
+        | OperationId::ModuleDependencyDecisionInspect
+        | OperationId::ModuleDependencyDecisionList
+        | OperationId::ModuleDependencyPolicyInspect
+        | OperationId::ModuleDependencyPolicyList
+        | OperationId::ModuleDependencyRequestInspect
+        | OperationId::ModuleDependencyRequestList
+        | OperationId::ModuleInspect
+        | OperationId::ModuleInstallDecisionInspect
+        | OperationId::ModuleInstallDecisionList
+        | OperationId::ModuleInstallRequestInspect
+        | OperationId::ModuleInstallRequestList
+        | OperationId::ModuleLifecycleInspect
+        | OperationId::ModuleLifecycleList
+        | OperationId::ModuleList
+        | OperationId::ModuleProgramExecutionStatus
+        | OperationId::ModuleProposalInspect
+        | OperationId::ModuleProposalList
+        | OperationId::ModuleRuntimeInspect
+        | OperationId::ModuleRuntimeList
+        | OperationId::ModuleValidationInspect
+        | OperationId::ModuleValidationList
+        | OperationId::NotificationInspect
+        | OperationId::NotificationList
+        | OperationId::Observe
+        | OperationId::ProceduralActivationDecisionInspect
+        | OperationId::ProceduralActivationDecisionList
+        | OperationId::ProceduralActivationRequestInspect
+        | OperationId::ProceduralActivationRequestList
+        | OperationId::ProceduralStateInspect
+        | OperationId::ProceduralStateList
+        | OperationId::ProgramExecutionInspect
+        | OperationId::ProgramExecutionList
+        | OperationId::PromptArtifactInspect
+        | OperationId::PromptArtifactList
+        | OperationId::QuestionInspect
+        | OperationId::QuestionList
+        | OperationId::ReplayManifest
+        | OperationId::RepositoryTreeInspect
+        | OperationId::RepositoryTreeList
+        | OperationId::ScheduleInspect
+        | OperationId::ScheduleList
+        | OperationId::StateGet
+        | OperationId::StateList
+        | OperationId::SubagentResult
+        | OperationId::SubagentStatus
+        | OperationId::SubagentTaskInspect
+        | OperationId::SubagentTaskList
+        | OperationId::ToolSourceInspect
+        | OperationId::ToolSourceList
+        | OperationId::TraceGet
+        | OperationId::TraceList
+        | OperationId::UpdateDiagnosticInspect
+        | OperationId::UpdateDiagnosticList
+        | OperationId::WebResearchRequestInspect
+        | OperationId::WebResearchRequestList
+        | OperationId::WebResearchReviewInspect
+        | OperationId::WebResearchReviewList
+        | OperationId::WebResearchSourceInspect
+        | OperationId::WebResearchSourceList
+        | OperationId::WebSourceInspect
+        | OperationId::WebSourceList
+        | OperationId::WorkerPackageInspect
+        | OperationId::WorkerPackageList => OperationEffect::ReadOnly,
+
+        OperationId::JobStart
+        | OperationId::ModuleProgramExecutionStart
+        | OperationId::ModuleRuntimeRequest
+        | OperationId::ProcessRun
+        | OperationId::ScheduleFireDue
+        | OperationId::SubagentLaunch => OperationEffect::StartsWork,
+
+        OperationId::CapabilityBindingDecisionRecord
+        | OperationId::CapabilityBindingPolicyActivate
+        | OperationId::CapabilityBindingRequestRecord
+        | OperationId::CapabilityReplacementCandidateRecord
+        | OperationId::CapabilityRouteActivate
+        | OperationId::CapabilityRouteBindingRecord
+        | OperationId::CapabilityRouteDisable
+        | OperationId::CapabilityRouteRollback
+        | OperationId::CapabilityShadowTrialDecisionRecord
+        | OperationId::CapabilityShadowTrialRequestRecord
+        | OperationId::CapabilityShadowTrialRunRecord
+        | OperationId::CatalogConformance
+        | OperationId::ContextControlClear
+        | OperationId::ContextControlCompact
+        | OperationId::ContextControlSnapshot
+        | OperationId::ContextExclusionDisable
+        | OperationId::ContextExclusionRecord
+        | OperationId::ContextPolicySnapshot
+        | OperationId::ContextSurvivorDisable
+        | OperationId::ContextSurvivorRecord
+        | OperationId::ImportHistoryRecord
+        | OperationId::ImportPreviewRecord
+        | OperationId::MediaArchive
+        | OperationId::MediaCreate
+        | OperationId::ModuleDependencyDecisionRecord
+        | OperationId::ModuleDependencyPolicyActivate
+        | OperationId::ModuleDependencyRequestRecord
+        | OperationId::ModuleInstallDecisionRecord
+        | OperationId::ModuleInstallRequestRecord
+        | OperationId::ModuleLifecycleDecision
+        | OperationId::ModuleLifecycleRequest
+        | OperationId::ModuleProposalRecord
+        | OperationId::ModuleRuntimeCancel
+        | OperationId::ModuleValidationRecord
+        | OperationId::ProceduralActivationDecisionRecord
+        | OperationId::ProceduralActivationRequestRecord
+        | OperationId::ProceduralDefinitionRecord
+        | OperationId::ProgramExecutionRecord
+        | OperationId::PromptArtifactRecord
+        | OperationId::StateSet
+        | OperationId::UpdateDiagnosticRecord
+        | OperationId::WebResearchRequestRecord
+        | OperationId::WebResearchReviewRecord
+        | OperationId::WebResearchSourceRecord => OperationEffect::MetadataWrite,
+
+        OperationId::FilesystemApplyPatch
+        | OperationId::FilesystemEdit
+        | OperationId::FilesystemWrite
+        | OperationId::GitBranchStart
+        | OperationId::GitCommit
+        | OperationId::GitStage
+        | OperationId::GitUnstage
+        | OperationId::GoalCancel
+        | OperationId::GoalCreate
+        | OperationId::JobCancel
+        | OperationId::ModuleProgramExecutionCancel
+        | OperationId::ModuleProgramExecutionCleanup
+        | OperationId::NotificationMarkAllRead
+        | OperationId::NotificationMarkRead
+        | OperationId::NotificationSend
+        | OperationId::QuestionAnswer
+        | OperationId::QuestionCreate
+        | OperationId::RepositoryTreeSnapshot
+        | OperationId::ScheduleCancel
+        | OperationId::ScheduleCreate
+        | OperationId::SubagentCancel
+        | OperationId::WebFetch
+        | OperationId::WebRobotsCheck
+        | OperationId::WebSourceArchive => OperationEffect::StateChange,
     }
-    if matches!(
-        operation,
-        "job_start"
-            | "job_status"
-            | "job_list"
-            | "job_log"
-            | "job_cancel"
-            | "goal_create"
-            | "goal_list"
-            | "goal_inspect"
-            | "goal_cancel"
-            | "question_create"
-            | "question_list"
-            | "question_inspect"
-            | "question_answer"
-            | "web_fetch"
-            | "web_robots_check"
-            | "web_source_list"
-            | "web_source_inspect"
-            | "web_source_archive"
-            | "tool_source_list"
-            | "tool_source_inspect"
-            | "subagent_launch"
-            | "subagent_status"
-            | "subagent_result"
-            | "subagent_cancel"
-            | "subagent_task_list"
-            | "subagent_task_inspect"
-            | "worker_package_list"
-            | "worker_package_inspect"
-            | "module_list"
-            | "module_inspect"
-            | "module_program_execution_start"
-            | "module_program_execution_status"
-            | "module_program_execution_cancel"
-            | "module_program_execution_cleanup"
-            | "procedural_state_list"
-            | "procedural_state_inspect"
-            | "notification_send"
-            | "notification_list"
-            | "notification_inspect"
-            | "notification_mark_read"
-            | "notification_mark_all_read"
-            | "context_control_status"
-            | "context_control_snapshot"
-            | "context_control_compact"
-            | "context_control_clear"
-            | "context_control_action_list"
-            | "context_control_action_inspect"
-            | "context_survivor_record"
-            | "context_survivor_list"
-            | "context_survivor_disable"
-            | "context_exclusion_record"
-            | "context_exclusion_list"
-            | "context_exclusion_disable"
-            | "context_policy_snapshot"
-            | "trace_list"
-            | "trace_get"
-            | "log_recent"
-            | "replay_manifest"
-            | "memory_status"
-            | "memory_list"
-            | "memory_inspect"
-            | "memory_query_list"
-            | "memory_query_inspect"
-            | "memory_decision_list"
-            | "memory_decision_inspect"
-            | "schedule_create"
-            | "schedule_list"
-            | "schedule_inspect"
-            | "schedule_cancel"
-            | "schedule_fire_due"
-    ) {
-        InvocationScope::CurrentSession
-    } else {
-        InvocationScope::None
+}
+
+pub(super) const fn risk(operation: OperationId) -> OperationRisk {
+    match operation {
+        OperationId::CapabilityBindingPolicyActivate
+        | OperationId::CapabilityRouteActivate
+        | OperationId::CapabilityRouteDisable
+        | OperationId::CapabilityRouteRollback
+        | OperationId::ContextControlClear
+        | OperationId::ModuleDependencyPolicyActivate
+        | OperationId::ModuleLifecycleDecision => OperationRisk::High,
+        operation => match effect(operation) {
+            OperationEffect::ReadOnly => OperationRisk::Low,
+            OperationEffect::MetadataWrite => OperationRisk::Medium,
+            OperationEffect::StateChange | OperationEffect::StartsWork => OperationRisk::High,
+        },
     }
-}
-
-pub(super) fn effect(operation: &str) -> Option<OperationEffect> {
-    OperationId::parse(operation).map(|_| {
-        if is_read_only(operation) {
-            OperationEffect::ReadOnly
-        } else if starts_work(operation) {
-            OperationEffect::StartsWork
-        } else if writes_metadata(operation) {
-            OperationEffect::MetadataWrite
-        } else {
-            OperationEffect::StateChange
-        }
-    })
-}
-
-fn is_read_only(operation: &str) -> bool {
-    matches!(
-        operation,
-        "observe"
-            | "state_get"
-            | "state_list"
-            | "filesystem_read"
-            | "filesystem_list"
-            | "filesystem_find"
-            | "filesystem_glob"
-            | "filesystem_search_text"
-            | "filesystem_diff"
-            | "git_status"
-            | "git_diff"
-            | "git_branch_inventory"
-            | "job_status"
-            | "job_list"
-            | "job_log"
-            | "trace_list"
-            | "trace_get"
-            | "log_recent"
-            | "replay_manifest"
-            | "catalog_search"
-            | "catalog_inspect"
-            | "memory_status"
-            | "memory_list"
-            | "memory_inspect"
-            | "memory_query_list"
-            | "memory_query_inspect"
-            | "memory_decision_list"
-            | "memory_decision_inspect"
-            | "context_control_action_list"
-            | "context_control_action_inspect"
-            | "context_survivor_list"
-            | "context_exclusion_list"
-            | "subagent_status"
-            | "subagent_result"
-            | "subagent_task_list"
-            | "subagent_task_inspect"
-            | "capability_binding_cockpit_overview"
-    ) || operation.ends_with("_list")
-        || operation.ends_with("_inspect")
-        || operation.ends_with("_status")
-}
-
-fn writes_metadata(operation: &str) -> bool {
-    operation.ends_with("_record")
-        || matches!(
-            operation,
-            "state_set"
-                | "catalog_conformance"
-                | "context_control_snapshot"
-                | "context_control_compact"
-                | "context_control_clear"
-                | "context_policy_snapshot"
-                | "context_survivor_disable"
-                | "context_exclusion_disable"
-                | "media_create"
-                | "media_archive"
-                | "module_lifecycle_request"
-                | "module_lifecycle_decision"
-                | "module_runtime_cancel"
-                | "module_dependency_policy_activate"
-                | "capability_binding_policy_activate"
-                | "capability_route_activate"
-                | "capability_route_disable"
-                | "capability_route_rollback"
-                | "procedural_definition_record"
-                | "procedural_activation_request_record"
-                | "procedural_activation_decision_record"
-        )
-}
-
-fn starts_work(operation: &str) -> bool {
-    matches!(
-        operation,
-        "process_run"
-            | "job_start"
-            | "subagent_launch"
-            | "module_runtime_request"
-            | "module_program_execution_start"
-            | "schedule_fire_due"
-    )
 }
 
 #[cfg(test)]
@@ -247,12 +461,24 @@ mod tests {
     #[test]
     fn every_supported_operation_has_one_effect() {
         for operation in supported_operation_names() {
-            assert!(
-                effect(operation).is_some(),
-                "missing effect for {operation}"
-            );
+            let operation_id = OperationId::parse(operation).expect("supported operation id");
+            let _ = effect(operation_id);
         }
-        assert!(effect("not_real").is_none());
+    }
+
+    #[test]
+    fn risk_is_derived_from_effect_with_explicit_governance_overrides() {
+        assert_eq!(risk(OperationId::GitStatus), OperationRisk::Low);
+        assert_eq!(
+            risk(OperationId::ContextControlSnapshot),
+            OperationRisk::Medium
+        );
+        assert_eq!(risk(OperationId::FilesystemWrite), OperationRisk::High);
+        assert_eq!(risk(OperationId::ContextControlClear), OperationRisk::High);
+        assert_eq!(
+            risk(OperationId::CapabilityRouteActivate),
+            OperationRisk::High
+        );
     }
 
     #[test]
@@ -263,17 +489,24 @@ mod tests {
             "program_execution_inspect",
             "device_list",
         ] {
+            let operation_id = OperationId::parse(operation).expect("supported operation id");
             assert_eq!(
-                invocation_scope(operation),
+                invocation_scope(operation_id),
                 InvocationScope::SessionOrWorkspace,
                 "{operation}"
             );
         }
         assert_eq!(
-            invocation_scope("context_control_snapshot"),
+            invocation_scope(OperationId::ContextControlSnapshot),
             InvocationScope::CurrentSession
         );
-        assert_eq!(invocation_scope("git_status"), InvocationScope::None);
-        assert_eq!(invocation_scope("not_real"), InvocationScope::None);
+        assert_eq!(
+            invocation_scope(OperationId::GitStatus),
+            InvocationScope::None
+        );
+        assert_eq!(
+            invocation_scope(OperationId::CapabilityRouteActivate),
+            InvocationScope::SessionOrWorkspace
+        );
     }
 }

@@ -54,6 +54,7 @@ async fn module_lifecycle_runtime_grants_are_scoped_to_lifecycle_resources() {
     ];
 
     for (payload, write_allowed, expected_install_decision_id, expected_lifecycle_id) in cases {
+        let operation = payload["operation"].as_str().expect("operation").to_owned();
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
         let grant = engine_host
             .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
@@ -98,6 +99,13 @@ async fn module_lifecycle_runtime_grants_are_scoped_to_lifecycle_resources() {
         if let Some(resource_id) = expected_lifecycle_id.as_deref() {
             expected_selectors.push(format!("resource:{resource_id}"));
         }
+        if operation == "module_lifecycle_decision" {
+            expected_selectors.extend([
+                "resource:approval_decision:runtime".to_owned(),
+                "resource:approval_request:runtime".to_owned(),
+            ]);
+        }
+        expected_selectors.sort();
         assert_eq!(grant.resource_selectors, expected_selectors);
         assert!(
             !grant

@@ -43,9 +43,6 @@ pub(super) fn validate_execute_context(
     }
     match operation {
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
-        _ if operation_contract::requires_idempotency(operation) => {
-            require_idempotency_key(invocation, operation)
-        }
         _ => Ok(()),
     }
 }
@@ -89,20 +86,6 @@ fn require_current_session(
     if invocation.causal_context.session_id.is_none() {
         return Err(invalid(format!(
             "{operation} requires trusted current session context"
-        )));
-    }
-    Ok(())
-}
-
-fn require_idempotency_key(
-    invocation: &Invocation,
-    operation: &str,
-) -> Result<(), CapabilityError> {
-    if invocation.causal_context.idempotency_key.is_none()
-        && optional_str(&invocation.payload, "idempotencyKey")?.is_none()
-    {
-        return Err(invalid(format!(
-            "{operation} writes durable evidence and requires an idempotencyKey"
         )));
     }
     Ok(())

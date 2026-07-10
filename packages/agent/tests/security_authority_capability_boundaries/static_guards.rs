@@ -294,14 +294,14 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "\"parentGrantId\": \"agent-capability-runtime\"",
         "target.function_id.clone()",
         "target_function_id.as_str().to_owned()",
-        "\"allowedCapabilities\": allowed_capabilities",
+        "\"allowedCapabilities\": resolved.allowed_capabilities",
         "\"allowedNamespaces\": [\"__no_namespace_authority__\"]",
-        "operation == \"web_robots_check\"",
-        "\"resource.read\".to_owned()",
-        "\"declared\"",
-        "\"none\"",
-        "\"networkPolicy\": network_policy",
-        "allowed_resource_kinds.push(\"web_robots_policy\".to_owned())",
+        "authority_policy(operation)",
+        "operation_risk(operation)",
+        "policy.network_policy().as_str()",
+        "field.ends_with(\"ResourceId\")",
+        "field.ends_with(\"ResourceRef\")",
+        "push_resource_selector",
         "normalize_working_directory(working_directory)",
         "with_agent_working_directory_metadata(",
         "RUNTIME_METADATA_WORKING_DIRECTORY",
@@ -327,9 +327,6 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "workspace state requires trusted workspace context",
         "capability::execute cannot read or write system-scoped state",
         "requires trusted current session context",
-        "\"catalog_conformance\"",
-        "\"filesystem_apply_patch\"",
-        "=> require_idempotency_key(invocation, operation)",
     ] {
         assert!(
             operation_guards.contains(required),
@@ -351,13 +348,14 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
     let grant_authorization =
         read_repo_file("packages/agent/src/engine/authority/grants/authorization.rs");
     for required in [
-        "capability_execute_requires_working_directory(invocation)",
+        "is_capability_execute(invocation)",
+        "ensure_capability_grant_is_explicit(grant, invocation)",
+        "capability_working_directory(invocation)?",
         "RUNTIME_METADATA_WORKING_DIRECTORY",
         "normalize_working_directory(raw)",
         "resolve_invocation_path(invocation, raw)",
-        "\"filesystem_read\"",
-        "\"filesystem_apply_patch\"",
-        "\"process_run\"",
+        "cannot use wildcard",
+        "requires exact {selector} selector",
     ] {
         assert!(
             grant_authorization.contains(required),
