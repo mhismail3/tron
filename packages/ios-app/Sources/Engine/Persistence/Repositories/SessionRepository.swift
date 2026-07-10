@@ -108,20 +108,29 @@ final class SessionRepository: @unchecked Sendable {
 
                 var staleSessionIds: [String] = []
                 if let authoritativeSessionIds, let snapshotAsOf {
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime]
+                    guard let snapshotInstant = Self.rfc3339Instant(snapshotAsOf, formatter: formatter) else {
+                        throw EventDatabaseError.executeFailed("Invalid server session snapshot timestamp")
+                    }
                     var selectStatement: OpaquePointer?
                     let selectSQL = """
-                        SELECT id FROM sessions
-                        WHERE server_origin = ? AND julianday(created_at) <= julianday(?)
+                        SELECT id, created_at FROM sessions
+                        WHERE server_origin = ?
                     """
                     guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStatement, nil) == SQLITE_OK else {
                         throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
                     }
                     sqlite3_bind_text(selectStatement, 1, serverOrigin, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                    sqlite3_bind_text(selectStatement, 2, snapshotAsOf, -1, SQLITE_TRANSIENT_DESTRUCTOR)
                     var selectStep = sqlite3_step(selectStatement)
                     while selectStep == SQLITE_ROW {
                         let id = String(cString: sqlite3_column_text(selectStatement, 0))
-                        if !authoritativeSessionIds.contains(id) {
+                        let createdAt = String(cString: sqlite3_column_text(selectStatement, 1))
+                        guard let createdInstant = Self.rfc3339Instant(createdAt, formatter: formatter) else {
+                            sqlite3_finalize(selectStatement)
+                            throw EventDatabaseError.executeFailed("Invalid cached session creation timestamp")
+                        }
+                        if createdInstant <= snapshotInstant, !authoritativeSessionIds.contains(id) {
                             staleSessionIds.append(id)
                         }
                         selectStep = sqlite3_step(selectStatement)
@@ -178,6 +187,46 @@ final class SessionRepository: @unchecked Sendable {
                 throw error
             }
         }
+    }
+
+    /// Exact sortable RFC 3339 instant used by destructive snapshot reconciliation.
+    /// Foundation `Date` is used only for whole-second/offset normalization; the
+    /// fractional nanoseconds are retained separately so nearby sessions cannot
+    /// collapse onto the same floating-point or SQLite date value.
+    private static func rfc3339Instant(
+        _ value: String,
+        formatter: ISO8601DateFormatter
+    ) -> (seconds: Int64, nanoseconds: Int32)? {
+        guard let timeSeparator = value.firstIndex(of: "T") else { return nil }
+        let timezoneStart: String.Index
+        if value.last == "Z" {
+            timezoneStart = value.index(before: value.endIndex)
+        } else {
+            let timeRange = value.index(after: timeSeparator)..<value.endIndex
+            guard let offset = value[timeRange].lastIndex(where: { $0 == "+" || $0 == "-" }) else {
+                return nil
+            }
+            timezoneStart = offset
+        }
+
+        let localTimestamp = value[..<timezoneStart]
+        let timezone = value[timezoneStart...]
+        let fractionSeparator = localTimestamp.lastIndex(of: ".")
+        let wholeTimestamp: Substring
+        let fraction: Substring
+        if let fractionSeparator {
+            wholeTimestamp = localTimestamp[..<fractionSeparator]
+            fraction = localTimestamp[localTimestamp.index(after: fractionSeparator)...]
+        } else {
+            wholeTimestamp = localTimestamp
+            fraction = ""
+        }
+        guard fraction.count <= 9, fraction.allSatisfy(\.isNumber) else { return nil }
+        let paddedFraction = String(fraction) + String(repeating: "0", count: 9 - fraction.count)
+        guard let nanoseconds = Int32(paddedFraction) else { return nil }
+        let normalized = String(wholeTimestamp) + String(timezone)
+        guard let date = formatter.date(from: normalized) else { return nil }
+        return (Int64(date.timeIntervalSince1970.rounded()), nanoseconds)
     }
 
     // MARK: - Query Operations

@@ -28,7 +28,18 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .build()?,
         CapabilityContract::new("session::list", "session", EffectClass::PureRead, RiskLevel::Low, Some("session.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"cursor":{"type":"string"},"includeArchived":{"type":"boolean"},"limit":{"maximum":200,"minimum":1,"type":"integer"},"offset":{"minimum":0,"type":"integer"},"sessionId":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .response_schema(json!({
+                "additionalProperties": false,
+                "properties": {
+                    "sessions": {"type": "array", "items": {"type": "object"}},
+                    "hasMore": {"type": "boolean"},
+                    "nextCursor": {"type": ["string", "null"]},
+                    "snapshotAsOf": {"type": "string"},
+                    "snapshotCanReconcile": {"type": "boolean"}
+                },
+                "required": ["sessions", "hasMore", "nextCursor", "snapshotAsOf", "snapshotCanReconcile"],
+                "type": "object"
+            }))
             .build()?,
         CapabilityContract::new("session::delete", "session", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("session.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
@@ -116,5 +127,41 @@ mod tests {
             }),
         )
         .expect("page-two payload must pass the actual closed engine contract");
+    }
+
+    #[test]
+    fn session_list_response_contract_requires_complete_pagination_state() {
+        let list = capabilities()
+            .expect("session contracts")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "session::list")
+            .expect("session::list contract");
+        let schema = list
+            .response_schema
+            .as_ref()
+            .expect("session::list response schema");
+
+        let missing = crate::engine::kernel::schema::validate_payload(
+            &list.function_id,
+            "response",
+            schema,
+            &json!({}),
+        )
+        .expect_err("empty list response must fail the wire contract");
+        assert!(missing.to_string().contains("$.sessions"));
+
+        crate::engine::kernel::schema::validate_payload(
+            &list.function_id,
+            "response",
+            schema,
+            &json!({
+                "sessions": [],
+                "hasMore": false,
+                "nextCursor": null,
+                "snapshotAsOf": "2026-07-09T12:00:00.000000001Z",
+                "snapshotCanReconcile": true
+            }),
+        )
+        .expect("complete pagination response must pass the wire contract");
     }
 }

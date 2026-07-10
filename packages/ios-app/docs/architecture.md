@@ -440,7 +440,10 @@ together so archive transitions cannot change membership mid-snapshot. Cursor
 cycles, inconsistent boundaries, and cap-limited results are partial and never
 delete cached rows. A complete unfiltered snapshot is applied in one SQLite
 transaction; server-missing sessions at or before its boundary are removed
-with their events while newer local rows and all retained events survive. Full
+with their events while newer local rows and all retained events survive.
+Destructive boundary checks compare RFC 3339 instants at full nanosecond
+precision; Foundation floating-point dates and SQLite `julianday` are not used
+because either can collapse distinct session creation times. Full
 session sync clears and refetches event rows, and fork ancestor rows remain source-session history
 rather than copied client truth. Engine stream cursors are stored per server
 origin/topic/filter for ACK coalescing and diagnostics only; session history is

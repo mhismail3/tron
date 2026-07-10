@@ -163,7 +163,8 @@ fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
     let (conn, ws_id) = setup();
     for (id, created_at) in [
         ("sess_at_boundary", "2026-07-01T12:00:00Z"),
-        ("sess_after_boundary", "2026-07-01T12:00:00.500Z"),
+        ("sess_before_boundary", "2026-07-01T12:00:00.000100Z"),
+        ("sess_after_boundary", "2026-07-01T12:00:00.000300Z"),
     ] {
         SessionRepo::create_with_identity(
             &conn,
@@ -184,7 +185,7 @@ fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
     let sessions = SessionRepo::list(
         &conn,
         &ListSessionsOptions {
-            snapshot_created_at: Some("2026-07-01T12:00:00Z"),
+            snapshot_created_at: Some("2026-07-01T12:00:00.000200Z"),
             ..Default::default()
         },
     )
@@ -195,7 +196,7 @@ fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
             .iter()
             .map(|session| session.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["sess_at_boundary"]
+        vec!["sess_before_boundary", "sess_at_boundary"]
     );
 }
 

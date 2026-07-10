@@ -296,6 +296,41 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertTrue(futureEventExists)
     }
 
+    func testSnapshotReconciliationPreservesSessionCreatedNanosecondsAfterBoundary() async throws {
+        let origin = "prod:8080"
+        let stale = makeSession(
+            id: "stale",
+            createdAt: "2026-04-02T00:00:00.000100Z",
+            serverOrigin: origin
+        )
+        let future = makeSession(
+            id: "future",
+            createdAt: "2026-04-02T00:00:00.000300Z",
+            serverOrigin: origin
+        )
+        try await database.sessions.insert(stale)
+        try await database.sessions.insert(future)
+        try await database.events.insert(makeEvent(id: "stale-event-ns", sessionId: stale.id, type: "message.user"))
+        try await database.events.insert(makeEvent(id: "future-event-ns", sessionId: future.id, type: "message.user"))
+
+        let removed = try await database.sessions.reconcileServerSnapshot(
+            upserting: [],
+            serverOrigin: origin,
+            authoritativeSessionIds: [],
+            snapshotAsOf: "2026-04-02T00:00:00.000200Z"
+        )
+
+        XCTAssertEqual(removed, 1)
+        let staleSession = try await database.sessions.get(stale.id)
+        let futureSession = try await database.sessions.get(future.id)
+        let staleEventExists = try await database.events.exists("stale-event-ns")
+        let futureEventExists = try await database.events.exists("future-event-ns")
+        XCTAssertNil(staleSession)
+        XCTAssertNotNil(futureSession)
+        XCTAssertFalse(staleEventExists)
+        XCTAssertTrue(futureEventExists)
+    }
+
     func testPartialServerSnapshotNeverDeletesMissingSessions() async throws {
         let origin = "prod:8080"
         let existing = makeSession(id: "existing", serverOrigin: origin)

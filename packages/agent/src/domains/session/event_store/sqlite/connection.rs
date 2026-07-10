@@ -6,7 +6,8 @@
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::Connection;
+use rusqlite::functions::{Context, FunctionFlags};
+use rusqlite::{Connection, Error as SqliteError};
 
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
 use crate::domains::session::event_store::sqlite::contention::BusyRetryPolicy;
@@ -66,8 +67,34 @@ impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer
              PRAGMA page_size = 8192;",
             self.busy_timeout_ms, self.cache_size_kib, self.mmap_size
         ))?;
+        register_timestamp_functions(conn)?;
         Ok(())
     }
+}
+
+/// Register exact RFC 3339 comparison support on one SQLite connection.
+///
+/// SQLite's built-in `julianday` rounds fractional seconds and is therefore
+/// not safe for snapshot/keyset boundaries. Converting through Chrono keeps
+/// nanosecond ordering without changing the durable text representation.
+pub(crate) fn register_timestamp_functions(
+    conn: &Connection,
+) -> std::result::Result<(), rusqlite::Error> {
+    conn.create_scalar_function(
+        "rfc3339_unix_nanos",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |context: &Context<'_>| {
+            let value = context.get::<String>(0)?;
+            let parsed = chrono::DateTime::parse_from_rfc3339(&value)
+                .map_err(|error| SqliteError::UserFunctionError(Box::new(error)))?;
+            parsed.timestamp_nanos_opt().ok_or_else(|| {
+                SqliteError::UserFunctionError(
+                    format!("RFC 3339 timestamp is outside nanosecond range: {value}").into(),
+                )
+            })
+        },
+    )
 }
 
 /// Create an in-memory connection pool (for testing).

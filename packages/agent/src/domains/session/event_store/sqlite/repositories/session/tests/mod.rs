@@ -12,6 +12,8 @@ fn setup() -> (Connection, String) {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
         .unwrap();
+    crate::domains::session::event_store::sqlite::connection::register_timestamp_functions(&conn)
+        .unwrap();
     run_migrations(&conn).unwrap();
 
     let ws = WorkspaceRepo::create(
