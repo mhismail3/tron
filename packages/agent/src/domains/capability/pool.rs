@@ -15,7 +15,10 @@ use std::borrow::Cow;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use super::operation_binding_metadata;
+use super::{
+    operation_binding_metadata,
+    operations::{OperationEffect, operation_effect},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -446,87 +449,20 @@ fn prior_evidence_for_operation(operation: &str) -> Value {
 }
 
 fn operation_is_read_only_safe(operation: &str) -> bool {
-    matches!(
-        operation,
-        "observe"
-            | "state_get"
-            | "state_list"
-            | "filesystem_read"
-            | "filesystem_list"
-            | "filesystem_find"
-            | "filesystem_glob"
-            | "filesystem_search_text"
-            | "filesystem_diff"
-            | "git_status"
-            | "git_diff"
-            | "git_branch_inventory"
-            | "job_status"
-            | "job_list"
-            | "job_log"
-            | "trace_list"
-            | "trace_get"
-            | "log_recent"
-            | "replay_manifest"
-            | "catalog_search"
-            | "catalog_inspect"
-            | "memory_status"
-            | "memory_list"
-            | "memory_inspect"
-            | "memory_query_list"
-            | "memory_query_inspect"
-            | "memory_decision_list"
-            | "memory_decision_inspect"
-            | "context_control_action_list"
-            | "context_control_action_inspect"
-            | "context_survivor_list"
-            | "context_exclusion_list"
-            | "subagent_status"
-            | "subagent_result"
-            | "subagent_task_list"
-            | "subagent_task_inspect"
-            | "capability_binding_cockpit_overview"
-    ) || operation.ends_with("_list")
-        || operation.ends_with("_inspect")
-        || operation.ends_with("_status")
+    matches!(operation_effect(operation), Some(OperationEffect::ReadOnly))
 }
 
 fn operation_writes_metadata(operation: &str) -> bool {
-    operation.ends_with("_record")
-        || matches!(
-            operation,
-            "state_set"
-                | "catalog_conformance"
-                | "context_control_snapshot"
-                | "context_control_compact"
-                | "context_control_clear"
-                | "context_policy_snapshot"
-                | "context_survivor_disable"
-                | "context_exclusion_disable"
-                | "media_create"
-                | "media_archive"
-                | "module_lifecycle_request"
-                | "module_lifecycle_decision"
-                | "module_runtime_cancel"
-                | "module_dependency_policy_activate"
-                | "capability_binding_policy_activate"
-                | "capability_route_activate"
-                | "capability_route_disable"
-                | "capability_route_rollback"
-                | "procedural_definition_record"
-                | "procedural_activation_request_record"
-                | "procedural_activation_decision_record"
-        )
+    matches!(
+        operation_effect(operation),
+        Some(OperationEffect::MetadataWrite)
+    )
 }
 
 fn operation_starts_work(operation: &str) -> bool {
     matches!(
-        operation,
-        "process_run"
-            | "job_start"
-            | "subagent_launch"
-            | "module_runtime_request"
-            | "module_program_execution_start"
-            | "schedule_fire_due"
+        operation_effect(operation),
+        Some(OperationEffect::StartsWork)
     )
 }
 

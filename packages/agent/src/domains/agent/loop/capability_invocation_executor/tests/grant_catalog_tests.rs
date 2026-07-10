@@ -102,7 +102,7 @@ async fn catalog_conformance_runtime_grant_authorizes_exact_report_write() {
 }
 
 #[test]
-fn catalog_conformance_uses_caller_key_not_provider_call_for_wrapper_replay() {
+fn durable_operations_use_caller_key_not_provider_call_for_wrapper_replay() {
     let payload = json!({
         "operation": "catalog_conformance",
         "reason": "Verify catalog",
@@ -170,6 +170,34 @@ fn catalog_conformance_uses_caller_key_not_provider_call_for_wrapper_replay() {
         &different_key_payload,
     );
     assert_ne!(first, different);
+
+    let goal_payload = json!({
+        "operation": "goal_create",
+        "objective": "prove generic caller-key replay",
+        "idempotencyKey": "stable-goal-key"
+    });
+    let goal_first = model_capability_invocation_idempotency_key(
+        Some("run-a"),
+        "session-a",
+        1,
+        "provider-call-a",
+        "execute",
+        "/workspace",
+        Some("workspace-a"),
+        &goal_payload,
+    );
+    let goal_replay = model_capability_invocation_idempotency_key(
+        Some("run-b"),
+        "session-a",
+        7,
+        "provider-call-b",
+        "execute",
+        "/workspace",
+        Some("workspace-a"),
+        &goal_payload,
+    );
+    assert_eq!(goal_first, goal_replay);
+    assert_ne!(goal_first, first, "operation identity scopes caller keys");
 }
 
 #[tokio::test]

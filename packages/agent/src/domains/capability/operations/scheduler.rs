@@ -6,24 +6,6 @@ use crate::engine::Invocation;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
-pub(super) fn is_scheduler_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "schedule_create"
-            | "schedule_list"
-            | "schedule_inspect"
-            | "schedule_cancel"
-            | "schedule_fire_due"
-    )
-}
-
-pub(super) fn requires_scheduler_idempotency(operation: &str) -> bool {
-    matches!(
-        operation,
-        "schedule_create" | "schedule_cancel" | "schedule_fire_due"
-    )
-}
-
 pub(super) async fn schedule_create(
     invocation: &Invocation,
     deps: &Deps,

@@ -1,9 +1,9 @@
 //! Provider-visible structural contracts for `capability::execute` operations.
 //!
-//! Each promoted operation has one [`OperationContract`] here. Catalog
-//! projection and runtime validation consume the same schema; no second exact
-//! field list is maintained in the catalog. Domain services still own semantic,
-//! authority, lifecycle, and resource validation after this structural gate.
+//! Every supported operation has one [`OperationContract`] here. Catalog
+//! projection and runtime validation consume the same closed schema. Domain
+//! services retain semantic, lifecycle, and runtime resource validation after
+//! this structural gate.
 
 use serde_json::{Map, Value, json};
 
@@ -14,7 +14,23 @@ use crate::engine::FunctionId;
 use crate::engine::kernel::schema;
 use crate::shared::server::errors::CapabilityError;
 
+mod authority;
 mod capability_binding;
+mod direct;
+mod governance;
+mod metadata;
+mod output;
+mod policy;
+mod records;
+
+pub(crate) use authority::{
+    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
+    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
+    ProceduralResourceSet, ResourceKindPolicy, SelectorAddition, SubagentResourceSet,
+    WorkerPackageKindSource,
+};
+pub(super) use policy::InvocationScope;
+pub(crate) use policy::OperationEffect;
 
 /// One authoritative provider-visible structural contract.
 #[derive(Clone, Debug)]
@@ -23,160 +39,42 @@ pub(super) struct OperationContract {
     pub(super) input_schema: Value,
 }
 
-/// Return the promoted contract for one operation.
-///
-/// Absence means the operation still relies on its domain-owned structural
-/// validator and must be projected as `domain_validated_contract`.
-pub(super) fn contract(operation: &str) -> Option<OperationContract> {
-    if let Some(input_schema) = capability_binding::input_schema(operation) {
-        return Some(OperationContract { input_schema });
-    }
-    let (required, properties) = match operation {
-        "catalog_search" => (vec!["operation"], catalog_query_properties(false)),
-        "catalog_conformance" => (
-            vec!["operation", "idempotencyKey"],
-            catalog_query_properties(true),
-        ),
-        "catalog_inspect" => (
-            vec!["operation", "kind", "id"],
-            vec![
-                (
-                    "kind",
-                    json!({"type": "string", "enum": ["function", "worker", "trigger_type", "trigger"]}),
-                ),
-                (
-                    "id",
-                    string_schema("Exact catalog or execute-operation id to inspect."),
-                ),
-                (
-                    "includeOutputSchema",
-                    json!({"type": "boolean", "description": "Include the output contract only when it is needed."}),
-                ),
-            ],
-        ),
-        "repository_tree_snapshot" => (
-            vec![
-                "operation",
-                "repositoryRef",
-                "rootRef",
-                "treeObjectRef",
-                "idempotencyKey",
-            ],
-            repository_tree_snapshot_properties(),
-        ),
-        "repository_tree_list" => (
-            vec!["operation"],
-            vec![
-                (
-                    "limit",
-                    bounded_integer_schema(1, 100, "Maximum snapshots returned."),
-                ),
-                ("includeArchived", json!({"type": "boolean"})),
-                (
-                    "repositoryRefId",
-                    string_schema(
-                        "Optional bounded repository ref id filter; unsupported aliases are rejected.",
-                    ),
-                ),
-                ("networkPolicy", network_policy_none_schema()),
-            ],
-        ),
-        "repository_tree_inspect" => (
-            vec!["operation", "repositoryTreeResourceId"],
-            vec![
-                (
-                    "repositoryTreeResourceId",
-                    string_schema("Exact repository_tree_snapshot resource id."),
-                ),
-                ("networkPolicy", network_policy_none_schema()),
-            ],
-        ),
-        "job_start" => (
-            vec!["operation", "command", "idempotencyKey"],
-            vec![
-                ("command", command_schema()),
-                ("idempotencyKey", idempotency_schema()),
-                (
-                    "timeoutMs",
-                    bounded_integer_schema(1, 120_000, "Maximum job runtime."),
-                ),
-                (
-                    "maxOutputBytes",
-                    bounded_integer_schema(1, 200_000, "Maximum captured output bytes."),
-                ),
-                (
-                    "cleanupAfterSeconds",
-                    json!({"type": "integer", "minimum": 0}),
-                ),
-            ],
-        ),
-        "job_status" | "job_log" => (
-            vec!["operation", "jobResourceId"],
-            vec![("jobResourceId", job_resource_id_schema())],
-        ),
-        "job_list" => (
-            vec!["operation"],
-            vec![
-                (
-                    "state",
-                    json!({"type": "string", "enum": ["running", "completed", "failed", "timed_out", "cancelled", "archived"]}),
-                ),
-                (
-                    "limit",
-                    bounded_integer_schema(1, 500, "Maximum jobs returned."),
-                ),
-            ],
-        ),
-        "job_cancel" => (
-            vec!["operation", "jobResourceId", "idempotencyKey"],
-            vec![
-                ("jobResourceId", job_resource_id_schema()),
-                ("idempotencyKey", idempotency_schema()),
-                (
-                    "reason",
-                    string_schema("Optional bounded cancellation reason."),
-                ),
-            ],
-        ),
-        "process_run" => (
-            vec!["operation", "command"],
-            vec![
-                ("command", command_schema()),
-                (
-                    "timeoutMs",
-                    bounded_integer_schema(1, 120_000, "Maximum synchronous process runtime."),
-                ),
-                (
-                    "maxOutputBytes",
-                    bounded_integer_schema(1, 200_000, "Maximum provider-visible output bytes."),
-                ),
-            ],
-        ),
-        "trace_list" => (
-            vec!["operation"],
-            vec![
-                (
-                    "limit",
-                    bounded_integer_schema(1, 500, "Maximum trace records returned."),
-                ),
-                (
-                    "traceId",
-                    string_schema("Optional exact engine trace filter."),
-                ),
-            ],
-        ),
-        "trace_get" => (
-            vec!["operation", "traceRecordId"],
-            vec![(
-                "traceRecordId",
-                string_schema("Exact provider-safe trace record id returned by trace_list."),
-            )],
-        ),
-        _ => return None,
-    };
-    is_supported_operation(operation).then(|| OperationContract {
-        input_schema: closed_schema(operation, &required, properties),
+pub(super) fn binding_metadata(
+    operation: &str,
+) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    metadata::metadata(operation).map(|metadata| {
+        (
+            metadata.family,
+            metadata.current_owner,
+            metadata.ownership_class,
+            metadata.replacement_target,
+        )
     })
+}
+
+pub(super) fn invocation_scope(operation: &str) -> policy::InvocationScope {
+    policy::invocation_scope(operation)
+}
+
+pub(super) fn requires_idempotency(operation: &str) -> bool {
+    policy::requires_idempotency(operation)
+}
+
+pub(crate) fn effect(operation: &str) -> Option<OperationEffect> {
+    policy::effect(operation)
+}
+
+pub(crate) fn authority_policy(operation: &str) -> Option<AuthorityPolicy> {
+    authority::policy(operation)
+}
+
+/// Return the complete provider-visible contract for one supported operation.
+pub(super) fn contract(operation: &str) -> Option<OperationContract> {
+    let input_schema = capability_binding::input_schema(operation)
+        .or_else(|| governance::input_schema(operation))
+        .or_else(|| records::input_schema(operation))
+        .or_else(|| direct::input_schema(operation))?;
+    Some(OperationContract { input_schema })
 }
 
 /// Return the exact schema for catalog projection or runtime validation.
@@ -184,7 +82,11 @@ pub(super) fn exact_input_schema(operation: &str) -> Option<Value> {
     contract(operation).map(|contract| contract.input_schema)
 }
 
-/// Validate membership and, once promoted, the closed payload shape.
+pub(super) fn exact_output_schema(operation: &str) -> Option<Value> {
+    output::output_schema(operation)
+}
+
+/// Validate membership and the operation's closed payload shape.
 pub(crate) fn validate_payload(payload: &Value) -> Result<(), CapabilityError> {
     let operation = payload
         .get("operation")
@@ -201,9 +103,8 @@ pub(crate) fn validate_payload(payload: &Value) -> Result<(), CapabilityError> {
             ),
         });
     }
-    let Some(contract) = contract(operation) else {
-        return Ok(());
-    };
+    let contract = contract(operation)
+        .expect("supported capability operation must have one canonical structural contract");
     let function_id =
         FunctionId::new("capability::execute").expect("canonical capability function id is valid");
     schema::validate_payload(
@@ -240,122 +141,6 @@ fn closed_schema(operation: &str, required: &[&str], fields: Vec<(&str, Value)>)
     })
 }
 
-fn catalog_query_properties(include_reason: bool) -> Vec<(&'static str, Value)> {
-    let mut fields = vec![
-        (
-            "text",
-            string_schema("Optional natural-language or exact operation query."),
-        ),
-        (
-            "namespacePrefix",
-            string_schema("Optional exact namespace or capability-family prefix."),
-        ),
-        (
-            "visibility",
-            string_schema("Optional catalog visibility filter."),
-        ),
-        (
-            "effectClass",
-            json!({
-                "type": "string",
-                "enum": [
-                    "pure_read", "read", "read_only", "inspect", "deterministic_compute",
-                    "delegated_invocation", "idempotent_write", "append_only_event",
-                    "reversible_side_effect", "external_side_effect", "irreversible_side_effect"
-                ]
-            }),
-        ),
-        ("maxRisk", string_schema("Optional maximum risk filter.")),
-        ("health", string_schema("Optional catalog health filter.")),
-        ("includeInternal", json!({"type": "boolean"})),
-        ("includeProtectedCounts", json!({"type": "boolean"})),
-        (
-            "limit",
-            bounded_integer_schema(1, 500, "Maximum catalog matches returned."),
-        ),
-    ];
-    if include_reason {
-        fields.push((
-            "reason",
-            string_schema("Reason for the durable conformance report."),
-        ));
-        fields.push(("idempotencyKey", idempotency_schema()));
-    }
-    fields
-}
-
-fn repository_tree_snapshot_properties() -> Vec<(&'static str, Value)> {
-    vec![
-        ("snapshotId", string_schema("Optional stable snapshot id.")),
-        (
-            "repositoryRef",
-            json!({"type": "object", "description": "Required bounded repository reference; copy the complete repositoryTreeSnapshotInput.repositoryRef object from git_status when available, including kind. Passing only .id is invalid."}),
-        ),
-        (
-            "rootRef",
-            json!({"type": "object", "description": "Required bounded workspace/repository-root reference; copy the complete repositoryTreeSnapshotInput.rootRef object from git_status when available, including kind. Passing only .id is invalid."}),
-        ),
-        (
-            "treeObjectRef",
-            string_schema(
-                "Required bounded tree object token; copy repositoryTreeSnapshotInput.treeObjectRef from git_status when available. Never pass raw tree contents.",
-            ),
-        ),
-        (
-            "headRef",
-            json!({"type": "object", "description": "Optional bounded commit/head reference; copy the complete repositoryTreeSnapshotInput.headRef object from git_status when available, including kind."}),
-        ),
-        (
-            "snapshotLabel",
-            string_schema("Optional short snapshot label."),
-        ),
-        (
-            "snapshotSummary",
-            string_schema("Optional provider-safe snapshot summary."),
-        ),
-        (
-            "pathEntries",
-            json!({"type": "array", "maxItems": 100, "description": "Optional bounded normalized relative path metadata only; never raw file contents."}),
-        ),
-        (
-            "totalEntries",
-            bounded_integer_schema(0, 100_000, "Aggregate tree entry count."),
-        ),
-        (
-            "fileCount",
-            bounded_integer_schema(0, 100_000, "Aggregate file count."),
-        ),
-        (
-            "directoryCount",
-            bounded_integer_schema(0, 100_000, "Aggregate directory count."),
-        ),
-        (
-            "symlinkCount",
-            bounded_integer_schema(0, 100_000, "Aggregate symlink count."),
-        ),
-        (
-            "submoduleCount",
-            bounded_integer_schema(0, 100_000, "Aggregate submodule count."),
-        ),
-        (
-            "maxDepth",
-            bounded_integer_schema(0, 64, "Maximum path depth."),
-        ),
-        ("sourceRefs", json!({"type": "array", "maxItems": 25})),
-        ("evidenceRefs", json!({"type": "array", "maxItems": 25})),
-        (
-            "maxAgeDays",
-            bounded_integer_schema(1, 366, "Retention limit in days."),
-        ),
-        ("idempotencyKey", idempotency_schema()),
-        ("networkPolicy", network_policy_none_schema()),
-        (
-            "reason",
-            string_schema("Optional provider-safe custody reason."),
-        ),
-    ]
-}
-
 fn string_schema(description: &str) -> Value {
     json!({"type": "string", "description": description})
 }
@@ -377,19 +162,9 @@ fn network_policy_none_schema() -> Value {
     })
 }
 
-fn command_schema() -> Value {
-    string_schema("Shell command executed from trusted runtime working-directory context.")
-}
-
 fn idempotency_schema() -> Value {
     string_schema(
         "Stable bounded caller idempotency key for this durable write. This value is provider-visible in the tool-call payload because the caller supplies it, but provider-safe result, status, log, and trace projections redact it.",
-    )
-}
-
-fn job_resource_id_schema() -> Value {
-    string_schema(
-        "Exact durable job_process resource id returned by job_start or job_list for the current session scope.",
     )
 }
 
@@ -400,13 +175,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn promoted_contracts_are_single_source_closed_schemas() {
-        let promoted = supported_operation_names()
+    fn every_contract_is_a_single_source_closed_schema() {
+        let contracts = supported_operation_names()
             .iter()
             .filter_map(|operation| contract(operation).map(|contract| (*operation, contract)))
             .collect::<Vec<_>>();
-        assert_eq!(promoted.len(), 39);
-        for (operation, contract) in promoted {
+        assert_eq!(contracts.len(), supported_operation_names().len());
+        for (operation, contract) in contracts {
             assert_eq!(contract.input_schema["additionalProperties"], false);
             assert_eq!(
                 contract.input_schema["schemaCompleteness"],
@@ -421,12 +196,44 @@ mod tests {
                 "operation request",
                 &contract.input_schema,
             )
-            .expect("promoted schema uses only enforced structural keywords");
+            .expect("canonical schema uses only enforced structural keywords");
         }
     }
 
     #[test]
-    fn promoted_catalog_and_runtime_schemas_are_identical() {
+    fn every_supported_operation_has_exactly_one_contract_family_owner() {
+        for operation in supported_operation_names() {
+            let owners = [
+                capability_binding::input_schema(operation).is_some(),
+                governance::input_schema(operation).is_some(),
+                records::input_schema(operation).is_some(),
+                direct::input_schema(operation).is_some(),
+            ]
+            .into_iter()
+            .filter(|owned| *owned)
+            .count();
+            assert_eq!(owners, 1, "{operation} has {owners} contract family owners");
+        }
+    }
+
+    #[test]
+    fn every_idempotent_operation_requires_the_caller_key_in_its_schema() {
+        for operation in supported_operation_names() {
+            if !requires_idempotency(operation) {
+                continue;
+            }
+            let schema = exact_input_schema(operation).expect("supported operation contract");
+            assert!(
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|required| required.contains(&json!("idempotencyKey"))),
+                "{operation} requires idempotency but does not require the caller key structurally"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_and_runtime_schemas_are_identical() {
         for operation in supported_operation_names() {
             let Some(contract) = contract(operation) else {
                 continue;
@@ -474,12 +281,16 @@ mod tests {
 
     #[test]
     fn exact_contract_enforces_const_and_bounds() {
-        let wrong_policy = validate_payload(&json!({
+        let inert_policy = validate_payload(&json!({
             "operation": "repository_tree_list",
-            "networkPolicy": "declared"
+            "networkPolicy": "none"
         }))
-        .expect_err("network policy const must be enforced");
-        assert!(wrong_policy.to_string().contains("does not match const"));
+        .expect_err("authority-owned network policy is not a payload parameter");
+        assert!(
+            inert_policy
+                .to_string()
+                .contains("additional property is not allowed")
+        );
 
         let excessive_limit = validate_payload(&json!({
             "operation": "capability_binding_cockpit_overview",
@@ -490,11 +301,11 @@ mod tests {
     }
 
     #[test]
-    fn domain_validated_operation_is_not_prematurely_closed() {
+    fn direct_operation_uses_its_canonical_closed_contract() {
         validate_payload(&json!({
             "operation": "filesystem_read",
             "path": "README.md"
         }))
-        .expect("unmigrated domain service retains structural ownership");
+        .expect("direct operation validates through the canonical contract owner");
     }
 }

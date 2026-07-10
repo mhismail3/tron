@@ -78,6 +78,12 @@ use replay::replay_manifest;
 use trace::{complete_trace_record, started_trace_record};
 
 pub(crate) use operation_contract::validate_payload as validate_operation_payload;
+pub(crate) use operation_contract::{
+    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
+    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy, OperationEffect,
+    ProceduralResourceSet, ResourceKindPolicy, SelectorAddition, SubagentResourceSet,
+    WorkerPackageKindSource, authority_policy, effect as operation_effect,
+};
 pub(crate) use registry::supported_operation_names;
 pub(crate) use registry::{
     OperationBindingMetadata, is_supported_operation, operation_binding_metadata,

@@ -25,7 +25,7 @@ async fn filesystem_runtime_grants_use_file_git_module_authority_without_state_f
                 "resource.read",
                 "resource.write",
             ][..],
-            &["patch_proposal", "materialized_file"][..],
+            &["materialized_file", "patch_proposal"][..],
         ),
     ];
 
@@ -80,7 +80,7 @@ async fn git_runtime_grants_use_git_evidence_kinds_without_state_fallback() {
         (
             json!({"operation": "git_status"}),
             &["git.read", "resource.read"][..],
-            &["git_index_change", "git_commit", "git_branch_start"][..],
+            &["git_branch_start", "git_commit", "git_index_change"][..],
         ),
         (
             json!({

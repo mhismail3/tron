@@ -51,8 +51,6 @@ pub(crate) async fn record_repository_tree_snapshot_value_at(
             "evidenceRefs",
             "maxAgeDays",
             "idempotencyKey",
-            "networkPolicy",
-            "reason",
         ],
     )?;
     ensure_write_authority(deps, invocation, "repository_tree_snapshot").await?;
@@ -189,13 +187,7 @@ pub(crate) async fn list_repository_tree_value(
     reject_unknown_fields(
         payload,
         "repository_tree_list",
-        &[
-            "operation",
-            "limit",
-            "includeArchived",
-            "repositoryRefId",
-            "networkPolicy",
-        ],
+        &["operation", "limit", "includeArchived", "repositoryRefId"],
     )?;
     let _grant = inspect_read_grant(deps, invocation, "repository_tree_list").await?;
     let scope = resource_scope(invocation)?;
@@ -277,7 +269,7 @@ pub(crate) async fn inspect_repository_tree_value(
     reject_unknown_fields(
         payload,
         "repository_tree_inspect",
-        &["operation", "repositoryTreeResourceId", "networkPolicy"],
+        &["operation", "repositoryTreeResourceId"],
     )?;
     let _grant = inspect_read_grant(deps, invocation, "repository_tree_inspect").await?;
     let resource_id = required_string(payload, "repositoryTreeResourceId")?;

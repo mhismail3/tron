@@ -6,13 +6,11 @@ async fn device_read_runtime_grants_are_read_only_and_selector_bounded() {
         let payload = if operation == "device_inspect" {
             json!({
                 "operation": operation,
-                "deviceRegistrationResourceId": "device_registration:runtime-grant",
-                "idempotencyKey": format!("{operation}-grant")
+                "deviceRegistrationResourceId": "device_registration:runtime-grant"
             })
         } else {
             json!({
-                "operation": operation,
-                "idempotencyKey": format!("{operation}-grant")
+                "operation": operation
             })
         };
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
@@ -54,13 +52,11 @@ async fn notification_read_runtime_grants_are_selector_bounded() {
         let payload = if operation == "notification_inspect" {
             json!({
                 "operation": operation,
-                "notificationResourceId": "notification:runtime-grant",
-                "idempotencyKey": format!("{operation}-grant")
+                "notificationResourceId": "notification:runtime-grant"
             })
         } else {
             json!({
-                "operation": operation,
-                "idempotencyKey": format!("{operation}-grant")
+                "operation": operation
             })
         };
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;

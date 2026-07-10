@@ -257,7 +257,7 @@ fn execute_operation_inspect_projection_with_options(
     let schema_completeness = input_schema
         .get("schemaCompleteness")
         .cloned()
-        .unwrap_or_else(|| Value::String("domain_validated_contract".to_owned()));
+        .expect("canonical input contract declares schema completeness");
     let capability_pool = operation_pool_metadata(operation).map(|metadata| {
         operation_contextual_pool_projection(
             operation,
@@ -299,7 +299,8 @@ fn execute_operation_inspect_projection_with_options(
     if include_output_schema && let Some(object) = projection.as_object_mut() {
         object.insert(
             "outputSchema".to_owned(),
-            execute_operation_output_schema(operation),
+            super::operation_contract::exact_output_schema(operation)
+                .expect("supported execute operation has an output contract"),
         );
     }
     if alias != projection["id"].as_str().unwrap_or_default() {
@@ -383,661 +384,10 @@ fn operation_contextual_pool_projection(operation: &str, mut projection: Value) 
 }
 
 pub(super) fn execute_operation_input_schema(operation: &str) -> Value {
-    if let Some(schema) = super::operation_contract::exact_input_schema(operation) {
-        return schema;
-    }
-    let required_payload_fields = operation_required_payload_fields(operation);
-    let required_fields = required_payload_fields
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    let mut properties = serde_json::Map::new();
-    properties.insert(
-        "operation".to_owned(),
-        json!({
-            "type": "string",
-            "const": operation,
-            "description": "Exact capability::execute operation selector."
-        }),
-    );
-    for field in &required_fields {
-        if *field == "operation" {
-            continue;
-        }
-        properties.insert(
-            (*field).to_owned(),
-            execute_operation_field_schema(operation, field),
-        );
-    }
-
-    add_operation_specific_optional_fields(operation, &mut properties);
-    json!({
-        "type": "object",
-        "required": required_fields,
-        "properties": properties,
-        "additionalProperties": true,
-        "payloadPlacement": "top_level_capability_execute_payload",
-        "schemaCompleteness": "domain_validated_contract"
-    })
-}
-
-fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
-    match (operation, field) {
-        (_, "sessionId") => json!({
-            "type": "string",
-            "description": "Current trusted session id. If supplied, it must match the invocation session context."
-        }),
-        (_, "url") => json!({
-            "type": "string",
-            "format": "uri",
-            "description": "Explicit target URL for this web operation. web_robots_check fetches only the target origin robots.txt; web_fetch fetches exactly this target URL after authority and optional robots checks."
-        }),
-        (_, field) => json!({
-            "type": "string",
-            "description": format!(
-                "Operation-specific top-level payload field `{field}` required before invoking this capability."
-            )
-        }),
-    }
-}
-
-fn add_operation_specific_optional_fields(
-    operation: &str,
-    properties: &mut serde_json::Map<String, Value>,
-) {
-    let optional_fields: Vec<(&str, Value)> = match operation {
-        "web_robots_check" => vec![
-            (
-                "userAgent",
-                json!({"type": "string", "description": "Optional bounded user-agent token used only for robots.txt matching. Browser-like wildcard strings such as `*` are invalid; omit this field for the default Tron robots user agent."}),
-            ),
-            (
-                "maxRobotsBytes",
-                json!({"type": "integer", "minimum": 1, "maximum": 262144, "description": "Maximum captured robots.txt bytes for bounded policy evidence."}),
-            ),
-            (
-                "maxOutputBytes",
-                json!({"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum provider-visible redacted robots preview bytes."}),
-            ),
-            (
-                "maxRedirects",
-                json!({"type": "integer", "minimum": 0, "maximum": 10, "description": "Maximum robots.txt redirects. Redirect targets are validated before follow."}),
-            ),
-            (
-                "timeoutMs",
-                json!({"type": "integer", "minimum": 1, "maximum": 30000, "description": "Request timeout in milliseconds."}),
-            ),
-        ],
-        "web_fetch" => vec![
-            (
-                "webRobotsPolicyResourceId",
-                json!({"type": ["string", "null"], "description": "Optional current-session web_robots_policy resource id returned by web_robots_check. Required together with expectedWebRobotsPolicyVersionId when the task requires robots-gated fetch proof."}),
-            ),
-            (
-                "expectedWebRobotsPolicyVersionId",
-                json!({"type": ["string", "null"], "description": "Expected current web_robots_policy version id returned as webRobotsPolicyVersionId by web_robots_check. Stale or missing versions fail closed before target network I/O when a robots policy ref is supplied."}),
-            ),
-            (
-                "maxResponseBytes",
-                json!({"type": "integer", "minimum": 1, "maximum": 1048576, "description": "Maximum captured response bytes for source evidence."}),
-            ),
-            (
-                "maxOutputBytes",
-                json!({"type": "integer", "minimum": 1, "maximum": 100000, "description": "Maximum provider-visible redacted extracted text bytes."}),
-            ),
-            (
-                "maxRedirects",
-                json!({"type": "integer", "minimum": 0, "maximum": 10, "description": "Maximum target fetch redirects. Redirect targets are validated before follow."}),
-            ),
-            (
-                "timeoutMs",
-                json!({"type": "integer", "minimum": 1, "maximum": 30000, "description": "Request timeout in milliseconds."}),
-            ),
-        ],
-        _ => Vec::new(),
-    };
-    for (field, schema) in optional_fields {
-        properties.entry(field.to_owned()).or_insert(schema);
-    }
-}
-
-fn execute_operation_output_schema(operation: &str) -> Value {
-    if operation == "git_status" {
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe text summary of repository status."
-                },
-                "details": {
-                    "type": "object",
-                    "description": "Bounded provider-safe git status evidence. Absolute paths, raw commands, raw logs, grants, and authority ids are excluded.",
-                    "required": ["primitiveOperation", "status", "git"],
-                    "properties": {
-                        "primitiveOperation": {"const": "git_status"},
-                        "status": {"type": "string"},
-                        "git": {
-                            "type": "object",
-                            "required": ["schemaVersion", "status", "operation", "summary", "repository", "evidence"],
-                            "properties": {
-                                "schemaVersion": {"const": "tron.git_readonly.v1"},
-                                "status": {"type": "string"},
-                                "operation": {"const": "status"},
-                                "summary": {
-                                    "type": "object",
-                                    "properties": {
-                                        "stagedCount": {"type": "integer"},
-                                        "unstagedCount": {"type": "integer"},
-                                        "untrackedCount": {"type": "integer"},
-                                        "conflictedCount": {"type": "integer"}
-                                    }
-                                },
-                                "repository": {
-                                    "type": "object",
-                                    "description": "Provider-safe repository facts using workspace-relative path refs.",
-                                    "properties": {
-                                        "branch": {"type": ["string", "null"]},
-                                        "detachedHead": {"type": "boolean"},
-                                        "headOid": {"type": ["string", "null"]},
-                                        "headTreeOid": {"type": ["string", "null"]},
-                                        "treeObjectRef": {"type": ["string", "null"], "description": "Provider-safe bounded tree object token for repository_tree_snapshot."},
-                                        "repositoryTreeSnapshotInput": {"type": "object", "description": "Copyable provider-safe refs for repository_tree_snapshot."},
-                                        "hasUpstream": {"type": "boolean"},
-                                        "ahead": {"type": ["integer", "null"]},
-                                        "behind": {"type": ["integer", "null"]},
-                                        "pathspec": {"type": "string"},
-                                        "repositoryRoot": {"description": "Workspace-relative repository root ref."},
-                                        "worktreeRoot": {"description": "Workspace-relative worktree root ref."},
-                                        "requestedPath": {"description": "Workspace-relative requested path ref."}
-                                    }
-                                },
-                                "evidence": {
-                                    "type": "object",
-                                    "properties": {
-                                        "resourceRefs": {"type": "array"},
-                                        "statusLimitBytes": {"type": "integer"},
-                                        "statusTruncated": {"type": "boolean"},
-                                        "statusPorcelainV1Z": {"type": "string"}
-                                    }
-                                },
-                                "staged": {"type": "array"},
-                                "unstaged": {"type": "array"},
-                                "untracked": {"type": "array"},
-                                "conflicted": {"type": "array"}
-                            }
-                        }
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    if operation == "web_robots_check" {
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe robots-policy summary including copy-ready robots evidence refs for a later robots-gated web_fetch."
-                },
-                "details": {
-                    "type": "object",
-                    "required": ["primitiveOperation", "status", "web"],
-                    "properties": {
-                        "primitiveOperation": {"const": "web_robots_check"},
-                        "status": {"const": "ok"},
-                        "web": {
-                            "type": "object",
-                            "required": [
-                                "schemaVersion",
-                                "status",
-                                "operation",
-                                "webRobotsPolicyResourceId",
-                                "webRobotsPolicyVersionId",
-                                "resourceRefs"
-                            ],
-                            "properties": {
-                                "schemaVersion": {"const": "tron.web_robots_policy.v1"},
-                                "status": {"const": "checked"},
-                                "operation": {"const": "web_robots_check"},
-                                "webRobotsPolicyResourceId": {"type": "string", "description": "Copy this into web_fetch.webRobotsPolicyResourceId when a subsequent fetch must be robots-gated."},
-                                "webRobotsPolicyVersionId": {"type": "string", "description": "Copy this into web_fetch.expectedWebRobotsPolicyVersionId for freshness."},
-                                "resourceRefs": {"type": "array", "description": "Bounded robots-policy resource refs; resourceRefs[0].versionId equals webRobotsPolicyVersionId."}
-                            }
-                        }
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    if operation == "web_fetch" {
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe fetch/source summary; raw HTML and raw bytes are not returned directly."
-                },
-                "details": {
-                    "type": "object",
-                    "required": ["primitiveOperation", "status", "web"],
-                    "properties": {
-                        "primitiveOperation": {"const": "web_fetch"},
-                        "status": {"const": "ok"},
-                        "web": {
-                            "type": "object",
-                            "required": [
-                                "schemaVersion",
-                                "status",
-                                "operation",
-                                "webSourceResourceId",
-                                "webSourceVersionId",
-                                "resourceRefs"
-                            ],
-                            "properties": {
-                                "schemaVersion": {"const": "tron.web_source.v1"},
-                                "status": {"const": "fetched"},
-                                "operation": {"const": "web_fetch"},
-                                "webSourceResourceId": {"type": "string"},
-                                "webSourceVersionId": {"type": "string"},
-                                "robotsPolicyRefs": {"type": "array", "description": "Present when fetch was linked to current robots evidence; contains bounded resource/version refs only."},
-                                "resourceRefs": {"type": "array", "description": "Bounded source resource refs for later web_source_list/inspect/archive operations."}
-                            }
-                        }
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    if matches!(operation, "job_status" | "job_list") {
-        let jobs_schema = if operation == "job_status" {
-            json!({
-                "type": "object",
-                "required": ["schemaVersion", "status", "job", "resourceRefs"],
-                "properties": {
-                    "schemaVersion": {"type": "string"},
-                    "status": {"type": "string"},
-                    "job": redacted_job_output_schema(),
-                    "resourceRefs": {"type": "array", "description": "Provider-safe job/output refs only."}
-                }
-            })
-        } else {
-            json!({
-                "type": "object",
-                "required": ["schemaVersion", "status", "jobs"],
-                "properties": {
-                    "schemaVersion": {"type": "string"},
-                    "status": {"const": "ok"},
-                    "jobs": {"type": "array", "items": redacted_job_output_schema()}
-                }
-            })
-        };
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe lifecycle summary for durable jobs."
-                },
-                "details": {
-                    "type": "object",
-                    "description": "Provider-safe durable job lifecycle projection. Raw commands, working directories, authority/grant ids, raw idempotency keys, stdout, stderr, and raw job/output payloads are excluded.",
-                    "required": ["primitiveOperation", "status", "jobs"],
-                    "properties": {
-                        "primitiveOperation": {"const": operation},
-                        "status": {"type": "string"},
-                        "jobs": jobs_schema
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    if operation == "job_log" {
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe bounded stdout/stderr preview summary for one durable job."
-                },
-                "details": {
-                    "type": "object",
-                    "description": "Bounded job log projection for explicit output inspection. Raw working directories, authority/grant ids, raw idempotency keys, and raw job payloads are excluded.",
-                    "required": ["primitiveOperation", "status", "jobs"],
-                    "properties": {
-                        "primitiveOperation": {"const": "job_log"},
-                        "status": {"type": "string"},
-                        "jobs": {
-                            "type": "object",
-                            "required": ["schemaVersion", "status", "jobResourceId", "jobVersionId", "stdoutPreview", "stderrPreview", "outputTruncated", "resourceRefs"],
-                            "properties": {
-                                "schemaVersion": {"type": "string"},
-                                "status": {"type": "string"},
-                                "jobResourceId": {"type": "string"},
-                                "jobVersionId": {"type": "string"},
-                                "stdoutPreview": {"type": "string"},
-                                "stderrPreview": {"type": "string"},
-                                "outputResourceId": {"type": ["string", "null"]},
-                                "outputVersionId": {"type": ["string", "null"]},
-                                "outputTruncated": {"type": "boolean"},
-                                "resourceRefs": {"type": "array"}
-                            }
-                        }
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    if operation == "trace_list" {
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe trace summary with completed/in-progress counts and projection-boundary guidance."
-                },
-                "details": {
-                    "type": "object",
-                    "description": "Provider-safe current-session trace list. Raw provider invocation ids, grant ids, idempotency keys, raw requests/results, paths, commands, logs, and file contents are excluded from records[].",
-                    "required": ["primitiveOperation", "status", "projectionBoundary", "statusSummary", "records"],
-                    "properties": {
-                        "primitiveOperation": {"const": "trace_list"},
-                        "status": {"const": "ok"},
-                        "projectionBoundary": trace_projection_boundary_output_schema(),
-                        "statusSummary": {
-                            "type": "object",
-                            "required": ["totalRecords", "completedStatusCounts", "inProgressCount", "currentTraceListMayAppearRunning", "currentInvocationStatus"],
-                            "properties": {
-                                "totalRecords": {"type": "integer"},
-                                "completedStatusCounts": {
-                                    "type": "object",
-                                    "description": "Counts by completed trace status, normally ok/failed."
-                                },
-                                "completedStatusValuesOnlyOkFailed": {"type": "boolean"},
-                                "inProgressCount": {"type": "integer"},
-                                "currentTraceListMayAppearRunning": {"const": true},
-                                "currentInvocationStatus": {
-                                    "const": "pending_at_projection_time",
-                                    "description": "The current trace_list invocation is projected before its own completion is recorded."
-                                },
-                                "inProgressInterpretation": {"type": "string"},
-                                "completedStatusGuidance": {"type": "string"},
-                                "answerGuidance": {"type": "string"}
-                            }
-                        },
-                        "records": {
-                            "type": "array",
-                            "description": "Bounded provider-safe trace records for the current session.",
-                            "items": provider_safe_trace_record_output_schema()
-                        }
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    if operation == "trace_get" {
-        return json!({
-            "type": "object",
-            "required": ["content", "details"],
-            "properties": {
-                "content": {
-                    "description": "Provider-safe trace-record summary for one current-session trace record."
-                },
-                "details": {
-                    "type": "object",
-                    "description": "Provider-safe focused trace record. Raw provider invocation ids, grant ids, idempotency keys, raw requests/results, paths, commands, logs, and file contents are excluded.",
-                    "required": ["primitiveOperation", "status", "projectionBoundary", "record"],
-                    "properties": {
-                        "primitiveOperation": {"const": "trace_get"},
-                        "status": {"const": "ok"},
-                        "projectionBoundary": trace_projection_boundary_output_schema(),
-                        "record": provider_safe_trace_record_output_schema()
-                    }
-                }
-            },
-            "schemaCompleteness": "operation_specific_contract"
-        });
-    }
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe text summary of the operation result."
-            },
-            "details": {
-                "type": "object",
-                "description": "Bounded provider-safe evidence for the operation result.",
-                "properties": {
-                    "primitiveOperation": {"const": operation},
-                    "status": {"type": "string"}
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn redacted_job_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "description": "Redacted durable job lifecycle projection.",
-        "required": ["jobResourceId", "jobVersionId", "state", "limits", "retention", "cancellation", "projection"],
-        "properties": {
-            "jobResourceId": {"type": "string"},
-            "jobVersionId": {"type": "string"},
-            "state": {"type": "string"},
-            "limits": {
-                "type": "object",
-                "properties": {
-                    "timeoutMs": {"type": "integer"},
-                    "maxOutputBytes": {"type": "integer"}
-                }
-            },
-            "retention": {"type": "object"},
-            "createdAt": {"type": "string"},
-            "startedAt": {"type": ["string", "null"]},
-            "completedAt": {"type": ["string", "null"]},
-            "cancellation": {
-                "type": "object",
-                "properties": {
-                    "requested": {"type": "boolean"},
-                    "reasonRedacted": {"type": "boolean"},
-                    "rawReasonReturned": {"const": false}
-                }
-            },
-            "terminal": {
-                "type": ["object", "null"],
-                "properties": {
-                    "status": {"type": "string"},
-                    "exitCode": {"type": ["integer", "null"]},
-                    "timedOut": {"type": "boolean"},
-                    "cancelled": {"type": "boolean"},
-                    "errorRedacted": {"type": "boolean"},
-                    "rawErrorReturned": {"const": false}
-                }
-            },
-            "output": {
-                "type": ["object", "null"],
-                "properties": {
-                    "kind": {"type": "string"},
-                    "resourceId": {"type": "string"},
-                    "versionId": {"type": "string"},
-                    "contentHash": {"type": "string"},
-                    "durationMs": {"type": "integer"},
-                    "exitCode": {"type": ["integer", "null"]},
-                    "outputTruncated": {"type": "boolean"},
-                    "stdoutPreviewReturned": {"const": false},
-                    "stderrPreviewReturned": {"const": false},
-                    "rawOutputReturned": {"const": false}
-                }
-            },
-            "projection": {
-                "type": "object",
-                "properties": {
-                    "rawCommandReturned": {"const": false},
-                    "workingDirectoryReturned": {"const": false},
-                    "authorityReturned": {"const": false},
-                    "stdoutPreviewReturned": {"const": false},
-                    "stderrPreviewReturned": {"const": false},
-                    "rawOutputReturned": {"const": false}
-                }
-            }
-        }
-    })
-}
-
-fn trace_projection_boundary_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "description": "Explains that traceId, invocationId, parentInvocationId, runId, sessionRef, and workspaceRef are provider-safe engine refs, not raw provider invocation ids.",
-        "properties": {
-            "providerVisibleProjection": {"type": "string"},
-            "providerVisibleMeaning": {"type": "string"},
-            "internalAuditStorage": {"type": "string"},
-            "safeRefSemantics": {"type": "string"},
-            "recordProof": {"type": "string"},
-            "transcriptToolCallBoundary": {"type": "string"},
-            "operationBoundary": {"type": "string"},
-            "rawCommandEvidenceGuidance": {"type": "string"},
-            "answerGuidance": {"type": "string"},
-            "traceGetUse": {"type": "string"}
-        }
-    })
-}
-
-fn provider_safe_trace_record_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": [
-            "schemaVersion",
-            "id",
-            "traceId",
-            "invocationId",
-            "modelPrimitiveName",
-            "operation",
-            "status",
-            "request",
-            "result",
-            "projectionBoundary",
-            "authority",
-            "redaction"
-        ],
-        "properties": {
-            "schemaVersion": {"const": "tron.trace.provider_safe.v1"},
-            "id": {"type": ["string", "null"], "description": "Provider-safe trace record ref."},
-            "version": {"type": ["string", "null"]},
-            "timestamp": {"type": ["string", "null"]},
-            "traceId": {"type": ["string", "null"], "description": "Provider-safe engine trace ref, not a raw provider invocation id."},
-            "invocationId": {"type": ["string", "null"], "description": "Provider-safe engine invocation ref, not a raw provider tool-call id."},
-            "parentInvocationId": {"type": ["string", "null"]},
-            "runId": {"type": ["string", "null"]},
-            "sessionRef": {"type": ["string", "null"]},
-            "workspaceRef": {"type": ["string", "null"]},
-            "turn": {"type": ["integer", "null"]},
-            "modelPrimitiveName": {"type": ["string", "null"]},
-            "operation": {"type": ["string", "null"]},
-            "status": {"type": ["string", "null"]},
-            "startedAt": {"type": ["string", "null"]},
-            "completedAt": {"type": ["string", "null"]},
-            "durationMs": {"type": ["integer", "null"]},
-            "request": {
-                "type": "object",
-                "required": ["hash", "rawStoredInProjection"],
-                "properties": {
-                    "hash": {"type": ["string", "null"]},
-                    "rawStoredInProjection": {"const": false}
-                }
-            },
-            "result": {
-                "type": "object",
-                "required": ["hash", "rawStoredInProjection"],
-                "properties": {
-                    "hash": {"type": ["string", "null"]},
-                    "rawStoredInProjection": {"const": false}
-                }
-            },
-            "projectionBoundary": {
-                "type": "object",
-                "required": [
-                    "providerVisibleProjection",
-                    "safeEngineRefsOnly",
-                    "rawAuditFieldsProjected",
-                    "internalAuditStorageMayRetainRawAuditFields"
-                ],
-                "properties": {
-                    "providerVisibleProjection": {"const": true},
-                    "safeEngineRefsOnly": {"const": true},
-                    "rawAuditFieldsProjected": {"const": false},
-                    "internalAuditStorageMayRetainRawAuditFields": {"const": true}
-                }
-            },
-            "authority": {
-                "type": "object",
-                "required": [
-                    "actorKind",
-                    "scopeCount",
-                    "rawActorIdStored",
-                    "rawAuthorityGrantIdStored",
-                    "rawIdempotencyKeyStored"
-                ],
-                "properties": {
-                    "actorKind": {"type": ["string", "null"]},
-                    "scopeCount": {"type": "integer"},
-                    "rawActorIdStored": {"const": false},
-                    "rawAuthorityGrantIdStored": {"const": false},
-                    "rawIdempotencyKeyStored": {"const": false}
-                }
-            },
-            "error": {
-                "type": ["object", "null"],
-                "description": "Provider-safe error summary. Raw error details are not stored in the projection."
-            },
-            "redaction": {
-                "type": "object",
-                "required": [
-                    "rawProviderInvocationIdsExcluded",
-                    "rawGrantIdsExcluded",
-                    "rawAuthorityIdsExcluded",
-                    "rawIdempotencyKeysExcluded",
-                    "rawWorkingDirectoryExcluded",
-                    "rawRequestExcluded",
-                    "rawResultExcluded",
-                    "rawFilesExcluded",
-                    "rawVcsExcluded"
-                ],
-                "properties": {
-                    "rawProviderInvocationIdsExcluded": {"const": true},
-                    "rawGrantIdsExcluded": {"const": true},
-                    "rawAuthorityIdsExcluded": {"const": true},
-                    "rawIdempotencyKeysExcluded": {"const": true},
-                    "rawWorkingDirectoryExcluded": {"const": true},
-                    "rawRequestExcluded": {"const": true},
-                    "rawResultExcluded": {"const": true},
-                    "rawFilesExcluded": {"const": true},
-                    "rawVcsExcluded": {"const": true}
-                }
-            }
-        },
-        "notProjectedFields": [
-            "providerInvocationId",
-            "authorityGrantId",
-            "actorId",
-            "idempotencyKey",
-            "workingDirectory",
-            "rawRequest",
-            "rawResult",
-            "rawCommand",
-            "rawLog",
-            "rawPath",
-            "fileContents"
-        ]
+    super::operation_contract::exact_input_schema(operation).unwrap_or_else(|| {
+        panic!(
+            "registry invariant violated: supported capability::execute operation `{operation}` has no canonical input contract"
+        )
     })
 }
 
@@ -1059,88 +409,6 @@ fn normalize_catalog_inspect_payload(payload: &Value) -> (Value, Option<String>)
         object.insert("id".to_owned(), Value::String(canonical.to_owned()));
     }
     (normalized, Some(id.to_owned()))
-}
-
-fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
-    let fields = match operation {
-        "catalog_inspect" => vec!["operation", "kind", "id"],
-        "repository_tree_snapshot" => vec![
-            "operation",
-            "repositoryRef",
-            "rootRef",
-            "treeObjectRef",
-            "idempotencyKey",
-        ],
-        "trace_get" => vec!["operation", "traceRecordId"],
-        "goal_create" => vec!["operation", "objective", "idempotencyKey"],
-        "goal_inspect" => vec!["operation", "goalResourceId"],
-        "goal_cancel" => vec!["operation", "goalResourceId", "reason", "idempotencyKey"],
-        "question_create" => vec!["operation", "prompt", "idempotencyKey"],
-        "question_inspect" => vec!["operation", "questionResourceId"],
-        "question_answer" => vec![
-            "operation",
-            "questionResourceId",
-            "expectedQuestionVersionId",
-            "answerText",
-            "reason",
-            "idempotencyKey",
-        ],
-        "memory_inspect" => vec!["operation", "recordResourceId"],
-        "memory_query_inspect" => vec!["operation", "queryResourceId"],
-        "memory_decision_inspect" => vec!["operation", "decisionResourceId"],
-        "context_control_status" => vec!["operation"],
-        "context_control_action_inspect" => vec!["operation", "contextControlActionResourceId"],
-        "media_inspect" => vec!["operation", "mediaResourceId"],
-        "import_history_inspect" => vec!["operation", "importHistoryResourceId"],
-        "repository_tree_inspect" => vec!["operation", "repositoryTreeResourceId"],
-        "import_preview_inspect" => vec!["operation", "importPreviewResourceId"],
-        "program_execution_inspect" => vec!["operation", "programExecutionResourceId"],
-        "prompt_artifact_inspect" => vec!["operation", "promptArtifactResourceId"],
-        "update_diagnostic_inspect" => vec!["operation", "updateDiagnosticResourceId"],
-        "device_inspect" => vec!["operation", "deviceRegistrationResourceId"],
-        "notification_inspect" => vec!["operation", "notificationResourceId"],
-        "procedural_state_inspect" => vec!["operation", "proceduralRecordResourceId"],
-        "procedural_activation_request_inspect" => {
-            vec!["operation", "proceduralActivationRequestResourceId"]
-        }
-        "procedural_activation_decision_inspect" => {
-            vec!["operation", "proceduralActivationDecisionResourceId"]
-        }
-        "schedule_inspect" => vec!["operation", "scheduleResourceId"],
-        "tool_source_inspect" => vec!["operation", "toolSourceResourceId"],
-        "subagent_task_inspect" => vec!["operation", "subagentTaskResourceId"],
-        "worker_package_inspect" => vec!["operation", "workerPackageResourceId"],
-        "module_inspect" => vec!["operation", "moduleManifestResourceId"],
-        "module_proposal_inspect" => vec!["operation", "moduleProposalResourceId"],
-        "module_validation_inspect" => vec!["operation", "moduleValidationReportResourceId"],
-        "module_install_request_inspect" => vec!["operation", "moduleInstallRequestResourceId"],
-        "module_install_decision_inspect" => vec!["operation", "moduleInstallDecisionResourceId"],
-        "module_dependency_request_inspect" => {
-            vec!["operation", "moduleDependencyRequestResourceId"]
-        }
-        "module_dependency_decision_inspect" => {
-            vec!["operation", "moduleDependencyDecisionResourceId"]
-        }
-        "module_dependency_policy_inspect" => vec!["operation", "moduleDependencyPolicyResourceId"],
-        "module_lifecycle_inspect" => vec!["operation", "moduleLifecycleResourceId"],
-        "module_runtime_inspect" => vec!["operation", "moduleRuntimeResourceId"],
-        "web_fetch" => vec!["operation", "url"],
-        "web_robots_check" => vec!["operation", "url"],
-        "job_start" => vec!["operation", "command", "idempotencyKey"],
-        "job_status" | "job_log" => vec!["operation", "jobResourceId"],
-        "job_list" => vec!["operation"],
-        "job_cancel" => vec!["operation", "jobResourceId", "idempotencyKey"],
-        "process_run" => vec!["operation", "command"],
-        "web_source_inspect" => vec!["operation", "webSourceResourceId"],
-        "web_research_request_inspect" => vec!["operation", "webResearchRequestResourceId"],
-        "web_research_review_inspect" => vec!["operation", "webResearchReviewResourceId"],
-        "web_research_source_inspect" => vec!["operation", "webResearchSourceResourceId"],
-        _ => vec!["operation"],
-    };
-    fields
-        .iter()
-        .map(|field| Value::String((*field).to_owned()))
-        .collect()
 }
 
 fn annotate_model_facing_invocation(discovery: &mut Value, payload: &Value) {
@@ -2785,6 +2053,48 @@ mod tests {
     }
 
     #[test]
+    fn every_supported_operation_projects_only_its_canonical_contracts() {
+        for operation in supported_operation_names() {
+            let canonical_input = super::super::operation_contract::exact_input_schema(operation)
+                .expect("supported operation input contract");
+            let canonical_output = super::super::operation_contract::exact_output_schema(operation)
+                .expect("supported operation output contract");
+            let discovery = execute_operation_inspect_projection_with_options(
+                operation,
+                &format!("execute::{operation}"),
+                true,
+            );
+
+            assert_eq!(
+                discovery["inputSchema"], canonical_input,
+                "catalog input contract drifted for {operation}"
+            );
+            assert_eq!(
+                discovery["outputSchema"], canonical_output,
+                "catalog output contract drifted for {operation}"
+            );
+            assert_eq!(
+                discovery["inputSchema"]["additionalProperties"], false,
+                "catalog input contract must be closed for {operation}"
+            );
+            assert_eq!(
+                discovery["inputSchema"]["schemaCompleteness"], "exact_structural_contract",
+                "catalog input contract must be exact for {operation}"
+            );
+            assert_eq!(
+                discovery["schema"]["requiredPayloadFields"], discovery["inputSchema"]["required"],
+                "required fields must derive from the canonical schema for {operation}"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "has no canonical input contract")]
+    fn missing_canonical_operation_contract_fails_loudly() {
+        let _ = execute_operation_input_schema("not_registered");
+    }
+
+    #[test]
     fn catalog_inspect_includes_output_contract_only_when_requested() {
         let discovery = execute_operation_inspect_projection_with_options(
             "git_status",
@@ -2866,11 +2176,11 @@ mod tests {
         );
         assert_eq!(
             robots["schema"]["requiredPayloadFields"],
-            json!(["operation", "url"])
+            json!(["operation", "url", "idempotencyKey"])
         );
         assert_eq!(
             robots["inputSchema"]["required"],
-            json!(["operation", "url"])
+            json!(["operation", "url", "idempotencyKey"])
         );
         assert_eq!(
             robots["inputSchema"]["properties"]["operation"]["const"],
@@ -2888,12 +2198,10 @@ mod tests {
                 .contains("copy webRobotsPolicyVersionId")
         );
         assert!(
-            robots["inputSchema"]["properties"]
-                .as_object()
-                .expect("robots properties")
-                .get("idempotencyKey")
-                .is_none(),
-            "trusted runtime context owns web robots idempotency keys"
+            robots["inputSchema"]["properties"]["idempotencyKey"]["description"]
+                .as_str()
+                .expect("idempotency description")
+                .contains("Stable bounded caller idempotency key")
         );
         assert_eq!(
             robots["outputSchema"]["properties"]["details"]["properties"]["web"]["required"],
@@ -2914,11 +2222,11 @@ mod tests {
         );
         assert_eq!(
             fetch["schema"]["requiredPayloadFields"],
-            json!(["operation", "url"])
+            json!(["operation", "url", "idempotencyKey"])
         );
         assert_eq!(
             fetch["inputSchema"]["required"],
-            json!(["operation", "url"])
+            json!(["operation", "url", "idempotencyKey"])
         );
         assert_eq!(
             fetch["inputSchema"]["properties"]["operation"]["const"],
@@ -2935,12 +2243,10 @@ mod tests {
                 .contains("webRobotsPolicyVersionId")
         );
         assert!(
-            fetch["inputSchema"]["properties"]
-                .as_object()
-                .expect("fetch properties")
-                .get("idempotencyKey")
-                .is_none(),
-            "trusted runtime context owns web fetch idempotency keys"
+            fetch["inputSchema"]["properties"]["idempotencyKey"]["description"]
+                .as_str()
+                .expect("idempotency description")
+                .contains("Stable bounded caller idempotency key")
         );
         assert!(execute_operation_invocation_guidance("web_fetch").contains("copy"));
         assert!(execute_operation_invocation_guidance("web_fetch").contains("fail closed"));
@@ -3596,7 +2902,7 @@ mod tests {
             true,
         );
 
-        assert_eq!(discovery["inputSchema"]["additionalProperties"], true);
+        assert_eq!(discovery["inputSchema"]["additionalProperties"], false);
         assert_eq!(discovery["inputSchema"]["required"], json!(["operation"]));
         assert_eq!(
             discovery["outputSchema"]["properties"]["details"]["properties"]["git"]["required"],

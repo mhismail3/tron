@@ -24,8 +24,7 @@ async fn module_runtime_runtime_grants_are_scoped_to_runtime_and_lifecycle_resou
         ),
         (
             json!({
-                "operation": "module_runtime_list",
-                "idempotencyKey": "module-runtime-list-grant"
+                "operation": "module_runtime_list"
             }),
             false,
             None,
@@ -34,8 +33,7 @@ async fn module_runtime_runtime_grants_are_scoped_to_runtime_and_lifecycle_resou
         (
             json!({
                 "operation": "module_runtime_inspect",
-                "moduleRuntimeResourceId": "module_runtime_state:inspect",
-                "idempotencyKey": "module-runtime-inspect-grant"
+                "moduleRuntimeResourceId": "module_runtime_state:inspect"
             }),
             false,
             None,
@@ -99,7 +97,7 @@ async fn module_runtime_runtime_grants_are_scoped_to_runtime_and_lifecycle_resou
                 .allowed_resource_kinds
                 .contains(&"agent_state".to_owned())
         );
-        let mut expected_selectors = vec!["kind:module_runtime_state".to_owned()];
+        let mut expected_selectors = Vec::new();
         if expected_lifecycle_id.is_some() {
             assert!(
                 grant
@@ -108,6 +106,7 @@ async fn module_runtime_runtime_grants_are_scoped_to_runtime_and_lifecycle_resou
             );
             expected_selectors.push("kind:module_lifecycle_state".to_owned());
         }
+        expected_selectors.push("kind:module_runtime_state".to_owned());
         if let Some(resource_id) = expected_lifecycle_id.as_deref() {
             expected_selectors.push(format!("resource:{resource_id}"));
         }

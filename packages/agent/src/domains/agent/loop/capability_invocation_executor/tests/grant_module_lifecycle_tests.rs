@@ -36,8 +36,7 @@ async fn module_lifecycle_runtime_grants_are_scoped_to_lifecycle_resources() {
         ),
         (
             json!({
-                "operation": "module_lifecycle_list",
-                "idempotencyKey": "module-lifecycle-list-grant"
+                "operation": "module_lifecycle_list"
             }),
             false,
             None,
@@ -46,8 +45,7 @@ async fn module_lifecycle_runtime_grants_are_scoped_to_lifecycle_resources() {
         (
             json!({
                 "operation": "module_lifecycle_inspect",
-                "moduleLifecycleResourceId": "module_lifecycle_state:inspect",
-                "idempotencyKey": "module-lifecycle-inspect-grant"
+                "moduleLifecycleResourceId": "module_lifecycle_state:inspect"
             }),
             false,
             None,

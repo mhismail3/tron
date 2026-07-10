@@ -230,8 +230,8 @@ fn derive_schema() -> Value {
             "allowedCapabilities": string_array_schema(),
             "allowedNamespaces": string_array_schema(),
             "allowedAuthorityScopes": string_array_schema(),
-            "allowedResourceKinds": string_array_schema(),
-            "resourceSelectors": string_array_schema(),
+            "allowedResourceKinds": optional_string_array_schema(),
+            "resourceSelectors": optional_string_array_schema(),
             "fileRoots": string_array_schema(),
             "networkPolicy": {"type": "string", "enum": ["none", "loopback", "declared", "unrestricted"]},
             "maxRisk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
@@ -257,6 +257,10 @@ fn list_schema() -> Value {
 
 fn string_array_schema() -> Value {
     json!({"type": "array", "items": {"type": "string"}, "minItems": 1})
+}
+
+fn optional_string_array_schema() -> Value {
+    json!({"type": "array", "items": {"type": "string"}})
 }
 
 fn string_array(payload: &Value, field: &str) -> Result<Vec<String>> {

@@ -19,8 +19,7 @@ async fn module_install_runtime_grants_are_scoped_to_install_gate_resources() {
         ),
         (
             json!({
-                "operation": "module_install_request_list",
-                "idempotencyKey": "module-install-request-list-grant"
+                "operation": "module_install_request_list"
             }),
             false,
             None,
@@ -30,8 +29,7 @@ async fn module_install_runtime_grants_are_scoped_to_install_gate_resources() {
         (
             json!({
                 "operation": "module_install_request_inspect",
-                "moduleInstallRequestResourceId": "module_install_request:runtime-grant",
-                "idempotencyKey": "module-install-request-inspect-grant"
+                "moduleInstallRequestResourceId": "module_install_request:runtime-grant"
             }),
             false,
             None,
@@ -55,8 +53,7 @@ async fn module_install_runtime_grants_are_scoped_to_install_gate_resources() {
         ),
         (
             json!({
-                "operation": "module_install_decision_list",
-                "idempotencyKey": "module-install-decision-list-grant"
+                "operation": "module_install_decision_list"
             }),
             false,
             None,
@@ -66,8 +63,7 @@ async fn module_install_runtime_grants_are_scoped_to_install_gate_resources() {
         (
             json!({
                 "operation": "module_install_decision_inspect",
-                "moduleInstallDecisionResourceId": "module_install_decision:runtime-grant",
-                "idempotencyKey": "module-install-decision-inspect-grant"
+                "moduleInstallDecisionResourceId": "module_install_decision:runtime-grant"
             }),
             false,
             None,
@@ -153,14 +149,14 @@ fn assert_module_install_runtime_grant(
     assert_eq!(
         grant.allowed_resource_kinds,
         vec![
-            "module_install_request".to_owned(),
-            "module_install_decision".to_owned()
+            "module_install_decision".to_owned(),
+            "module_install_request".to_owned()
         ],
         "module install runtime grant must be install-gate-only"
     );
     let mut expected_selectors = vec![
-        "kind:module_install_request".to_owned(),
         "kind:module_install_decision".to_owned(),
+        "kind:module_install_request".to_owned(),
     ];
     if let Some(resource_id) = expected_validation_report_id {
         expected_selectors.push(format!("resource:{resource_id}"));

@@ -655,7 +655,7 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     assert_eq!(
         captured.len(),
         2,
-        "payload idempotencyKey must not become the model-wrapper key; replay belongs to the primitive invocation"
+        "the wrapper forwards both calls so the primitive ledger can replay or reject conflicting reuse"
     );
     let first_expected_key = model_capability_invocation_idempotency_key(
         Some("run-1"),
@@ -677,7 +677,10 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
         None,
         &replay_payload,
     );
-    assert_ne!(first_expected_key, second_expected_key);
+    assert_eq!(
+        first_expected_key, second_expected_key,
+        "the stable caller key, operation, and session must control replay across provider calls"
+    );
     assert_eq!(
         captured[0].causal_context.idempotency_key.as_deref(),
         Some(first_expected_key.as_str())

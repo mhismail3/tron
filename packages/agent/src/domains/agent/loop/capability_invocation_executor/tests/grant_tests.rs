@@ -34,6 +34,34 @@ fn assert_no_state_inheritance(grant: &crate::engine::EngineGrant) {
     );
 }
 
+#[test]
+fn runtime_grant_derivation_has_one_static_authority_owner() {
+    let source = include_str!("../grant.rs");
+
+    assert!(source.contains("authority_policy(operation)"));
+    assert!(
+        source.lines().count() < 900,
+        "runtime grant wiring should contain resolution, not another operation catalog"
+    );
+    for removed_owner in [
+        "state_runtime_capability",
+        "exact_resource_selector_fields",
+        "capability_binding_resource_kinds",
+        "capability_route_resource_kinds",
+        "delegated_subagent_module_scopes",
+        "diagnostic_read_resource_kinds",
+    ] {
+        assert!(
+            !source.contains(removed_owner),
+            "duplicate static authority owner {removed_owner} must stay deleted"
+        );
+    }
+    assert!(
+        !source.contains("\"agent_state\""),
+        "runtime grants must not restore removed agent_state resource authority"
+    );
+}
+
 #[tokio::test]
 async fn state_runtime_grants_are_explicit_state_only() {
     for (operation, expected_capability, expected_scope) in [
@@ -45,20 +73,17 @@ async fn state_runtime_grants_are_explicit_state_only() {
             "state_get" => json!({
                 "operation": operation,
                 "namespace": "runtime-grant",
-                "key": "item",
-                "idempotencyKey": format!("{operation}-grant")
+                "key": "item"
             }),
             "state_set" => json!({
                 "operation": operation,
                 "namespace": "runtime-grant",
                 "key": "item",
-                "value": {"ok": true},
-                "idempotencyKey": format!("{operation}-grant")
+                "value": {"ok": true}
             }),
             "state_list" => json!({
                 "operation": operation,
-                "namespace": "runtime-grant",
-                "idempotencyKey": format!("{operation}-grant")
+                "namespace": "runtime-grant"
             }),
             _ => unreachable!(),
         };
@@ -95,11 +120,11 @@ async fn state_runtime_grants_are_explicit_state_only() {
                 "{operation} grant must not include {forbidden_scope}"
             );
         }
-        assert_eq!(grant.allowed_resource_kinds, vec!["agent_state".to_owned()]);
-        assert_eq!(
-            grant.resource_selectors,
-            vec!["kind:agent_state".to_owned()]
+        assert!(
+            grant.allowed_resource_kinds.is_empty(),
+            "state authority is capability-and-scope based, not resource inheritance"
         );
+        assert!(grant.resource_selectors.is_empty());
     }
 }
 
@@ -216,7 +241,8 @@ async fn web_fetch_runtime_grant_stays_source_only_without_robots_evidence() {
 async fn web_robots_check_runtime_grant_is_exact_network_policy_grant() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "web_robots_check",
-        "url": "https://example.com/"
+        "url": "https://example.com/",
+        "idempotencyKey": "web-robots-check-runtime-grant"
     }))
     .await;
     let grant = engine_host
@@ -319,6 +345,46 @@ async fn web_fetch_runtime_grant_stays_source_only_with_null_robots_fields() {
 }
 
 #[tokio::test]
+async fn web_fetch_runtime_grant_rejects_partial_robots_proof_before_execution() {
+    let (engine_host, surface, captured) = capturing_execute_surface().await;
+    let emitter = Arc::new(EventEmitter::new());
+    let cancel = CancellationToken::new();
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
+    ctx.engine_host = Some(&engine_host);
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let call = CapabilityInvocationDraft::new(
+        "tc1",
+        "execute",
+        payload_object(&json!({
+            "operation": "web_fetch",
+            "url": "https://example.com/source",
+            "webRobotsPolicyResourceId": "web_robots_policy:abc123",
+            "expectedWebRobotsPolicyVersionId": null,
+            "idempotencyKey": "web-fetch-partial-robots-proof"
+        })),
+    );
+
+    let result = execute_capability_invocation(
+        &call,
+        "session-grant",
+        tempdir.path().to_str().expect("utf8 tempdir"),
+        &ctx,
+    )
+    .await;
+
+    assert_eq!(result.result.is_error, Some(true));
+    assert_failure_code(&result.result, "INVALID_PARAMS");
+    assert_eq!(
+        result.result.details.as_ref().unwrap()["failure"]["category"],
+        "invalid_request"
+    );
+    assert!(
+        captured.lock().is_none(),
+        "partial robots proof must not reach capability execution"
+    );
+}
+
+#[tokio::test]
 async fn web_fetch_runtime_grant_includes_robots_policy_authority_when_linked() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "web_fetch",
@@ -362,8 +428,7 @@ async fn web_fetch_runtime_grant_includes_robots_policy_authority_when_linked() 
 async fn worker_package_list_runtime_grant_authorizes_only_selected_read_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "worker_package_list",
-        "workerPackageKind": "worker_package_proposal",
-        "idempotencyKey": "worker-package-list-grant-proposal"
+        "workerPackageKind": "worker_package_proposal"
     }))
     .await;
     let grant = engine_host
@@ -387,8 +452,7 @@ async fn worker_package_list_runtime_grant_authorizes_only_selected_read_kind() 
 async fn worker_package_inspect_runtime_grant_authorizes_only_resource_id_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "worker_package_inspect",
-        "workerPackageResourceId": "worker_package_conformance_report:local.echo:1.0.0:run-1",
-        "idempotencyKey": "worker-package-inspect-grant-conformance"
+        "workerPackageResourceId": "worker_package_conformance_report:local.echo:1.0.0:run-1"
     }))
     .await;
     let grant = engine_host
@@ -715,8 +779,7 @@ async fn procedural_state_runtime_grant_authorizes_only_selected_read_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "procedural_state_inspect",
         "proceduralKind": "hook",
-        "proceduralRecordResourceId": "procedural_record:hook:runtime-grant",
-        "idempotencyKey": "procedural-state-inspect-grant"
+        "proceduralRecordResourceId": "procedural_record:hook:runtime-grant"
     }))
     .await;
     let grant = engine_host
@@ -834,10 +897,7 @@ async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped(
             Some("memory_decision:runtime-grant"),
         ),
     ] {
-        let mut payload = json!({
-            "operation": operation,
-            "idempotencyKey": format!("{operation}-grant")
-        });
+        let mut payload = json!({"operation": operation});
         if let (Some(field), Some(resource_id)) = (id_field, resource_id) {
             payload[field] = json!(resource_id);
         }
@@ -855,8 +915,7 @@ async fn memory_query_decision_runtime_grants_are_read_only_and_resource_scoped(
 #[tokio::test]
 async fn module_registry_list_runtime_grant_is_read_only_and_kind_scoped() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
-        "operation": "module_list",
-        "idempotencyKey": "module-list-grant"
+        "operation": "module_list"
     }))
     .await;
     let grant = engine_host
@@ -872,8 +931,7 @@ async fn module_registry_list_runtime_grant_is_read_only_and_kind_scoped() {
 async fn module_registry_inspect_runtime_grant_is_read_only_and_resource_scoped() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "module_inspect",
-        "moduleManifestResourceId": "module_manifest:module_registry",
-        "idempotencyKey": "module-inspect-grant"
+        "moduleManifestResourceId": "module_manifest:module_registry"
     }))
     .await;
     let grant = engine_host
@@ -889,12 +947,12 @@ async fn module_registry_inspect_runtime_grant_is_read_only_and_resource_scoped(
 }
 
 #[tokio::test]
-async fn promoted_exact_contracts_reach_runtime_grant_derivation() {
+async fn canonical_exact_contracts_reach_runtime_grant_derivation() {
     let payloads = [
         json!({"operation": "catalog_search"}),
         json!({
             "operation": "catalog_conformance",
-            "idempotencyKey": "promoted-catalog-conformance"
+            "idempotencyKey": "canonical-catalog-conformance"
         }),
         json!({
             "operation": "catalog_inspect",
@@ -907,7 +965,7 @@ async fn promoted_exact_contracts_reach_runtime_grant_derivation() {
             "repositoryRef": {"kind": "repository", "id": "repository"},
             "rootRef": {"kind": "workspace", "id": "root"},
             "treeObjectRef": "tree-object",
-            "idempotencyKey": "promoted-repository-snapshot"
+            "idempotencyKey": "canonical-repository-snapshot"
         }),
         json!({"operation": "repository_tree_list"}),
         json!({
@@ -917,7 +975,7 @@ async fn promoted_exact_contracts_reach_runtime_grant_derivation() {
         json!({
             "operation": "job_start",
             "command": "printf test",
-            "idempotencyKey": "promoted-job-start"
+            "idempotencyKey": "canonical-job-start"
         }),
         json!({"operation": "job_status", "jobResourceId": "job_process:test"}),
         json!({"operation": "job_list"}),
@@ -925,7 +983,7 @@ async fn promoted_exact_contracts_reach_runtime_grant_derivation() {
         json!({
             "operation": "job_cancel",
             "jobResourceId": "job_process:test",
-            "idempotencyKey": "promoted-job-cancel"
+            "idempotencyKey": "canonical-job-cancel"
         }),
         json!({"operation": "process_run", "command": "printf test"}),
         json!({"operation": "trace_list"}),
@@ -976,15 +1034,13 @@ async fn diagnostic_read_runtime_grant_has_no_state_authority() {
         (
             json!({
                 "operation": "log_recent",
-                "limit": 25,
-                "idempotencyKey": "log-recent-grant"
+                "limit": 25
             }),
             "log_entry",
         ),
         (
             json!({
-                "operation": "replay_manifest",
-                "idempotencyKey": "replay-manifest-grant"
+                "operation": "replay_manifest"
             }),
             "session",
         ),
@@ -1042,8 +1098,7 @@ async fn diagnostic_read_runtime_grant_has_no_state_authority() {
 async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_list",
-        "limit": 10,
-        "idempotencyKey": "subagent-task-list-grant"
+        "limit": 10
     }))
     .await;
     let grant = engine_host
@@ -1059,8 +1114,7 @@ async fn subagent_task_list_runtime_grant_authorizes_only_read_projection_kind()
 async fn subagent_task_inspect_runtime_grant_authorizes_only_read_projection_kind() {
     let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
         "operation": "subagent_task_inspect",
-        "subagentTaskResourceId": "subagent_task:runtime-grant",
-        "idempotencyKey": "subagent-task-inspect-grant"
+        "subagentTaskResourceId": "subagent_task:runtime-grant"
     }))
     .await;
     let grant = engine_host
@@ -1077,8 +1131,7 @@ async fn subagent_status_and_result_runtime_grants_authorize_delegated_module_re
     for operation in ["subagent_status", "subagent_result"] {
         let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
             "operation": operation,
-            "subagentTaskResourceId": "subagent_task:runtime-grant",
-            "idempotencyKey": format!("{operation}-grant")
+            "subagentTaskResourceId": "subagent_task:runtime-grant"
         }))
         .await;
         let grant = engine_host
@@ -1176,8 +1229,7 @@ async fn subagent_followup_grant_reads_existing_task_for_exact_delegated_refs() 
     seed_delegated_subagent_task(&engine_host).await;
     let payload = json!({
         "operation": "subagent_status",
-        "subagentTaskResourceId": "subagent_task:delegated-runtime-grant",
-        "idempotencyKey": "subagent-status-delegated-grant"
+        "subagentTaskResourceId": "subagent_task:delegated-runtime-grant"
     });
     let runtime_grant = derive_capability_runtime_grant(
         &engine_host,

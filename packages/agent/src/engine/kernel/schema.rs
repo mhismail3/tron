@@ -1,4 +1,4 @@
-//! Minimal JSON schema validation for Phase 1 engine contracts.
+//! Minimal enforced JSON Schema subset for engine contracts.
 
 use serde_json::Value;
 
@@ -115,6 +115,50 @@ fn validate_schema_node(
         validate_schema_node(function_id, direction, items, &format!("{path}.items"))?;
     }
 
+    for keyword in ["allOf", "anyOf", "oneOf"] {
+        if let Some(branches) = object.get(keyword) {
+            let Some(branches) = branches.as_array() else {
+                return Err(invalid_schema(
+                    function_id,
+                    direction,
+                    format!("{path}.{keyword} must be an array"),
+                ));
+            };
+            if branches.is_empty() {
+                return Err(invalid_schema(
+                    function_id,
+                    direction,
+                    format!("{path}.{keyword} must not be empty"),
+                ));
+            }
+            for (index, branch) in branches.iter().enumerate() {
+                validate_schema_node(
+                    function_id,
+                    direction,
+                    branch,
+                    &format!("{path}.{keyword}[{index}]"),
+                )?;
+            }
+        }
+    }
+    if let Some(branch) = object.get("not") {
+        validate_schema_node(function_id, direction, branch, &format!("{path}.not"))?;
+    }
+    if let Some(condition) = object.get("if") {
+        validate_schema_node(function_id, direction, condition, &format!("{path}.if"))?;
+        for keyword in ["then", "else"] {
+            if let Some(branch) = object.get(keyword) {
+                validate_schema_node(function_id, direction, branch, &format!("{path}.{keyword}"))?;
+            }
+        }
+    } else if object.contains_key("then") || object.contains_key("else") {
+        return Err(invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.then/else requires an if schema"),
+        ));
+    }
+
     if let Some(max_items) = object.get("maxItems") {
         match max_items.as_u64() {
             Some(_) => {}
@@ -126,6 +170,29 @@ fn validate_schema_node(
                 ));
             }
         }
+    }
+    if let Some(min_items) = object.get("minItems") {
+        match min_items.as_u64() {
+            Some(_) => {}
+            None => {
+                return Err(invalid_schema(
+                    function_id,
+                    direction,
+                    format!("{path}.minItems must be a non-negative integer"),
+                ));
+            }
+        }
+    }
+    if let (Some(min_items), Some(max_items)) = (
+        object.get("minItems").and_then(Value::as_u64),
+        object.get("maxItems").and_then(Value::as_u64),
+    ) && min_items > max_items
+    {
+        return Err(invalid_schema(
+            function_id,
+            direction,
+            format!("{path}.minItems must not exceed maxItems"),
+        ));
     }
 
     if let Some(min_length) = object.get("minLength") {
@@ -252,6 +319,61 @@ fn validate_payload_node(
         }
     }
 
+    if let Some(branches) = object.get("allOf").and_then(Value::as_array) {
+        for branch in branches {
+            validate_payload_node(function_id, direction, branch, payload, path)?;
+        }
+    }
+    if let Some(branches) = object.get("anyOf").and_then(Value::as_array)
+        && !branches.iter().any(|branch| {
+            validate_payload_node(function_id, direction, branch, payload, path).is_ok()
+        })
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            "value does not match any anyOf branch".to_owned(),
+        ));
+    }
+    if let Some(branches) = object.get("oneOf").and_then(Value::as_array) {
+        let matches = branches
+            .iter()
+            .filter(|branch| {
+                validate_payload_node(function_id, direction, branch, payload, path).is_ok()
+            })
+            .count();
+        if matches != 1 {
+            return Err(schema_violation(
+                function_id,
+                direction,
+                path,
+                format!("value matches {matches} oneOf branches; expected exactly one"),
+            ));
+        }
+    }
+    if let Some(branch) = object.get("not")
+        && validate_payload_node(function_id, direction, branch, payload, path).is_ok()
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            "value matches forbidden not schema".to_owned(),
+        ));
+    }
+    if let Some(condition) = object.get("if") {
+        let branch =
+            if validate_payload_node(function_id, direction, condition, payload, path).is_ok() {
+                object.get("then")
+            } else {
+                object.get("else")
+            };
+        if let Some(branch) = branch {
+            validate_payload_node(function_id, direction, branch, payload, path)?;
+        }
+    }
+
     if let Some(enum_values) = object.get("enum").and_then(Value::as_array) {
         if !enum_values.iter().any(|candidate| candidate == payload) {
             return Err(schema_violation(
@@ -350,6 +472,16 @@ fn validate_payload_node(
     }
 
     if let Some(items) = payload.as_array() {
+        if let Some(min_items) = object.get("minItems").and_then(Value::as_u64)
+            && (items.len() as u64) < min_items
+        {
+            return Err(schema_violation(
+                function_id,
+                direction,
+                path,
+                format!("array has fewer than {min_items} items"),
+            ));
+        }
         if let Some(max_items) = object.get("maxItems").and_then(Value::as_u64) {
             if items.len() as u64 > max_items {
                 return Err(schema_violation(
@@ -552,5 +684,122 @@ mod tests {
                 .to_string()
                 .contains("minimum must not exceed maximum")
         );
+    }
+
+    #[test]
+    fn composition_keywords_are_validated_and_enforced() {
+        let schema = json!({
+            "type": "object",
+            "allOf": [{
+                "anyOf": [
+                    {"required": ["query"]},
+                    {"required": ["glob"]}
+                ]
+            }],
+            "oneOf": [
+                {"required": ["operation"]},
+                {"required": ["kind"]}
+            ],
+            "not": {"required": ["forbidden"]}
+        });
+
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"operation": "find", "query": "contract"}),
+        )
+        .unwrap();
+        assert!(
+            validate_payload(
+                &function_id(),
+                "request",
+                &schema,
+                &json!({"operation": "find"}),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("anyOf")
+        );
+        assert!(
+            validate_payload(
+                &function_id(),
+                "request",
+                &schema,
+                &json!({"operation": "find", "kind": "query", "query": "contract"}),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("oneOf")
+        );
+        assert!(
+            validate_payload(
+                &function_id(),
+                "request",
+                &schema,
+                &json!({"operation": "find", "query": "contract", "forbidden": true}),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("forbidden not schema")
+        );
+    }
+
+    #[test]
+    fn composition_keywords_reject_invalid_definitions() {
+        for schema in [
+            json!({"anyOf": {}}),
+            json!({"allOf": []}),
+            json!({"oneOf": ["not-a-schema"]}),
+            json!({"not": "not-a-schema"}),
+            json!({"then": {"required": ["value"]}}),
+            json!({"type": "array", "minItems": 2, "maxItems": 1}),
+        ] {
+            assert!(validate_schema_definition(&function_id(), "request", &schema).is_err());
+        }
+    }
+
+    #[test]
+    fn conditional_and_min_items_keywords_are_enforced() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string"},
+                "items": {"type": "array", "minItems": 1}
+            },
+            "if": {
+                "required": ["mode"],
+                "properties": {"mode": {"const": "bounded"}}
+            },
+            "then": {"required": ["items"]}
+        });
+        validate_payload(&function_id(), "request", &schema, &json!({"mode": "free"})).unwrap();
+        assert!(
+            validate_payload(
+                &function_id(),
+                "request",
+                &schema,
+                &json!({"mode": "bounded"}),
+            )
+            .is_err()
+        );
+        assert!(
+            validate_payload(
+                &function_id(),
+                "request",
+                &schema,
+                &json!({"mode": "bounded", "items": []}),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("fewer than 1")
+        );
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"mode": "bounded", "items": ["ready"]}),
+        )
+        .unwrap();
     }
 }

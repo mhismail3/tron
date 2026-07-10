@@ -6,13 +6,11 @@ async fn import_history_read_runtime_grants_are_read_only_and_selector_bounded()
         let payload = if operation == "import_history_inspect" {
             json!({
                 "operation": operation,
-                "importHistoryResourceId": "import_history_record:runtime-grant",
-                "idempotencyKey": format!("{operation}-grant")
+                "importHistoryResourceId": "import_history_record:runtime-grant"
             })
         } else {
             json!({
-                "operation": operation,
-                "idempotencyKey": format!("{operation}-grant")
+                "operation": operation
             })
         };
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;

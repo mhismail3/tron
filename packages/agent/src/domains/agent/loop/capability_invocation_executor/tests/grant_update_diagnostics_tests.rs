@@ -6,13 +6,11 @@ async fn update_diagnostics_read_runtime_grants_are_read_only_and_selector_bound
         let payload = if operation == "update_diagnostic_inspect" {
             json!({
                 "operation": operation,
-                "updateDiagnosticResourceId": "update_diagnostic_record:runtime-grant",
-                "idempotencyKey": format!("{operation}-grant")
+                "updateDiagnosticResourceId": "update_diagnostic_record:runtime-grant"
             })
         } else {
             json!({
-                "operation": operation,
-                "idempotencyKey": format!("{operation}-grant")
+                "operation": operation
             })
         };
         let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;

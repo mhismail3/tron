@@ -28,8 +28,7 @@ async fn module_dependency_runtime_grants_are_scoped_to_dependency_policy_resour
         ),
         (
             json!({
-                "operation": "module_dependency_request_list",
-                "idempotencyKey": "module-dependency-request-list-grant"
+                "operation": "module_dependency_request_list"
             }),
             false,
             None,
@@ -39,8 +38,7 @@ async fn module_dependency_runtime_grants_are_scoped_to_dependency_policy_resour
         (
             json!({
                 "operation": "module_dependency_request_inspect",
-                "moduleDependencyRequestResourceId": "module_dependency_request:runtime-grant",
-                "idempotencyKey": "module-dependency-request-inspect-grant"
+                "moduleDependencyRequestResourceId": "module_dependency_request:runtime-grant"
             }),
             false,
             Some("module_dependency_request:runtime-grant"),
@@ -63,8 +61,7 @@ async fn module_dependency_runtime_grants_are_scoped_to_dependency_policy_resour
         (
             json!({
                 "operation": "module_dependency_decision_inspect",
-                "moduleDependencyDecisionResourceId": "module_dependency_decision:runtime-grant",
-                "idempotencyKey": "module-dependency-decision-inspect-grant"
+                "moduleDependencyDecisionResourceId": "module_dependency_decision:runtime-grant"
             }),
             false,
             None,
@@ -86,8 +83,7 @@ async fn module_dependency_runtime_grants_are_scoped_to_dependency_policy_resour
         (
             json!({
                 "operation": "module_dependency_policy_inspect",
-                "moduleDependencyPolicyResourceId": "module_dependency_policy:runtime-grant",
-                "idempotencyKey": "module-dependency-policy-inspect-grant"
+                "moduleDependencyPolicyResourceId": "module_dependency_policy:runtime-grant"
             }),
             false,
             None,
@@ -139,9 +135,9 @@ async fn module_dependency_runtime_grants_are_scoped_to_dependency_policy_resour
         assert_eq!(
             grant.allowed_resource_kinds,
             vec![
-                "module_dependency_request".to_owned(),
                 "module_dependency_decision".to_owned(),
                 "module_dependency_policy".to_owned(),
+                "module_dependency_request".to_owned(),
             ]
         );
         assert!(
@@ -150,9 +146,9 @@ async fn module_dependency_runtime_grants_are_scoped_to_dependency_policy_resour
                 .contains(&"agent_state".to_owned())
         );
         let mut expected_selectors = vec![
-            "kind:module_dependency_request".to_owned(),
             "kind:module_dependency_decision".to_owned(),
             "kind:module_dependency_policy".to_owned(),
+            "kind:module_dependency_request".to_owned(),
         ];
         if let Some(resource_id) = expected_request_id {
             expected_selectors.push(format!("resource:{resource_id}"));

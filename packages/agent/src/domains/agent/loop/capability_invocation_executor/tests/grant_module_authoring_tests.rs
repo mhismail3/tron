@@ -16,8 +16,7 @@ async fn module_proposal_runtime_grants_are_scoped_to_module_proposals() {
         ),
         (
             json!({
-                "operation": "module_proposal_list",
-                "idempotencyKey": "module-proposal-list-grant"
+                "operation": "module_proposal_list"
             }),
             false,
             None,
@@ -25,8 +24,7 @@ async fn module_proposal_runtime_grants_are_scoped_to_module_proposals() {
         (
             json!({
                 "operation": "module_proposal_inspect",
-                "moduleProposalResourceId": "module_proposal:runtime-grant",
-                "idempotencyKey": "module-proposal-inspect-grant"
+                "moduleProposalResourceId": "module_proposal:runtime-grant"
             }),
             false,
             Some("module_proposal:runtime-grant"),

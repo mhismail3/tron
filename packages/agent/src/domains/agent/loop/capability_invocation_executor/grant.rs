@@ -1,6 +1,12 @@
+use crate::domains::capability::{
+    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
+    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
+    ProceduralResourceSet, ResourceKindPolicy, SelectorAddition, SubagentResourceSet,
+    WorkerPackageKindSource, authority_policy,
+};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CATALOG_DISCOVERY_REPORT_KIND, CausalContext,
-    EngineHostHandle, FunctionId, Invocation, SUBAGENT_TASK_KIND, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
+    SUBAGENT_TASK_KIND, TraceId,
 };
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
@@ -14,6 +20,34 @@ pub(super) struct CapabilityRuntimeGrant {
     pub(super) grant_id: AuthorityGrantId,
     pub(super) authority_scopes: Vec<String>,
 }
+
+struct ResolvedRuntimeAuthority {
+    allowed_capabilities: Vec<String>,
+    allowed_authority_scopes: Vec<String>,
+    allowed_resource_kinds: Vec<String>,
+    resource_selectors: Vec<String>,
+    network_policy: &'static str,
+}
+
+#[derive(Default)]
+struct DynamicAuthorityState {
+    web_robots_proof: bool,
+    notification_push: bool,
+}
+
+struct RuntimeResolutionContext<'a> {
+    engine_host: &'a EngineHostHandle,
+    session_id: &'a str,
+    workspace_id: Option<&'a str>,
+    working_directory: &'a str,
+    invocation_id: &'a str,
+    model_primitive_name: &'a str,
+    turn: i64,
+    run_id: Option<&'a str>,
+    args: &'a Value,
+}
+
+type AuthorityResult<T> = Result<T, Box<FailureEnvelope>>;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn derive_capability_runtime_grant(
@@ -34,890 +68,40 @@ pub(super) async fn derive_capability_runtime_grant(
     let operation = effective_args
         .get("operation")
         .and_then(Value::as_str)
-        .unwrap_or_default();
-    let state_operation = matches!(operation, "state_get" | "state_set" | "state_list");
-    let catalog_discovery_operation = is_catalog_discovery_operation(operation);
-    let catalog_conformance_operation = operation == "catalog_conformance";
-    let capability_binding_operation = is_capability_binding_operation(operation);
-    let capability_route_operation = is_capability_route_operation(operation);
-    let capability_shadow_trial_operation = is_capability_shadow_trial_operation(operation);
-    let context_control_operation = matches!(
-        operation,
-        "context_control_status"
-            | "context_control_snapshot"
-            | "context_control_compact"
-            | "context_control_clear"
-            | "context_control_action_list"
-            | "context_control_action_inspect"
-            | "context_survivor_record"
-            | "context_survivor_list"
-            | "context_survivor_disable"
-            | "context_exclusion_record"
-            | "context_exclusion_list"
-            | "context_exclusion_disable"
-            | "context_policy_snapshot"
-    );
-    let delegated_subagent_operation = matches!(
-        operation,
-        "subagent_launch" | "subagent_status" | "subagent_result" | "subagent_cancel"
-    );
-    let diagnostic_read_operation = is_diagnostic_read_operation(operation);
-    let web_network_operation = matches!(operation, "web_fetch" | "web_robots_check");
-    let notification_push_requested = operation == "notification_send"
-        && effective_args
-            .get("pushRequested")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-    let web_fetch_uses_robots_policy = operation == "web_fetch"
-        && has_non_empty_string(effective_args, "webRobotsPolicyResourceId")
-        && has_non_empty_string(effective_args, "expectedWebRobotsPolicyVersionId");
-    let mut allowed_capabilities = vec![target_function_id.as_str().to_owned()];
-    if let Some(state_capability) = state_runtime_capability(operation) {
-        allowed_capabilities.push(state_capability.to_owned());
-    }
-    allowed_capabilities.sort();
-    allowed_capabilities.dedup();
-    let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    if state_operation {
-        match operation {
-            "state_get" | "state_list" => allowed_authority_scopes.push("state.read".to_owned()),
-            "state_set" => allowed_authority_scopes.push("state.write".to_owned()),
-            _ => {}
-        }
-    }
-    if catalog_conformance_operation {
-        allowed_authority_scopes.extend([
-            "catalog_discovery.write".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if catalog_discovery_operation {
-        allowed_authority_scopes.push("catalog_discovery.read".to_owned());
-    } else if matches!(
-        operation,
-        "goal_create" | "goal_cancel" | "question_create" | "question_answer"
-    ) {
-        allowed_authority_scopes.extend(["goals.write".to_owned(), "resource.write".to_owned()]);
-        if matches!(
-            operation,
-            "goal_cancel" | "question_create" | "question_answer"
-        ) {
-            allowed_authority_scopes.extend(["goals.read".to_owned(), "resource.read".to_owned()]);
-        }
-    } else if matches!(
-        operation,
-        "goal_list" | "goal_inspect" | "question_list" | "question_inspect"
-    ) {
-        allowed_authority_scopes.extend(["goals.read".to_owned(), "resource.read".to_owned()]);
-    } else if operation == "web_fetch" {
-        allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
-        if web_fetch_uses_robots_policy {
-            allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
-        }
-    } else if operation == "web_robots_check" {
-        allowed_authority_scopes.extend([
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-            "web.write".to_owned(),
-        ]);
-    } else if matches!(operation, "web_source_list" | "web_source_inspect") {
-        allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
-    } else if operation == "web_source_archive" {
-        allowed_authority_scopes.extend([
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-            "web.read".to_owned(),
-            "web.write".to_owned(),
-        ]);
-    } else if matches!(operation, "media_list" | "media_inspect") {
-        allowed_authority_scopes.extend(["media.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(operation, "media_create" | "media_archive") {
-        allowed_authority_scopes.extend([
-            "media.read".to_owned(),
-            "media.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(operation, "import_history_list" | "import_history_inspect") {
-        allowed_authority_scopes
-            .extend(["import_history.read".to_owned(), "resource.read".to_owned()]);
-    } else if operation == "import_history_record" {
-        allowed_authority_scopes.extend([
-            "import_history.read".to_owned(),
-            "import_history.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "repository_tree_list" | "repository_tree_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "repository_tree.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if operation == "repository_tree_snapshot" {
-        allowed_authority_scopes.extend([
-            "repository_tree.read".to_owned(),
-            "repository_tree.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(operation, "import_preview_list" | "import_preview_inspect") {
-        allowed_authority_scopes
-            .extend(["import_preview.read".to_owned(), "resource.read".to_owned()]);
-    } else if operation == "import_preview_record" {
-        allowed_authority_scopes.extend([
-            "import_preview.read".to_owned(),
-            "import_preview.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "program_execution_list" | "program_execution_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "program_execution.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if operation == "program_execution_record" {
-        allowed_authority_scopes.extend([
-            "program_execution.read".to_owned(),
-            "program_execution.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "prompt_artifact_list" | "prompt_artifact_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "prompt_artifacts.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if operation == "prompt_artifact_record" {
-        allowed_authority_scopes.extend([
-            "prompt_artifacts.read".to_owned(),
-            "prompt_artifacts.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "update_diagnostic_list" | "update_diagnostic_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "update_diagnostics.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if operation == "update_diagnostic_record" {
-        allowed_authority_scopes.extend([
-            "update_diagnostics.read".to_owned(),
-            "update_diagnostics.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "memory_status"
-            | "memory_list"
-            | "memory_inspect"
-            | "memory_query_list"
-            | "memory_query_inspect"
-            | "memory_decision_list"
-            | "memory_decision_inspect"
-    ) {
-        allowed_authority_scopes.extend(["memory.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(operation, "worker_package_list" | "worker_package_inspect") {
-        allowed_authority_scopes.extend([
-            "worker.lifecycle.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if matches!(operation, "module_list" | "module_inspect") {
-        allowed_authority_scopes.extend([
-            "module_registry.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_proposal_list" | "module_proposal_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_authoring.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if operation == "module_proposal_record" {
-        allowed_authority_scopes.extend([
-            "module_authoring.read".to_owned(),
-            "module_authoring.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_validation_list" | "module_validation_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_validation.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if operation == "module_validation_record" {
-        allowed_authority_scopes.extend([
-            "module_validation.read".to_owned(),
-            "module_validation.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_install_request_list"
-            | "module_install_request_inspect"
-            | "module_install_decision_list"
-            | "module_install_decision_inspect"
-    ) {
-        allowed_authority_scopes
-            .extend(["module_install.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "module_install_request_record" | "module_install_decision_record"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_install.read".to_owned(),
-            "module_install.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_dependency_request_list"
-            | "module_dependency_request_inspect"
-            | "module_dependency_decision_list"
-            | "module_dependency_decision_inspect"
-            | "module_dependency_policy_list"
-            | "module_dependency_policy_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_dependencies.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_dependency_request_record"
-            | "module_dependency_decision_record"
-            | "module_dependency_policy_activate"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_dependencies.read".to_owned(),
-            "module_dependencies.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if is_capability_binding_read_operation(operation) {
-        allowed_authority_scopes.extend([
-            "capability_binding.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if is_capability_binding_write_operation(operation) {
-        allowed_authority_scopes.extend([
-            "capability_binding.read".to_owned(),
-            "capability_binding.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if is_capability_route_read_operation(operation) {
-        allowed_authority_scopes.extend([
-            "capability_binding.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if is_capability_route_write_operation(operation) {
-        allowed_authority_scopes.extend([
-            "capability_binding.read".to_owned(),
-            "capability_binding.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if is_capability_shadow_trial_read_operation(operation) {
-        allowed_authority_scopes.extend([
-            "capability_binding.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if is_capability_shadow_trial_write_operation(operation) {
-        allowed_authority_scopes.extend([
-            "capability_binding.read".to_owned(),
-            "capability_binding.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "web_research_request_list"
-            | "web_research_request_inspect"
-            | "web_research_review_list"
-            | "web_research_review_inspect"
-            | "web_research_source_list"
-            | "web_research_source_inspect"
-    ) {
-        allowed_authority_scopes
-            .extend(["web_research.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "web_research_request_record" | "web_research_review_record" | "web_research_source_record"
-    ) {
-        allowed_authority_scopes.extend([
-            "web_research.read".to_owned(),
-            "web_research.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_lifecycle_list" | "module_lifecycle_inspect"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_lifecycle.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_lifecycle_request" | "module_lifecycle_decision"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_lifecycle.read".to_owned(),
-            "module_lifecycle.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(operation, "module_runtime_list" | "module_runtime_inspect") {
-        allowed_authority_scopes
-            .extend(["module_runtime.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "module_runtime_request" | "module_runtime_cancel"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_runtime.read".to_owned(),
-            "module_runtime.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "context_control_status"
-            | "context_control_action_list"
-            | "context_control_action_inspect"
-            | "context_survivor_list"
-            | "context_exclusion_list"
-    ) {
-        allowed_authority_scopes.extend([
-            "context_control.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "context_control_snapshot"
-            | "context_control_compact"
-            | "context_control_clear"
-            | "context_survivor_record"
-            | "context_survivor_disable"
-            | "context_exclusion_record"
-            | "context_exclusion_disable"
-            | "context_policy_snapshot"
-    ) {
-        allowed_authority_scopes.extend([
-            "context_control.read".to_owned(),
-            "context_control.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if operation == "module_program_execution_start" {
-        allowed_authority_scopes.extend([
-            "module_runtime.read".to_owned(),
-            "module_runtime.write".to_owned(),
-            "program_execution.read".to_owned(),
-            "program_execution.write".to_owned(),
-            "jobs.read".to_owned(),
-            "jobs.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if operation == "module_program_execution_status" {
-        allowed_authority_scopes.extend([
-            "module_runtime.read".to_owned(),
-            "program_execution.read".to_owned(),
-            "jobs.read".to_owned(),
-            "resource.read".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_program_execution_cancel" | "module_program_execution_cleanup"
-    ) {
-        allowed_authority_scopes.extend([
-            "module_runtime.read".to_owned(),
-            "module_runtime.write".to_owned(),
-            "program_execution.read".to_owned(),
-            "jobs.read".to_owned(),
-            "jobs.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if operation == "job_start" {
-        allowed_authority_scopes.extend(["jobs.write".to_owned(), "resource.write".to_owned()]);
-    } else if matches!(operation, "job_status" | "job_list" | "job_log") {
-        allowed_authority_scopes.extend(["jobs.read".to_owned(), "resource.read".to_owned()]);
-    } else if operation == "job_cancel" {
-        allowed_authority_scopes.extend([
-            "jobs.read".to_owned(),
-            "jobs.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "filesystem_read"
-            | "filesystem_list"
-            | "filesystem_find"
-            | "filesystem_glob"
-            | "filesystem_search_text"
-            | "filesystem_diff"
-    ) {
-        allowed_authority_scopes.extend(["filesystem.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "filesystem_write" | "filesystem_edit" | "filesystem_apply_patch"
-    ) {
-        allowed_authority_scopes.extend([
-            "filesystem.read".to_owned(),
-            "filesystem.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "git_status" | "git_diff" | "git_branch_inventory"
-    ) {
-        allowed_authority_scopes.extend(["git.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "git_stage" | "git_unstage" | "git_commit" | "git_branch_start"
-    ) {
-        allowed_authority_scopes.extend([
-            "git.read".to_owned(),
-            "git.write".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "procedural_state_list"
-            | "procedural_state_inspect"
-            | "procedural_activation_request_list"
-            | "procedural_activation_request_inspect"
-            | "procedural_activation_decision_list"
-            | "procedural_activation_decision_inspect"
-    ) {
-        allowed_authority_scopes.extend(["procedural.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "procedural_definition_record"
-            | "procedural_activation_request_record"
-            | "procedural_activation_decision_record"
-    ) {
-        allowed_authority_scopes.extend([
-            "procedural.read".to_owned(),
-            "procedural.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "subagent_status" | "subagent_result" | "subagent_task_list" | "subagent_task_inspect"
-    ) {
-        allowed_authority_scopes.extend(["subagents.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(operation, "subagent_launch" | "subagent_cancel") {
-        allowed_authority_scopes.extend([
-            "subagents.read".to_owned(),
-            "subagents.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-    } else if matches!(operation, "device_list" | "device_inspect") {
-        allowed_authority_scopes.extend(["device.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(operation, "notification_list" | "notification_inspect") {
-        allowed_authority_scopes
-            .extend(["notifications.read".to_owned(), "resource.read".to_owned()]);
-    } else if matches!(
-        operation,
-        "notification_send" | "notification_mark_read" | "notification_mark_all_read"
-    ) {
-        allowed_authority_scopes.extend([
-            "notifications.read".to_owned(),
-            "notifications.write".to_owned(),
-            "resource.read".to_owned(),
-            "resource.write".to_owned(),
-        ]);
-        if notification_push_requested {
-            allowed_authority_scopes.push("device.read".to_owned());
-        }
-    }
-    if delegated_subagent_operation {
-        allowed_authority_scopes.extend(delegated_subagent_module_scopes(operation));
-    }
-    allowed_authority_scopes.sort();
-    allowed_authority_scopes.dedup();
-    let network_policy = if web_network_operation {
-        "declared"
-    } else {
-        "none"
-    };
-    let mut allowed_resource_kinds = if state_operation {
-        vec!["agent_state".to_owned()]
-    } else {
-        Vec::new()
-    };
-    if state_operation {
-        // State is the only execute operation family allowed to carry the
-        // scratch-state resource kind. Every other operation must declare its
-        // own resource custody below.
-    } else if catalog_conformance_operation {
-        allowed_resource_kinds.push(CATALOG_DISCOVERY_REPORT_KIND.to_owned());
-    } else if diagnostic_read_operation {
-        allowed_resource_kinds.extend(diagnostic_read_resource_kinds(operation));
-    } else if matches!(
-        operation,
-        "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel"
-    ) {
-        allowed_resource_kinds.push("goal".to_owned());
-    } else if operation == "question_create" {
-        if effective_args.get("goalResourceId").is_some() {
-            allowed_resource_kinds.push("goal".to_owned());
-        }
-        allowed_resource_kinds.push("user_question".to_owned());
-    } else if matches!(operation, "question_list" | "question_inspect") {
-        allowed_resource_kinds.push("user_question".to_owned());
-    } else if operation == "question_answer" {
-        allowed_resource_kinds.extend(["user_question".to_owned(), "goal_answer".to_owned()]);
-    } else if operation == "web_robots_check" {
-        allowed_resource_kinds.push("web_robots_policy".to_owned());
-    } else if matches!(
-        operation,
-        "web_fetch" | "web_source_list" | "web_source_inspect" | "web_source_archive"
-    ) {
-        allowed_resource_kinds.push("web_source".to_owned());
-        if web_fetch_uses_robots_policy {
-            allowed_resource_kinds.push("web_robots_policy".to_owned());
-        }
-    } else if matches!(
-        operation,
-        "media_create" | "media_list" | "media_inspect" | "media_archive"
-    ) {
-        allowed_resource_kinds.push("media_artifact".to_owned());
-    } else if matches!(
-        operation,
-        "import_history_record" | "import_history_list" | "import_history_inspect"
-    ) {
-        allowed_resource_kinds.push("import_history_record".to_owned());
-    } else if matches!(
-        operation,
-        "repository_tree_snapshot" | "repository_tree_list" | "repository_tree_inspect"
-    ) {
-        allowed_resource_kinds.push("repository_tree_snapshot".to_owned());
-    } else if matches!(
-        operation,
-        "import_preview_record" | "import_preview_list" | "import_preview_inspect"
-    ) {
-        allowed_resource_kinds.push("import_preview".to_owned());
-    } else if matches!(
-        operation,
-        "program_execution_record" | "program_execution_list" | "program_execution_inspect"
-    ) {
-        allowed_resource_kinds.push("program_execution_record".to_owned());
-    } else if matches!(
-        operation,
-        "prompt_artifact_record" | "prompt_artifact_list" | "prompt_artifact_inspect"
-    ) {
-        allowed_resource_kinds.push("prompt_artifact".to_owned());
-    } else if matches!(
-        operation,
-        "update_diagnostic_record" | "update_diagnostic_list" | "update_diagnostic_inspect"
-    ) {
-        allowed_resource_kinds.push("update_diagnostic_record".to_owned());
-    } else if operation == "memory_status" {
-        allowed_resource_kinds.extend(["memory_policy".to_owned(), "memory_engine".to_owned()]);
-    } else if matches!(operation, "memory_list" | "memory_inspect") {
-        allowed_resource_kinds.push("memory_record".to_owned());
-    } else if matches!(operation, "memory_query_list" | "memory_query_inspect") {
-        allowed_resource_kinds.push("memory_query".to_owned());
-    } else if matches!(
-        operation,
-        "memory_decision_list" | "memory_decision_inspect"
-    ) {
-        allowed_resource_kinds.push("memory_decision".to_owned());
-    } else if operation == "worker_package_list" {
-        if let Some(kind) = worker_package_list_kind(effective_args) {
-            allowed_resource_kinds.push(kind.to_owned());
-        }
-    } else if operation == "worker_package_inspect"
-        && let Some(kind) = worker_package_inspect_kind(effective_args)
-    {
-        allowed_resource_kinds.push(kind.to_owned());
-    } else if matches!(operation, "module_list" | "module_inspect") {
-        allowed_resource_kinds.push("module_manifest".to_owned());
-    } else if matches!(
-        operation,
-        "module_proposal_record" | "module_proposal_list" | "module_proposal_inspect"
-    ) {
-        allowed_resource_kinds.push("module_proposal".to_owned());
-    } else if matches!(
-        operation,
-        "module_validation_record" | "module_validation_list" | "module_validation_inspect"
-    ) {
-        allowed_resource_kinds.push("module_validation_report".to_owned());
-    } else if matches!(
-        operation,
-        "module_install_request_record"
-            | "module_install_request_list"
-            | "module_install_request_inspect"
-            | "module_install_decision_record"
-            | "module_install_decision_list"
-            | "module_install_decision_inspect"
-    ) {
-        allowed_resource_kinds.extend([
-            "module_install_request".to_owned(),
-            "module_install_decision".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_dependency_request_record"
-            | "module_dependency_request_list"
-            | "module_dependency_request_inspect"
-            | "module_dependency_decision_record"
-            | "module_dependency_decision_list"
-            | "module_dependency_decision_inspect"
-            | "module_dependency_policy_activate"
-            | "module_dependency_policy_list"
-            | "module_dependency_policy_inspect"
-    ) {
-        allowed_resource_kinds.extend([
-            "module_dependency_request".to_owned(),
-            "module_dependency_decision".to_owned(),
-            "module_dependency_policy".to_owned(),
-        ]);
-    } else if capability_binding_operation {
-        allowed_resource_kinds.extend(capability_binding_resource_kinds(operation));
-    } else if capability_route_operation {
-        allowed_resource_kinds.extend(capability_route_resource_kinds());
-    } else if capability_shadow_trial_operation {
-        allowed_resource_kinds.extend(capability_shadow_trial_resource_kinds());
-    } else if matches!(
-        operation,
-        "web_research_request_record"
-            | "web_research_request_list"
-            | "web_research_request_inspect"
-            | "web_research_review_record"
-            | "web_research_review_list"
-            | "web_research_review_inspect"
-            | "web_research_source_record"
-            | "web_research_source_list"
-            | "web_research_source_inspect"
-    ) {
-        allowed_resource_kinds.extend([
-            "web_research_request".to_owned(),
-            "web_research_review".to_owned(),
-            "web_research_source".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_lifecycle_request"
-            | "module_lifecycle_decision"
-            | "module_lifecycle_list"
-            | "module_lifecycle_inspect"
-    ) {
-        allowed_resource_kinds.push("module_lifecycle_state".to_owned());
-    } else if matches!(
-        operation,
-        "module_runtime_request"
-            | "module_runtime_list"
-            | "module_runtime_inspect"
-            | "module_runtime_cancel"
-    ) {
-        allowed_resource_kinds.push("module_runtime_state".to_owned());
-        if operation == "module_runtime_request" {
-            allowed_resource_kinds.push("module_lifecycle_state".to_owned());
-        }
-    } else if context_control_operation {
-        allowed_resource_kinds.extend([
-            "context_control_snapshot".to_owned(),
-            "context_control_action".to_owned(),
-            "context_control_epoch".to_owned(),
-            "context_survivor".to_owned(),
-            "context_exclusion".to_owned(),
-            "context_policy_snapshot".to_owned(),
-        ]);
-    } else if operation == "module_program_execution_start" {
-        allowed_resource_kinds.extend([
-            "module_runtime_state".to_owned(),
-            "module_lifecycle_state".to_owned(),
-            "program_execution_record".to_owned(),
-            "job_process".to_owned(),
-            "execution_output".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "module_program_execution_status"
-            | "module_program_execution_cancel"
-            | "module_program_execution_cleanup"
-    ) {
-        allowed_resource_kinds.extend([
-            "module_runtime_state".to_owned(),
-            "program_execution_record".to_owned(),
-            "job_process".to_owned(),
-            "execution_output".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "job_start" | "job_status" | "job_list" | "job_log" | "job_cancel"
-    ) {
-        allowed_resource_kinds.extend(["job_process".to_owned(), "execution_output".to_owned()]);
-    } else if matches!(
-        operation,
-        "filesystem_read"
-            | "filesystem_list"
-            | "filesystem_find"
-            | "filesystem_glob"
-            | "filesystem_search_text"
-            | "filesystem_diff"
-    ) {
-        allowed_resource_kinds.push("materialized_file".to_owned());
-    } else if matches!(
-        operation,
-        "filesystem_write" | "filesystem_edit" | "filesystem_apply_patch"
-    ) {
-        allowed_resource_kinds
-            .extend(["patch_proposal".to_owned(), "materialized_file".to_owned()]);
-    } else if matches!(
-        operation,
-        "git_status" | "git_diff" | "git_branch_inventory"
-    ) {
-        allowed_resource_kinds.extend([
-            "git_index_change".to_owned(),
-            "git_commit".to_owned(),
-            "git_branch_start".to_owned(),
-        ]);
-    } else if matches!(operation, "git_stage" | "git_unstage") {
-        allowed_resource_kinds.push("git_index_change".to_owned());
-    } else if operation == "git_commit" {
-        allowed_resource_kinds.push("git_commit".to_owned());
-    } else if operation == "git_branch_start" {
-        allowed_resource_kinds.push("git_branch_start".to_owned());
-    } else if matches!(
-        operation,
-        "subagent_launch"
-            | "subagent_status"
-            | "subagent_result"
-            | "subagent_cancel"
-            | "subagent_task_list"
-            | "subagent_task_inspect"
-    ) {
-        allowed_resource_kinds.push("subagent_task".to_owned());
-        if delegated_subagent_operation {
-            allowed_resource_kinds.extend(delegated_subagent_module_resource_kinds(operation));
-        }
-    } else if is_procedural_module_operation(operation) && procedural_kind(effective_args).is_some()
-    {
-        allowed_resource_kinds.extend(procedural_resource_kinds(operation));
-    } else if matches!(operation, "device_list" | "device_inspect") {
-        allowed_resource_kinds.push("device_registration".to_owned());
-    } else if operation == "notification_list" {
-        allowed_resource_kinds.push("notification".to_owned());
-    } else if operation == "notification_inspect" {
-        allowed_resource_kinds.extend([
-            "notification".to_owned(),
-            "notification_delivery".to_owned(),
-        ]);
-    } else if matches!(
-        operation,
-        "notification_send" | "notification_mark_read" | "notification_mark_all_read"
-    ) {
-        allowed_resource_kinds.extend([
-            "notification".to_owned(),
-            "notification_delivery".to_owned(),
-        ]);
-        if notification_push_requested {
-            allowed_resource_kinds.push("device_registration".to_owned());
-        }
-    }
-    let mut resource_selectors = allowed_resource_kinds
-        .iter()
-        .map(|kind| format!("kind:{kind}"))
-        .collect::<Vec<_>>();
-    if context_control_operation {
-        resource_selectors.push(format!("session:{session_id}"));
-    }
-    if capability_route_operation || operation == "capability_binding_cockpit_overview" {
-        resource_selectors.push(format!("session:{session_id}"));
-    }
-    for (operations, field) in exact_resource_selector_fields() {
-        if operations.contains(&operation) {
-            push_resource_selector_arg(&mut resource_selectors, effective_args, field);
-        }
-    }
-    if operation == "module_lifecycle_request" {
-        push_module_lifecycle_request_selector(&mut resource_selectors, session_id, effective_args);
-    }
-    if operation == "module_runtime_request" {
-        push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
-    }
-    if operation == "module_program_execution_start" {
-        push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
-    }
-    if operation == "subagent_launch" {
-        push_resource_selector_arg(
-            &mut resource_selectors,
-            effective_args,
-            "moduleLifecycleResourceId",
-        );
-        push_module_runtime_request_selector(&mut resource_selectors, session_id, effective_args);
-        push_subagent_launch_selector(
-            &mut resource_selectors,
-            session_id,
-            workspace_id,
-            working_directory,
-            invocation_id,
-            model_primitive_name,
-            turn,
-            run_id,
-            effective_args,
-        );
-    } else if matches!(
-        operation,
-        "subagent_status" | "subagent_result" | "subagent_cancel"
-    ) {
-        push_resource_selector_arg(
-            &mut resource_selectors,
-            effective_args,
-            "subagentTaskResourceId",
-        );
-        push_delegated_subagent_followup_selectors(
-            engine_host,
-            &mut resource_selectors,
-            effective_args,
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| *invalid_authority_request("unknown", "operation is required"))?;
+    let policy = authority_policy(operation).ok_or_else(|| {
+        FailureEnvelope::new(
+            ENGINE_POLICY_VIOLATION,
+            FailureCategory::Engine,
+            "Capability runtime authority has no canonical policy for the requested operation",
+            false,
+            false,
+            FailureOrigin::Engine,
         )
-        .await?;
-    }
-    if matches!(
+    })?;
+    let resolution_context = RuntimeResolutionContext {
+        engine_host,
+        session_id,
+        workspace_id,
+        working_directory,
+        invocation_id,
+        model_primitive_name,
+        turn,
+        run_id,
+        args: effective_args,
+    };
+    let resolved = resolve_runtime_authority(
+        policy,
         operation,
-        "procedural_definition_record"
-            | "procedural_state_list"
-            | "procedural_state_inspect"
-            | "procedural_activation_request_record"
-            | "procedural_activation_request_list"
-            | "procedural_activation_request_inspect"
-            | "procedural_activation_decision_record"
-            | "procedural_activation_decision_list"
-            | "procedural_activation_decision_inspect"
-    ) && let Some(kind) = procedural_kind(effective_args)
-    {
-        resource_selectors.push(format!("proceduralKind:{kind}"));
-    }
+        target_function_id,
+        target_authority_scopes,
+        &resolution_context,
+    )
+    .await
+    .map_err(|failure| *failure)?;
+
     let idempotency_material = json!({
         "version": 1,
         "sessionId": session_id,
@@ -953,13 +137,13 @@ pub(super) async fn derive_capability_runtime_grant(
     let payload = json!({
         "parentGrantId": "agent-capability-runtime",
         "subjectActorId": actor_id.as_str(),
-        "allowedCapabilities": allowed_capabilities,
+        "allowedCapabilities": resolved.allowed_capabilities,
         "allowedNamespaces": ["__no_namespace_authority__"],
-        "allowedAuthorityScopes": allowed_authority_scopes.clone(),
-        "allowedResourceKinds": allowed_resource_kinds,
-        "resourceSelectors": resource_selectors,
+        "allowedAuthorityScopes": resolved.allowed_authority_scopes,
+        "allowedResourceKinds": resolved.allowed_resource_kinds,
+        "resourceSelectors": resolved.resource_selectors,
         "fileRoots": [working_directory],
-        "networkPolicy": network_policy,
+        "networkPolicy": resolved.network_policy,
         "maxRisk": "medium",
         "budget": {
             "remainingInvocations": 2,
@@ -977,7 +161,7 @@ pub(super) async fn derive_capability_runtime_grant(
             "turn": turn,
             "runId": run_id,
             "workingDirectory": working_directory,
-            "networkPolicy": network_policy
+            "networkPolicy": resolved.network_policy
         }
     });
     let result = engine_host
@@ -1016,7 +200,8 @@ pub(super) async fn derive_capability_runtime_grant(
         })?;
     let grant_id = AuthorityGrantId::new(grant_id.to_owned())
         .map_err(|error| engine_error_to_failure(&error))?;
-    let causal_authority_scopes = allowed_authority_scopes
+    let causal_authority_scopes = resolved
+        .allowed_authority_scopes
         .into_iter()
         .filter(|scope| {
             matches!(scope.as_str(), "capability.execute")
@@ -1030,259 +215,432 @@ pub(super) async fn derive_capability_runtime_grant(
     })
 }
 
-fn has_non_empty_string(value: &Value, field: &str) -> bool {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .is_some_and(|item| !item.trim().is_empty())
-}
+async fn resolve_runtime_authority(
+    policy: AuthorityPolicy,
+    operation: &str,
+    target_function_id: &FunctionId,
+    target_authority_scopes: &[String],
+    context: &RuntimeResolutionContext<'_>,
+) -> AuthorityResult<ResolvedRuntimeAuthority> {
+    let mut allowed_capabilities = vec![target_function_id.as_str().to_owned()];
+    allowed_capabilities.extend(
+        policy
+            .capability_additions()
+            .iter()
+            .map(|value| (*value).to_owned()),
+    );
 
-fn is_catalog_discovery_operation(operation: &str) -> bool {
-    matches!(
+    let mut allowed_authority_scopes = target_authority_scopes.to_vec();
+    allowed_authority_scopes.extend(
+        policy
+            .base_scope_additions()
+            .iter()
+            .map(|value| (*value).to_owned()),
+    );
+
+    let resource_policy = policy.resource_kind_policy();
+    let mut allowed_resource_kinds = resource_policy
+        .base_kinds()
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect::<Vec<_>>();
+
+    let dynamic_authority = apply_conditional_authority(
+        policy.conditional_authority(),
         operation,
-        "catalog_search" | "catalog_inspect" | "catalog_conformance"
-    )
-}
-
-fn is_diagnostic_read_operation(operation: &str) -> bool {
-    matches!(
+        context.args,
+        &mut allowed_authority_scopes,
+        &mut allowed_resource_kinds,
+    )?;
+    resolve_dynamic_resource_kinds(
+        resource_policy,
         operation,
-        "trace_list" | "trace_get" | "log_recent" | "replay_manifest"
-    )
-}
+        context.args,
+        &dynamic_authority,
+        &mut allowed_resource_kinds,
+    )?;
 
-fn diagnostic_read_resource_kinds(operation: &str) -> Vec<String> {
-    match operation {
-        "trace_list" | "trace_get" => vec!["trace_record".to_owned()],
-        "log_recent" => vec!["log_entry".to_owned()],
-        "replay_manifest" => vec!["session".to_owned()],
-        _ => Vec::new(),
-    }
-}
+    allowed_capabilities.sort();
+    allowed_capabilities.dedup();
+    allowed_authority_scopes.sort();
+    allowed_authority_scopes.dedup();
+    allowed_resource_kinds.sort();
+    allowed_resource_kinds.dedup();
 
-fn state_runtime_capability(operation: &str) -> Option<&'static str> {
-    match operation {
-        "state_get" => Some("state::get"),
-        "state_set" => Some("state::set"),
-        "state_list" => Some("state::list"),
-        _ => None,
-    }
-}
-
-fn is_capability_route_operation(operation: &str) -> bool {
-    is_capability_route_read_operation(operation) || is_capability_route_write_operation(operation)
-}
-
-fn is_capability_shadow_trial_operation(operation: &str) -> bool {
-    is_capability_shadow_trial_read_operation(operation)
-        || is_capability_shadow_trial_write_operation(operation)
-}
-
-fn is_capability_binding_operation(operation: &str) -> bool {
-    is_capability_binding_read_operation(operation)
-        || is_capability_binding_write_operation(operation)
-}
-
-fn is_capability_binding_read_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "capability_binding_cockpit_overview"
-            | "capability_binding_request_list"
-            | "capability_binding_request_inspect"
-            | "capability_binding_decision_list"
-            | "capability_binding_decision_inspect"
-            | "capability_binding_policy_list"
-            | "capability_binding_policy_inspect"
-    )
-}
-
-fn is_capability_binding_write_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "capability_binding_request_record"
-            | "capability_binding_decision_record"
-            | "capability_binding_policy_activate"
-    )
-}
-
-fn capability_binding_resource_kinds(operation: &str) -> Vec<String> {
-    match operation {
-        "capability_binding_cockpit_overview" => {
-            let mut kinds = vec![
-                "capability_binding_request".to_owned(),
-                "capability_binding_decision".to_owned(),
-                "capability_binding_policy".to_owned(),
-            ];
-            kinds.extend(capability_route_resource_kinds());
-            kinds.sort();
-            kinds.dedup();
-            kinds
+    let mut resource_selectors = allowed_resource_kinds
+        .iter()
+        .map(|kind| format!("kind:{kind}"))
+        .collect::<Vec<_>>();
+    for field in policy.exact_resource_id_fields() {
+        if let Some(resource_id) = optional_non_empty_string(context.args, field, operation)? {
+            push_resource_selector(&mut resource_selectors, resource_id, operation)?;
         }
-        "capability_binding_request_record"
-        | "capability_binding_request_list"
-        | "capability_binding_request_inspect" => vec!["capability_binding_request".to_owned()],
-        "capability_binding_decision_record" => vec![
-            "capability_binding_request".to_owned(),
-            "capability_binding_decision".to_owned(),
-        ],
-        "capability_binding_decision_list" | "capability_binding_decision_inspect" => {
-            vec!["capability_binding_decision".to_owned()]
-        }
-        "capability_binding_policy_activate" => vec![
-            "capability_binding_decision".to_owned(),
-            "capability_binding_policy".to_owned(),
-        ],
-        "capability_binding_policy_list" | "capability_binding_policy_inspect" => {
-            vec!["capability_binding_policy".to_owned()]
-        }
-        _ => Vec::new(),
     }
-}
-
-fn is_capability_route_read_operation(operation: &str) -> bool {
-    matches!(
+    apply_selector_additions(
+        policy.selector_additions(),
         operation,
-        "capability_replacement_candidate_list"
-            | "capability_replacement_candidate_inspect"
-            | "capability_route_binding_list"
-            | "capability_route_binding_inspect"
-            | "capability_route_event_list"
-            | "capability_route_event_inspect"
+        context,
+        &mut resource_selectors,
     )
-}
+    .await?;
+    resource_selectors.sort();
+    resource_selectors.dedup();
 
-fn is_capability_route_write_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "capability_replacement_candidate_record"
-            | "capability_route_binding_record"
-            | "capability_route_activate"
-            | "capability_route_disable"
-            | "capability_route_rollback"
-    )
-}
-
-fn is_capability_shadow_trial_read_operation(operation: &str) -> bool {
-    operation == "capability_shadow_trial_evidence_inspect"
-}
-
-fn is_capability_shadow_trial_write_operation(operation: &str) -> bool {
-    matches!(
-        operation,
-        "capability_shadow_trial_request_record"
-            | "capability_shadow_trial_decision_record"
-            | "capability_shadow_trial_run_record"
-    )
-}
-
-fn capability_route_resource_kinds() -> Vec<String> {
-    vec![
-        "capability_replacement_candidate".to_owned(),
-        "capability_route_binding".to_owned(),
-        "capability_route_activation".to_owned(),
-        "capability_route_event".to_owned(),
-        "capability_route_rollback".to_owned(),
-        "capability_shadow_trial_evidence".to_owned(),
-        "capability_shadow_trial_run".to_owned(),
-        "capability_shadow_trial_decision".to_owned(),
-        "capability_shadow_trial_request".to_owned(),
-        "capability_binding_policy".to_owned(),
-    ]
-}
-
-fn capability_shadow_trial_resource_kinds() -> Vec<String> {
-    vec![
-        "capability_shadow_trial_request".to_owned(),
-        "capability_shadow_trial_decision".to_owned(),
-        "capability_shadow_trial_run".to_owned(),
-        "capability_shadow_trial_evidence".to_owned(),
-    ]
-}
-
-fn delegated_subagent_module_scopes(operation: &str) -> Vec<String> {
-    let mut scopes = vec![
-        "module_runtime.read".to_owned(),
-        "program_execution.read".to_owned(),
-        "jobs.read".to_owned(),
-    ];
-    if operation == "subagent_launch" {
-        scopes.extend([
-            "module_runtime.write".to_owned(),
-            "program_execution.write".to_owned(),
-            "jobs.write".to_owned(),
-        ]);
-    } else if operation == "subagent_cancel" {
-        scopes.extend(["module_runtime.write".to_owned(), "jobs.write".to_owned()]);
-    }
-    scopes
-}
-
-fn delegated_subagent_module_resource_kinds(operation: &str) -> Vec<String> {
-    let mut kinds = vec![
-        "module_runtime_state".to_owned(),
-        "program_execution_record".to_owned(),
-        "job_process".to_owned(),
-        "execution_output".to_owned(),
-    ];
-    if operation == "subagent_launch" {
-        kinds.push("module_lifecycle_state".to_owned());
-    }
-    kinds
-}
-
-fn push_resource_selector_arg(selectors: &mut Vec<String>, args: &Value, field: &str) {
-    if let Some(resource_id) = args
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
+    if resource_selectors
+        .iter()
+        .any(|selector| selector == "*" || selector.ends_with(":*"))
     {
-        selectors.push(format!("resource:{resource_id}"));
+        return Err(invalid_authority_request(
+            operation,
+            "wildcard resource selectors are not allowed",
+        ));
+    }
+
+    let network_policy: NetworkPolicy = policy.network_policy();
+    Ok(ResolvedRuntimeAuthority {
+        allowed_capabilities,
+        allowed_authority_scopes,
+        allowed_resource_kinds,
+        resource_selectors,
+        network_policy: network_policy.as_str(),
+    })
+}
+
+fn apply_conditional_authority(
+    authority: ConditionalAuthority,
+    operation: &str,
+    args: &Value,
+    scopes: &mut Vec<String>,
+    resource_kinds: &mut Vec<String>,
+) -> AuthorityResult<DynamicAuthorityState> {
+    let mut state = DynamicAuthorityState::default();
+    match authority {
+        ConditionalAuthority::None => {}
+        ConditionalAuthority::WebRobotsProof {
+            resource_id_field,
+            version_id_field,
+            additional_scopes,
+        } => {
+            if web_robots_proof(args, resource_id_field, version_id_field, operation)?.is_some() {
+                scopes.extend(additional_scopes.iter().map(|value| (*value).to_owned()));
+                state.web_robots_proof = true;
+            }
+        }
+        ConditionalAuthority::NotificationPush {
+            requested_field,
+            additional_scopes,
+            additional_resource_kind,
+        } => {
+            if optional_bool(args, requested_field, operation)? {
+                scopes.extend(additional_scopes.iter().map(|value| (*value).to_owned()));
+                resource_kinds.push(additional_resource_kind.to_owned());
+                state.notification_push = true;
+            }
+        }
+    }
+    Ok(state)
+}
+
+fn resolve_dynamic_resource_kinds(
+    policy: ResourceKindPolicy,
+    operation: &str,
+    args: &Value,
+    dynamic_authority: &DynamicAuthorityState,
+    resource_kinds: &mut Vec<String>,
+) -> AuthorityResult<()> {
+    match policy {
+        ResourceKindPolicy::None
+        | ResourceKindPolicy::Static(_)
+        | ResourceKindPolicy::CapabilityRouteUnion => {}
+        ResourceKindPolicy::CapabilityBinding(resources) => {
+            let _: CapabilityBindingResourceSet = resources;
+        }
+        ResourceKindPolicy::ModuleRuntime(resources) => {
+            let _: ModuleRuntimeResourceSet = resources;
+        }
+        ResourceKindPolicy::ModuleProgramExecution(resources) => {
+            let _: ModuleProgramExecutionResourceSet = resources;
+        }
+        ResourceKindPolicy::Subagent(resources) => {
+            let _: SubagentResourceSet = resources;
+        }
+        ResourceKindPolicy::OptionalGoal {
+            field, linked_kind, ..
+        } => {
+            if optional_non_empty_string(args, field, operation)?.is_some() {
+                resource_kinds.push(linked_kind.to_owned());
+            }
+        }
+        ResourceKindPolicy::WebFetchRobotsProof { proof_kind, .. } => {
+            if dynamic_authority.web_robots_proof {
+                resource_kinds.push(proof_kind.to_owned());
+            }
+        }
+        ResourceKindPolicy::NotificationPush { push_kind, .. } => {
+            if dynamic_authority.notification_push {
+                resource_kinds.push(push_kind.to_owned());
+            }
+        }
+        ResourceKindPolicy::Procedural {
+            kind_field,
+            resources,
+        } => {
+            let resources: ProceduralResourceSet = resources;
+            procedural_kind(args, kind_field, operation)?;
+            resource_kinds.extend(
+                resources
+                    .resource_kinds()
+                    .iter()
+                    .map(|value| (*value).to_owned()),
+            );
+        }
+        ResourceKindPolicy::WorkerPackage(source) => {
+            let kind = worker_package_kind(args, source, operation)?;
+            if !source.allowed_resource_kinds().contains(&kind) {
+                return Err(invalid_authority_field(operation, "workerPackageKind"));
+            }
+            resource_kinds.push(kind.to_owned());
+        }
+    }
+    Ok(())
+}
+
+async fn apply_selector_additions(
+    additions: &[SelectorAddition],
+    operation: &str,
+    context: &RuntimeResolutionContext<'_>,
+    selectors: &mut Vec<String>,
+) -> AuthorityResult<()> {
+    for addition in additions {
+        match *addition {
+            SelectorAddition::Session => {
+                selectors.push(format!("session:{}", context.session_id));
+            }
+            SelectorAddition::WebRobotsProof {
+                resource_id_field,
+                version_id_field,
+            } => {
+                if let Some(resource_id) =
+                    web_robots_proof(context.args, resource_id_field, version_id_field, operation)?
+                {
+                    push_resource_selector(selectors, resource_id, operation)?;
+                }
+            }
+            SelectorAddition::ProceduralKind { field } => {
+                let kind = procedural_kind(context.args, field, operation)?;
+                selectors.push(format!("proceduralKind:{kind}"));
+            }
+            SelectorAddition::DerivedModuleLifecycleState {
+                install_decision_field,
+            } => {
+                if let Some(resource_id) =
+                    optional_non_empty_string(context.args, install_decision_field, operation)?
+                {
+                    push_resource_selector(
+                        selectors,
+                        &module_lifecycle_state_resource_id(context.session_id, resource_id),
+                        operation,
+                    )?;
+                }
+            }
+            SelectorAddition::DerivedModuleRuntimeState {
+                lifecycle_field,
+                request_id_field,
+                idempotency_field,
+            } => push_module_runtime_state_selector(
+                selectors,
+                context.session_id,
+                context.args,
+                lifecycle_field,
+                request_id_field,
+                idempotency_field,
+                operation,
+            )?,
+            SelectorAddition::DerivedSubagentTask { task_id_field } => {
+                push_subagent_launch_selector(selectors, context, task_id_field, operation)?;
+            }
+            SelectorAddition::DelegatedSubagentResources {
+                task_resource_field,
+            } => {
+                push_delegated_subagent_followup_selectors(
+                    context.engine_host,
+                    selectors,
+                    context.args,
+                    task_resource_field,
+                    operation,
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn web_robots_proof<'a>(
+    args: &'a Value,
+    resource_id_field: &str,
+    version_id_field: &str,
+    operation: &str,
+) -> AuthorityResult<Option<&'a str>> {
+    let resource_id = optional_non_empty_string(args, resource_id_field, operation)?;
+    let version_id = optional_non_empty_string(args, version_id_field, operation)?;
+    match (resource_id, version_id) {
+        (None, None) => Ok(None),
+        (Some(resource_id), Some(_)) => Ok(Some(resource_id)),
+        _ => Err(invalid_authority_request(
+            operation,
+            "robots policy resource and version proof must be supplied together",
+        )),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_subagent_launch_selector(
+fn optional_bool(args: &Value, field: &str, operation: &str) -> AuthorityResult<bool> {
+    match args.get(field) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(invalid_authority_field(operation, field)),
+    }
+}
+
+fn optional_non_empty_string<'a>(
+    args: &'a Value,
+    field: &str,
+    operation: &str,
+) -> AuthorityResult<Option<&'a str>> {
+    match args.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value)),
+        Some(_) => Err(invalid_authority_field(operation, field)),
+    }
+}
+
+fn procedural_kind<'a>(
+    args: &'a Value,
+    field: &str,
+    operation: &str,
+) -> AuthorityResult<&'static str> {
+    match optional_non_empty_string(args, field, operation)? {
+        Some("skill") => Ok("skill"),
+        Some("rule") => Ok("rule"),
+        Some("hook") => Ok("hook"),
+        Some("procedure") => Ok("procedure"),
+        _ => Err(invalid_authority_field(operation, field)),
+    }
+}
+
+fn worker_package_kind(
+    args: &Value,
+    source: WorkerPackageKindSource,
+    operation: &str,
+) -> AuthorityResult<&'static str> {
+    match source {
+        WorkerPackageKindSource::ListArgument { field } => {
+            match optional_non_empty_string(args, field, operation)? {
+                None | Some("worker_package") => Ok("worker_package"),
+                Some("worker_package_installation") => Ok("worker_package_installation"),
+                Some("worker_package_proposal") => Ok("worker_package_proposal"),
+                Some("worker_package_conformance_report") => {
+                    Ok("worker_package_conformance_report")
+                }
+                Some("worker_launch_attempt") => Ok("worker_launch_attempt"),
+                Some(_) => Err(invalid_authority_field(operation, field)),
+            }
+        }
+        WorkerPackageKindSource::InspectResourceIdPrefix { field } => {
+            let resource_id = optional_non_empty_string(args, field, operation)?
+                .ok_or_else(|| invalid_authority_field(operation, field))?;
+            if resource_id.starts_with("worker_package_installation:") {
+                Ok("worker_package_installation")
+            } else if resource_id.starts_with("worker_package_proposal:") {
+                Ok("worker_package_proposal")
+            } else if resource_id.starts_with("worker_package_conformance_report:") {
+                Ok("worker_package_conformance_report")
+            } else if resource_id.starts_with("worker_launch_attempt:") {
+                Ok("worker_launch_attempt")
+            } else if resource_id.starts_with("worker_package:") {
+                Ok("worker_package")
+            } else {
+                Err(invalid_authority_field(operation, field))
+            }
+        }
+    }
+}
+
+fn push_resource_selector(
+    selectors: &mut Vec<String>,
+    resource_id: &str,
+    operation: &str,
+) -> AuthorityResult<()> {
+    if resource_id.trim().is_empty() || resource_id.contains('*') {
+        return Err(invalid_authority_request(
+            operation,
+            "resource identifiers must be exact and non-empty",
+        ));
+    }
+    selectors.push(format!("resource:{resource_id}"));
+    Ok(())
+}
+
+fn push_module_runtime_state_selector(
     selectors: &mut Vec<String>,
     session_id: &str,
-    workspace_id: Option<&str>,
-    working_directory: &str,
-    invocation_id: &str,
-    model_primitive_name: &str,
-    turn: i64,
-    run_id: Option<&str>,
     args: &Value,
-) {
-    let task_id = args
-        .get("taskId")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(invocation_id);
+    lifecycle_field: &str,
+    request_id_field: &str,
+    idempotency_field: &str,
+    operation: &str,
+) -> AuthorityResult<()> {
+    let Some(lifecycle_resource_id) = optional_non_empty_string(args, lifecycle_field, operation)?
+    else {
+        return Ok(());
+    };
+    let runtime_request_id = optional_non_empty_string(args, request_id_field, operation)?
+        .or(optional_non_empty_string(
+            args,
+            idempotency_field,
+            operation,
+        )?)
+        .unwrap_or("runtime");
+    push_resource_selector(
+        selectors,
+        &module_runtime_state_resource_id(session_id, lifecycle_resource_id, runtime_request_id),
+        operation,
+    )
+}
+
+fn push_subagent_launch_selector(
+    selectors: &mut Vec<String>,
+    context: &RuntimeResolutionContext<'_>,
+    task_id_field: &str,
+    operation: &str,
+) -> AuthorityResult<()> {
+    let task_id = optional_non_empty_string(context.args, task_id_field, operation)?
+        .unwrap_or(context.invocation_id);
     let idempotency_key = model_capability_invocation_idempotency_key(
-        run_id,
-        session_id,
-        turn,
-        invocation_id,
-        model_primitive_name,
-        working_directory,
-        workspace_id,
-        args,
+        context.run_id,
+        context.session_id,
+        context.turn,
+        context.invocation_id,
+        context.model_primitive_name,
+        context.working_directory,
+        context.workspace_id,
+        context.args,
     );
-    selectors.push(format!(
-        "resource:{}",
-        subagent_task_resource_id(session_id, task_id, &idempotency_key)
-    ));
+    push_resource_selector(
+        selectors,
+        &subagent_task_resource_id(context.session_id, task_id, &idempotency_key),
+        operation,
+    )
 }
 
 async fn push_delegated_subagent_followup_selectors(
     engine_host: &EngineHostHandle,
     selectors: &mut Vec<String>,
     args: &Value,
-) -> Result<(), FailureEnvelope> {
-    let Some(resource_id) = args
-        .get("subagentTaskResourceId")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
+    task_resource_field: &str,
+    operation: &str,
+) -> AuthorityResult<()> {
+    let Some(resource_id) = optional_non_empty_string(args, task_resource_field, operation)? else {
         return Ok(());
     };
     let Some(inspection) = engine_host
@@ -1320,55 +678,10 @@ async fn push_delegated_subagent_followup_selectors(
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
         {
-            selectors.push(format!("resource:{resource_id}"));
+            push_resource_selector(selectors, resource_id, operation)?;
         }
     }
     Ok(())
-}
-
-fn push_module_lifecycle_request_selector(
-    selectors: &mut Vec<String>,
-    session_id: &str,
-    args: &Value,
-) {
-    if let Some(install_decision_resource_id) = args
-        .get("moduleInstallDecisionResourceId")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        selectors.push(format!(
-            "resource:{}",
-            module_lifecycle_state_resource_id(session_id, install_decision_resource_id)
-        ));
-    }
-}
-
-fn push_module_runtime_request_selector(
-    selectors: &mut Vec<String>,
-    session_id: &str,
-    args: &Value,
-) {
-    if let Some(lifecycle_resource_id) = args
-        .get("moduleLifecycleResourceId")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        selectors.push(format!(
-            "resource:{}",
-            module_runtime_state_resource_id(
-                session_id,
-                lifecycle_resource_id,
-                args.get("runtimeRequestId")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| {
-                        args.get("idempotencyKey")
-                            .and_then(Value::as_str)
-                            .unwrap_or("runtime")
-                    })
-            )
-        ));
-    }
 }
 
 fn module_lifecycle_state_resource_id(
@@ -1406,269 +719,22 @@ fn subagent_task_resource_id(session_id: &str, task_id: &str, idempotency_key: &
     format!("subagent_task:{:x}", hasher.finalize())
 }
 
-fn exact_resource_selector_fields() -> &'static [(&'static [&'static str], &'static str)] {
-    &[
-        (
-            &["goal_inspect", "goal_cancel", "question_create"],
-            "goalResourceId",
-        ),
-        (
-            &["question_inspect", "question_answer"],
-            "questionResourceId",
-        ),
-        (&["media_inspect", "media_archive"], "mediaResourceId"),
-        (&["import_history_inspect"], "importHistoryResourceId"),
-        (&["repository_tree_inspect"], "repositoryTreeResourceId"),
-        (&["import_preview_inspect"], "importPreviewResourceId"),
-        (&["program_execution_inspect"], "programExecutionResourceId"),
-        (&["prompt_artifact_inspect"], "promptArtifactResourceId"),
-        (&["update_diagnostic_inspect"], "updateDiagnosticResourceId"),
-        (&["memory_inspect"], "recordResourceId"),
-        (&["memory_query_inspect"], "queryResourceId"),
-        (&["memory_decision_inspect"], "decisionResourceId"),
-        (
-            &["context_control_action_inspect"],
-            "contextControlActionResourceId",
-        ),
-        (&["context_survivor_disable"], "contextSurvivorResourceId"),
-        (&["context_exclusion_disable"], "contextExclusionResourceId"),
-        (&["module_inspect"], "moduleManifestResourceId"),
-        (&["module_proposal_inspect"], "moduleProposalResourceId"),
-        (
-            &["module_validation_inspect"],
-            "moduleValidationReportResourceId",
-        ),
-        (
-            &["module_install_request_record"],
-            "moduleValidationReportResourceId",
-        ),
-        (
-            &[
-                "module_install_request_inspect",
-                "module_install_decision_record",
-            ],
-            "moduleInstallRequestResourceId",
-        ),
-        (
-            &["module_install_decision_inspect"],
-            "moduleInstallDecisionResourceId",
-        ),
-        (
-            &[
-                "module_dependency_request_inspect",
-                "module_dependency_decision_record",
-            ],
-            "moduleDependencyRequestResourceId",
-        ),
-        (
-            &[
-                "module_dependency_decision_inspect",
-                "module_dependency_policy_activate",
-            ],
-            "moduleDependencyDecisionResourceId",
-        ),
-        (
-            &["module_dependency_policy_inspect"],
-            "moduleDependencyPolicyResourceId",
-        ),
-        (
-            &["capability_binding_request_inspect"],
-            "capabilityBindingRequestResourceId",
-        ),
-        (
-            &["capability_binding_decision_record"],
-            "capabilityBindingRequestResourceId",
-        ),
-        (
-            &["capability_binding_decision_inspect"],
-            "capabilityBindingDecisionResourceId",
-        ),
-        (
-            &["capability_binding_policy_activate"],
-            "capabilityBindingDecisionResourceId",
-        ),
-        (
-            &["capability_binding_policy_inspect"],
-            "capabilityBindingPolicyResourceId",
-        ),
-        (
-            &["capability_replacement_candidate_inspect"],
-            "capabilityReplacementCandidateResourceId",
-        ),
-        (
-            &["capability_route_binding_record"],
-            "capabilityReplacementCandidateResourceId",
-        ),
-        (
-            &[
-                "capability_route_binding_inspect",
-                "capability_route_activate",
-            ],
-            "capabilityRouteBindingResourceId",
-        ),
-        (
-            &["capability_route_disable", "capability_route_rollback"],
-            "capabilityRouteBindingResourceId",
-        ),
-        (
-            &["capability_route_disable", "capability_route_rollback"],
-            "capabilityRouteActivationResourceId",
-        ),
-        (
-            &["capability_route_event_inspect"],
-            "capabilityRouteEventResourceId",
-        ),
-        (
-            &[
-                "web_research_request_inspect",
-                "web_research_review_record",
-                "web_research_source_record",
-            ],
-            "webResearchRequestResourceId",
-        ),
-        (
-            &["web_research_review_inspect", "web_research_source_record"],
-            "webResearchReviewResourceId",
-        ),
-        (
-            &["web_research_source_inspect"],
-            "webResearchSourceResourceId",
-        ),
-        (
-            &["module_lifecycle_decision", "module_lifecycle_inspect"],
-            "moduleLifecycleResourceId",
-        ),
-        (
-            &["module_lifecycle_request"],
-            "moduleInstallDecisionResourceId",
-        ),
-        (&["module_runtime_request"], "moduleLifecycleResourceId"),
-        (
-            &["module_program_execution_start"],
-            "moduleLifecycleResourceId",
-        ),
-        (
-            &["module_runtime_inspect", "module_runtime_cancel"],
-            "moduleRuntimeResourceId",
-        ),
-        (
-            &[
-                "module_program_execution_status",
-                "module_program_execution_cancel",
-                "module_program_execution_cleanup",
-            ],
-            "moduleRuntimeResourceId",
-        ),
-        (
-            &[
-                "module_program_execution_status",
-                "module_program_execution_cancel",
-                "module_program_execution_cleanup",
-            ],
-            "jobResourceId",
-        ),
-        (&["procedural_state_inspect"], "proceduralRecordResourceId"),
-        (
-            &["procedural_activation_request_record"],
-            "proceduralRecordResourceId",
-        ),
-        (
-            &[
-                "procedural_activation_request_inspect",
-                "procedural_activation_decision_record",
-            ],
-            "proceduralActivationRequestResourceId",
-        ),
-        (
-            &["procedural_activation_decision_inspect"],
-            "proceduralActivationDecisionResourceId",
-        ),
-    ]
-}
-
-fn is_procedural_module_operation(operation: &str) -> bool {
-    matches!(
+fn invalid_authority_field(operation: &str, field: &str) -> Box<FailureEnvelope> {
+    invalid_authority_request(
         operation,
-        "procedural_definition_record"
-            | "procedural_state_list"
-            | "procedural_state_inspect"
-            | "procedural_activation_request_record"
-            | "procedural_activation_request_list"
-            | "procedural_activation_request_inspect"
-            | "procedural_activation_decision_record"
-            | "procedural_activation_decision_list"
-            | "procedural_activation_decision_inspect"
+        &format!("authority field '{field}' is missing or invalid"),
     )
 }
 
-fn procedural_resource_kinds(operation: &str) -> Vec<String> {
-    match operation {
-        "procedural_definition_record" | "procedural_state_list" | "procedural_state_inspect" => {
-            vec!["procedural_record".to_owned()]
-        }
-        "procedural_activation_request_record"
-        | "procedural_activation_request_list"
-        | "procedural_activation_request_inspect" => {
-            vec![
-                "procedural_record".to_owned(),
-                "procedural_activation_request".to_owned(),
-            ]
-        }
-        "procedural_activation_decision_record"
-        | "procedural_activation_decision_list"
-        | "procedural_activation_decision_inspect" => {
-            vec![
-                "procedural_record".to_owned(),
-                "procedural_activation_request".to_owned(),
-                "procedural_activation_decision".to_owned(),
-            ]
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn procedural_kind(args: &Value) -> Option<&'static str> {
-    match args.get("proceduralKind").and_then(Value::as_str) {
-        Some("skill") => Some("skill"),
-        Some("rule") => Some("rule"),
-        Some("hook") => Some("hook"),
-        Some("procedure") => Some("procedure"),
-        _ => None,
-    }
-}
-
-fn worker_package_list_kind(args: &Value) -> Option<&'static str> {
-    match args
-        .get("workerPackageKind")
-        .and_then(Value::as_str)
-        .unwrap_or("worker_package")
-    {
-        "worker_package" => Some("worker_package"),
-        "worker_package_installation" => Some("worker_package_installation"),
-        "worker_package_proposal" => Some("worker_package_proposal"),
-        "worker_package_conformance_report" => Some("worker_package_conformance_report"),
-        "worker_launch_attempt" => Some("worker_launch_attempt"),
-        _ => None,
-    }
-}
-
-fn worker_package_inspect_kind(args: &Value) -> Option<&'static str> {
-    let resource_id = args
-        .get("workerPackageResourceId")
-        .and_then(Value::as_str)?;
-    if resource_id.starts_with("worker_package_installation:") {
-        Some("worker_package_installation")
-    } else if resource_id.starts_with("worker_package_proposal:") {
-        Some("worker_package_proposal")
-    } else if resource_id.starts_with("worker_package_conformance_report:") {
-        Some("worker_package_conformance_report")
-    } else if resource_id.starts_with("worker_launch_attempt:") {
-        Some("worker_launch_attempt")
-    } else if resource_id.starts_with("worker_package:") {
-        Some("worker_package")
-    } else {
-        None
-    }
+fn invalid_authority_request(operation: &str, reason: &str) -> Box<FailureEnvelope> {
+    Box::new(FailureEnvelope::new(
+        ENGINE_POLICY_VIOLATION,
+        FailureCategory::InvalidRequest,
+        format!("Capability authority for '{operation}' was rejected: {reason}"),
+        false,
+        true,
+        FailureOrigin::Capability,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1710,20 +776,21 @@ pub(super) fn model_capability_invocation_idempotency_key(
     workspace_id: Option<&str>,
     effective_args: &Value,
 ) -> String {
-    if effective_args.get("operation").and_then(Value::as_str) == Some("catalog_conformance")
-        && let Some(caller_key) = effective_args.get("idempotencyKey").and_then(Value::as_str)
-    {
+    if let (Some(operation), Some(caller_key)) = (
+        effective_args.get("operation").and_then(Value::as_str),
+        effective_args.get("idempotencyKey").and_then(Value::as_str),
+    ) {
         let material = json!({
             "version": 1,
             "sessionId": session_id,
-            "operation": "catalog_conformance",
+            "operation": operation,
             "callerKey": caller_key
         });
         return format!(
             "model-capability-caller-idempotency:v1:{}",
             sha256_hex(
                 serde_json::to_string(&material)
-                    .unwrap_or_else(|_| format!("{session_id}:catalog_conformance:{caller_key}"))
+                    .unwrap_or_else(|_| format!("{session_id}:{operation}:{caller_key}"))
                     .as_bytes()
             )
         );

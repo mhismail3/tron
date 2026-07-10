@@ -19,8 +19,7 @@ async fn module_validation_runtime_grants_are_scoped_to_validation_reports() {
         ),
         (
             json!({
-                "operation": "module_validation_list",
-                "idempotencyKey": "module-validation-list-grant"
+                "operation": "module_validation_list"
             }),
             false,
             None,
@@ -28,8 +27,7 @@ async fn module_validation_runtime_grants_are_scoped_to_validation_reports() {
         (
             json!({
                 "operation": "module_validation_inspect",
-                "moduleValidationReportResourceId": "module_validation_report:runtime-grant",
-                "idempotencyKey": "module-validation-inspect-grant"
+                "moduleValidationReportResourceId": "module_validation_report:runtime-grant"
             }),
             false,
             Some("module_validation_report:runtime-grant"),

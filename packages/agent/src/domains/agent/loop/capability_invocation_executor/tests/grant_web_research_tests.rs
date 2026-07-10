@@ -18,8 +18,7 @@ async fn web_research_runtime_grants_are_scoped_to_research_resources() {
         ),
         (
             json!({
-                "operation": "web_research_request_list",
-                "idempotencyKey": "web-research-request-list-grant"
+                "operation": "web_research_request_list"
             }),
             false,
             None,
@@ -29,8 +28,7 @@ async fn web_research_runtime_grants_are_scoped_to_research_resources() {
         (
             json!({
                 "operation": "web_research_request_inspect",
-                "webResearchRequestResourceId": "web_research_request:runtime-grant",
-                "idempotencyKey": "web-research-request-inspect-grant"
+                "webResearchRequestResourceId": "web_research_request:runtime-grant"
             }),
             false,
             Some("web_research_request:runtime-grant"),
@@ -52,8 +50,7 @@ async fn web_research_runtime_grants_are_scoped_to_research_resources() {
         (
             json!({
                 "operation": "web_research_review_inspect",
-                "webResearchReviewResourceId": "web_research_review:runtime-grant",
-                "idempotencyKey": "web-research-review-inspect-grant"
+                "webResearchReviewResourceId": "web_research_review:runtime-grant"
             }),
             false,
             None,
@@ -78,8 +75,7 @@ async fn web_research_runtime_grants_are_scoped_to_research_resources() {
         (
             json!({
                 "operation": "web_research_source_inspect",
-                "webResearchSourceResourceId": "web_research_source:runtime-grant",
-                "idempotencyKey": "web-research-source-inspect-grant"
+                "webResearchSourceResourceId": "web_research_source:runtime-grant"
             }),
             false,
             None,

@@ -204,7 +204,7 @@
 //! | `module_runtime_contract` | Module-runtime supervisor schema fields |
 //! | `module_validation_contract` | Module-validation request schema fields |
 //! | `operations` | Direct primitive operation implementations |
-//! | `operations::operation_contract` | Exact structural validation boundary promoted family-by-family before authority derivation |
+//! | `operations::operation_contract` | Canonical input/output, ownership, effect, context, idempotency, and base-authority contracts for every execute operation |
 //! | `pool` | Operation/catalog-function classification for agent-facing discovery |
 //! | `scheduler_contract` | Schedule-specific request schema fields |
 //!
@@ -218,12 +218,12 @@
 //! discovery, unsupported-operation diagnostics, and stream/UI operation
 //! identity. Do not duplicate freehand operation lists elsewhere.
 //! Host validation keeps the complete closed request union, while providers see
-//! only the catalog bootstrap fields plus an open operation payload. Exact
-//! operation contracts are promoted through the operations contract boundary,
-//! enforced before grant derivation and again for direct engine callers, and
-//! returned by `catalog_inspect`; the compact bootstrap must not become a
-//! second operation-contract registry. Families not yet promoted are labeled
-//! `domain_validated_contract` rather than falsely claiming exactness.
+//! only the catalog bootstrap fields plus an open operation payload. Every
+//! supported operation has one closed contract under `operations::operation_contract`;
+//! catalog inspection, pre-authority validation, context/effect classification,
+//! and grant derivation consume that contract. Domain services retain semantic,
+//! lifecycle, stale-version, and runtime-resource checks. The compact bootstrap
+//! must not become a second operation-contract registry.
 //! Natural-language catalog queries that contain a complete unsupported
 //! operation-like token report that token explicitly and suppress unrelated
 //! fuzzy matches. Valid operation prefixes still expand normally. Inspecting an
@@ -266,8 +266,11 @@ mod scheduler_contract;
 
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
-    OperationBindingMetadata, is_supported_operation, operation_binding_metadata,
-    operation_list_text, validate_operation_payload,
+    AuthorityPolicy, CapabilityBindingResourceSet, ConditionalAuthority,
+    ModuleProgramExecutionResourceSet, ModuleRuntimeResourceSet, NetworkPolicy,
+    OperationBindingMetadata, ProceduralResourceSet, ResourceKindPolicy, SelectorAddition,
+    SubagentResourceSet, WorkerPackageKindSource, authority_policy, is_supported_operation,
+    operation_binding_metadata, operation_list_text, validate_operation_payload,
 };
 mod update_diagnostics_contract;
 mod web_research_contract;
