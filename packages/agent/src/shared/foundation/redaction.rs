@@ -20,7 +20,7 @@ pub fn redact_sensitive_content(text: &str) -> String {
             // JSON-shaped auth fields, preserving the key and JSON quoting.
             (
                 Regex::new(
-                    r#"(?i)("(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|code)"\s*:\s*")([^"]{8,})(")"#,
+                    r#"(?i)("(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code)"\s*:\s*")([^"]{8,})(")"#,
                 )
                 .unwrap(),
                 "${1}****${3}",
@@ -28,7 +28,7 @@ pub fn redact_sensitive_content(text: &str) -> String {
             // Swift/Rust debug-description fields like `apiKey: "..."`.
             (
                 Regex::new(
-                    r#"(?i)(\b(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|code)\s*:\s*")([^"]{8,})(")"#,
+                    r#"(?i)(\b(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code)\s*:\s*")([^"]{8,})(")"#,
                 )
                 .unwrap(),
                 "${1}****${3}",
@@ -128,5 +128,15 @@ mod tests {
     fn leaves_non_secret_text_unchanged() {
         let text = "provider returned status code invalid_api_key";
         assert_eq!(redact_sensitive_content(text), text);
+    }
+
+    #[test]
+    fn preserves_engine_error_codes_while_redacting_authorization_codes() {
+        let text = r#"{"code":"INVALID_PARAMS","authorizationCode":"oauth-code-1234567890"}"#;
+        let result = redact_sensitive_content(text);
+
+        assert!(result.contains(r#""code":"INVALID_PARAMS""#));
+        assert!(result.contains(r#""authorizationCode":"****""#));
+        assert!(!result.contains("oauth-code-1234567890"));
     }
 }

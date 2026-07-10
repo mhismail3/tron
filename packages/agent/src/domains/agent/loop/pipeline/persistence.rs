@@ -187,7 +187,7 @@ mod tests {
         );
         assert!(
             json[0].get("input").is_none(),
-            "must not include retired input key"
+            "must not include unsupported input key"
         );
         assert_eq!(json[0]["arguments"]["command"], "ls");
     }

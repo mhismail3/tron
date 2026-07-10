@@ -21,12 +21,10 @@ use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::Invo
 use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
-use crate::domains::capability::{
-    is_supported_operation, provider_result_content, provider_result_text,
-};
+use crate::domains::capability::{is_supported_operation, provider_result_text};
 use crate::domains::session::event_store::{EventRow, EventType};
 use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::messages::Message;
+use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
@@ -54,6 +52,11 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
 pub(super) struct CapabilityInvocationPhaseOutcome {
     pub capability_invocations_executed: usize,
     pub stop_turn_requested: bool,
+}
+
+struct ExecutedCapabilityInvocation {
+    result: CapabilityInvocationExecutionResult,
+    provider_text: String,
 }
 
 fn primitive_identity_json(
@@ -134,6 +137,12 @@ fn requested_operation_name_from_map(arguments: &serde_json::Map<String, Value>)
             .filter(|operation| !operation.is_empty())
             .map(ToOwned::to_owned)
     })
+}
+
+fn provider_operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> String {
+    validated_operation_name_from_map(arguments)
+        .or_else(|| requested_operation_name_from_map(arguments))
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 pub(super) async fn execute_capability_invocation_phase(
@@ -273,8 +282,10 @@ pub(super) async fn execute_capability_invocation_phase(
         invocation_count = params.stream_result.capability_invocations.len(),
         "capability execution waves built"
     );
-    let mut results: Vec<Option<CapabilityInvocationExecutionResult>> =
-        vec![None; params.stream_result.capability_invocations.len()];
+    let mut results: Vec<Option<ExecutedCapabilityInvocation>> =
+        (0..params.stream_result.capability_invocations.len())
+            .map(|_| None)
+            .collect();
 
     for (wave_index, wave) in waves.iter().enumerate() {
         if params.cancel.is_cancelled() {
@@ -315,8 +326,7 @@ pub(super) async fn execute_capability_invocation_phase(
                 let working_dir = working_dir.as_str();
                 async move {
                     let operation =
-                        validated_operation_name_from_map(&capability_invocation.arguments)
-                            .unwrap_or_else(|| "unknown".to_owned());
+                        provider_operation_name_from_map(&capability_invocation.arguments);
                     let requested_operation =
                         requested_operation_name_from_map(&capability_invocation.arguments);
                     info!(
@@ -339,6 +349,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         &capability_ctx,
                     )
                     .await;
+                    let provider_text = provider_result_text(&operation, &result.result);
                     info!(
                         component = "agent.capability",
                         agent_event = "capability_invocation_execute_completed",
@@ -357,8 +368,6 @@ pub(super) async fn execute_capability_invocation_phase(
 
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
-                        let model_context_content =
-                            provider_result_text(&operation, &result.result);
                         let is_error = result.result.is_error.unwrap_or(false);
                         let base_identity = primitive_identity_json(
                             &capability_invocation.name,
@@ -377,12 +386,12 @@ pub(super) async fn execute_capability_invocation_phase(
                             "traceId": params.trace_id.map(|id| id.as_str()),
                             "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
                         });
-                        if model_context_content != result_text
+                        if provider_text != result_text
                             && let Some(payload) = payload.as_object_mut()
                         {
                             payload.insert(
                                 "modelContextContent".to_owned(),
-                                json!(model_context_content),
+                                Value::String(provider_text.clone()),
                             );
                         }
                         if let (Some(payload), Some(identity)) = (
@@ -425,7 +434,13 @@ pub(super) async fn execute_capability_invocation_phase(
                         }
                     }
 
-                    (idx, result)
+                    (
+                        idx,
+                        ExecutedCapabilityInvocation {
+                            result,
+                            provider_text,
+                        },
+                    )
                 }
             })
             .collect();
@@ -450,7 +465,7 @@ pub(super) async fn execute_capability_invocation_phase(
 }
 
 async fn process_capability_results(
-    mut results: Vec<Option<CapabilityInvocationExecutionResult>>,
+    mut results: Vec<Option<ExecutedCapabilityInvocation>>,
     params: CapabilityInvocationPhaseParams<'_>,
 ) -> CapabilityInvocationPhaseOutcome {
     let mut outcome = CapabilityInvocationPhaseOutcome::default();
@@ -461,20 +476,21 @@ async fn process_capability_results(
         .iter()
         .enumerate()
     {
-        let Some(exec_result) = results[idx].take() else {
+        let Some(executed) = results[idx].take() else {
             continue;
         };
+        let ExecutedCapabilityInvocation {
+            result: exec_result,
+            provider_text,
+        } = executed;
         outcome.capability_invocations_executed += 1;
         let is_error = exec_result.result.is_error.unwrap_or(false);
-        let operation = validated_operation_name_from_map(&capability_invocation.arguments)
-            .or_else(|| requested_operation_name_from_map(&capability_invocation.arguments))
-            .unwrap_or_else(|| "unknown".to_owned());
 
         params
             .context_manager
             .add_message(Message::CapabilityResult {
                 invocation_id: capability_invocation.id.clone(),
-                content: provider_result_content(&operation, &exec_result.result),
+                content: CapabilityResultMessageContent::Text(provider_text),
                 is_error: if is_error { Some(true) } else { None },
             });
 

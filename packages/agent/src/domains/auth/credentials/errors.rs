@@ -37,9 +37,8 @@ pub enum AuthError {
     #[error("no auth configured for provider: {0}")]
     NotConfigured(String),
 
-    /// Stored provider auth carries unknown fields (e.g. retired `endpoint`
-    /// from the pre-CCA Google era). The user must re-authenticate so the
-    /// stale shape is rewritten.
+    /// Stored provider auth carries unknown fields. The user must
+    /// re-authenticate so the invalid shape is rewritten.
     #[error(
         "malformed auth for provider '{provider}': {details}. Re-authenticate via `tron auth {provider}`."
     )]
@@ -50,12 +49,10 @@ pub enum AuthError {
         details: String,
     },
 
-    /// The on-disk auth file failed top-level deserialization — a retired
-    /// single-field service shape (`services.x.apiKey: "k"` instead of the
-    /// current `services.x.apiKeys: ["k"]`), a stray unknown key, or a
-    /// version bump. The whole file is unusable until the user repairs it;
-    /// surfacing as a hard error prevents silently masking every configured
-    /// provider.
+    /// The on-disk auth file failed top-level deserialization because its
+    /// schema or version is invalid. The whole file is unusable until the user
+    /// repairs it; surfacing a hard error prevents silently masking configured
+    /// providers.
     #[error(
         "malformed auth file at '{path}': {details}. Fix the file or run \
          `tron auth reset` to wipe and re-authenticate."

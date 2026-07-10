@@ -151,7 +151,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         and output contract. Every non-read-only schema structurally requires a stable, \
         caller-supplied `idempotencyKey`.\n\
         4. Use exact refs and selectors returned by catalog and operation outputs; do not infer \
-        aliases, wildcard selectors, or resource identifiers.\n\
+        alternate names, wildcard selectors, or resource identifiers.\n\
         5. Normal task invocation must not enter a capability replacement workflow unless the user \
         explicitly requests replacement.\n\
         6. If a call is invalid or unsupported, recover by catalog inspection: run `catalog_search`, \

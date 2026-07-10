@@ -75,6 +75,7 @@ use common::{
 use context::validate_execute_context;
 use trace::{complete_trace_record, started_trace_record};
 
+pub(crate) use operation_contract::provider_result_text;
 pub(crate) use operation_contract::validate_payload as validate_operation_payload;
 pub(crate) use operation_contract::{
     AuthorityPolicy, ConditionalAuthority, OperationBindingMetadata, OperationEffect, OperationId,
@@ -84,7 +85,6 @@ pub(crate) use operation_contract::{
     operation_list_text, required_payload_fields as operation_required_payload_fields,
     risk as operation_risk, supported_operation_names,
 };
-pub(crate) use operation_contract::{provider_result_content, provider_result_text};
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,

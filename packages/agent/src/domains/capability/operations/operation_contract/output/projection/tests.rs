@@ -20,11 +20,63 @@ fn make_exec_result_with_details(
     }
 }
 
+fn provider_envelope(result: &CapabilityResult) -> Value {
+    let CapabilityResultMessageContent::Text(text) = extract_result_content(result) else {
+        panic!("canonical provider output must be text-only");
+    };
+    let envelope: Value = serde_json::from_str(&text).expect("canonical provider envelope parses");
+    assert_eq!(
+        envelope["schemaVersion"],
+        json!("tron.provider_operation_output.v1")
+    );
+    assert!(envelope["evidence"]["facts"].is_array());
+    assert!(envelope["evidence"]["resources"].is_array());
+    assert!(envelope["evidence"]["collections"].is_array());
+    assert!(envelope["nextActions"].is_array());
+    envelope
+}
+
+fn fact<'a>(envelope: &'a Value, field: &str) -> &'a Value {
+    envelope["evidence"]["facts"]
+        .as_array()
+        .expect("facts array")
+        .iter()
+        .find(|fact| fact["field"] == field)
+        .unwrap_or_else(|| panic!("missing provider fact `{field}` in {envelope:#}"))
+        .get("value")
+        .expect("fact value")
+}
+
+fn collection<'a>(envelope: &'a Value, field: &str) -> &'a Value {
+    envelope["evidence"]["collections"]
+        .as_array()
+        .expect("collections array")
+        .iter()
+        .find(|collection| collection["field"] == field)
+        .unwrap_or_else(|| panic!("missing provider collection `{field}` in {envelope:#}"))
+}
+
+fn item_fact<'a>(item: &'a Value, field: &str) -> &'a Value {
+    item["facts"]
+        .as_array()
+        .expect("item facts array")
+        .iter()
+        .find(|fact| fact["field"] == field)
+        .unwrap_or_else(|| panic!("missing collection item fact `{field}` in {item:#}"))
+        .get("value")
+        .expect("item fact value")
+}
+
+fn envelope_text(envelope: &Value) -> String {
+    serde_json::to_string(envelope).expect("serialize canonical provider envelope")
+}
+
 #[test]
 fn extract_result_content_text_body_passthrough() {
     let exec = make_exec_result(CapabilityResultBody::Text("hello".into()));
-    let content = extract_result_content(&exec);
-    assert!(matches!(content, CapabilityResultMessageContent::Text(ref t) if t == "hello"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(envelope["operation"], json!("unknown"));
+    assert_eq!(envelope["summary"], json!("hello"));
 }
 
 #[test]
@@ -33,37 +85,39 @@ fn extract_result_content_text_blocks_flatten() {
         CapabilityResultContent::text("line 1"),
         CapabilityResultContent::text("line 2"),
     ]));
-    let content = extract_result_content(&exec);
-    assert!(
-        matches!(content, CapabilityResultMessageContent::Text(ref t) if t == "line 1\nline 2")
-    );
+    let envelope = provider_envelope(&exec);
+    assert_eq!(envelope["summary"], json!("line 1\nline 2"));
 }
 
 #[test]
-fn extract_result_content_mixed_blocks_preserve() {
+fn extract_result_content_mixed_blocks_fail_closed_without_inline_media() {
     let exec = make_exec_result(CapabilityResultBody::Blocks(vec![
         CapabilityResultContent::text("screenshot taken"),
         CapabilityResultContent::image("base64data", "image/png"),
     ]));
-    let content = extract_result_content(&exec);
-    match content {
-        CapabilityResultMessageContent::Blocks(blocks) => {
-            assert_eq!(blocks.len(), 2);
-            assert!(
-                matches!(&blocks[0], CapabilityResultContent::Text { text } if text == "screenshot taken")
-            );
-            assert!(
-                matches!(&blocks[1], CapabilityResultContent::Image { data, mime_type } if data == "base64data" && mime_type == "image/png")
-            );
-        }
-        CapabilityResultMessageContent::Text(_) => panic!("expected Blocks variant"),
-    }
+    let envelope = provider_envelope(&exec);
+    assert_eq!(envelope["ok"], json!(false));
+    assert_eq!(
+        envelope["error"]["code"],
+        json!("PROVIDER_OUTPUT_UNCUSTODIED_MEDIA")
+    );
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("durable media resource refs")
+    );
+    let text = envelope_text(&envelope);
+    assert!(!text.contains("base64data"));
+    assert!(!text.contains("image/png"));
 }
 
 #[test]
 fn extract_model_context_result_text_matches_direct_text() {
     let exec = make_exec_result(CapabilityResultBody::Text("direct output".into()));
-    assert_eq!(extract_model_context_result_text(&exec), "direct output");
+    let envelope: Value = serde_json::from_str(&extract_model_context_result_text(&exec))
+        .expect("canonical provider envelope parses");
+    assert_eq!(envelope["summary"], json!("direct output"));
 }
 
 #[test]
@@ -91,14 +145,16 @@ fn extract_result_content_projects_catalog_ids_for_model_context() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("modelContextEvidence"));
-    assert!(text.contains("logs::recent"));
-    assert!(text.contains("log_recent"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(envelope["operation"], json!("catalog_search"));
+    assert_eq!(fact(&envelope, "primitiveOperation"), "catalog_search");
+    let functions = collection(&envelope, "functions");
+    let function = &functions["items"][0];
+    assert_eq!(item_fact(function, "id"), "logs::recent");
+    assert_eq!(
+        item_fact(function, "modelFacingInvocation.operation"),
+        "log_recent"
+    );
 }
 
 #[test]
@@ -161,51 +217,31 @@ fn extract_result_content_separates_callable_and_effect_excluded_matches() {
         })),
     );
 
-    let content = extract_result_content(&exec);
+    let envelope = provider_envelope(&exec);
+    let callable = &collection(&envelope, "executeOperationMatches")["items"][0];
+    assert_eq!(item_fact(callable, "operation"), "question_inspect");
+    assert_eq!(
+        item_fact(callable, "catalogInspectId"),
+        "execute::question_inspect"
+    );
 
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("modelContextEvidence"));
+    let excluded = &collection(&envelope, "effectClassExcludedOperationMatches")["items"][0];
+    assert_eq!(item_fact(excluded, "operation"), "question_answer");
+    assert_eq!(
+        item_fact(excluded, "invokeArgumentsOmitted"),
+        "excluded_by_active_effect_filter"
+    );
+    assert_eq!(
+        item_fact(excluded, "agentUsage.currentSearchCallable"),
+        &json!(false)
+    );
+    assert_eq!(
+        item_fact(excluded, "agentUsage.invokeArgumentsOmitted"),
+        "excluded_by_active_effect_filter"
+    );
+    let text = envelope_text(&envelope);
     assert!(!text.contains("allDiscoveredInspectTargets"));
-    assert!(text.contains("effectClassExcludedOperationMatches"));
-    assert!(text.contains("execute::question_inspect"));
-    assert!(text.contains("execute::question_answer"));
-    let json_start = text.find("\n\n{").expect("model context evidence JSON") + 2;
-    let evidence: Value =
-        serde_json::from_str(&text[json_start..]).expect("model context evidence parses");
-    let context = &evidence["modelContextEvidence"];
-    assert_eq!(
-        context["executeOperationMatches"][0]["operation"],
-        json!("question_inspect")
-    );
-    let excluded_matches = context["effectClassExcludedOperationMatches"]
-        .as_array()
-        .expect("effect-class excluded operation matches");
-    assert!(
-        excluded_matches
-            .iter()
-            .all(|target| target.get("arguments").is_none()),
-        "effect-excluded projection must not expose direct execute args: {excluded_matches:#?}"
-    );
-    assert!(
-        excluded_matches
-            .iter()
-            .all(|target| target.pointer("/agentUsage/arguments").is_none()),
-        "effect-excluded agent usage must not expose direct execute args: {excluded_matches:#?}"
-    );
-    assert_eq!(
-        excluded_matches[0]["invokeArgumentsOmitted"],
-        json!("excluded_by_active_effect_filter")
-    );
-    assert_eq!(
-        excluded_matches[0]["agentUsage"]["currentSearchCallable"],
-        json!(false)
-    );
-    assert_eq!(
-        excluded_matches[0]["agentUsage"]["invokeArgumentsOmitted"],
-        json!("excluded_by_active_effect_filter")
-    );
+    assert!(!text.contains("agentUsage.arguments"));
 }
 
 #[test]
@@ -281,11 +317,16 @@ fn extract_result_content_projects_catalog_operation_truncation_metadata() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("\"executeOperationMatchesOmitted\": 5"));
-    assert!(text.contains("operation_19"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "executeOperationMatchesOmitted"), 5);
+    let matches = collection(&envelope, "executeOperationMatches");
+    assert_eq!(matches["total"], json!(20));
+    assert_eq!(matches["returned"], json!(12));
+    assert_eq!(
+        item_fact(&matches["items"][11], "operation"),
+        "operation_11"
+    );
+    let text = envelope_text(&envelope);
     assert!(!text.contains("operation_20"));
 }
 
@@ -339,18 +380,31 @@ fn extract_result_content_projects_catalog_execute_operation_matches() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("executeOperationMatches"));
-    assert!(text.contains("trace_list"));
-    assert!(text.contains("execute::trace_list"));
-    assert!(text.contains("schemaInspection"));
-    assert!(text.contains("\"score\": 10"));
-    assert!(text.contains("diagnose_or_verify"));
-    assert!(text.contains("kernel_evolution_only"));
-    assert!(text.contains("readOnlyInspectionSafe"));
-    assert!(text.contains("safe to call during read-only inspection"));
+    let envelope = provider_envelope(&exec);
+    let item = &collection(&envelope, "executeOperationMatches")["items"][0];
+    assert_eq!(item_fact(item, "operation"), "trace_list");
+    assert_eq!(item_fact(item, "catalogInspectId"), "execute::trace_list");
+    assert_eq!(item_fact(item, "score"), 10);
+    assert_eq!(
+        item_fact(item, "agentUsage.defaultUse"),
+        "diagnose_or_verify"
+    );
+    assert_eq!(
+        item_fact(item, "capabilityPool.replacementClass"),
+        "kernel_evolution_only"
+    );
+    assert_eq!(
+        item_fact(item, "agentUsage.effect.readOnlyInspectionSafe"),
+        &json!(true)
+    );
+    assert_eq!(
+        item_fact(item, "agentUsage.effect.readOnlyInstruction"),
+        "safe to call during read-only inspection"
+    );
+    assert_eq!(
+        envelope["nextActions"][0]["operation"],
+        json!("catalog_inspect")
+    );
 }
 
 #[test]
@@ -398,17 +452,22 @@ fn extract_result_content_projects_git_status_evidence_for_agent() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("\"primitiveOperation\": \"git_status\""));
-    assert!(text.contains("\"branch\": \"main\""));
-    assert!(text.contains("\"dirty\": false"));
-    assert!(text.contains("\"stagedCount\": 0"));
-    assert!(text.contains("\"statusPorcelainEmpty\": true"));
-    assert!(text.contains("\"statusTruncated\": false"));
-    assert!(text.contains("\"relativePath\": \".\""));
-    assert!(!text.contains("statusPorcelainV1Z"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(envelope["operation"], json!("git_status"));
+    assert_eq!(fact(&envelope, "primitiveOperation"), "git_status");
+    assert_eq!(fact(&envelope, "git.branch"), "main");
+    assert_eq!(fact(&envelope, "git.dirty"), &json!(false));
+    assert_eq!(fact(&envelope, "git.summary.stagedCount"), 0);
+    assert_eq!(
+        fact(&envelope, "git.evidence.statusPorcelainEmpty"),
+        &json!(true)
+    );
+    assert_eq!(
+        fact(&envelope, "git.evidence.statusTruncated"),
+        &json!(false)
+    );
+    assert_eq!(fact(&envelope, "git.relativePath"), ".");
+    assert!(!envelope_text(&envelope).contains("statusPorcelainV1Z"));
 }
 
 #[test]
@@ -485,19 +544,27 @@ fn extract_result_content_projects_compact_catalog_next_step() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("agentNextStep"));
-    assert!(text.contains("targetOperation"));
-    assert!(text.contains("git_status"));
-    assert!(text.contains("primaryInspection"));
-    assert!(text.contains("capability_binding_cockpit_overview"));
-    assert!(text.contains("unsupportedOperationRecovery"));
+    let envelope = provider_envelope(&exec);
+    let match_item = &collection(&envelope, "executeOperationMatches")["items"][0];
+    assert_eq!(item_fact(match_item, "operation"), "git_status");
+    assert_eq!(item_fact(match_item, "score"), 18);
+    let actions = envelope["nextActions"].as_array().expect("next actions");
+    assert!(actions.iter().any(|action| {
+        action["source"] == "agentNextStep"
+            && action["summary"].as_str().is_some_and(|summary| {
+                summary.contains("capability_binding_cockpit_overview")
+                    && summary.contains("targetOperation")
+                    && summary.contains("git_status")
+            })
+    }));
+    assert!(actions.iter().any(|action| {
+        action["summary"]
+            .as_str()
+            .is_some_and(|summary| summary.contains("no current-scope replacement evidence exists"))
+    }));
+    let text = envelope_text(&envelope);
     assert!(text.contains("Do not call the queried name"));
     assert!(text.contains("Inspect readiness for the exact operation"));
-    assert!(text.contains("no current-scope replacement evidence exists"));
-    assert!(text.contains("\"score\": 18"));
     assert!(!text.contains("agentSearchPlan"));
     assert!(!text.contains("contextualWriteOperations"));
     assert!(!text.contains("must_not_project"));
@@ -589,18 +656,26 @@ fn extract_result_content_projects_catalog_execute_operation_inspect_schema() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("\"kind\": \"execute_operation\""));
-    assert!(text.contains("capability_shadow_trial_evidence_inspect"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "kind"), "execute_operation");
+    assert_eq!(
+        fact(&envelope, "operation"),
+        "capability_shadow_trial_evidence_inspect"
+    );
+    assert_eq!(fact(&envelope, "providerCallable"), &json!(true));
+    assert_eq!(
+        fact(&envelope, "capabilityPool.replacementClass"),
+        "kernel_evolution_only"
+    );
+    assert_eq!(
+        fact(&envelope, "schema.payloadPlacement"),
+        "Put operation-specific fields at the top level of the capability::execute payload."
+    );
+    let text = envelope_text(&envelope);
     assert!(text.contains("capabilityShadowTrialEvidenceResourceId"));
-    assert!(text.contains("payloadPlacement"));
-    assert!(text.contains("\"inputSchema\""));
-    assert!(text.contains("\"outputSchema\""));
-    assert!(text.contains("\"schemaCompleteness\": \"operation_specific_contract\""));
-    assert!(text.contains("\"providerCallable\": true"));
-    assert!(text.contains("kernel_evolution_only"));
+    assert!(text.contains("inputSchema"));
+    assert!(text.contains("outputSchema"));
+    assert!(text.contains("operation_specific_contract"));
     assert!(text.contains("capability_binding.read"));
 }
 
@@ -916,42 +991,93 @@ fn extract_result_content_projects_capability_cockpit_overview_digest() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("Capability ownership visible"));
-    assert!(text.contains("\"missingCapabilityPool\": 0"));
-    assert!(text.contains("\"missingAgentUsage\": 0"));
-    assert!(text.contains("git_status"));
-    assert!(text.contains("trace_list"));
-    assert!(text.contains("capability_binding_cockpit_overview"));
-    assert!(text.contains("capability_binding_request_list"));
-    assert!(text.contains("capability_shadow_trial_request_record"));
-    assert!(text.contains("runtime_routable"));
-    assert!(text.contains("kernel_evolution_only"));
-    assert!(text.contains("operationDirectory"));
-    assert!(text.contains("broad directory is compact"));
-    assert!(text.contains("detailNextStep"));
-    assert!(text.contains("targetOperation"));
-    assert!(text.contains("readOnlyInspectionSafe"));
-    assert!(text.contains("safe to call during read-only inspection"));
-    assert!(text.contains("do not call during read-only inspection"));
-    assert!(!text.contains("requiredPayloadFields"));
-    assert!(!text.contains("capability_binding.read"));
-    assert!(!text.contains("kind:capability_binding_request"));
-    assert!(!text.contains("kind:capability_shadow_trial_request"));
-    assert!(!text.contains("\"agentPath\""));
-    assert!(!text.contains("\"primaryInspection\""));
-    assert!(!text.contains("capability_replacement_candidate_list"));
-    assert!(!text.contains("capability_shadow_trial_request_list"));
-    assert!(!text.contains("No binding requests have been recorded"));
-    assert!(!text.contains("No runtime route is active"));
-    assert!(!text.contains("No active replacement rollback is available yet"));
-    assert!(!text.contains("Do not call git_status merely to inspect replacement readiness"));
-    assert!(!text.contains("no current-scope replacement evidence exists"));
-    assert!(!text.contains("authorityGrantId"));
-    assert!(!text.contains("grant_must_not_project"));
-    assert!(!text.contains("nested_grant_must_not_project"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "summary.title"),
+        "Capability ownership visible"
+    );
+    assert_eq!(fact(&envelope, "coverage.missingCapabilityPool"), 0);
+    assert_eq!(fact(&envelope, "coverage.missingAgentUsage"), 0);
+    assert_eq!(fact(&envelope, "operationDirectory.total"), 5);
+    assert_eq!(
+        fact(&envelope, "operationDirectory.detailPolicy"),
+        "broad directory is compact; call capability_binding_cockpit_overview with targetOperation for one exact operation when detailed readiness, preflight, binding, shadow, route, rollback, or agentPath data is needed"
+    );
+    let operations = collection(&envelope, "operationDirectory.operations");
+    assert_eq!(operations["returned"], json!(5));
+    let names = operations["items"]
+        .as_array()
+        .expect("operation items")
+        .iter()
+        .map(|item| item_fact(item, "name").as_str().expect("operation name"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "git_status",
+            "trace_list",
+            "capability_binding_cockpit_overview",
+            "capability_binding_request_list",
+            "capability_shadow_trial_request_record"
+        ]
+    );
+    assert_eq!(
+        item_fact(&operations["items"][0], "capabilityPool.replacementClass"),
+        "runtime_routable"
+    );
+    assert_eq!(
+        item_fact(&operations["items"][1], "capabilityPool.replacementClass"),
+        "kernel_evolution_only"
+    );
+    assert_eq!(
+        item_fact(&operations["items"][0], "detailNextStep.operation"),
+        "capability_binding_cockpit_overview"
+    );
+    assert_eq!(
+        item_fact(
+            &operations["items"][0],
+            "agentUsage.effect.readOnlyInspectionSafe"
+        ),
+        &json!(true)
+    );
+    assert_eq!(
+        item_fact(
+            &operations["items"][4],
+            "agentUsage.effect.readOnlyInstruction"
+        ),
+        "do not call during read-only inspection; inspect schema/catalog/list operations instead"
+    );
+    for operation in operations["items"].as_array().expect("operation items") {
+        assert!(
+            operation["facts"]
+                .as_array()
+                .expect("operation facts")
+                .iter()
+                .all(|fact| !fact["field"]
+                    .as_str()
+                    .expect("fact field")
+                    .starts_with("agentPath")),
+            "broad cockpit must omit detailed agentPath fields: {operation:#}"
+        );
+    }
+    let text = envelope_text(&envelope);
+    for excluded in [
+        "requiredPayloadFields",
+        "capability_binding.read",
+        "kind:capability_binding_request",
+        "kind:capability_shadow_trial_request",
+        "primaryInspection",
+        "capability_replacement_candidate_list",
+        "capability_shadow_trial_request_list",
+        "authorityGrantId",
+        "grant_must_not_project",
+        "nested_grant_must_not_project",
+    ] {
+        assert!(
+            !text.contains(excluded),
+            "broad cockpit leaked `{excluded}`"
+        );
+    }
 }
 
 #[test]
@@ -1044,21 +1170,38 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("\"agentPath\""));
-    assert!(text.contains("\"completion\""));
-    assert!(text.contains("capabilityRequestedMutation=false; engineAuditPersistence=true"));
-    assert!(text.contains("capability_replacement_candidate_record"));
-    assert!(text.contains("capability_shadow_trial_evidence:test"));
-    assert!(text.contains("capability_shadow_trial_evidence_inspect"));
-    assert!(text.contains("\"operationsReturned\": 1"));
-    assert!(text.contains("\"returned\": 1"));
-    assert!(text.contains("\"requiredPayloadFields\""));
-    assert!(text.contains("git.read"));
-    assert!(!text.contains("\"primaryInspection\""));
-    assert!(!text.contains("\"readOnlySequence\""));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "coverage.operationsReturned"), 1);
+    assert_eq!(fact(&envelope, "operationDirectory.returned"), 1);
+    let target = &collection(&envelope, "operationDirectory.operations")["items"][0];
+    assert_eq!(item_fact(target, "name"), "git_status");
+    assert_eq!(
+        item_fact(target, "agentPath.completion.state"),
+        "answer_now_no_current_scope_evidence"
+    );
+    assert_eq!(
+        item_fact(
+            target,
+            "agentPath.completion.readOnlyBoundary.requiredFinalAnswerSuffix"
+        ),
+        "capabilityRequestedMutation=false; engineAuditPersistence=true"
+    );
+    assert_eq!(
+        item_fact(target, "agentPath.completion.governedNextSteps"),
+        "1 item(s)"
+    );
+    assert_eq!(
+        item_fact(target, "agentUsage.preflight.requiredPayloadFields"),
+        "1 item(s)"
+    );
+    assert_eq!(
+        item_fact(target, "agentUsage.preflight.authorityScopes"),
+        "1 item(s)"
+    );
+    assert_eq!(item_fact(target, "shadowTrial.evidenceRefs"), "1 item(s)");
+    let text = envelope_text(&envelope);
+    assert!(!text.contains("primaryInspection"));
+    assert!(!text.contains("readOnlySequence"));
     assert!(!text.contains("must_not_project"));
     assert!(!text.contains("must_not_project_shadow_detail"));
     assert!(
@@ -1110,18 +1253,39 @@ fn extract_result_content_projects_context_action_list_inspect_arguments() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("modelContextEvidence"));
-    assert!(text.contains("\"inspectOperation\": \"context_control_action_inspect\""));
-    assert!(text.contains("\"argumentField\": \"contextControlActionResourceId\""));
-    assert!(text.contains("\"contextControlActionResourceId\": \"context_control_action:abc\""));
-    assert!(text.contains("\"operation\": \"context_control_action_inspect\""));
-    assert!(text.contains("\"resourceId\": \"context_control_action:abc\""));
-    assert!(text.contains("\"versionId\": \"ver_context_action_abc\""));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "agentNextStep.inspectOperation"),
+        "context_control_action_inspect"
+    );
+    assert_eq!(
+        fact(&envelope, "agentNextStep.argumentField"),
+        "contextControlActionResourceId"
+    );
+    let action = &collection(&envelope, "actions.items")["items"][0];
+    assert_eq!(
+        item_fact(action, "contextControlActionResourceId"),
+        "context_control_action:abc"
+    );
+    assert_eq!(
+        item_fact(action, "inspectArguments.operation"),
+        "context_control_action_inspect"
+    );
+    assert_eq!(
+        item_fact(action, "inspectArguments.contextControlActionResourceId"),
+        "context_control_action:abc"
+    );
+    assert_eq!(
+        item_fact(action, "resource.resourceId"),
+        "context_control_action:abc"
+    );
+    assert_eq!(
+        item_fact(action, "resource.versionId"),
+        "ver_context_action_abc"
+    );
+    let text = envelope_text(&envelope);
     assert!(!text.contains("compact-model-capability-invocation:v1:abc"));
-    assert!(!text.contains("\"actionId\""));
+    assert!(!text.contains("actionId"));
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("grant_top_level_must_not_project"));
     assert!(!text.contains("authorityGrantId"));
@@ -1155,13 +1319,20 @@ fn extract_result_content_projects_metadata_ids_without_raw_payload() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("modelContextEvidence"));
-    assert!(text.contains("procedural_record:abc123"));
-    assert!(text.contains("ver_abc123"));
-    assert!(text.contains("Bounded metadata summary"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "procedural.proceduralRecordResourceId"),
+        "procedural_record:abc123"
+    );
+    assert_eq!(
+        fact(&envelope, "procedural.proceduralRecordVersionId"),
+        "ver_abc123"
+    );
+    assert_eq!(
+        fact(&envelope, "procedural.summary"),
+        "Bounded metadata summary"
+    );
+    let text = envelope_text(&envelope);
     assert!(!text.contains("must not be projected"));
     assert!(!text.contains("nested raw object"));
     assert!(!text.contains("grant_secret"));
@@ -1189,19 +1360,29 @@ fn extract_result_content_projects_goal_question_next_call_arguments() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(goal_text) = extract_result_content(&goal_exec) else {
-        panic!("expected text result");
-    };
-    assert!(goal_text.contains("modelContextEvidence"));
-    assert!(goal_text.contains("\"agentInspectableGoals\""));
-    assert!(goal_text.contains("\"inspectArguments\""));
-    assert!(goal_text.contains("\"operation\": \"goal_inspect\""));
-    assert!(goal_text.contains("\"goalResourceId\": \"goal:abc123\""));
-    assert!(goal_text.contains("\"cancelArgumentsBase\""));
-    assert!(goal_text.contains("\"operation\": \"goal_cancel\""));
-    assert!(goal_text.contains("\"cancelRequiredAdditionalFields\""));
-    assert!(goal_text.contains("\"reason\""));
-    assert!(goal_text.contains("\"idempotencyKey\""));
+    let goal_envelope = provider_envelope(&goal_exec);
+    let goal = &collection(&goal_envelope, "agentInspectableGoals.items")["items"][0];
+    assert_eq!(
+        item_fact(goal, "inspectArguments.operation"),
+        "goal_inspect"
+    );
+    assert_eq!(
+        item_fact(goal, "inspectArguments.goalResourceId"),
+        "goal:abc123"
+    );
+    assert_eq!(
+        item_fact(goal, "cancelArgumentsBase.operation"),
+        "goal_cancel"
+    );
+    assert_eq!(
+        item_fact(goal, "cancelArgumentsBase.goalResourceId"),
+        "goal:abc123"
+    );
+    assert_eq!(
+        item_fact(goal, "cancelRequiredAdditionalFields"),
+        "2 item(s)"
+    );
+    let goal_text = envelope_text(&goal_envelope);
     assert!(!goal_text.contains("grant_must_not_project"));
     assert!(!goal_text.contains("grant_top_level_must_not_project"));
     assert!(!goal_text.contains("authorityGrantId"));
@@ -1224,21 +1405,29 @@ fn extract_result_content_projects_goal_question_next_call_arguments() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(question_text) =
-        extract_result_content(&question_exec)
-    else {
-        panic!("expected text result");
-    };
-    assert!(question_text.contains("\"agentInspectableQuestions\""));
-    assert!(question_text.contains("\"operation\": \"question_inspect\""));
-    assert!(question_text.contains("\"questionResourceId\": \"user_question:def456\""));
-    assert!(question_text.contains("\"answerArgumentsBase\""));
-    assert!(question_text.contains("\"operation\": \"question_answer\""));
-    assert!(question_text.contains("\"expectedQuestionVersionId\": \"ver_question_def456\""));
-    assert!(question_text.contains("\"answerRequiredAdditionalFields\""));
-    assert!(question_text.contains("\"answerText\""));
-    assert!(question_text.contains("\"reason\""));
-    assert!(question_text.contains("\"idempotencyKey\""));
+    let question_envelope = provider_envelope(&question_exec);
+    let question = &collection(&question_envelope, "agentInspectableQuestions.items")["items"][0];
+    assert_eq!(
+        item_fact(question, "inspectArguments.operation"),
+        "question_inspect"
+    );
+    assert_eq!(
+        item_fact(question, "inspectArguments.questionResourceId"),
+        "user_question:def456"
+    );
+    assert_eq!(
+        item_fact(question, "answerArgumentsBase.operation"),
+        "question_answer"
+    );
+    assert_eq!(
+        item_fact(question, "answerArgumentsBase.expectedQuestionVersionId"),
+        "ver_question_def456"
+    );
+    assert_eq!(
+        item_fact(question, "answerRequiredAdditionalFields"),
+        "3 item(s)"
+    );
+    let question_text = envelope_text(&question_envelope);
     assert!(!question_text.contains("raw prompt body"));
     assert!(!question_text.contains("\"prompt\""));
 }
@@ -1341,18 +1530,22 @@ fn extract_result_content_projects_capability_binding_records_for_agent_context(
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("modelContextEvidence"));
-    assert!(text.contains("capability_binding_request_list"));
-    assert!(text.contains("bindingRequests"));
-    assert!(text.contains("capability_binding_request:first"));
-    assert!(text.contains("ver_binding_request_first"));
-    assert!(text.contains("git_status"));
-    assert!(text.contains("adapter_replaceable"));
-    assert!(text.contains("runtime_routable"));
-    assert!(text.contains("shadow"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "operation"),
+        "capability_binding_request_list"
+    );
+    let request = &collection(&envelope, "capabilityBinding.bindingRequests.items")["items"][0];
+    assert_eq!(
+        item_fact(request, "resourceId"),
+        "capability_binding_request:first"
+    );
+    assert_eq!(item_fact(request, "versionId"), "ver_binding_request_first");
+    assert_eq!(item_fact(request, "targetOperation"), "git_status");
+    assert_eq!(item_fact(request, "ownershipClass"), "adapter_replaceable");
+    assert_eq!(item_fact(request, "replacementClass"), "runtime_routable");
+    assert_eq!(item_fact(request, "bindingMode"), "shadow");
+    let text = envelope_text(&envelope);
     assert!(!text.contains("authorityGrantId"));
     assert!(!text.contains("grant_must_not_project"));
 }
@@ -1396,6 +1589,12 @@ fn extract_result_content_projects_trace_metadata_ids() {
         Some(json!({
             "primitiveOperation": "trace_list",
             "status": "ok",
+            "projectionBoundary": {
+                "providerVisibleProjection": true
+            },
+            "statusSummary": {
+                "totalRecords": 1
+            },
             "records": [{
                 "id": "019f-trace-record",
                 "timestamp": "2026-06-30T07:30:00Z",
@@ -1423,16 +1622,24 @@ fn extract_result_content_projects_trace_metadata_ids() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("019f-trace-record"));
-    assert!(text.contains("trace_nested"));
-    assert!(text.contains("inv_nested"));
-    assert!(text.contains("procedural_definition_record"));
-    assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
-    assert!(text.contains("$.field"));
-    assert!(text.contains("[redacted-path]"));
+    let envelope = provider_envelope(&exec);
+    let record = &collection(&envelope, "records")["items"][0];
+    assert_eq!(item_fact(record, "id"), "019f-trace-record");
+    assert_eq!(item_fact(record, "traceId"), "trace_nested");
+    assert_eq!(item_fact(record, "invocationId"), "inv_nested");
+    assert_eq!(
+        item_fact(record, "operation"),
+        "procedural_definition_record"
+    );
+    assert_eq!(item_fact(record, "error.code"), "ENGINE_SCHEMA_VIOLATION");
+    assert_eq!(item_fact(record, "error.details.path"), "$.field");
+    assert!(
+        item_fact(record, "error.message")
+            .as_str()
+            .expect("redacted error message")
+            .contains("[redacted-path]")
+    );
+    let text = envelope_text(&envelope);
     assert!(!text.contains("grant_must_not_project"));
     assert!(!text.contains("authorityGrantId"));
     assert!(!text.contains("provider_nested"));
@@ -1457,6 +1664,7 @@ fn extract_result_content_projects_trace_projection_proof_for_agent() {
                 "traceGetUse": "Use trace_get only for one focused trace record."
             },
             "statusSummary": {
+                "totalRecords": 1,
                 "okCount": 1,
                 "failedCount": 0,
                 "inProgressCount": 0
@@ -1515,19 +1723,33 @@ fn extract_result_content_projects_trace_projection_proof_for_agent() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("rawProviderInvocationIdsExcluded"));
-    assert!(text.contains("rawAuditFieldsProjected"));
-    assert!(text.contains("rawStoredInProjection"));
-    assert!(text.contains("rawAuthorityGrantIdStored"));
-    assert!(text.contains("statusSummary"));
-    assert!(text.contains("failedCount"));
-    assert!(text.contains("traceGetUse"));
-    assert!(text.contains("request_hash_safe"));
-    assert!(text.contains("result_hash_safe"));
-    assert!(text.contains("scopeCount"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "projectionBoundary.rawAuditFieldsProjected"),
+        &json!(false)
+    );
+    assert_eq!(fact(&envelope, "statusSummary.failedCount"), 0);
+    assert_eq!(
+        fact(&envelope, "projectionBoundary.traceGetUse"),
+        "Use trace_get only for one focused trace record."
+    );
+    let record = &collection(&envelope, "records")["items"][0];
+    assert_eq!(
+        item_fact(record, "redaction.rawProviderInvocationIdsExcluded"),
+        &json!(true)
+    );
+    assert_eq!(
+        item_fact(record, "request.rawStoredInProjection"),
+        &json!(false)
+    );
+    assert_eq!(item_fact(record, "request.hash"), "request_hash_safe");
+    assert_eq!(item_fact(record, "result.hash"), "result_hash_safe");
+    assert_eq!(
+        item_fact(record, "authority.rawAuthorityGrantIdStored"),
+        &json!(false)
+    );
+    assert_eq!(item_fact(record, "authority.scopeCount"), 2);
+    let text = envelope_text(&envelope);
     assert!(!text.contains("provider_must_not_project"));
     assert!(!text.contains("providerInvocationId"));
     assert!(!text.contains("grant_must_not_project"));
@@ -1554,14 +1776,14 @@ fn extract_result_content_projects_recent_logs_for_model_context() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
-    assert!(text.contains("modelContextEvidence"));
-    assert!(text.contains("capability.invocation.arguments_delta"));
-    assert!(text.contains("sess_1"));
+    let envelope = provider_envelope(&exec);
+    let entry = &collection(&envelope, "entries")["items"][0];
+    assert_eq!(
+        item_fact(entry, "message"),
+        "Unknown event type: capability.invocation.arguments_delta"
+    );
+    assert_eq!(item_fact(entry, "sessionId"), "sess_1");
+    assert_eq!(item_fact(entry, "traceId"), "trace_1");
 }
 
 #[test]
@@ -1605,13 +1827,19 @@ fn extract_result_content_does_not_project_unlisted_raw_details() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
-    assert_eq!(text, "Command completed.");
-    assert!(!text.contains("raw diagnostic payload"));
+    let envelope = provider_envelope(&exec);
+    assert_eq!(envelope["ok"], json!(false));
+    assert_eq!(
+        envelope["error"]["code"],
+        json!("PROVIDER_OUTPUT_CONTRACT_FAILED")
+    );
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .expect("contract failure message")
+            .contains("missing required semantic fact `primitiveOperation`")
+    );
+    assert!(!envelope_text(&envelope).contains("raw diagnostic payload"));
 }
 
 #[test]

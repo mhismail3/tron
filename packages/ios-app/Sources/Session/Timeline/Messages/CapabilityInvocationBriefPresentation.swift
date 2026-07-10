@@ -227,7 +227,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
             rows.append(CapabilityDisplayRow(label: "Code", value: safeTopLevelText(code, limit: 96)))
         }
         return Issue(
-            title: issueTitle(error: error, message: rawMessage, fallback: title),
+            title: issueTitle(error: error, message: rawMessage, defaultTitle: title),
             message: message,
             nextStep: nextStep(error: error, message: rawMessage),
             rows: rows
@@ -237,7 +237,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
     private static func issueTitle(
         error: CapabilityErrorClassification?,
         message: String,
-        fallback: String
+        defaultTitle: String
     ) -> String {
         let lowered = [error?.code, error?.category, message].compactMap { $0 }.joined(separator: " ").lowercased()
         if lowered.contains("policy") || lowered.contains("authority") || lowered.contains("grant") {
@@ -246,7 +246,7 @@ struct CapabilityInvocationBriefPresentation: Equatable {
         if lowered.contains("schema") || lowered.contains("invalid") {
             return "Request shape needs correction"
         }
-        return "\(fallback) failed"
+        return "\(defaultTitle) failed"
     }
 
     private static func nextStep(error: CapabilityErrorClassification?, message: String) -> String? {

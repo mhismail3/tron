@@ -1,8 +1,7 @@
 //! Filesystem primitive execute operations.
 //!
-//! Legacy `file_read`/`file_write` operation names are intentionally absent
-//! from this module. Model-visible file access must go through the hardened
-//! `filesystem_*` package wrappers below.
+//! Model-visible file access goes through the scoped `filesystem_*` package
+//! wrappers below.
 
 use std::path::PathBuf;
 

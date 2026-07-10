@@ -82,6 +82,7 @@ pub(super) struct ProviderTruncation {
     pub(super) omitted_resources: usize,
     pub(super) omitted_collections: usize,
     pub(super) omitted_items: usize,
+    pub(super) omitted_actions: usize,
     pub(super) serialized_bytes: usize,
     pub(super) max_bytes: usize,
 }

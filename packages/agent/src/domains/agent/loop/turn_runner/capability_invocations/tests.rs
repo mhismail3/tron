@@ -14,6 +14,7 @@ use crate::engine::{
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::events::{AssistantMessage, TronEvent};
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
@@ -62,6 +63,31 @@ fn primitive_identity_exposes_valid_execute_operation() {
 
     assert_eq!(identity["operationName"], "log_recent");
     assert!(identity.get("requestedOperationName").is_none());
+}
+
+#[test]
+fn provider_operation_identity_preserves_unsupported_request() {
+    let mut args = Map::new();
+    args.insert(
+        "operation".to_owned(),
+        json!("capability_shadow_trial_request_list"),
+    );
+
+    assert_eq!(
+        provider_operation_name_from_map(&args),
+        "capability_shadow_trial_request_list"
+    );
+}
+
+#[test]
+fn provider_operation_identity_normalizes_malformed_requests() {
+    for args in [
+        Map::new(),
+        Map::from_iter([("operation".to_owned(), json!(42))]),
+        Map::from_iter([("operation".to_owned(), json!("   "))]),
+    ] {
+        assert_eq!(provider_operation_name_from_map(&args), "unknown");
+    }
 }
 
 #[test]
@@ -260,6 +286,141 @@ fn persisted_rows(store: &EventStore, sid: &str, event_type: &str) -> Vec<EventR
         .into_iter()
         .filter(|event| event.event_type == event_type)
         .collect()
+}
+
+async fn assert_provider_result_identity_survives_reconstruction(
+    arguments: Map<String, Value>,
+    expected_operation: &str,
+) {
+    let h = phase_persistence_harness().await;
+    let (engine_host, surface) = phase_engine_surface().await;
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = crate::shared::foundation::paths::normalize_working_directory(
+        tempdir.path().to_str().expect("utf8 tempdir"),
+    )
+    .expect("normalized working directory")
+    .display()
+    .to_string();
+    let mut context_manager = context_manager_for_workdir(&working_directory);
+    let cancel = CancellationToken::new();
+    let invocation_id = format!("call-{expected_operation}");
+    let stream_result = stream_result_with_invocations(vec![CapabilityInvocationDraft::new(
+        invocation_id.clone(),
+        "execute",
+        arguments.clone(),
+    )]);
+
+    h.persister
+        .append_with_runtime_sequence(
+            &h.session_id,
+            EventType::MessageAssistant,
+            json!({
+                "content": [{
+                    "type": "capability_invocation",
+                    "id": invocation_id,
+                    "name": "execute",
+                    "arguments": arguments,
+                }],
+                "turn": 1,
+            }),
+            Some(&h.counter),
+        )
+        .await
+        .expect("persist assistant invocation");
+
+    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+        turn: 1,
+        stream_result: &stream_result,
+        context_manager: &mut context_manager,
+        primitive_surface: &surface,
+        session_id: &h.session_id,
+        emitter: &h.emitter,
+        cancel: &cancel,
+        workspace_id: None,
+        persister: Some(&h.persister),
+        sequence_counter: Some(&h.counter),
+        invocation_abort_registry: None,
+        engine_host: Some(&engine_host),
+        run_id: Some("run-operation-identity"),
+        provider_type: "openai",
+        trace_id: None,
+        parent_invocation_id: None,
+    })
+    .await;
+    assert_eq!(outcome.capability_invocations_executed, 1);
+
+    let live_content = context_manager
+        .messages_slice()
+        .iter()
+        .find_map(|message| match message {
+            Message::CapabilityResult {
+                invocation_id: id,
+                content: CapabilityResultMessageContent::Text(content),
+                ..
+            } if id == &invocation_id => Some(content.clone()),
+            _ => None,
+        })
+        .expect("live provider result");
+    assert_eq!(
+        serde_json::from_str::<Value>(&live_content).expect("provider envelope")["operation"],
+        expected_operation
+    );
+
+    h.persister.flush().await.expect("flush persisted events");
+    let completed = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
+    assert_eq!(completed.len(), 1);
+    let completed_payload: Value =
+        serde_json::from_str(&completed[0].payload).expect("completed event payload");
+    let persisted_content = completed_payload["modelContextContent"]
+        .as_str()
+        .expect("persisted model context content");
+    assert_eq!(persisted_content.as_bytes(), live_content.as_bytes());
+
+    let reconstructed =
+        crate::domains::agent::r#loop::orchestrator::session_reconstructor::reconstruct(
+            &h.store,
+            &h.session_id,
+        )
+        .expect("reconstruct session");
+    let reconstructed_content = reconstructed
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::CapabilityResult {
+                invocation_id: id,
+                content: CapabilityResultMessageContent::Text(content),
+                ..
+            } if id == &invocation_id => Some(content),
+            _ => None,
+        })
+        .expect("reconstructed provider result");
+    assert_eq!(reconstructed_content.as_bytes(), live_content.as_bytes());
+}
+
+#[tokio::test]
+async fn unsupported_operation_provider_result_is_stable_after_reconstruction() {
+    let mut arguments = Map::new();
+    arguments.insert(
+        "operation".to_owned(),
+        json!("capability_shadow_trial_request_list"),
+    );
+
+    assert_provider_result_identity_survives_reconstruction(
+        arguments,
+        "capability_shadow_trial_request_list",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn malformed_operation_provider_results_are_stable_after_reconstruction() {
+    for arguments in [
+        Map::new(),
+        Map::from_iter([("operation".to_owned(), json!(42))]),
+        Map::from_iter([("operation".to_owned(), json!("   "))]),
+    ] {
+        assert_provider_result_identity_survives_reconstruction(arguments, "unknown").await;
+    }
 }
 
 #[tokio::test]

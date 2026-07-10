@@ -1223,15 +1223,18 @@ multiple result fields.
 
 Every supported operation uses the same closed
 `tron.provider_operation_output.v1` model envelope. The capability domain owns
-the operation-specific profile, redacted evidence projection, common failure
-branch, and structural 15 KB byte budget; the turn runner and provider adapters
-do not reconstruct domain output. Raw `CapabilityResult` details remain
-internal audit/UI state, while model context receives only bounded facts,
-resource refs, collections, next actions, explicit truncation proof, and a
-typed recoverable error when applicable. Oversized evidence is removed as
-whole JSON elements rather than slicing serialized bytes, so provider context
-always receives valid JSON. Unsupported operation guesses use the same safe
-failure envelope and retain catalog-based recovery guidance.
+the operation-specific profile and semantic evidence contract, sanitized
+summary policy, redacted evidence projection, common failure branch, and
+structural 15 KB byte budget; the turn runner and provider adapters transport
+the canonical text without reconstructing domain output. Raw
+`CapabilityResult` details remain internal audit/UI state, while model context
+receives only bounded facts, resource refs, collections, next actions, explicit
+truncation proof, and a typed recoverable error when applicable. Oversized
+evidence is removed as whole JSON elements rather than slicing serialized
+bytes, and omission counters describe the final retained structure exactly.
+Inline capability-result images fail closed because provider media must enter
+through durable resource custody. Unsupported operation guesses use the same
+safe failure envelope and retain catalog-based recovery guidance.
 
 Catalog search extracts complete operation-like tokens from natural-language
 queries. Unsupported names are reported explicitly and do not produce unrelated
@@ -1584,18 +1587,20 @@ Current primitive operations:
 | `memory_decision_inspect` | Accepted Slice 24D operation that inspects one current-session `memory_decision` evidence resource/version without exposing raw prompts, provider payloads, body refs, secrets, unsafe paths, raw authority/grant ids, or raw idempotency keys. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, report evidence, model-facing `capability::execute` operation aliases, and deterministic execute-operation matches without invoking catalog targets; non-callable metadata targets are marked as such, exact or prefix searches for supported execute operation names return direct `capability::execute` arguments plus a preferred `catalog_inspect` step for `execute::<operation>` so the agent inspects the provider-visible schema before backing engine-substrate functions, preferred next-step guidance includes immediate invoke arguments only for read-only non-mutating matches and emits blocked-invoke guidance for write-like matches, `namespacePrefix` also matches capability-pool family/owner metadata so related operations can be found even when names do not share the literal prefix, readiness and trace/evidence searches retain deterministic full `agentSearchPlan` records in durable audit details while the provider projection receives only exact matches and one compact `agentNextStep`, avoiding duplicated plans and contextual write schemas, broad module-governance readiness/list/inspect searches preserve the exact read-only module registry/lifecycle/runtime/dependency, binding, candidate, route, and route-event plan with default payloads marked complete, empty lists documented as valid evidence, and activation/rollback/write surfaces excluded, `effectClass` accepts canonical values plus safe read-only aliases (`read`, `read_only`, `inspect`) for `pure_read`, supported operations excluded by the requested read-only effect class are returned separately with bounded metadata and a clear non-invocation reason, `allDiscoveredInspectTargets` gives durable audit data one merged list of exact `catalog_inspect` arguments for both immediate read-only matches and effect-class-excluded supported operations, the model-facing summary states whether the execute-operation search was complete or truncated, unsupported operation-like names stay recovery-guidance results instead of fuzzy near matches, and generic schema searches such as `capability::execute` stay catalog-schema lookups rather than expanding to every operation. |
-| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, required top-level payload fields, and current-invocation guidance that keeps normal read-only/session calls separate from explicit replacement, shadow, route, disable, and rollback workflows. Every supported execute operation reports one closed `exact_structural_contract` consumed by both catalog inspection and pre-authority runtime validation; domain services retain semantic, lifecycle, stale-version, and runtime-resource checks rather than maintaining a second provider-visible field contract. |
+| `catalog_inspect` | Inspect one visible function, worker, trigger type, trigger definition, or supported execute operation with schema/conformance hints and no target execution; model-facing aliases such as `execute::git_status` or any supported execute operation name return an operation-specific inspect projection with exact `capability::execute` arguments, normalized `inputSchema`/`outputSchema`, read-only/effect guidance, preflight metadata, required top-level payload fields, and current-invocation guidance that keeps normal read-only/session calls separate from explicit replacement, shadow, route, disable, and rollback workflows. Every supported execute operation reports one closed `exact_structural_contract` plus one canonical provider-output profile and semantic evidence contract consumed by catalog inspection and runtime validation; domain services retain lifecycle, stale-version, resource-linkage, and runtime checks that cannot be expressed statically. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks; this is verification-report evidence, not passive read-only inspection. |
 
 File access goes through the hardened `filesystem_*` operation package.
 
 The execute-operation contract boundary is fail closed. All 188 supported
 operations have one canonical closed input schema and provider-safe output
-schema under `operations::operation_contract`, together with canonical
+contract under `operations::operation_contract`, including the normalized
+envelope profile, required semantic success facts, expected resource/collection
+evidence, summary policy, and safety exclusions, together with canonical
 ownership/replacement, effect, context/idempotency, and base-authority policy.
 Catalog inspection, pre-authority validation, capability-pool projection, and
 grant derivation consume those contracts; permissive cross-operation payloads
-and catalog/grant fallback tables are not retained. Domain services remain the
+and duplicate catalog/grant policy tables are not retained. Domain services remain the
 owners of semantic, lifecycle, stale-version, resource-linkage, and runtime
 validation that cannot be expressed as a static provider contract.
 

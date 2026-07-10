@@ -17,8 +17,7 @@
 //! rule: they can inspect trusted engine projections without inheriting
 //! scratch-state read/write delegation. Scratch-state authority is explicit and
 //! isolated to the `state_get`, `state_set`, and `state_list` execute
-//! operations; non-state operations do not receive state capabilities as a
-//! fallback.
+//! operations; non-state operations never receive implicit state capabilities.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the

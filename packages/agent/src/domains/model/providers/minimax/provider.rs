@@ -344,6 +344,7 @@ impl Provider for MiniMaxProvider {
 mod tests {
     use super::*;
     use crate::domains::model::providers::anthropic::types::AnthropicMessageParam;
+    use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
     use serde_json::json;
 
     fn test_config() -> MiniMaxConfig {
@@ -362,6 +363,26 @@ mod tests {
             system_prompt: Some(prompt.into()),
             ..Context::default()
         }
+    }
+
+    #[test]
+    fn capability_result_text_is_transport_exact_through_shared_converter() {
+        let output_envelope = format!(
+            "{{\"schemaVersion\":\"tron.provider_operation_output.v1\",\"summary\":\"{}\"}}",
+            "safe-evidence-".repeat(1_400)
+        );
+        let messages = vec![Message::CapabilityResult {
+            invocation_id: "toolu_01minimax".into(),
+            content: CapabilityResultMessageContent::Text(output_envelope.clone()),
+            is_error: None,
+        }];
+
+        let converted = convert_messages(&messages);
+
+        assert_eq!(
+            converted[0].content[0]["content"][0]["text"].as_str(),
+            Some(output_envelope.as_str())
+        );
     }
 
     // ── Provider metadata ───────────────────────────────────────────────

@@ -391,6 +391,7 @@ fn provider_capability_result_transport_does_not_rewrite_canonical_output() {
         "packages/agent/src/domains/model/providers/anthropic/message_converter/mod.rs",
         "packages/agent/src/domains/model/providers/kimi/message_converter.rs",
         "packages/agent/src/domains/model/providers/ollama/message_converter/mod.rs",
+        "packages/agent/src/domains/model/providers/minimax/provider.rs",
     ] {
         let source = read_repo_file(path);
         for forbidden in [
@@ -426,6 +427,10 @@ fn provider_capability_result_transport_does_not_rewrite_canonical_output() {
         (
             "packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs",
             "capability_result_text_is_transport_exact",
+        ),
+        (
+            "packages/agent/src/domains/model/providers/minimax/provider.rs",
+            "capability_result_text_is_transport_exact_through_shared_converter",
         ),
     ] {
         assert!(

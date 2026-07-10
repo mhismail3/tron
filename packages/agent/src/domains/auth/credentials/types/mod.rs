@@ -101,11 +101,9 @@ pub struct ProviderAuth {
 
 /// Google-specific provider auth with Cloud Code Assist metadata.
 ///
-/// Serializes and deserializes through `GoogleProviderAuthWire`, which
-/// carries `#[serde(deny_unknown_fields)]`. A retired `endpoint` field
-/// (left over from the pre-CCA "antigravity" era) fails to load with an
-/// error naming the unknown field — users must re-authenticate via
-/// `tron auth google`.
+/// Serializes and deserializes through `GoogleProviderAuthWire`, which carries
+/// `#[serde(deny_unknown_fields)]`. Unknown fields fail with a named schema
+/// error, requiring users to re-authenticate via `tron auth google`.
 #[derive(Clone, Debug, Default)]
 pub struct GoogleProviderAuth {
     /// Base provider auth fields.

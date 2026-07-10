@@ -407,7 +407,11 @@ fn kernel_boundary_areas() -> Vec<KernelBoundaryArea> {
             source: &[
                 SourceRequirement {
                     path: "packages/agent/src/domains/capability/operations/mod.rs",
-                    markers: &["trace evidence", "replay_manifest", "trace_bypassed"],
+                    markers: &[
+                        "trace evidence",
+                        "OperationId::ReplayManifest",
+                        "trace_bypassed",
+                    ],
                 },
                 SourceRequirement {
                     path: "packages/agent/src/engine/durability/replay.rs",

@@ -132,9 +132,8 @@ enum InterleavedContentProcessor {
         if let serverKind = block["kind"] as? String {
             kind = ThinkingDisplayKind(serverValue: serverKind)
         } else if parsed.providerType == "openai" {
-            // Legacy OpenAI events predate the server `kind` field. Those
-            // blocks are provider-authored reasoning summaries, not raw
-            // append-only thinking, so avoid overpromising in persisted UI.
+            // OpenAI blocks without an explicit kind are provider-authored
+            // reasoning summaries, not raw append-only thinking.
             kind = .reasoningSummary
         } else {
             kind = .thinking

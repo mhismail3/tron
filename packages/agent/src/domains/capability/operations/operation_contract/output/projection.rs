@@ -32,7 +32,7 @@ use crate::shared::protocol::content::CapabilityResultContent;
 #[cfg(test)]
 use crate::shared::protocol::messages::CapabilityResultMessageContent;
 #[cfg(test)]
-use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::model_capabilities::CapabilityResult;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
@@ -54,7 +54,19 @@ fn extract_model_context_result_text(result: &CapabilityResult) -> String {
 }
 
 #[cfg(test)]
-const MODEL_CONTEXT_EVIDENCE_MAX_CHARS: usize = 80_000;
+fn tested_operation(result: &CapabilityResult) -> &str {
+    result
+        .details
+        .as_ref()
+        .and_then(|details| {
+            details
+                .get("primitiveOperation")
+                .or_else(|| details.get("operation"))
+                .and_then(Value::as_str)
+        })
+        .unwrap_or("unknown")
+}
+
 const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
 const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
 const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 12;
@@ -62,64 +74,7 @@ const MODEL_CONTEXT_OBJECT_MAX_KEYS: usize = 80;
 
 #[cfg(test)]
 fn extract_result_content(result: &CapabilityResult) -> CapabilityResultMessageContent {
-    let projected = model_context_evidence(result.details.as_ref());
-    match &result.content {
-        CapabilityResultBody::Text(text) => CapabilityResultMessageContent::Text(
-            append_model_context_evidence(text.clone(), projected),
-        ),
-        CapabilityResultBody::Blocks(blocks) => {
-            let has_images = blocks
-                .iter()
-                .any(|b| matches!(b, CapabilityResultContent::Image { .. }));
-            if has_images {
-                let mut blocks = blocks.clone();
-                if let Some(projected) = projected {
-                    blocks.push(CapabilityResultContent::text(projected));
-                }
-                CapabilityResultMessageContent::Blocks(blocks)
-            } else {
-                let text = blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        CapabilityResultContent::Text { text } => Some(text.as_str()),
-                        CapabilityResultContent::Image { .. } => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                CapabilityResultMessageContent::Text(append_model_context_evidence(text, projected))
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-fn append_model_context_evidence(text: String, projected: Option<String>) -> String {
-    let Some(projected) = projected else {
-        return text;
-    };
-    if text.is_empty() {
-        projected
-    } else {
-        format!("{text}\n\n{projected}")
-    }
-}
-
-#[cfg(test)]
-fn model_context_evidence(details: Option<&Value>) -> Option<String> {
-    let details = details?;
-    if let Some(projected) = project_error_evidence(details) {
-        return render_model_context_evidence(projected);
-    }
-    let operation = details
-        .get("primitiveOperation")
-        .and_then(Value::as_str)
-        .or_else(|| details.get("operation").and_then(Value::as_str))?;
-    let operation_id = super::super::OperationId::parse(operation)?;
-    render_model_context_evidence(project_evidence(
-        operation,
-        super::spec::profile(operation_id),
-        Some(details),
-    )?)
+    super::provider_result_content(tested_operation(result), result)
 }
 
 pub(super) fn project_evidence(
@@ -156,19 +111,6 @@ pub(super) fn project_evidence(
         | OutputProfile::Governance
         | OutputProfile::Web => project_metadata_operation_evidence(operation, details),
     }
-}
-
-#[cfg(test)]
-fn render_model_context_evidence(projected: Value) -> Option<String> {
-    let mut text = serde_json::to_string_pretty(&json!({
-        "modelContextEvidence": projected
-    }))
-    .ok()?;
-    if text.len() > MODEL_CONTEXT_EVIDENCE_MAX_CHARS {
-        text.truncate(MODEL_CONTEXT_EVIDENCE_MAX_CHARS);
-        text.push_str("\n... [model context evidence truncated]");
-    }
-    Some(text)
 }
 
 fn project_catalog_evidence(details: &Value) -> Option<Value> {
@@ -1748,7 +1690,7 @@ fn bounded_model_context_value(value: &Value) -> Value {
 }
 
 fn truncate_model_context_string(text: &str) -> String {
-    let redacted = redact_model_context_string(text);
+    let redacted = sanitize_provider_text(text);
     if redacted.chars().count() <= MODEL_CONTEXT_STRING_MAX_CHARS {
         return redacted;
     }
@@ -1760,7 +1702,7 @@ fn truncate_model_context_string(text: &str) -> String {
     truncated
 }
 
-fn redact_model_context_string(text: &str) -> String {
+pub(super) fn sanitize_provider_text(text: &str) -> String {
     static ABSOLUTE_PATHS: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"(^|[\s"'=:,\[])(/(?:Users|home|private|tmp|var|Volumes)/[^\s"',}\]]+)"#)
             .expect("valid absolute path redaction regex")
@@ -1775,10 +1717,26 @@ fn redact_model_context_string(text: &str) -> String {
         )
         .expect("valid authority reference redaction regex")
     });
+    static INTERNAL_INVOCATION_REFERENCES: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"\b(providerInvocationId|provider invocation id|tool call id|idempotencyKey|idempotency key)\s*[:=]?\s*[A-Za-z0-9:_-]{8,}",
+        )
+        .expect("valid internal invocation reference redaction regex")
+    });
+    static SECRET_REFERENCES: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(api key|apiKey|token|secret|password)\s*[:=]?\s*[A-Za-z0-9._:-]{8,}")
+            .expect("valid secret reference redaction regex")
+    });
 
     let redacted = redact_sensitive_content(text);
     let redacted = AUTHORITY_REFERENCES
         .replace_all(&redacted, "${1} [redacted-authority]")
+        .to_string();
+    let redacted = INTERNAL_INVOCATION_REFERENCES
+        .replace_all(&redacted, "${1} [redacted-internal-ref]")
+        .to_string();
+    let redacted = SECRET_REFERENCES
+        .replace_all(&redacted, "${1} [redacted-secret]")
         .to_string();
     let redacted = ABSOLUTE_PATHS
         .replace_all(&redacted, "${1}[redacted-path]")

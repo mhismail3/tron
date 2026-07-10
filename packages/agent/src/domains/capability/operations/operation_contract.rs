@@ -1,9 +1,10 @@
 //! Provider-visible structural contracts for `capability::execute` operations.
 //!
-//! Every supported operation has one [`OperationContract`] here. Catalog
-//! projection and runtime validation consume the same closed schema. Domain
-//! services retain semantic, lifecycle, and runtime resource validation after
-//! this structural gate.
+//! Every supported operation has one [`OperationSchemaContract`] here. Catalog
+//! projection and runtime validation consume the same closed input schema,
+//! provider output profile, semantic evidence requirements, summary policy,
+//! and safety exclusions. Domain services retain lifecycle, stale-version, and
+//! runtime resource validation after this structural gate.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -22,7 +23,7 @@ mod output;
 mod policy;
 mod records;
 
-pub(crate) use output::{provider_result_content, provider_result_text};
+pub(crate) use output::provider_result_text;
 
 macro_rules! define_operation_ids {
     ($($variant:ident => $name:literal,)+) => {
@@ -261,6 +262,8 @@ pub(crate) use policy::OperationEffect;
 pub(super) struct OperationSchemaContract {
     /// Closed top-level payload schema consumed by catalog and runtime.
     pub(super) input_schema: Value,
+    /// Canonical provider output profile and semantic evidence requirements.
+    pub(super) output_contract: output::OutputContract,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -319,7 +322,10 @@ fn input_schema(operation: OperationId) -> Option<Value> {
 pub(super) fn contract(operation: &str) -> Option<OperationSchemaContract> {
     let operation_id = OperationId::parse(operation)?;
     let input_schema = input_schema(operation_id)?;
-    Some(OperationSchemaContract { input_schema })
+    Some(OperationSchemaContract {
+        input_schema,
+        output_contract: output::contract(operation_id),
+    })
 }
 
 /// Return the exact schema for catalog projection or runtime validation.
@@ -328,8 +334,11 @@ pub(super) fn exact_input_schema(operation: &str) -> Option<Value> {
 }
 
 pub(super) fn exact_output_schema(operation: &str) -> Option<Value> {
-    let operation = OperationId::parse(operation)?;
-    output::output_schema(operation.as_str())
+    let contract = contract(operation)?;
+    Some(output::schema_for_contract(
+        operation,
+        contract.output_contract,
+    ))
 }
 
 /// Build the engine-facing host union mechanically from the exact operation

@@ -93,113 +93,21 @@
 //! protocols translate into the transport-neutral engine envelope before
 //! reaching these handlers.
 //!
-//! Product/tool domains retired by the primitive teardown must remain absent
-//! from this module tree and startup registration unless a restoration slice
-//! reintroduces the behavior as a narrow worker-owned contract. The filesystem
-//! domain is restored only for the iOS workspace selector and must not regain
-//! agent read/write/search/diff/apply-patch tools in Phase 1. The
-//! transcription domain is restored only as local speech-to-text for composer
-//! input; saved voice-note/media custody lives in the media domain as blob refs
-//! and bounded metadata, without native capture UI or server transcription
-//! model changes. Import/history restoration is resource-backed generic graph
-//! lineage only; raw repository trees, import payloads, and native session tree
-//! UI remain absent until a later slice proves generic rendering is
-//! insufficient. Repository tree restoration is content-free snapshot metadata
-//! only: it stores repository/root refs, tree object refs, bounded relative path
-//! metadata, counts, and evidence refs without raw file contents, blob bytes,
-//! absolute paths, repository visualization, or git mutation workflows. Import
-//! preview restoration is content-free ref and metadata custody only: it links
-//! import-history and repository-tree refs with bounded normalized relative path
-//! metadata and preview fingerprints without raw import payloads, file contents,
-//! repository contents, import execution, visualization, or git mutation.
-//! Program execution restoration is content-free metadata custody only: it
-//! stores runtime/language ids, I/O refs or fingerprints, resource-limit policy,
-//! trace/replay refs, and lifecycle evidence without raw code, command strings,
-//! raw stdin/stdout/stderr, subprocesses, runtime installs, file writes, network
-//! behavior, result merge, or native UI. Update
-//! Prompt artifact restoration is metadata-only explicit artifact custody: it
-//! stores artifact kinds, bounded titles/summaries/previews, content refs or
-//! fingerprints, retention state, trace/replay refs, and lifecycle evidence
-//! without raw prompt bodies, automatic prompt-history capture, provider-visible
-//! raw prompt payloads, prompt injection, learned behavior, context inclusion,
-//! native snippet/template UI, or settings/profile migration. Update
-//! diagnostics restoration is metadata-only signed-release and provenance
-//! custody: it does not perform live update checks, execute
-//! installers, restart processes, register packages/catalog entries, expose
-//! production endpoints, or add native update panels. The worker lifecycle
-//! domain is the post-baseline package/launch substrate for
-//! self-updating workers; it is not a restored product tool domain. The git
-//! domain is restored only for read-only status/diff evidence; source-control
-//! mutations remain absent. The procedural domain is resource-backed custody
-//! and inspection evidence only; activation, trigger firing, prompt injection,
-//! learned behavior, and autonomous execution remain absent. Device and
-//! notification domains are server-owned foundations only: raw APNs tokens are
-//! not provider-visible, live APNs transport and native iOS inbox affordances
-//! remain absent, and the old notification product surface is not restored.
-//! Module registry restoration is inspect-only source-backed manifest custody:
-//! it stores first-party `module_manifest` resources and provider-safe
-//! list/inspect projections without module install, activation, execution,
-//! dependency resolution, network behavior, public `/engine` expansion, or
-//! native marketplace panels. Module authoring restoration is inert
-//! resource-backed proposal custody: it stores bounded `module_proposal`
-//! metadata and refs in current session/workspace scope without physical
-//! module workspace directories, install, activation, execution, dependency
-//! restoration, network behavior, repo-managed skills, raw prompt/proposal
-//! bodies, or public `/engine` expansion. Module validation restoration is
-//! inert contract-test evidence custody: it stores bounded
-//! `module_validation_report` metadata, refs, parity checks, docs/tests
-//! evidence, command/result refs, failure evidence, trace/replay refs, and
-//! no-install/no-execution proof without running commands or module code,
-//! storing raw logs/commands/env/code/file contents, activating modules,
-//! resolving dependencies, touching repo-managed skills, accessing networks, or
-//! expanding public `/engine`. Module install restoration is metadata-only
-//! review-gate custody: it stores current-scope install requests and decisions
-//! linked to passed validation reports, approval freshness evidence, dependency
-//! policy refs, and rollback proof refs without physical install, activation,
-//! execution, dependency restoration, package-manager use, network access,
-//! repo-managed skills, raw logs/commands/env/code/file contents, or approval
-//! evidence minting authority. Module dependency restoration is metadata-only
-//! request and policy custody: it stores module-owned dependency rationale,
-//! security/license/runtime needs, removal plans, Cargo.toml/Cargo.lock parity
-//! evidence, decisions, and active policy metadata without package-manager
-//! execution, dependency restoration, manifest/lockfile mutation, raw package
-//! artifacts, network access, or runtime execution. Capability binding policy
-//! is metadata-only replacement governance: it stores operation owner/class,
-//! requested shadow/extend/replace mode, target refs, contract/evidence
-//! requirements, exact authority/network constraints, stale-version guards,
-//! decisions, rollback/disable refs, audit refs, and active policy metadata
-//! without changing `capability::execute` dispatch, routing runtime calls,
-//! hot-swapping modules, activating packages, running code, restoring
-//! dependencies, accessing networks, or exposing raw paths, commands, logs,
-//! grant ids, or authority ids. Context control is
-//! provider-safe context visibility and boundary custody: it stores bounded
-//! composition snapshots, compact/clear action records, and context epochs
-//! without raw prompt bodies, secrets, local paths, commands, logs, grant ids,
-//! authority ids, or hidden reasoning. Module lifecycle restoration is metadata-only
-//! state custody: it stores enable, disable, quarantine, and rollback
-//! transitions for current install-candidate decisions with fresh approval,
-//! rollback proof refs, current-version guards, and fail-closed
-//! disabled/quarantined runtime guards without activation, execution,
-//! dependency restore, package-manager use, network behavior, or repo-managed
-//! skills. Module runtime restoration is the first generic supervised runtime
-//! gate: it stores enabled-lifecycle-guarded runtime envelopes with sandbox,
-//! network, secrets, timeout, cancellation, shutdown, output-ref, and authority
-//! proof metadata while leaving package feature semantics outside this domain
-//! and without raw commands/logs/output, PTYs, browser automation, dependency
-//! restoration, package-manager use, network access, or physical install.
-//! Module activity restoration is inspect-only cockpit aggregation over
-//! existing module-plane records: it derives active, waiting, and blocked state
-//! from current module resource facts and returns bounded metadata summaries
-//! only, without raw payloads, local paths, command/log output,
-//! grant/authority ids, trace/invocation ids, activation, install, dependency
-//! restore, package-manager use, or network access. Agent briefing restoration
-//! is a read-only dashboard projection over existing module activity facts: it
-//! creates named narrative sections, empty states, and evidence labels for
-//! native UI without creating autonomy behavior, new durable state, diagnostics
-//! panels, raw ids, paths, commands, logs, prompt bodies, secrets, or
-//! provider-visible sensitive material. New domain behavior must add a contract,
-//! deps narrowing, handler binding, tests, and README/domain-doc updates
-//! together.
+//! Every retained domain owns a narrow contract and registers only canonical
+//! operation keys. Metadata-custody domains store bounded metadata and durable
+//! refs; they cannot acquire execution, network, package-manager, or raw-content
+//! behavior implicitly. Executing domains run only through engine authority,
+//! exact selectors, lifecycle gates, and traceable results. Provider-facing
+//! projections remain bounded and omit raw prompts, content, paths, commands,
+//! logs, credentials, grant ids, authority ids, and hidden reasoning.
+//!
+//! Module governance owns proposal, validation, dependency, install, lifecycle,
+//! runtime, binding, shadow, route, and rollback records. Module implementations
+//! can extend or replace eligible operations only through that pipeline; they
+//! cannot replace the authority, resource-custody, event, trace, redaction, or
+//! governance substrate at runtime. New behavior must ship its contract,
+//! narrowed dependencies, handler binding, tests, and current README/domain
+//! documentation together.
 //!
 //! ## Test Ownership
 //!

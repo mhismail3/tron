@@ -1,7 +1,7 @@
-use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::foundation::text::truncate_str;
 use serde_json::Value;
 
+use super::projection::sanitize_provider_text;
 use super::types::{
     ProviderCollection, ProviderCollectionItem, ProviderEvidence, ProviderFact, ProviderNextAction,
     ProviderOperationError, ProviderResourceRef, ProviderTruncation,
@@ -308,6 +308,6 @@ fn join_field(parent: &str, child: &str) -> String {
 }
 
 pub(super) fn bounded_text(value: &str, max_bytes: usize) -> String {
-    let redacted = redact_sensitive_content(value);
+    let redacted = sanitize_provider_text(value);
     truncate_str(&redacted, max_bytes).to_owned()
 }

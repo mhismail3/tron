@@ -44,26 +44,26 @@ The TSV covers tracked and newly introduced files under:
 | primitive | 113 |
 | implementation | 878 |
 | support | 385 |
-| test | 600 |
-| docs | 141 |
+| test | 609 |
+| docs | 150 |
 | delete | 0 |
 
 ## Owner Summary
 
 | Owner | Count |
 |-------|------:|
-| `agent_domain` | 17 |
-| `agent_runtime` | 77 |
+| `agent_domain` | 16 |
+| `agent_runtime` | 91 |
 | `app_bootstrap` | 11 |
 | `approval` | 8 |
 | `auth` | 19 |
 | `capability` | 4 |
-| `capability_execute` | 54 |
+| `capability_execute` | 38 |
 | `catalog_discovery` | 8 |
 | `context_control` | 9 |
 | `device` | 6 |
 | `docs` | 5 |
-| `docs/static gates` | 128 |
+| `docs/static gates` | 137 |
 | `domain_worker` | 7 |
 | `engine` | 110 |
 | `filesystem` | 7 |
@@ -72,7 +72,7 @@ The TSV covers tracked and newly introduced files under:
 | `import_history` | 6 |
 | `import_preview` | 6 |
 | `ios` | 98 |
-| `ios_app` | 11 |
+| `ios_app` | 14 |
 | `ios_chat_ui` | 4 |
 | `ios_engine` | 139 |
 | `ios_events` | 8 |
@@ -112,7 +112,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 598 |
+| `test_harness` | 607 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

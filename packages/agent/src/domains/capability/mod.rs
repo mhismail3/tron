@@ -130,7 +130,7 @@
 //! `inspect` as `pure_read` so natural discovery filters do not become invalid
 //! calls; read-only searches must return only operations whose agent-usage
 //! metadata proves they are inspection-safe and non-mutating in both immediate
-//! matches and generic supported-operation fallback guidance, so broad resource
+//! matches and generic supported-operation default guidance, so broad resource
 //! discovery queries cannot steer the model into write or record operations.
 //! Supported operations excluded by the requested read-only effect class are
 //! reported separately with bounded operation metadata and an explicit
@@ -244,6 +244,7 @@ pub(crate) mod pool;
 
 pub(crate) use contract::{EXECUTE_MODEL_PRIMITIVE, EXECUTE_MODEL_PRIMITIVE_EFFECT};
 pub(crate) use operations::execute_value;
+pub(crate) use operations::provider_result_text;
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
     AuthorityPolicy, ConditionalAuthority, OperationBindingMetadata, ResourceKindPolicy,
@@ -252,7 +253,6 @@ pub(crate) use operations::{
     operation_required_payload_fields, operation_risk, validate_operation_payload,
 };
 pub(crate) use operations::{OperationEffect, operation_effect};
-pub(crate) use operations::{provider_result_content, provider_result_text};
 
 use std::sync::Arc;
 

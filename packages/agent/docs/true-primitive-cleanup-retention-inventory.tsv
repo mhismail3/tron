@@ -2098,3 +2098,39 @@ packages/ios-app/Tests/Session/Chat/Navigation/ScrollViewportAnchorTests.swift	t
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentBriefingViewModelTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Settings/EngineSettingsOwnershipTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Settings/EngineSettingsPageLayoutTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md	docs	docs/static gates	TPC-10	durable capability replacement evidence documentation
+packages/agent/docs/capability-dynamic-replacement-inventory.tsv	docs	docs/static gates	TPC-10	durable capability replacement inventory
+packages/agent/docs/capability-dynamic-replacement-scorecard.md	docs	docs/static gates	TPC-10	durable capability replacement scorecard
+packages/agent/docs/engine-capability-pool-evidence-manifest.md	docs	docs/static gates	TPC-10	durable capability pool evidence documentation
+packages/agent/docs/engine-capability-pool-inventory.tsv	docs	docs/static gates	TPC-10	durable capability pool inventory
+packages/agent/docs/engine-capability-pool-scorecard.md	docs	docs/static gates	TPC-10	durable capability pool scorecard
+packages/agent/docs/minimal-kernel-self-adaptation-hardening-evidence-manifest.md	docs	docs/static gates	TPC-10	durable kernel hardening evidence documentation
+packages/agent/docs/minimal-kernel-self-adaptation-hardening-inventory.tsv	docs	docs/static gates	TPC-10	durable kernel hardening inventory
+packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md	docs	docs/static gates	TPC-10	durable kernel hardening scorecard
+packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_catalog_tests.rs	test	test_harness	TPC-10	canonical catalog grant derivation regression coverage
+packages/agent/src/domains/capability/operations/catalog/tests.rs	test	test_harness	TPC-10	canonical capability discovery and inspection regression coverage
+packages/agent/src/domains/capability/operations/operation_contract.rs	implementation	agent_runtime	TPC-10	canonical operation contract owner
+packages/agent/src/domains/capability/operations/operation_contract/authority.rs	implementation	agent_runtime	TPC-10	canonical operation authority policy owner
+packages/agent/src/domains/capability/operations/operation_contract/capability_binding.rs	implementation	agent_runtime	TPC-10	canonical binding operation input contract owner
+packages/agent/src/domains/capability/operations/operation_contract/direct.rs	implementation	agent_runtime	TPC-10	canonical direct operation input contract owner
+packages/agent/src/domains/capability/operations/operation_contract/governance.rs	implementation	agent_runtime	TPC-10	canonical governance operation input contract owner
+packages/agent/src/domains/capability/operations/operation_contract/metadata.rs	implementation	agent_runtime	TPC-10	canonical operation metadata contract owner
+packages/agent/src/domains/capability/operations/operation_contract/output.rs	implementation	agent_runtime	TPC-10	canonical provider operation output owner
+packages/agent/src/domains/capability/operations/operation_contract/output/normalize.rs	implementation	agent_runtime	TPC-10	canonical provider output normalization owner
+packages/agent/src/domains/capability/operations/operation_contract/output/projection.rs	implementation	agent_runtime	TPC-10	canonical provider evidence projection owner
+packages/agent/src/domains/capability/operations/operation_contract/output/projection/tests.rs	test	test_harness	TPC-10	canonical provider evidence projection regression coverage
+packages/agent/src/domains/capability/operations/operation_contract/output/spec.rs	implementation	agent_runtime	TPC-10	canonical per-operation output specification owner
+packages/agent/src/domains/capability/operations/operation_contract/output/types.rs	implementation	agent_runtime	TPC-10	canonical provider output type owner
+packages/agent/src/domains/capability/operations/operation_contract/policy.rs	implementation	agent_runtime	TPC-10	canonical operation effect and scope policy owner
+packages/agent/src/domains/capability/operations/operation_contract/records.rs	implementation	agent_runtime	TPC-10	canonical record-plane input contract owner
+packages/agent/src/domains/capability/pool.rs	implementation	agent_runtime	TPC-10	canonical capability pool classification owner
+packages/agent/src/domains/capability_binding/route.rs	implementation	agent_runtime	TPC-10	governed capability route lifecycle owner
+packages/agent/tests/capability_dynamic_replacement_invariants.rs	test	test_harness	TPC-10	capability replacement static invariant coverage
+packages/agent/tests/minimal_kernel_self_adaptation_hardening_invariants.rs	test	test_harness	TPC-10	minimal kernel hardening static invariant coverage
+packages/ios-app/Sources/Engine/Persistence/Sync/SessionListPageLoader.swift	implementation	ios_app	TPC-8	bounded session list pagination owner
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationBriefPresentation.swift	implementation	ios_app	TPC-8	capability invocation progressive presentation owner
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationGrouping.swift	implementation	ios_app	TPC-8	capability invocation grouping owner
+packages/ios-app/Tests/Engine/Persistence/Sync/SessionListPageLoaderTests.swift	test	test_harness	TPC-10	session list pagination regression coverage
+packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationBriefPresentationTests.swift	test	test_harness	TPC-10	capability invocation presentation regression coverage
+packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationGroupingTests.swift	test	test_harness	TPC-10	capability invocation grouping regression coverage
+packages/ios-app/Tests/UI/Chat/SessionListExpansionAccessibilityTests.swift	test	test_harness	TPC-10	session list expansion accessibility coverage
