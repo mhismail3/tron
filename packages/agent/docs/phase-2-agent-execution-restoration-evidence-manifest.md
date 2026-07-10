@@ -1925,11 +1925,15 @@ Scope implemented:
   retention defaults, and `notifications.lifecycle` stream evidence.
 - Added built-in resource definitions for `device_registration`,
   `notification`, and `notification_delivery`.
-- Added execute-only operation values `device_register`, `device_unregister`,
+- The original Slice 13 implementation added device register/unregister plus
+  device and notification operations. The current minimal baseline retires
+  provider-visible `device_register` and `device_unregister`: only
   `device_list`, `device_inspect`, `notification_send`, `notification_list`,
   `notification_inspect`, `notification_mark_read`, and
-  `notification_mark_all_read` behind the existing single
-  `capability::execute` primitive.
+  `notification_mark_all_read` remain behind the existing single
+  `capability::execute` primitive. Registration/unregistration survives only
+  as trusted internal test-fixture proof; no production token-registration
+  transport seam currently exists.
 - Required trusted current-session/workspace context, explicit non-wildcard
   resource-kind selectors, bounded selectors, derived non-bootstrap grants,
   idempotency for writes, and push-requested sends gaining only

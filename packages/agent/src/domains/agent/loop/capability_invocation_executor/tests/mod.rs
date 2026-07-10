@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
 
+mod grant_catalog_tests;
 mod grant_file_git_tests;
 mod grant_import_history_tests;
 mod grant_import_preview_tests;

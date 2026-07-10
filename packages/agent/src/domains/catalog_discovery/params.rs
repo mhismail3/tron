@@ -8,6 +8,8 @@ use crate::shared::server::errors::CapabilityError;
 
 use super::errors::{invalid_params, policy_error};
 
+const IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
+
 pub(super) fn query_from_payload(
     payload: &Value,
     actor: ActorContext,
@@ -102,6 +104,19 @@ pub(super) fn required_str<'a>(
     field: &str,
 ) -> Result<&'a str, CapabilityError> {
     optional_str(payload, field)?.ok_or_else(|| invalid_params(format!("{field} is required")))
+}
+
+pub(super) fn required_idempotency_key(payload: &Value) -> Result<&str, CapabilityError> {
+    let key = required_str(payload, "idempotencyKey")?.trim();
+    if key.is_empty() {
+        return Err(invalid_params("idempotencyKey must not be empty"));
+    }
+    if key.len() > IDEMPOTENCY_KEY_MAX_BYTES {
+        return Err(invalid_params(format!(
+            "idempotencyKey must be at most {IDEMPOTENCY_KEY_MAX_BYTES} bytes"
+        )));
+    }
+    Ok(key)
 }
 
 pub(super) fn optional_str<'a>(

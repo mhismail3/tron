@@ -827,8 +827,8 @@ execution.
 Accepted Phase 3 Slice 24G also seeds a pending-review
 `notification_delivery_module` manifest for the existing server-owned
 `device_registration`, `notification`, and `notification_delivery` resource
-substrate. It declares only existing device list/inspect/register/unregister
-and notification send/list/inspect/read/badge operation values, exact
+substrate. It declares only provider-visible device list/inspect and
+notification send/list/inspect/read/badge operation values, exact
 device/notification operation authority needs, kind-selector-bounded generic
 resource authority needs, and validation gates for APNs
 credential custody, APNs environment labels, entitlement proof, physical-device
@@ -836,6 +836,10 @@ validation, delivery-failure evidence, provider redaction, and native inbox
 product decisions. It does not enable APNs transport, native inbox UI,
 entitlements, public notification APIs, provider payload leakage, or network
 behavior.
+Device registration and unregistration are not provider-visible operations and
+there is currently no production token-registration transport seam. Their
+hash-only custody and lifecycle behavior remain test fixtures for a future
+trusted native transport; the agent cannot submit APNs token material.
 Accepted Phase 3 Slice 24H also seeds a pending-review
 `import_update_module` manifest for existing `import_history_record`,
 `repository_tree_snapshot`, `import_preview`, and `update_diagnostic_record`
@@ -1567,11 +1571,14 @@ File access goes through the hardened `filesystem_*` operation package.
 
 The execute-operation contract migration is fail-closed and incremental. The
 catalog bootstrap, cockpit overview, repository-tree custody, durable jobs,
-short process execution, and trace inspection currently have closed structural
-contracts. Other operation families retain their existing domain-owned semantic
-and authority validation until their complete accepted field set is promoted;
-promotion requires focused schema/runtime parity tests and removes permissive
-cross-operation fields for that family.
+short process execution, trace inspection, and capability-binding/shadow/route
+governance currently have closed structural contracts. Catalog inspection and
+pre-authority runtime validation consume the same schema and required-field
+list for each promoted operation; the catalog retains no binding-specific
+fallback schema. Other operation families retain their existing domain-owned
+semantic and authority validation until their complete accepted field set is
+promoted; promotion requires focused schema/runtime parity tests and removes
+permissive cross-operation fields for that family.
 
 Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
@@ -2437,10 +2444,12 @@ execution-output payloads. Goal/question
 records are generic `goal`, `user_question`, and `goal_answer` resources with
 lifecycle events on `goals.lifecycle`; answer handoff uses the execute
 idempotency ledger and resource expected-version checks so replaying the same
-answer key returns the same evidence without double-answering. Slice 13 device
-and notification state uses engine resource versions plus `device.lifecycle`
-and `notifications.lifecycle` stream rows; it does not add transport-visible
-notification session-event variants. The replay snapshot includes resolved
+answer key returns the same evidence without double-answering. Notification
+state uses engine resource versions plus `notifications.lifecycle` stream
+rows. Trusted internal device-registration fixtures exercise
+`device.lifecycle`, but production device list/inspect does not accept token
+material or publish registration lifecycle events. Neither domain adds
+transport-visible notification session-event variants. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the

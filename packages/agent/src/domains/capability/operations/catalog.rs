@@ -246,20 +246,18 @@ fn execute_operation_inspect_projection_with_options(
             "arguments": {"operation": operation}
         })
     });
-    let operation_required_payload_fields = operation_required_payload_fields(operation);
-    let required_payload_fields = if operation_required_payload_fields.len() > 1 {
-        operation_required_payload_fields
-    } else {
-        agent_usage
-            .pointer("/preflight/requiredPayloadFields")
-            .and_then(Value::as_array)
-            .filter(|fields| !fields.is_empty())
-            .cloned()
-            .unwrap_or(operation_required_payload_fields)
-    };
+    let input_schema = execute_operation_input_schema(operation);
+    let required_payload_fields = input_schema
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_else(|| vec![Value::String("operation".to_owned())]);
     let effect = agent_usage.get("effect").cloned();
     let preflight = agent_usage.get("preflight").cloned();
-    let input_schema = execute_operation_input_schema(operation);
+    let schema_completeness = input_schema
+        .get("schemaCompleteness")
+        .cloned()
+        .unwrap_or_else(|| Value::String("domain_validated_contract".to_owned()));
     let capability_pool = operation_pool_metadata(operation).map(|metadata| {
         operation_contextual_pool_projection(
             operation,
@@ -293,7 +291,7 @@ fn execute_operation_inspect_projection_with_options(
             "arguments": {"operation": operation},
             "requiredPayloadFields": required_payload_fields,
             "payloadPlacement": "Put operation-specific fields at the top level of the capability::execute payload.",
-            "schemaCompleteness": "operation_specific_contract",
+            "schemaCompleteness": schema_completeness,
             "effect": effect,
             "preflight": preflight
         }
@@ -425,45 +423,6 @@ pub(super) fn execute_operation_input_schema(operation: &str) -> Value {
 
 fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
     match (operation, field) {
-        ("capability_shadow_trial_decision_record", "capabilityShadowTrialRequestResourceId") => {
-            json!({
-                "type": "string",
-                "description": "Exact capability_shadow_trial_request resource id returned by capability_shadow_trial_request_record."
-            })
-        }
-        (
-            "capability_shadow_trial_decision_record",
-            "expectedCapabilityShadowTrialRequestVersionId",
-        ) => json!({
-            "type": "string",
-            "description": "Exact current request version id returned with the capability shadow trial request; stale versions are rejected."
-        }),
-        ("capability_shadow_trial_decision_record", "decision") => json!({
-            "type": "string",
-            "enum": ["approved", "rejected", "denied", "disabled", "aborted"],
-            "description": "Governance decision for the metadata-only shadow trial. Approved becomes approved_trial; rejected/denied require denialEvidence."
-        }),
-        ("capability_shadow_trial_decision_record", "reason") => json!({
-            "type": "string",
-            "description": "Bounded provider-safe decision rationale. Secrets, commands, paths, prompts, grant ids, and authority ids are rejected."
-        }),
-        ("capability_shadow_trial_run_record", "capabilityShadowTrialDecisionResourceId") => {
-            json!({
-                "type": "string",
-                "description": "Exact capability_shadow_trial_decision resource id returned by capability_shadow_trial_decision_record."
-            })
-        }
-        (
-            "capability_shadow_trial_run_record",
-            "expectedCapabilityShadowTrialDecisionVersionId",
-        ) => json!({
-            "type": "string",
-            "description": "Exact current decision version id returned with the approved shadow trial decision; stale versions are rejected."
-        }),
-        ("capability_shadow_trial_run_record", "builtInProjection")
-        | ("capability_shadow_trial_run_record", "candidateProjection") => {
-            shadow_git_status_projection_schema(field)
-        }
         (_, "sessionId") => json!({
             "type": "string",
             "description": "Current trusted session id. If supplied, it must match the invocation session context."
@@ -480,41 +439,6 @@ fn execute_operation_field_schema(operation: &str, field: &str) -> Value {
             )
         }),
     }
-}
-
-fn shadow_git_status_projection_schema(field: &str) -> Value {
-    json!({
-        "type": "object",
-        "description": format!(
-            "{field} is a bounded provider-safe git_status projection for a metadata-only shadow comparison; never include raw commands, raw paths, logs, file contents, grants, or authority ids."
-        ),
-        "required": [
-            "operation",
-            "status",
-            "headState",
-            "indexState",
-            "worktreeState",
-            "evidenceRef"
-        ],
-        "properties": {
-            "operation": {"const": "git_status"},
-            "status": {"type": "string", "enum": ["clean", "dirty", "unavailable", "unknown"]},
-            "headState": {"type": "string", "enum": ["known", "unknown"]},
-            "indexState": {"type": "string", "enum": ["known", "unknown"]},
-            "worktreeState": {"type": "string", "enum": ["clean", "dirty", "unknown"]},
-            "truncation": {"type": "string", "enum": ["none", "bounded", "truncated", "unknown"]},
-            "evidenceRef": {
-                "type": "object",
-                "description": "Concrete bounded evidence ref for this shadow projection; placeholder evidence:none is rejected.",
-                "required": ["kind", "resourceId", "role"],
-                "properties": {
-                    "kind": {"type": "string"},
-                    "resourceId": {"type": "string"},
-                    "role": {"type": "string"}
-                }
-            }
-        }
-    })
 }
 
 fn add_operation_specific_optional_fields(
@@ -568,46 +492,6 @@ fn add_operation_specific_optional_fields(
             (
                 "timeoutMs",
                 json!({"type": "integer", "minimum": 1, "maximum": 30000, "description": "Request timeout in milliseconds."}),
-            ),
-        ],
-        "capability_shadow_trial_decision_record" => vec![
-            (
-                "capabilityShadowTrialDecisionId",
-                json!({"type": "string", "description": "Optional bounded caller-visible decision id for idempotent resource identity."}),
-            ),
-            (
-                "decisionEvidence",
-                json!({"type": "array", "description": "Optional bounded refs supporting the decision. Use concrete provider-safe evidence refs only."}),
-            ),
-            (
-                "denialEvidence",
-                json!({"type": "array", "description": "Required when decision is rejected or denied; bounded provider-safe denial evidence refs."}),
-            ),
-            (
-                "idempotencyKey",
-                json!({"type": "string", "description": "Optional stable bounded idempotency key when not supplied by invocation context."}),
-            ),
-        ],
-        "capability_shadow_trial_run_record" => vec![
-            (
-                "capabilityShadowTrialRunId",
-                json!({"type": "string", "description": "Optional bounded caller-visible run id for idempotent resource identity."}),
-            ),
-            (
-                "capabilityShadowTrialEvidenceId",
-                json!({"type": "string", "description": "Optional bounded caller-visible evidence id for the shadow evidence resource."}),
-            ),
-            (
-                "trialRunOutcome",
-                json!({"type": "string", "enum": ["completed", "aborted", "disabled"], "description": "Optional run outcome; omitted defaults to completed. Completed runs require builtInProjection and candidateProjection."}),
-            ),
-            (
-                "auditRefs",
-                json!({"type": "array", "description": "Optional bounded audit refs for the metadata-only run."}),
-            ),
-            (
-                "idempotencyKey",
-                json!({"type": "string", "description": "Optional stable bounded idempotency key when not supplied by invocation context."}),
             ),
         ],
         _ => Vec::new(),
@@ -1238,57 +1122,6 @@ fn operation_required_payload_fields(operation: &str) -> Vec<Value> {
             vec!["operation", "moduleDependencyDecisionResourceId"]
         }
         "module_dependency_policy_inspect" => vec!["operation", "moduleDependencyPolicyResourceId"],
-        "capability_binding_request_inspect" => {
-            vec!["operation", "capabilityBindingRequestResourceId"]
-        }
-        "capability_binding_decision_inspect" => {
-            vec!["operation", "capabilityBindingDecisionResourceId"]
-        }
-        "capability_binding_policy_inspect" => {
-            vec!["operation", "capabilityBindingPolicyResourceId"]
-        }
-        "capability_shadow_trial_request_record" => vec![
-            "operation",
-            "title",
-            "targetOperation",
-            "currentBuiltInOwner",
-            "ownershipClass",
-            "bindingMode",
-            "candidateAdapter",
-            "authorityConstraints",
-            "contractEvidenceRefs",
-            "evidenceRefs",
-            "staleVersionGuard",
-            "rollbackRef",
-            "disableRef",
-            "abortRef",
-            "rationale",
-            "idempotencyKey",
-        ],
-        "capability_shadow_trial_decision_record" => vec![
-            "operation",
-            "capabilityShadowTrialRequestResourceId",
-            "expectedCapabilityShadowTrialRequestVersionId",
-            "decision",
-            "reason",
-        ],
-        "capability_shadow_trial_run_record" => vec![
-            "operation",
-            "capabilityShadowTrialDecisionResourceId",
-            "expectedCapabilityShadowTrialDecisionVersionId",
-            "builtInProjection",
-            "candidateProjection",
-        ],
-        "capability_shadow_trial_evidence_inspect" => {
-            vec!["operation", "capabilityShadowTrialEvidenceResourceId"]
-        }
-        "capability_replacement_candidate_inspect" => {
-            vec!["operation", "capabilityReplacementCandidateResourceId"]
-        }
-        "capability_route_binding_inspect" => {
-            vec!["operation", "capabilityRouteBindingResourceId"]
-        }
-        "capability_route_event_inspect" => vec!["operation", "capabilityRouteEventResourceId"],
         "module_lifecycle_inspect" => vec!["operation", "moduleLifecycleResourceId"],
         "module_runtime_inspect" => vec!["operation", "moduleRuntimeResourceId"],
         "web_fetch" => vec!["operation", "url"],
@@ -2356,7 +2189,11 @@ fn operation_search_plan_projection(query: &OperationSearchQuery) -> Option<Valu
 }
 
 fn contextual_write_operation(operation: &str, use_only_when: &str) -> Value {
-    let required_payload_fields = operation_required_payload_fields(operation);
+    let required_payload_fields = execute_operation_input_schema(operation)
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_else(|| vec![Value::String("operation".to_owned())]);
     let mut agent_usage = operation_agent_usage_projection(operation).unwrap_or_else(|| {
         json!({
             "callable": true,
@@ -2897,7 +2734,7 @@ mod tests {
             discovery["inputSchema"]["properties"]["operation"]["const"],
             "capability_shadow_trial_evidence_inspect"
         );
-        assert_eq!(discovery["inputSchema"]["additionalProperties"], true);
+        assert_eq!(discovery["inputSchema"]["additionalProperties"], false);
         assert_eq!(
             discovery["inputSchema"]["properties"]["capabilityShadowTrialEvidenceResourceId"]["type"],
             "string"
@@ -3417,6 +3254,7 @@ mod tests {
                 "targetOperation",
                 "currentBuiltInOwner",
                 "ownershipClass",
+                "replacementTarget",
                 "bindingMode",
                 "candidateAdapter",
                 "authorityConstraints",

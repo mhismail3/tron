@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::engine::{
     CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID, CreateResource,
@@ -9,7 +10,7 @@ use crate::shared::server::errors::CapabilityError;
 use super::errors::{engine_error, invalid_params};
 use super::params::{
     actor_context, ensure_catalog_visibility, include_protected_counts, optional_limit, query_echo,
-    query_from_payload, report_scope, required_str,
+    query_from_payload, report_scope, required_idempotency_key, required_str,
 };
 use super::projection::{
     catalog_summary, filtered_trigger_types, filtered_triggers, filtered_workers,
@@ -197,21 +198,18 @@ pub(crate) async fn conformance_report_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    let idempotency_key = required_idempotency_key(payload)?;
+    let scope = report_scope(invocation);
     let actor = actor_context(invocation);
     let report = build_report_payload(engine_host, invocation, payload, &actor).await?;
     let status = report["status"].as_str().unwrap_or("failed").to_owned();
-    let catalog_revision = report["catalogRevision"].as_u64().unwrap_or_default();
-    let resource_id = format!(
-        "{CATALOG_DISCOVERY_REPORT_KIND}:{}:{}",
-        catalog_revision,
-        invocation.id.as_str()
-    );
+    let resource_id = conformance_report_resource_id(&scope, idempotency_key);
     let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id),
             kind: CATALOG_DISCOVERY_REPORT_KIND.to_owned(),
             schema_id: Some(CATALOG_DISCOVERY_REPORT_SCHEMA_ID.to_owned()),
-            scope: report_scope(invocation),
+            scope,
             owner_worker_id: WorkerId::new(WORKER).map_err(engine_error)?,
             owner_actor_id: invocation.causal_context.actor_id.clone(),
             lifecycle: Some(status.clone()),
@@ -237,4 +235,22 @@ pub(crate) async fn conformance_report_value(
         "summary": report["summary"].clone(),
         "resourceRefs": [resource_ref],
     }))
+}
+
+fn conformance_report_resource_id(
+    scope: &crate::engine::EngineResourceScope,
+    idempotency_key: &str,
+) -> String {
+    let scope_material = match scope {
+        crate::engine::EngineResourceScope::System => "system".to_owned(),
+        crate::engine::EngineResourceScope::Workspace(id) => format!("workspace:{id}"),
+        crate::engine::EngineResourceScope::Session(id) => format!("session:{id}"),
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(b"catalog-discovery-report:v1\0");
+    hasher.update(scope_material.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(idempotency_key.as_bytes());
+    let fingerprint = format!("{:x}", hasher.finalize());
+    format!("{CATALOG_DISCOVERY_REPORT_KIND}:{fingerprint}")
 }

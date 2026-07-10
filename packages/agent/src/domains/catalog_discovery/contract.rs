@@ -151,12 +151,19 @@ fn inspect_schema() -> serde_json::Value {
 fn report_schema() -> serde_json::Value {
     json!({
         "type": "object",
+        "required": ["idempotencyKey"],
         "additionalProperties": false,
         "properties": {
             "text": {"type": "string"},
             "namespacePrefix": {"type": "string"},
             "reason": {"type": "string"},
             "includeProtectedCounts": {"type": "boolean"},
+            "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": "Stable caller key used for durable report replay. The raw value is never stored in report resources or provider-safe results."
+            },
             "sessionId": {"type": "string"},
             "workspaceId": {"type": "string"}
         }

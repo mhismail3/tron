@@ -362,9 +362,9 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         resource["validation"]["status"]["text"],
         json!("pending_review")
     );
-    assert_eq!(resource["capabilityDeclarations"]["total"], json!(9));
+    assert_eq!(resource["capabilityDeclarations"]["total"], json!(7));
     assert_eq!(resource["resourceDeclarations"]["total"], json!(3));
-    assert_eq!(resource["authorityNeeds"]["total"], json!(6));
+    assert_eq!(resource["authorityNeeds"]["total"], json!(5));
     assert_side_effects_are_absent(&inspected);
     assert_provider_projection_has_no_raw_sensitive_material(&inspected);
 
@@ -404,44 +404,61 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         "notification_delivery",
         crate::domains::notifications::contract::DELIVERY_SCHEMA_VERSION,
     );
-    let notification_resource_selectors = vec![
+    let notification_read_resource_selectors = vec![
         "kind:device_registration".to_owned(),
         "kind:notification".to_owned(),
         "kind:notification_delivery".to_owned(),
     ];
-    for scope in ["resource.read", "resource.write"] {
-        assert_manifest_authority_need(
-            payload,
-            scope,
-            &[
-                "device_registration",
-                "notification",
-                "notification_delivery",
-            ],
-            &notification_resource_selectors,
-        );
-        let projected = projected_authority_need(resource, scope);
-        assert_eq!(
-            projected_text_items(projected, "resourceKinds"),
-            vec![
-                "device_registration".to_owned(),
-                "notification".to_owned(),
-                "notification_delivery".to_owned()
-            ],
-            "projected {scope} resource kinds must match manifest kind bounds"
-        );
-        assert_eq!(
-            projected_text_items(projected, "selectors"),
-            notification_resource_selectors,
-            "projected {scope} selectors must remain kind-selector bounded"
-        );
-    }
+    assert_manifest_authority_need(
+        payload,
+        "resource.read",
+        &[
+            "device_registration",
+            "notification",
+            "notification_delivery",
+        ],
+        &notification_read_resource_selectors,
+    );
+    let projected_read = projected_authority_need(resource, "resource.read");
+    assert_eq!(
+        projected_text_items(projected_read, "resourceKinds"),
+        vec![
+            "device_registration".to_owned(),
+            "notification".to_owned(),
+            "notification_delivery".to_owned()
+        ]
+    );
+    assert_eq!(
+        projected_text_items(projected_read, "selectors"),
+        notification_read_resource_selectors
+    );
+
+    let notification_write_resource_selectors = vec![
+        "kind:notification".to_owned(),
+        "kind:notification_delivery".to_owned(),
+    ];
+    assert_manifest_authority_need(
+        payload,
+        "resource.write",
+        &["notification", "notification_delivery"],
+        &notification_write_resource_selectors,
+    );
+    let projected_write = projected_authority_need(resource, "resource.write");
+    assert_eq!(
+        projected_text_items(projected_write, "resourceKinds"),
+        vec![
+            "notification".to_owned(),
+            "notification_delivery".to_owned()
+        ]
+    );
+    assert_eq!(
+        projected_text_items(projected_write, "selectors"),
+        notification_write_resource_selectors
+    );
 
     let rendered =
         serde_json::to_string(&inspected).expect("serialize notification delivery module");
     for required in [
-        "device_register",
-        "device_unregister",
         "device_list",
         "device_inspect",
         "notification_send",
@@ -453,7 +470,6 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         "notification",
         "notification_delivery",
         "device.read",
-        "device.write",
         "notifications.read",
         "notifications.write",
         "resource.read",
@@ -461,10 +477,10 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         "kind:device_registration",
         "kind:notification",
         "kind:notification_delivery",
-        "apns_custody_gate",
-        "environment_entitlement_device_gate",
+        "registration_transport_absent",
         "delivery_failure_evidence",
         "native_inbox_decision",
+        "provider_redaction",
         "P3MSA-INV-015",
     ] {
         assert!(
@@ -473,6 +489,9 @@ async fn notification_delivery_module_manifest_projects_pending_review_delivery_
         );
     }
     for forbidden in [
+        "device_register",
+        "device_unregister",
+        "device.write",
         "liveApnsTransport:true",
         "rawApnsToken",
         "rawDeviceToken",

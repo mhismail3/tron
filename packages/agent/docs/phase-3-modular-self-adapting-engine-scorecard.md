@@ -627,8 +627,11 @@ Accepted Slice 24G records a current-baseline metadata-only
 `notification_delivery_module` manifest seed. The manifest remains
 pending-review module metadata only and covers the existing
 server-owned `device_registration`, `notification`, and `notification_delivery`
-resources and existing device/notification execute operations, keeps the
-trusted system/admin split for device register/unregister, declares
+resources and existing provider-visible device list/inspect plus notification
+send/list/inspect/mark-read/mark-all-read execute operations. Device
+register/unregister behavior remains test-only schema and custody evidence;
+there is no provider operation or production registration transport seam. The
+manifest declares
 device/notification/resource authority needs bounded to the existing resource
 kinds with `kind:device_registration`, `kind:notification`, and
 `kind:notification_delivery` selectors, and keeps `networkPolicy: none`,

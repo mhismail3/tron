@@ -579,8 +579,6 @@ pub(super) async fn derive_capability_runtime_grant(
         // own resource custody below.
     } else if catalog_conformance_operation {
         allowed_resource_kinds.push(CATALOG_DISCOVERY_REPORT_KIND.to_owned());
-    } else if catalog_discovery_operation {
-        allowed_resource_kinds.push("catalog_discovery".to_owned());
     } else if diagnostic_read_operation {
         allowed_resource_kinds.extend(diagnostic_read_resource_kinds(operation));
     } else if matches!(
@@ -1712,6 +1710,24 @@ pub(super) fn model_capability_invocation_idempotency_key(
     workspace_id: Option<&str>,
     effective_args: &Value,
 ) -> String {
+    if effective_args.get("operation").and_then(Value::as_str) == Some("catalog_conformance")
+        && let Some(caller_key) = effective_args.get("idempotencyKey").and_then(Value::as_str)
+    {
+        let material = json!({
+            "version": 1,
+            "sessionId": session_id,
+            "operation": "catalog_conformance",
+            "callerKey": caller_key
+        });
+        return format!(
+            "model-capability-caller-idempotency:v1:{}",
+            sha256_hex(
+                serde_json::to_string(&material)
+                    .unwrap_or_else(|_| format!("{session_id}:catalog_conformance:{caller_key}"))
+                    .as_bytes()
+            )
+        );
+    }
     let material = stable_capability_invocation_material(
         run_id,
         session_id,

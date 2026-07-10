@@ -2443,8 +2443,9 @@ environment is explicit; delivery/read state is durable; badge semantics are
 defined; source-control/process/job/subagent/approval/web/research/skills/rules
 memory notification families map to real events.
 
-Focused tests: device register/unregister, token redaction, delivery failure
-evidence, read state, badge semantics, retention defaults, APNs environment,
+Focused tests: trusted internal-only device registration/unregistration schema
+and token-redaction fixtures, provider-visible device list/inspect, delivery
+failure evidence, read state, badge semantics, retention defaults, APNs environment,
 authority/resource checks, scope isolation, replay refs, provider schema
 behavior, runtime grant narrowing, and iOS/APNs absence guards.
 

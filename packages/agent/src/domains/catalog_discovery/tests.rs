@@ -138,7 +138,11 @@ async fn conformance_report_writes_resource_stream_event_and_does_not_execute_ta
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new(super::CONFORMANCE_REPORT_FUNCTION).unwrap(),
-            json!({"namespacePrefix": "demo", "reason": "test report"}),
+            json!({
+                "namespacePrefix": "demo",
+                "reason": "test report",
+                "idempotencyKey": "catalog-discovery-report-test"
+            }),
             client_context("catalog-discovery-report")
                 .with_scope(super::WRITE_SCOPE)
                 .with_idempotency_key("catalog-discovery-report-test"),
@@ -175,6 +179,41 @@ async fn conformance_report_writes_resource_stream_event_and_does_not_execute_ta
     assert!(serialized.contains("demo::call_guard"));
     assert!(!serialized.contains("demo::hidden_guard"));
     assert_eq!(payload["protected"]["functions"]["omitted"], 1);
+    assert!(
+        !serialized.contains("catalog-discovery-report-test"),
+        "raw caller idempotency key must not be stored in report evidence: {serialized}"
+    );
+}
+
+#[tokio::test]
+async fn conformance_report_rejects_missing_empty_and_oversized_caller_keys() {
+    let ctx = make_test_context();
+    for (suffix, payload) in [
+        ("missing", json!({"reason": "missing key"})),
+        (
+            "empty",
+            json!({"reason": "empty key", "idempotencyKey": "  "}),
+        ),
+        (
+            "oversized",
+            json!({"reason": "oversized key", "idempotencyKey": "x".repeat(257)}),
+        ),
+    ] {
+        let result = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new(super::CONFORMANCE_REPORT_FUNCTION).unwrap(),
+                payload,
+                client_context(&format!("catalog-discovery-report-{suffix}"))
+                    .with_scope(super::WRITE_SCOPE)
+                    .with_idempotency_key(format!("catalog-discovery-report-{suffix}")),
+            ))
+            .await;
+        assert!(
+            result.error.is_some(),
+            "{suffix} idempotency key must fail closed"
+        );
+    }
 }
 
 #[tokio::test]

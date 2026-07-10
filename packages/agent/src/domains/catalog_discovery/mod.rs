@@ -4,7 +4,10 @@
 //! inspectable, durable self-discovery surface. It does not route or execute
 //! discovered capabilities. Search and inspect are pure reads; conformance
 //! report generation writes only a `catalog_discovery_report` resource plus a
-//! catalog-discovery stream event.
+//! catalog-discovery stream event. Report replay is owned by the engine ledger:
+//! the bounded caller `idempotencyKey` determines both the invocation ledger
+//! identity and a hashed, scope-bound report resource id, while the raw key is
+//! never stored in report payloads or returned projections.
 //!
 //! ## Submodules
 //!

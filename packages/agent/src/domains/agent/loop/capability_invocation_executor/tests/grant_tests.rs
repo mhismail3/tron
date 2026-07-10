@@ -429,8 +429,7 @@ async fn capability_binding_list_runtime_grants_authorize_exact_record_kind_only
     ] {
         let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
             "operation": operation,
-            "limit": 10,
-            "idempotencyKey": format!("{operation}-runtime-grant")
+            "limit": 10
         }))
         .await;
         let grant = engine_host
@@ -575,11 +574,54 @@ async fn capability_shadow_trial_runtime_grants_authorize_exact_trial_kinds() {
         ("capability_shadow_trial_run_record", true),
         ("capability_shadow_trial_evidence_inspect", false),
     ] {
-        let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
-            "operation": operation,
-            "idempotencyKey": format!("{operation}-runtime-grant")
-        }))
-        .await;
+        let payload = match operation {
+            "capability_shadow_trial_request_record" => json!({
+                "operation": operation,
+                "title": "Runtime grant contract fixture",
+                "targetOperation": "git_status",
+                "currentBuiltInOwner": "domains::capability::operations::git",
+                "ownershipClass": "adapter_replaceable",
+                "replacementTarget": "replace",
+                "bindingMode": "shadow",
+                "candidateAdapter": {},
+                "authorityConstraints": {
+                    "networkPolicy": "none",
+                    "authorityScopes": [],
+                    "resourceKinds": [],
+                    "resourceSelectors": []
+                },
+                "contractEvidenceRefs": [],
+                "evidenceRefs": [],
+                "staleVersionGuard": {},
+                "rollbackRef": {"kind": "test", "resourceId": "rollback"},
+                "disableRef": {"kind": "test", "resourceId": "disable"},
+                "abortRef": {"kind": "test", "resourceId": "abort"},
+                "rationale": "Exercise grant derivation after structural validation.",
+                "idempotencyKey": format!("{operation}-runtime-grant")
+            }),
+            "capability_shadow_trial_decision_record" => json!({
+                "operation": operation,
+                "capabilityShadowTrialRequestResourceId": "capability_shadow_trial_request:test",
+                "expectedCapabilityShadowTrialRequestVersionId": "version-request",
+                "decision": "approved",
+                "reason": "Exercise grant derivation after structural validation.",
+                "idempotencyKey": format!("{operation}-runtime-grant")
+            }),
+            "capability_shadow_trial_run_record" => json!({
+                "operation": operation,
+                "capabilityShadowTrialDecisionResourceId": "capability_shadow_trial_decision:test",
+                "expectedCapabilityShadowTrialDecisionVersionId": "version-decision",
+                "builtInProjection": shadow_trial_grant_projection("built-in"),
+                "candidateProjection": shadow_trial_grant_projection("candidate"),
+                "idempotencyKey": format!("{operation}-runtime-grant")
+            }),
+            "capability_shadow_trial_evidence_inspect" => json!({
+                "operation": operation,
+                "capabilityShadowTrialEvidenceResourceId": "capability_shadow_trial_evidence:test"
+            }),
+            _ => unreachable!("covered shadow operation"),
+        };
+        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
         let grant = engine_host
             .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
             .await
@@ -651,6 +693,21 @@ async fn capability_shadow_trial_runtime_grants_authorize_exact_trial_kinds() {
             grant.allowed_authority_scopes
         );
     }
+}
+
+fn shadow_trial_grant_projection(role: &str) -> Value {
+    json!({
+        "operation": "git_status",
+        "status": "clean",
+        "headState": "known",
+        "indexState": "known",
+        "worktreeState": "clean",
+        "evidenceRef": {
+            "kind": "test",
+            "resourceId": format!("evidence-{role}"),
+            "role": role
+        }
+    })
 }
 
 #[tokio::test]
@@ -828,109 +885,6 @@ async fn module_registry_inspect_runtime_grant_is_read_only_and_resource_scoped(
     assert_module_registry_runtime_grant_is_read_only(
         &grant,
         Some("module_manifest:module_registry"),
-    );
-}
-
-#[tokio::test]
-async fn catalog_discovery_runtime_grant_has_no_state_authority() {
-    for payload in [
-        json!({
-            "operation": "catalog_search",
-            "text": "git_status"
-        }),
-        json!({
-            "operation": "catalog_inspect",
-            "kind": "function",
-            "id": "execute::git_status"
-        }),
-    ] {
-        let (engine_host, invocation) = captured_execute_invocation_for_payload(payload).await;
-        let grant = engine_host
-            .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-            .await
-            .expect("inspect grant")
-            .expect("derived grant");
-
-        assert_eq!(grant.network_policy, "none");
-        assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
-        assert_eq!(
-            grant.allowed_authority_scopes,
-            vec!["capability.execute", "catalog_discovery.read"]
-        );
-        assert_eq!(
-            grant.allowed_resource_kinds,
-            vec!["catalog_discovery"],
-            "catalog discovery must use its own catalog-scoped resource kind"
-        );
-        assert_eq!(
-            grant.resource_selectors,
-            vec!["kind:catalog_discovery"],
-            "catalog discovery must use its own catalog-scoped selector"
-        );
-        assert_invocation_scopes(
-            &invocation,
-            &["capability.execute", "catalog_discovery.read"],
-        );
-        for forbidden in ["state::get", "state::set", "state::list"] {
-            assert!(
-                !grant.allowed_capabilities.contains(&forbidden.to_owned()),
-                "catalog discovery grant must not include {forbidden}"
-            );
-        }
-        for forbidden in ["state.read", "state.write"] {
-            assert!(
-                !grant
-                    .allowed_authority_scopes
-                    .contains(&forbidden.to_owned()),
-                "catalog discovery grant must not include {forbidden}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn catalog_conformance_runtime_grant_authorizes_exact_report_write() {
-    let (engine_host, invocation) = captured_execute_invocation_for_payload(json!({
-        "operation": "catalog_conformance",
-        "reason": "Verify the current visible capability catalog",
-        "idempotencyKey": "catalog-conformance-runtime-grant"
-    }))
-    .await;
-    let grant = engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-        .await
-        .expect("inspect grant")
-        .expect("derived grant");
-
-    assert_eq!(grant.network_policy, "none");
-    assert_no_state_inheritance(&grant);
-    assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
-    assert_eq!(
-        grant.allowed_authority_scopes,
-        vec![
-            "capability.execute",
-            "catalog_discovery.write",
-            "resource.write"
-        ]
-    );
-    assert_eq!(
-        grant.allowed_resource_kinds,
-        vec![crate::engine::CATALOG_DISCOVERY_REPORT_KIND]
-    );
-    assert_eq!(
-        grant.resource_selectors,
-        vec![format!(
-            "kind:{}",
-            crate::engine::CATALOG_DISCOVERY_REPORT_KIND
-        )]
-    );
-    assert_invocation_scopes(
-        &invocation,
-        &[
-            "capability.execute",
-            "catalog_discovery.write",
-            "resource.write",
-        ],
     );
 }
 

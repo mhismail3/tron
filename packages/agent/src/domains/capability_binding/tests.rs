@@ -569,11 +569,21 @@ impl ShadowFixture {
         for scope in &source.causal_context.authority_scopes {
             context = context.with_scope(scope.clone());
         }
+        let mut payload = payload_with_operation(operation, &source.payload);
+        if matches!(
+            operation,
+            "capability_shadow_trial_request_record"
+                | "capability_shadow_trial_decision_record"
+                | "capability_shadow_trial_run_record"
+        ) && payload.get("idempotencyKey").is_none()
+        {
+            payload["idempotencyKey"] = Value::String(format!("idempotency-{key}"));
+        }
         let invocation = Invocation {
             id: InvocationId::new(format!("invocation-{key}")).expect("invocation id"),
             function_id: FunctionId::new("capability::execute").expect("function id"),
             delivery_mode: DeliveryMode::Sync,
-            payload: payload_with_operation(operation, &source.payload),
+            payload,
             causal_context: context,
         };
         crate::domains::capability::execute_value(&invocation, &self.capability_deps)

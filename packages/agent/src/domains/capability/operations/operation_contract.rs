@@ -14,6 +14,8 @@ use crate::engine::FunctionId;
 use crate::engine::kernel::schema;
 use crate::shared::server::errors::CapabilityError;
 
+mod capability_binding;
+
 /// One authoritative provider-visible structural contract.
 #[derive(Clone, Debug)]
 pub(super) struct OperationContract {
@@ -26,6 +28,9 @@ pub(super) struct OperationContract {
 /// Absence means the operation still relies on its domain-owned structural
 /// validator and must be projected as `domain_validated_contract`.
 pub(super) fn contract(operation: &str) -> Option<OperationContract> {
+    if let Some(input_schema) = capability_binding::input_schema(operation) {
+        return Some(OperationContract { input_schema });
+    }
     let (required, properties) = match operation {
         "catalog_search" => (vec!["operation"], catalog_query_properties(false)),
         "catalog_conformance" => (
@@ -46,26 +51,6 @@ pub(super) fn contract(operation: &str) -> Option<OperationContract> {
                 (
                     "includeOutputSchema",
                     json!({"type": "boolean", "description": "Include the output contract only when it is needed."}),
-                ),
-            ],
-        ),
-        "capability_binding_cockpit_overview" => (
-            vec!["operation"],
-            vec![
-                (
-                    "targetOperation",
-                    string_schema(
-                        "Optional exact provider-visible operation name. When set, returns one compact cockpit row with role, replacement, binding, shadow, route, rollback, and scoped evidence facts for that operation.",
-                    ),
-                ),
-                (
-                    "limit",
-                    bounded_integer_schema(
-                        1,
-                        crate::domains::capability_binding::contract::COCKPIT_OVERVIEW_MAX_LIMIT
-                            as u64,
-                        "Maximum broad cockpit operation rows.",
-                    ),
                 ),
             ],
         ),
@@ -420,7 +405,7 @@ mod tests {
             .iter()
             .filter_map(|operation| contract(operation).map(|contract| (*operation, contract)))
             .collect::<Vec<_>>();
-        assert_eq!(promoted.len(), 15);
+        assert_eq!(promoted.len(), 39);
         for (operation, contract) in promoted {
             assert_eq!(contract.input_schema["additionalProperties"], false);
             assert_eq!(
@@ -437,6 +422,20 @@ mod tests {
                 &contract.input_schema,
             )
             .expect("promoted schema uses only enforced structural keywords");
+        }
+    }
+
+    #[test]
+    fn promoted_catalog_and_runtime_schemas_are_identical() {
+        for operation in supported_operation_names() {
+            let Some(contract) = contract(operation) else {
+                continue;
+            };
+            assert_eq!(
+                super::super::catalog::execute_operation_input_schema(operation),
+                contract.input_schema,
+                "catalog and pre-authority runtime schema drifted for {operation}"
+            );
         }
     }
 
