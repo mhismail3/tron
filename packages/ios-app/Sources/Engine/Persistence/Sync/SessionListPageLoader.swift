@@ -23,6 +23,50 @@ enum SessionListPageLoadingError: LocalizedError, Equatable {
     }
 }
 
+enum CanonicalSessionTimestamp {
+    /// Server snapshot timestamps are fixed-width UTC RFC3339 nanoseconds, so
+    /// byte ordering is chronological without a lossy date conversion.
+    static func isValid(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard bytes.count == 30,
+              bytes[4] == 45,
+              bytes[7] == 45,
+              bytes[10] == 84,
+              bytes[13] == 58,
+              bytes[16] == 58,
+              bytes[19] == 46,
+              bytes[29] == 90 else {
+            return false
+        }
+        let punctuation = Set([4, 7, 10, 13, 16, 19, 29])
+        guard bytes.indices.allSatisfy({ index in
+            punctuation.contains(index) || (bytes[index] >= 48 && bytes[index] <= 57)
+        }) else {
+            return false
+        }
+
+        func integer(_ range: Range<Int>) -> Int {
+            range.reduce(0) { value, index in value * 10 + Int(bytes[index] - 48) }
+        }
+        let year = integer(0..<4)
+        let month = integer(5..<7)
+        let day = integer(8..<10)
+        let hour = integer(11..<13)
+        let minute = integer(14..<16)
+        let second = integer(17..<19)
+        guard year > 0, (1...12).contains(month), hour < 24, minute < 60, second < 60 else {
+            return false
+        }
+        let leapYear = year.isMultiple(of: 4) && (!year.isMultiple(of: 100) || year.isMultiple(of: 400))
+        let daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        return day > 0 && day <= daysInMonth[month - 1]
+    }
+
+    static func isAtOrBefore(_ value: String, boundary: String) -> Bool {
+        isValid(value) && isValid(boundary) && value <= boundary
+    }
+}
+
 /// Loads a generous, explicitly bounded server session snapshot.
 ///
 /// Data loading stays independent from dashboard presentation expansion. Pages
@@ -54,7 +98,8 @@ struct SessionListPageLoader {
             let result = try await fetchPage(min(Self.pageSize, remaining), cursor)
             pageCount += 1
 
-            if let pageSnapshotAsOf = result.snapshotAsOf, !pageSnapshotAsOf.isEmpty {
+            let pageSnapshotAsOf = result.snapshotAsOf
+            if CanonicalSessionTimestamp.isValid(pageSnapshotAsOf) {
                 if let snapshotAsOf, snapshotAsOf != pageSnapshotAsOf {
                     throw SessionListPageLoadingError.inconsistentSnapshot
                 }
@@ -62,14 +107,24 @@ struct SessionListPageLoader {
             } else {
                 canReconcile = false
             }
-            canReconcile = canReconcile && result.snapshotCanReconcile == true
+            canReconcile = canReconcile && result.snapshotCanReconcile
 
             let priorCount = sessions.count
-            for session in result.sessions where seenSessionIds.insert(session.sessionId).inserted {
+            let responseExceedsBudget = result.sessions.count > remaining
+            for session in result.sessions.prefix(remaining)
+            where seenSessionIds.insert(session.sessionId).inserted {
                 sessions.append(session)
             }
 
-            if sessions.count == priorCount, result.hasMore == true {
+            if responseExceedsBudget {
+                return ServerSessionListSnapshot(
+                    sessions: sessions,
+                    isComplete: false,
+                    snapshotAsOf: snapshotAsOf
+                )
+            }
+
+            if sessions.count == priorCount, result.hasMore {
                 noProgressPageCount += 1
                 if noProgressPageCount >= Self.maximumNoProgressPageCount {
                     return ServerSessionListSnapshot(
@@ -82,7 +137,7 @@ struct SessionListPageLoader {
                 noProgressPageCount = 0
             }
 
-            guard result.hasMore == true else {
+            guard result.hasMore else {
                 return ServerSessionListSnapshot(
                     sessions: sessions,
                     isComplete: canReconcile && snapshotAsOf != nil,

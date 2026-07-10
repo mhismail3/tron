@@ -46,6 +46,36 @@ final class SessionTypesTests: XCTestCase {
         XCTAssertFalse(info.isFork)
     }
 
+    func testSessionListRequiresBooleanTerminalProofAndSnapshotFields() throws {
+        let valid = """
+        {
+            "sessions": [],
+            "hasMore": false,
+            "nextCursor": null,
+            "snapshotAsOf": "2026-07-01T13:00:00.000000000Z",
+            "snapshotCanReconcile": true
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(SessionListResult.self, from: valid)
+        XCTAssertFalse(decoded.hasMore)
+
+        for invalidJSON in [
+            """
+            {"sessions": [], "nextCursor": null, "snapshotAsOf": "2026-07-01T13:00:00.000000000Z", "snapshotCanReconcile": true}
+            """,
+            """
+            {"sessions": [], "hasMore": "false", "nextCursor": null, "snapshotAsOf": "2026-07-01T13:00:00.000000000Z", "snapshotCanReconcile": true}
+            """,
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(
+                    SessionListResult.self,
+                    from: invalidJSON.data(using: .utf8)!
+                )
+            )
+        }
+    }
+
     func testSessionInfoIsFork() throws {
         let json = """
         {

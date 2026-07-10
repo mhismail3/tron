@@ -2810,7 +2810,7 @@ Agent soul / system prompt
 
 Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v4-*` and starts fresh. Non-current product/session data is archived, not migrated or read by the new runtime. Pre-unified database artifacts are archived the same way and are never read as active storage.
 
-The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
+The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships. Session snapshots traverse canonical UTC-nanosecond `(created_at, id)` keys through the composite creation index without SQLite date conversion.
 
 Retained session rows, event rows, Agent Trace-style records, bounded
 server/iOS logs, and compressed content-addressed blobs share that same SQLite
@@ -2926,11 +2926,13 @@ packages/ios-app/Sources/
   that use inset liquid-glass interactive containers, prefer generated session
   titles before prompt-derived labels, and show untitled rows as `New Session`.
   Session refresh reads immutable creation-key 200-row server cursor pages
-  beneath one snapshot boundary into a generous bounded snapshot instead of
-  truncating the dashboard at 50 rows. Page/cursor/no-progress limits fail
-  non-destructively, and complete snapshots reconcile metadata and stale event
-  rows in one local transaction while preserving sessions newer than the
-  boundary. Each
+  beneath one canonical nanosecond snapshot boundary into a generous bounded
+  snapshot instead of truncating the dashboard at 50 rows. The closed response
+  contract requires `hasMore`, cursor, boundary, and reconciliation proof;
+  only exact terminal false after verified traversal authorizes deletion.
+  Page/cursor/no-progress/oversized-response limits fail non-destructively, and
+  complete snapshots reconcile metadata and stale event rows in one local
+  transaction while preserving sessions newer than the boundary. Each
   workspace shows its latest 10 sessions by default and independently reveals
   older rows in 10-session increments with full-width View more/View less controls.
   The shell also keeps server-backed new-session workspace selection with configured/recent

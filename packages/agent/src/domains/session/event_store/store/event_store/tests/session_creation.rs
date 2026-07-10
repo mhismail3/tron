@@ -46,7 +46,7 @@ fn create_session_with_identity_persists_explicit_replay_fields() {
 
     assert_eq!(result.session.id, "sess_replay_fixed");
     assert_eq!(result.session.workspace_id, "ws_replay_fixed");
-    assert_eq!(result.session.created_at, "2026-06-09T12:00:01Z");
+    assert_eq!(result.session.created_at, "2026-06-09T12:00:01.000000000Z");
     assert_eq!(result.session.last_activity_at, "2026-06-09T12:00:02Z");
     assert_eq!(result.root_event.id, "evt_replay_root");
     assert_eq!(result.root_event.timestamp, "2026-06-09T12:00:02Z");

@@ -72,7 +72,9 @@ final class MockSessionClientForRepository {
             sessions: listResultToReturn,
             totalCount: listResultToReturn.count,
             hasMore: false,
-            nextCursor: nil
+            nextCursor: nil,
+            snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
+            snapshotCanReconcile: true
         )
     }
 

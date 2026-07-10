@@ -1,10 +1,10 @@
 //! Shared query-side services for session read capabilities.
 //!
 //! `session::list` clamps every page to 200 rows and returns an opaque cursor
-//! over immutable creation/session-ID keys beneath one server-issued
-//! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
-//! and clients can assemble a generous bounded snapshot without one unbounded
-//! database read.
+//! over lossless canonical-nanosecond creation/session-ID keys beneath one
+//! server-issued `snapshotAsOf` boundary. Mutable activity cannot move a row
+//! between pages, activity summaries use one bounded batch projection, and
+//! clients can assemble a generous snapshot without unbounded database reads.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -27,6 +27,17 @@ pub(crate) struct SessionListCursor {
     before_session_id: String,
     include_archived: bool,
     working_directory: Option<String>,
+}
+
+impl SessionListCursor {
+    fn has_canonical_timestamps(&self) -> bool {
+        [self.snapshot_as_of.as_str(), self.before_created_at.as_str()]
+            .into_iter()
+            .all(|timestamp| {
+                crate::domains::session::event_store::sqlite::repositories::session::canonical_session_timestamp(timestamp)
+                    .is_ok_and(|canonical| canonical == timestamp)
+            })
+    }
 }
 
 mod operations;
@@ -64,7 +75,6 @@ impl SessionQueryService {
         include_archived: bool,
         limit: Option<usize>,
         working_directory: Option<String>,
-        offset: Option<usize>,
         cursor: Option<SessionListCursor>,
     ) -> Result<Value, CapabilityError> {
         let limit = limit
@@ -72,14 +82,14 @@ impl SessionQueryService {
             .clamp(1, SESSION_LIST_MAX_LIMIT);
         let fetch_limit = limit.saturating_add(1);
         let snapshot_as_of = cursor.as_ref().map_or_else(
-            || chrono::Utc::now().to_rfc3339(),
+            || chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
             |cursor| cursor.snapshot_as_of.clone(),
         );
         let filter = crate::domains::agent::r#loop::SessionFilter {
             workspace_path: working_directory,
             include_archived,
             limit: Some(fetch_limit),
-            offset,
+            offset: None,
             snapshot_created_at: Some(snapshot_as_of.clone()),
             before_created_at: cursor
                 .as_ref()
@@ -166,7 +176,7 @@ impl SessionQueryService {
                 "hasMore": has_more,
                 "nextCursor": next_cursor,
                 "snapshotAsOf": snapshot_as_of,
-                "snapshotCanReconcile": include_archived && filter.workspace_path.is_none() && offset.is_none(),
+                "snapshotCanReconcile": include_archived && filter.workspace_path.is_none(),
             }))
         })
         .await
@@ -417,6 +427,9 @@ mod tests {
 
     use super::*;
     use crate::domains::session::event_store::{AppendOptions, EventType};
+    use crate::engine::{
+        ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
+    };
     use crate::shared::server::test_support::make_test_context;
 
     /// A freshly-created session always has exactly one event — the
@@ -537,16 +550,10 @@ mod tests {
             .create_session("m", "/tmp/b", Some("b"))
             .unwrap();
 
-        let result = SessionQueryService::list(
-            &Deps::from_test_context(&ctx),
-            false,
-            Some(1),
-            None,
-            Some(0),
-            None,
-        )
-        .await
-        .unwrap();
+        let result =
+            SessionQueryService::list(&Deps::from_test_context(&ctx), false, Some(1), None, None)
+                .await
+                .unwrap();
         let sessions = result["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(result["hasMore"].as_bool(), Some(true));
@@ -559,7 +566,6 @@ mod tests {
             &Deps::from_test_context(&ctx),
             false,
             Some(1),
-            None,
             None,
             Some(cursor),
         )
@@ -579,7 +585,6 @@ mod tests {
             false,
             None,
             Some("/tmp/a".to_string()),
-            Some(0),
             None,
         )
         .await
@@ -591,12 +596,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_rejects_mixed_cursor_and_offset_pagination() {
+    async fn registered_session_list_validates_routes_executes_and_validates_response() {
+        let ctx = make_test_context();
+        let session_id = ctx
+            .session_manager
+            .create_session("model", "/tmp/dashboard-contract", Some("Dashboard"))
+            .unwrap();
+        ctx.event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::MessageUser,
+                payload: json!({"content": "list me"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        let context = || {
+            CausalContext::new(
+                ActorId::new("engine-dashboard-test").unwrap(),
+                ActorKind::Client,
+                AuthorityGrantId::new("engine-transport").unwrap(),
+                TraceId::generate(),
+            )
+            .with_scope("session.read")
+            .with_session_id("dashboard-list-test")
+        };
+
+        let invalid = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("session::list").unwrap(),
+                json!({"includeArchived": true, "limit": 1, "offset": 0}),
+                context(),
+            ))
+            .await;
+        assert!(
+            invalid.error.is_some(),
+            "registered request schema accepted the retired offset fallback"
+        );
+
+        let result = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("session::list").unwrap(),
+                json!({"includeArchived": true, "limit": 1}),
+                context(),
+            ))
+            .await;
+        assert_eq!(result.error, None, "registered invocation failed");
+        let value = result.value.expect("validated response");
+        assert_eq!(value["sessions"][0]["sessionId"], session_id);
+        assert_eq!(value["hasMore"], false);
+        assert_eq!(value["nextCursor"], Value::Null);
+        assert_eq!(value["snapshotCanReconcile"], true);
+        let snapshot = value["snapshotAsOf"].as_str().expect("snapshot boundary");
+        assert_eq!(snapshot.len(), 30, "snapshot must retain nanoseconds");
+        assert!(snapshot.ends_with('Z'));
+    }
+
+    #[tokio::test]
+    async fn list_rejects_a_cursor_with_a_noncanonical_snapshot_boundary() {
         let ctx = make_test_context();
         let cursor = serde_json::to_string(&SessionListCursor {
             version: 1,
             snapshot_as_of: "2026-07-01T12:00:01Z".into(),
-            before_created_at: "2026-07-01T12:00:00Z".into(),
+            before_created_at: "2026-07-01T12:00:00.000000000Z".into(),
             before_session_id: "sess_cursor".into(),
             include_archived: false,
             working_directory: None,
@@ -604,7 +668,6 @@ mod tests {
         .unwrap();
         let params = json!({
             "limit": 20,
-            "offset": 0,
             "cursor": cursor,
         });
 
@@ -619,8 +682,8 @@ mod tests {
         let ctx = make_test_context();
         let cursor = serde_json::to_string(&SessionListCursor {
             version: 1,
-            snapshot_as_of: "2026-07-01T12:00:01Z".into(),
-            before_created_at: "2026-07-01T12:00:00Z".into(),
+            snapshot_as_of: "2026-07-01T12:00:01.000000000Z".into(),
+            before_created_at: "2026-07-01T12:00:00.000000000Z".into(),
             before_session_id: "sess_cursor".into(),
             include_archived: true,
             working_directory: None,

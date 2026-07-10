@@ -82,7 +82,9 @@ struct SessionClientTests {
                 sessions: listResult,
                 totalCount: listResult.count,
                 hasMore: false,
-                nextCursor: nil
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
+                snapshotCanReconcile: true
             )
         }
 
@@ -219,7 +221,9 @@ struct SessionClientTests {
                 sessions: [],
                 totalCount: nil,
                 hasMore: false,
-                nextCursor: nil
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
+                snapshotCanReconcile: true
             )
         }
 

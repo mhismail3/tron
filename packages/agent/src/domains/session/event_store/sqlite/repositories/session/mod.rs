@@ -54,7 +54,7 @@ pub struct ListSessionsOptions<'a> {
     pub limit: Option<i64>,
     /// Skip results.
     pub offset: Option<i64>,
-    /// Snapshot boundary: exclude sessions created after this timestamp.
+    /// Canonical nanosecond UTC snapshot boundary: exclude newer sessions.
     pub snapshot_created_at: Option<&'a str>,
     /// Stable keyset boundary: return rows older than this creation timestamp.
     pub before_created_at: Option<&'a str>,
@@ -88,6 +88,75 @@ pub struct IncrementCounters {
 /// Session repository — stateless, every method takes `&Connection`.
 pub struct SessionRepo;
 
+type ListQuery = (String, Vec<Box<dyn rusqlite::types::ToSql>>);
+
+/// Normalize a session creation timestamp into the lossless sortable form used
+/// by snapshot and keyset predicates.
+pub(crate) fn canonical_session_timestamp(timestamp: &str) -> Result<String> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|value| {
+            value
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        })
+        .map_err(|error| {
+            crate::domains::session::event_store::EventStoreError::InvalidOperation(format!(
+                "session creation timestamp must be RFC3339: {error}"
+            ))
+        })
+}
+
+fn build_list_query(opts: &ListSessionsOptions<'_>) -> ListQuery {
+    use std::fmt::Write;
+    let mut sql = String::from("SELECT * FROM sessions WHERE 1=1");
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ws_id) = opts.workspace_id {
+        let _ = write!(sql, " AND workspace_id = ?{}", param_values.len() + 1);
+        param_values.push(Box::new(ws_id.to_string()));
+    }
+    if let Some(working_directory) = opts.working_directory {
+        let _ = write!(sql, " AND working_directory = ?{}", param_values.len() + 1);
+        param_values.push(Box::new(working_directory.to_string()));
+    }
+    if let Some(ended) = opts.ended {
+        if ended {
+            sql.push_str(" AND ended_at IS NOT NULL");
+        } else {
+            sql.push_str(" AND ended_at IS NULL");
+        }
+    }
+    if let Some(snapshot_created_at) = opts.snapshot_created_at {
+        let _ = write!(sql, " AND created_at <= ?{}", param_values.len() + 1);
+        param_values.push(Box::new(snapshot_created_at.to_string()));
+    }
+    if let (Some(created_at), Some(session_id)) = (opts.before_created_at, opts.before_session_id) {
+        let timestamp_param = param_values.len() + 1;
+        let session_param = timestamp_param + 1;
+        let _ = write!(
+            sql,
+            " AND (created_at < ?{timestamp_param} OR (created_at = ?{timestamp_param} AND id < ?{session_param}))"
+        );
+        param_values.push(Box::new(created_at.to_string()));
+        param_values.push(Box::new(session_id.to_string()));
+    }
+    if opts.snapshot_created_at.is_some() || opts.before_created_at.is_some() {
+        sql.push_str(" ORDER BY created_at DESC, id DESC");
+    } else {
+        sql.push_str(" ORDER BY last_activity_at DESC, id DESC");
+    }
+    if let Some(limit) = opts.limit {
+        let _ = write!(sql, " LIMIT {limit}");
+    } else if opts.offset.is_some() {
+        sql.push_str(" LIMIT -1");
+    }
+    if let Some(offset) = opts.offset {
+        let _ = write!(sql, " OFFSET {offset}");
+    }
+
+    (sql, param_values)
+}
+
 impl SessionRepo {
     /// Create a new session.
     pub fn create(conn: &Connection, opts: &CreateSessionOptions<'_>) -> Result<SessionRow> {
@@ -101,7 +170,7 @@ impl SessionRepo {
         identity: &SessionIdentity,
     ) -> Result<SessionRow> {
         let id = identity.id.clone();
-        let now = identity.created_at.clone();
+        let now = canonical_session_timestamp(&identity.created_at)?;
         let tags_json = opts.tags.map_or_else(
             || "[]".to_string(),
             |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()),
@@ -165,58 +234,7 @@ impl SessionRepo {
 
     /// List sessions with filtering.
     pub fn list(conn: &Connection, opts: &ListSessionsOptions<'_>) -> Result<Vec<SessionRow>> {
-        use std::fmt::Write;
-        let mut sql = String::from("SELECT * FROM sessions WHERE 1=1");
-        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(ws_id) = opts.workspace_id {
-            let _ = write!(sql, " AND workspace_id = ?{}", param_values.len() + 1);
-            param_values.push(Box::new(ws_id.to_string()));
-        }
-        if let Some(working_directory) = opts.working_directory {
-            let _ = write!(sql, " AND working_directory = ?{}", param_values.len() + 1);
-            param_values.push(Box::new(working_directory.to_string()));
-        }
-        if let Some(ended) = opts.ended {
-            if ended {
-                sql.push_str(" AND ended_at IS NOT NULL");
-            } else {
-                sql.push_str(" AND ended_at IS NULL");
-            }
-        }
-        if let Some(snapshot_created_at) = opts.snapshot_created_at {
-            let _ = write!(
-                sql,
-                " AND julianday(created_at) <= julianday(?{})",
-                param_values.len() + 1
-            );
-            param_values.push(Box::new(snapshot_created_at.to_string()));
-        }
-        if let (Some(created_at), Some(session_id)) =
-            (opts.before_created_at, opts.before_session_id)
-        {
-            let timestamp_param = param_values.len() + 1;
-            let session_param = timestamp_param + 1;
-            let _ = write!(
-                sql,
-                " AND (julianday(created_at) < julianday(?{timestamp_param}) OR (julianday(created_at) = julianday(?{timestamp_param}) AND id < ?{session_param}))"
-            );
-            param_values.push(Box::new(created_at.to_string()));
-            param_values.push(Box::new(session_id.to_string()));
-        }
-        if opts.snapshot_created_at.is_some() || opts.before_created_at.is_some() {
-            sql.push_str(" ORDER BY julianday(created_at) DESC, id DESC");
-        } else {
-            sql.push_str(" ORDER BY last_activity_at DESC, id DESC");
-        }
-        if let Some(limit) = opts.limit {
-            let _ = write!(sql, " LIMIT {limit}");
-        } else if opts.offset.is_some() {
-            sql.push_str(" LIMIT -1");
-        }
-        if let Some(offset) = opts.offset {
-            let _ = write!(sql, " OFFSET {offset}");
-        }
+        let (sql, param_values) = build_list_query(opts);
 
         let mut stmt = conn.prepare(&sql)?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =

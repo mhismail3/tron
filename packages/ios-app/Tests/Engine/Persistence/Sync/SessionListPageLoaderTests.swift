@@ -21,7 +21,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                 totalCount: expected.count,
                 hasMore: hasMore,
                 nextCursor: hasMore ? String(end) : nil,
-                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                 snapshotCanReconcile: true
             )
         }
@@ -52,7 +52,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                     totalCount: 3,
                     hasMore: true,
                     nextCursor: "next",
-                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                     snapshotCanReconcile: true
                 )
             }
@@ -61,7 +61,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                 totalCount: 3,
                 hasMore: false,
                 nextCursor: nil,
-                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                 snapshotCanReconcile: true
             )
         }
@@ -83,7 +83,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                 totalCount: expected.count,
                 hasMore: end < expected.count,
                 nextCursor: String(end),
-                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                 snapshotCanReconcile: true
             )
         }
@@ -91,6 +91,26 @@ final class SessionListPageLoaderTests: XCTestCase {
         XCTAssertFalse(snapshot.isComplete)
         XCTAssertEqual(snapshot.sessions.count, SessionListPageLoader.maximumSessionCount)
         XCTAssertEqual(Set(snapshot.sessions.map(\.sessionId)).count, snapshot.sessions.count)
+    }
+
+    func testOversizedTerminalPageIsTruncatedAndNeverDestructive() async throws {
+        let oversized = (0..<2_100).map { index in
+            makeSessionInfo(index: index, project: index % 50)
+        }
+
+        let snapshot = try await SessionListPageLoader().load { _, _ in
+            SessionListResult(
+                sessions: oversized,
+                totalCount: oversized.count,
+                hasMore: false,
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
+                snapshotCanReconcile: true
+            )
+        }
+
+        XCTAssertEqual(snapshot.sessions.count, SessionListPageLoader.maximumSessionCount)
+        XCTAssertFalse(snapshot.isComplete)
     }
 
     func testRejectsMoreFlagWithoutCursor() async {
@@ -101,7 +121,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                     totalCount: 1,
                     hasMore: true,
                     nextCursor: nil,
-                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                     snapshotCanReconcile: true
                 )
             }
@@ -127,7 +147,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                     totalCount: nil,
                     hasMore: true,
                     nextCursor: nextCursor,
-                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                     snapshotCanReconcile: true
                 )
             }
@@ -146,7 +166,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                 totalCount: nil,
                 hasMore: true,
                 nextCursor: "cursor-\(requestCount)",
-                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                 snapshotCanReconcile: true
             )
         }
@@ -164,7 +184,7 @@ final class SessionListPageLoaderTests: XCTestCase {
                 totalCount: nil,
                 hasMore: true,
                 nextCursor: "cursor-\(requestCount)",
-                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotAsOf: "2026-07-01T13:00:00.000000000Z",
                 snapshotCanReconcile: true
             )
         }
@@ -179,7 +199,9 @@ final class SessionListPageLoaderTests: XCTestCase {
                 sessions: [makeSessionInfo(index: 0, project: 0)],
                 totalCount: 1,
                 hasMore: false,
-                nextCursor: nil
+                nextCursor: nil,
+                snapshotAsOf: "malformed",
+                snapshotCanReconcile: true
             )
         }
 
@@ -196,8 +218,8 @@ final class SessionListPageLoaderTests: XCTestCase {
                     hasMore: cursor == nil,
                     nextCursor: cursor == nil ? "next" : nil,
                     snapshotAsOf: cursor == nil
-                        ? "2026-07-01T13:00:00Z"
-                        : "2026-07-01T13:00:01Z",
+                        ? "2026-07-01T13:00:00.000000000Z"
+                        : "2026-07-01T13:00:01.000000000Z",
                     snapshotCanReconcile: true
                 )
             }
@@ -211,7 +233,7 @@ final class SessionListPageLoaderTests: XCTestCase {
         SessionInfo(
             sessionId: String(format: "session-%04d", index),
             model: "model",
-            createdAt: "2026-07-01T12:00:00Z",
+            createdAt: "2026-07-01T12:00:00.000000000Z",
             eventCount: 1,
             turnCount: 1,
             messageCount: 1,

@@ -59,7 +59,7 @@ impl SessionIdentity {
     pub fn generate_current() -> Self {
         Self {
             id: format!("sess_{}", Uuid::now_v7()),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
         }
     }
 }

@@ -29,7 +29,7 @@ final class SessionRepositoryTests: XCTestCase {
         title: String? = "Test Session",
         latestModel: String = "claude-sonnet-4-6",
         workingDirectory: String = "/tmp/test",
-        createdAt: String = "2026-04-01T00:00:00Z",
+        createdAt: String = "2026-04-01T00:00:00.000000000Z",
         lastActivityAt: String = "2026-04-01T12:00:00Z",
         archivedAt: String? = nil,
         eventCount: Int = 10,
@@ -110,7 +110,7 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved?.title, "Test Session")
         XCTAssertEqual(retrieved?.latestModel, "claude-sonnet-4-6")
         XCTAssertEqual(retrieved?.workingDirectory, "/tmp/test")
-        XCTAssertEqual(retrieved?.createdAt, "2026-04-01T00:00:00Z")
+        XCTAssertEqual(retrieved?.createdAt, "2026-04-01T00:00:00.000000000Z")
         XCTAssertEqual(retrieved?.lastActivityAt, "2026-04-01T12:00:00Z")
         XCTAssertNil(retrieved?.archivedAt)
         XCTAssertEqual(retrieved?.eventCount, 10)
@@ -252,7 +252,7 @@ final class SessionRepositoryTests: XCTestCase {
             upserting: allSessions,
             serverOrigin: origin,
             authoritativeSessionIds: allIds,
-            snapshotAsOf: "2026-04-02T00:00:00Z"
+            snapshotAsOf: "2026-04-02T00:00:00.000400000Z"
         )
         XCTAssertEqual(initialRemoved, 0)
         let initialSessions = try await database.sessions.getByOrigin(origin)
@@ -266,7 +266,7 @@ final class SessionRepositoryTests: XCTestCase {
         )
         var futureSession = makeSession(
             id: "session-future",
-            createdAt: "2026-04-02T00:00:00.500Z",
+            createdAt: "2026-04-02T00:00:00.000400001Z",
             serverOrigin: origin
         )
         futureSession.title = "Created after snapshot"
@@ -280,7 +280,7 @@ final class SessionRepositoryTests: XCTestCase {
             upserting: retainedSessions,
             serverOrigin: origin,
             authoritativeSessionIds: Set(retainedSessions.map(\.id)),
-            snapshotAsOf: "2026-04-02T00:00:00Z"
+            snapshotAsOf: "2026-04-02T00:00:00.000400000Z"
         )
 
         XCTAssertEqual(removed, 1)

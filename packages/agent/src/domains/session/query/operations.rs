@@ -28,10 +28,6 @@ pub(crate) async fn session_list_value(
         .and_then(|p| p.get("limit"))
         .and_then(Value::as_u64)
         .map(|value| value as usize);
-    let offset = params
-        .and_then(|p| p.get("offset"))
-        .and_then(Value::as_u64)
-        .map(|value| value as usize);
     let cursor: Option<super::SessionListCursor> = opt_string(params, "cursor")
         .map(|cursor| {
             serde_json::from_str(&cursor).map_err(|_| CapabilityError::InvalidParams {
@@ -45,6 +41,11 @@ pub(crate) async fn session_list_value(
                 message: "session::list cursor version is not supported".into(),
             });
         }
+        if !cursor.has_canonical_timestamps() {
+            return Err(CapabilityError::InvalidParams {
+                message: "session::list cursor contains an invalid snapshot boundary".into(),
+            });
+        }
         if cursor.include_archived != include_archived
             || cursor.working_directory != working_directory
         {
@@ -53,17 +54,11 @@ pub(crate) async fn session_list_value(
             });
         }
     }
-    if cursor.is_some() && offset.is_some() {
-        return Err(CapabilityError::InvalidParams {
-            message: "session::list accepts either cursor or offset, not both".into(),
-        });
-    }
     crate::domains::session::query::SessionQueryService::list(
         deps,
         include_archived,
         limit,
         working_directory,
-        offset,
         cursor,
     )
     .await

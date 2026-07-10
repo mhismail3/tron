@@ -117,20 +117,21 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
 struct SessionListResult: Decodable {
     let sessions: [SessionInfo]
     let totalCount: Int?
-    let hasMore: Bool?
+    /// Required terminal-page proof. Only an exact decoded `false` terminates traversal.
+    let hasMore: Bool
     let nextCursor: String?
     /// Immutable upper creation-time boundary shared by every page.
-    let snapshotAsOf: String?
+    let snapshotAsOf: String
     /// Whether this query covers every session needed for destructive reconciliation.
-    let snapshotCanReconcile: Bool?
+    let snapshotCanReconcile: Bool
 
     init(
         sessions: [SessionInfo],
         totalCount: Int?,
-        hasMore: Bool?,
+        hasMore: Bool,
         nextCursor: String?,
-        snapshotAsOf: String? = nil,
-        snapshotCanReconcile: Bool? = nil
+        snapshotAsOf: String,
+        snapshotCanReconcile: Bool
     ) {
         self.sessions = sessions
         self.totalCount = totalCount

@@ -1,8 +1,12 @@
 //! Session-list projection types and queries.
+//!
+//! Message previews and activity summaries are batch projections. Activity
+//! reads use one correlated statement with a fixed per-session recent-event
+//! bound so a 200-row page never becomes N complete-history scans.
 
 use std::collections::HashMap;
 
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -93,6 +97,28 @@ pub struct ActivitySummaryLine {
 const MAX_USER_PROMPT_LEN: usize = 100;
 const MAX_ASSISTANT_TEXT_LEN: usize = 200;
 const MAX_ACTIVITY_LINES: usize = 5;
+const MAX_ACTIVITY_EVENTS_PER_SESSION: usize = 20;
+
+pub(super) fn activity_summary_batch_sql(session_count: usize) -> String {
+    let requested_rows = (1..=session_count)
+        .map(|index| format!("(?{index})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "WITH requested(session_id) AS (VALUES {requested_rows})
+         SELECT requested.session_id, events.type, events.payload, events.invocation_id
+         FROM requested
+         JOIN events ON events.rowid IN (
+             SELECT recent.rowid
+             FROM events AS recent
+             WHERE recent.session_id = requested.session_id
+               AND recent.type IN ('message.user', 'message.assistant', 'capability.invocation.completed')
+             ORDER BY recent.sequence DESC
+             LIMIT {MAX_ACTIVITY_EVENTS_PER_SESSION}
+         )
+         ORDER BY requested.session_id, events.sequence ASC"
+    )
+}
 
 #[derive(Clone, Debug, Default)]
 struct CapabilityCompletionSummary {
@@ -260,144 +286,169 @@ impl SessionRepo {
         Ok(result)
     }
 
-    /// Build activity summary lines for a session list item.
-    ///
-    /// Walks persisted events to produce a compact summary of recent activity.
-    /// iOS renders each line with generic primitive presentation helpers.
+    /// Build activity summary lines for one session list item.
     pub fn get_activity_summaries(
         conn: &Connection,
         session_id: &str,
     ) -> Result<Vec<ActivitySummaryLine>> {
-        let mut stmt = conn.prepare(
-            "SELECT type, payload, invocation_id FROM events
-               WHERE session_id = ?1
-                 AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed')
-             ORDER BY sequence ASC",
-        )?;
+        Ok(Self::get_activity_summaries_batch(conn, &[session_id])?
+            .remove(session_id)
+            .unwrap_or_default())
+    }
 
-        let rows: Vec<(String, String, Option<String>)> = stmt
-            .query_map(params![session_id], |row| {
+    /// Build recent activity summaries for many session-list rows in one SQL
+    /// statement. The correlated index subquery reads at most a fixed number
+    /// of events per requested session instead of scanning complete histories.
+    pub fn get_activity_summaries_batch(
+        conn: &Connection,
+        session_ids: &[&str],
+    ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {
+        let mut result = session_ids
+            .iter()
+            .map(|session_id| ((*session_id).to_owned(), Vec::new()))
+            .collect::<HashMap<_, _>>();
+        if session_ids.is_empty() {
+            return Ok(result);
+        }
+
+        let sql = activity_summary_batch_sql(session_ids.len());
+        let params = session_ids
+            .iter()
+            .map(|session_id| session_id as &dyn rusqlite::types::ToSql)
+            .collect::<Vec<_>>();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut grouped: HashMap<String, Vec<(String, String, Option<String>)>> = HashMap::new();
+        for (session_id, event_type, payload, invocation_id) in rows {
+            grouped
+                .entry(session_id)
+                .or_default()
+                .push((event_type, payload, invocation_id));
+        }
+        for (session_id, rows) in grouped {
+            let _ = result.insert(session_id, activity_summaries_from_rows(&rows));
+        }
+        Ok(result)
+    }
+}
 
-        // Pass 1: collect capability result info by invocationId.
-        let mut capability_results: HashMap<String, CapabilityCompletionSummary> = HashMap::new();
-        for (event_type, payload_str, _) in &rows {
-            if event_type == "capability.invocation.completed" {
-                if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
-                    if let Some(tcid) = payload.get("invocationId").and_then(|v| v.as_str()) {
-                        let _ = capability_results.insert(
-                            tcid.to_string(),
-                            CapabilityCompletionSummary::from_payload(&payload),
-                        );
-                    }
+fn activity_summaries_from_rows(
+    rows: &[(String, String, Option<String>)],
+) -> Vec<ActivitySummaryLine> {
+    // Pass 1: collect capability result info by invocationId.
+    let mut capability_results: HashMap<String, CapabilityCompletionSummary> = HashMap::new();
+    for (event_type, payload_str, _) in rows {
+        if event_type == "capability.invocation.completed"
+            && let Ok(payload) = serde_json::from_str::<Value>(payload_str)
+            && let Some(tcid) = payload.get("invocationId").and_then(Value::as_str)
+        {
+            let _ = capability_results.insert(
+                tcid.to_string(),
+                CapabilityCompletionSummary::from_payload(&payload),
+            );
+        }
+    }
+
+    // Pass 2: walk events in order, building activity lines
+    let mut lines: Vec<ActivitySummaryLine> = Vec::new();
+
+    for (event_type, payload_str, _invocation_id) in rows {
+        let payload: Value = serde_json::from_str(payload_str).unwrap_or(Value::Null);
+
+        match event_type.as_str() {
+            "message.user" => {
+                let text = extract_text_from_payload(payload_str);
+                if !text.is_empty() {
+                    let fl = first_non_empty_line(&text);
+                    lines.push(ActivitySummaryLine {
+                        kind: "userPrompt".into(),
+                        text: Some(truncate(&fl, MAX_USER_PROMPT_LEN)),
+                        ..Default::default()
+                    });
                 }
             }
-        }
-
-        // Pass 2: walk events in order, building activity lines
-        let mut lines: Vec<ActivitySummaryLine> = Vec::new();
-
-        for (event_type, payload_str, _invocation_id) in &rows {
-            let payload: Value = serde_json::from_str(payload_str).unwrap_or(Value::Null);
-
-            match event_type.as_str() {
-                "message.user" => {
-                    let text = extract_text_from_payload(payload_str);
-                    if !text.is_empty() {
-                        let fl = first_non_empty_line(&text);
-                        lines.push(ActivitySummaryLine {
-                            kind: "userPrompt".into(),
-                            text: Some(truncate(&fl, MAX_USER_PROMPT_LEN)),
-                            ..Default::default()
-                        });
-                    }
-                }
-                "message.assistant" => {
-                    if let Some(Value::Array(blocks)) = payload.get("content") {
-                        for block in blocks {
-                            let bt = block.get("type").and_then(|t| t.as_str());
-                            match bt {
-                                Some("text") => {
-                                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                                        let trimmed = text.trim();
-                                        if !trimmed.is_empty() {
-                                            let fl = first_non_empty_line(trimmed);
-                                            lines.push(ActivitySummaryLine {
-                                                kind: "text".into(),
-                                                text: Some(truncate(&fl, MAX_ASSISTANT_TEXT_LEN)),
-                                                ..Default::default()
-                                            });
-                                        }
+            "message.assistant" => {
+                if let Some(Value::Array(blocks)) = payload.get("content") {
+                    for block in blocks {
+                        let bt = block.get("type").and_then(|t| t.as_str());
+                        match bt {
+                            Some("text") => {
+                                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                    let trimmed = text.trim();
+                                    if !trimmed.is_empty() {
+                                        let fl = first_non_empty_line(trimmed);
+                                        lines.push(ActivitySummaryLine {
+                                            kind: "text".into(),
+                                            text: Some(truncate(&fl, MAX_ASSISTANT_TEXT_LEN)),
+                                            ..Default::default()
+                                        });
                                     }
                                 }
-                                Some("capability_invocation") => {
-                                    let name = block
-                                        .get("name")
-                                        .and_then(|n| n.as_str())
-                                        .unwrap_or("unknown");
-                                    let invocation_id = block.get("id").and_then(|id| id.as_str());
-                                    let input = block
-                                        .get("input")
-                                        .cloned()
-                                        .or_else(|| block.get("arguments").cloned());
-                                    let completion =
-                                        invocation_id.and_then(|id| capability_results.get(id));
-                                    let display_args = display_capability_args(input);
-                                    let operation_name = completion
-                                        .and_then(|summary| summary.operation_name.clone())
-                                        .or_else(|| {
-                                            display_args
-                                                .as_ref()
-                                                .and_then(operation_name_from_value)
-                                        });
-
-                                    lines.push(ActivitySummaryLine {
-                                        kind: "capability".into(),
-                                        model_primitive_name: completion
-                                            .and_then(|summary| {
-                                                summary.model_primitive_name.clone()
-                                            })
-                                            .or_else(|| Some(name.to_string())),
-                                        operation_name,
-                                        trace_id: completion
-                                            .and_then(|summary| summary.trace_id.clone()),
-                                        root_invocation_id: completion
-                                            .and_then(|summary| summary.root_invocation_id.clone()),
-                                        theme_color: completion
-                                            .and_then(|summary| summary.theme_color.clone()),
-                                        presentation_hints: completion
-                                            .and_then(|summary| summary.presentation_hints.clone()),
-                                        summary: completion
-                                            .and_then(|summary| summary.summary.clone()),
-                                        capability_args: display_args,
-                                        duration_ms: completion
-                                            .and_then(|summary| summary.duration_ms),
-                                        is_error: completion.map(|summary| summary.is_error),
-                                        ..Default::default()
-                                    });
-                                }
-                                Some("thinking") => {
-                                    lines.push(ActivitySummaryLine {
-                                        kind: "thinking".into(),
-                                        ..Default::default()
-                                    });
-                                }
-                                _ => {}
                             }
+                            Some("capability_invocation") => {
+                                let name = block
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("unknown");
+                                let invocation_id = block.get("id").and_then(|id| id.as_str());
+                                let input = block
+                                    .get("input")
+                                    .cloned()
+                                    .or_else(|| block.get("arguments").cloned());
+                                let completion =
+                                    invocation_id.and_then(|id| capability_results.get(id));
+                                let display_args = display_capability_args(input);
+                                let operation_name = completion
+                                    .and_then(|summary| summary.operation_name.clone())
+                                    .or_else(|| {
+                                        display_args.as_ref().and_then(operation_name_from_value)
+                                    });
+
+                                lines.push(ActivitySummaryLine {
+                                    kind: "capability".into(),
+                                    model_primitive_name: completion
+                                        .and_then(|summary| summary.model_primitive_name.clone())
+                                        .or_else(|| Some(name.to_string())),
+                                    operation_name,
+                                    trace_id: completion
+                                        .and_then(|summary| summary.trace_id.clone()),
+                                    root_invocation_id: completion
+                                        .and_then(|summary| summary.root_invocation_id.clone()),
+                                    theme_color: completion
+                                        .and_then(|summary| summary.theme_color.clone()),
+                                    presentation_hints: completion
+                                        .and_then(|summary| summary.presentation_hints.clone()),
+                                    summary: completion.and_then(|summary| summary.summary.clone()),
+                                    capability_args: display_args,
+                                    duration_ms: completion.and_then(|summary| summary.duration_ms),
+                                    is_error: completion.map(|summary| summary.is_error),
+                                    ..Default::default()
+                                });
+                            }
+                            Some("thinking") => {
+                                lines.push(ActivitySummaryLine {
+                                    kind: "thinking".into(),
+                                    ..Default::default()
+                                });
+                            }
+                            _ => {}
                         }
                     }
                 }
-                _ => {}
             }
+            _ => {}
         }
-
-        let start = lines.len().saturating_sub(MAX_ACTIVITY_LINES);
-        Ok(lines[start..].to_vec())
     }
+
+    let start = lines.len().saturating_sub(MAX_ACTIVITY_LINES);
+    lines[start..].to_vec()
 }

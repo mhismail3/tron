@@ -405,13 +405,6 @@ impl EventStore {
         session_ids: &[&str],
     ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {
         let conn = self.conn()?;
-        let mut result = HashMap::new();
-        for &sid in session_ids {
-            let _ = result.insert(
-                sid.to_string(),
-                SessionRepo::get_activity_summaries(&conn, sid)?,
-            );
-        }
-        Ok(result)
+        SessionRepo::get_activity_summaries_batch(&conn, session_ids)
     }
 }

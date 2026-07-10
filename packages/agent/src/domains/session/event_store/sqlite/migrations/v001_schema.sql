@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_activity  ON sessions(last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent    ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_ended     ON sessions(ended_at);
-CREATE INDEX IF NOT EXISTS idx_sessions_created   ON sessions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_created   ON sessions(created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS events (
   id                    TEXT    PRIMARY KEY,

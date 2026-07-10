@@ -41,9 +41,9 @@ fn list_sessions() {
 }
 
 #[test]
-fn list_sessions_uses_stable_activity_and_id_keyset_order() {
+fn list_sessions_uses_stable_creation_and_id_keyset_order() {
     let (conn, ws_id) = setup();
-    let timestamp = "2026-07-01T12:00:00Z";
+    let timestamp = "2026-07-01T12:00:00.000000000Z";
 
     for id in ["sess_a", "sess_c", "sess_b"] {
         SessionRepo::create_with_identity(
@@ -159,11 +159,11 @@ fn immutable_creation_keyset_does_not_skip_a_session_when_activity_moves() {
 }
 
 #[test]
-fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
+fn snapshot_boundary_preserves_sub_millisecond_creation_order_losslessly() {
     let (conn, ws_id) = setup();
     for (id, created_at) in [
-        ("sess_at_boundary", "2026-07-01T12:00:00Z"),
-        ("sess_after_boundary", "2026-07-01T12:00:00.500Z"),
+        ("sess_at_boundary", "2026-07-01T12:00:00.000400000Z"),
+        ("sess_after_boundary", "2026-07-01T12:00:00.000400001Z"),
     ] {
         SessionRepo::create_with_identity(
             &conn,
@@ -184,7 +184,7 @@ fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
     let sessions = SessionRepo::list(
         &conn,
         &ListSessionsOptions {
-            snapshot_created_at: Some("2026-07-01T12:00:00Z"),
+            snapshot_created_at: Some("2026-07-01T12:00:00.000400000Z"),
             ..Default::default()
         },
     )
@@ -196,6 +196,42 @@ fn snapshot_boundary_compares_rfc3339_timestamps_chronologically() {
             .map(|session| session.id.as_str())
             .collect::<Vec<_>>(),
         vec!["sess_at_boundary"]
+    );
+}
+
+#[test]
+fn paginated_session_list_plan_uses_composite_creation_index_without_temp_sort() {
+    let (conn, _) = setup();
+    let options = ListSessionsOptions {
+        limit: Some(201),
+        snapshot_created_at: Some("2026-07-01T12:00:00.000400000Z"),
+        before_created_at: Some("2026-07-01T11:59:59.999999999Z"),
+        before_session_id: Some("sess_cursor"),
+        ..Default::default()
+    };
+    let (sql, values) = build_list_query(&options);
+    assert!(
+        !sql.contains("julianday"),
+        "lossy date function remained: {sql}"
+    );
+
+    let explain = format!("EXPLAIN QUERY PLAN {sql}");
+    let refs = values.iter().map(Box::as_ref).collect::<Vec<_>>();
+    let details = conn
+        .prepare(&explain)
+        .unwrap()
+        .query_map(refs.as_slice(), |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    let plan = details.join("\n");
+    assert!(
+        plan.contains("idx_sessions_created"),
+        "creation-key index not used:\n{plan}"
+    );
+    assert!(
+        !plan.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "creation-key traversal regressed to a temp sort:\n{plan}"
     );
 }
 

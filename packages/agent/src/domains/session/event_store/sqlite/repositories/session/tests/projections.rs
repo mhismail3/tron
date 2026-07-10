@@ -170,6 +170,58 @@ fn get_message_previews_multiple_sessions() {
     );
 }
 
+#[test]
+fn activity_summary_batch_is_bounded_per_session_and_uses_sequence_index() {
+    let (conn, ws_id) = setup();
+    let first = create_default_session(&conn, &ws_id);
+    let second = create_default_session(&conn, &ws_id);
+    for session in [&first, &second] {
+        for sequence in 1..=30 {
+            insert_event(
+                &conn,
+                &session.id,
+                &ws_id,
+                sequence,
+                "message.user",
+                &format!(r#"{{"content":"{}-{sequence}"}}"#, session.id),
+            );
+        }
+    }
+
+    let ids = [first.id.as_str(), second.id.as_str()];
+    let summaries = SessionRepo::get_activity_summaries_batch(&conn, &ids).unwrap();
+    for session in [&first, &second] {
+        let lines = &summaries[&session.id];
+        assert_eq!(lines.len(), 5);
+        assert_eq!(
+            lines.last().and_then(|line| line.text.as_deref()),
+            Some(format!("{}-30", session.id).as_str())
+        );
+    }
+
+    let sql = super::super::projections::activity_summary_batch_sql(ids.len());
+    let explain = format!("EXPLAIN QUERY PLAN {sql}");
+    let params = ids
+        .iter()
+        .map(|session_id| session_id as &dyn rusqlite::types::ToSql)
+        .collect::<Vec<_>>();
+    let mut statement = conn.prepare(&explain).unwrap();
+    let plan = statement
+        .query_map(params.as_slice(), |row| row.get::<_, String>(3))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n");
+    assert!(
+        plan.contains("idx_events_session_seq"),
+        "bounded recent-event projection missed the sequence index:\n{plan}"
+    );
+    assert!(
+        plan.contains("CORRELATED LIST SUBQUERY"),
+        "projection is no longer one bounded correlated batch query:\n{plan}"
+    );
+}
+
 // ── Text extraction helper ───────────────────────────────────────
 
 #[test]

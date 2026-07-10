@@ -123,6 +123,7 @@ xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SessionListPageLoaderTests \
   -only-testing:TronMobileTests/SessionRepositoryTests \
+  -only-testing:TronMobileTests/SessionTypesTests \
   -only-testing:TronMobileTests/SessionListPresentationTests \
   -only-testing:TronMobileTests/SessionListExpansionAccessibilityTests
 ```

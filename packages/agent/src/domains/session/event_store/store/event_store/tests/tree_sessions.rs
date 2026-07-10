@@ -59,7 +59,7 @@ fn fork_with_identity_persists_explicit_replay_fields() {
         .unwrap();
 
     assert_eq!(fork.session.id, "sess_replay_fork");
-    assert_eq!(fork.session.created_at, "2026-06-09T13:00:00Z");
+    assert_eq!(fork.session.created_at, "2026-06-09T13:00:00.000000000Z");
     assert_eq!(fork.session.last_activity_at, "2026-06-09T13:00:01Z");
     assert_eq!(fork.fork_event.id, "evt_replay_fork");
     assert_eq!(fork.fork_event.timestamp, "2026-06-09T13:00:01Z");

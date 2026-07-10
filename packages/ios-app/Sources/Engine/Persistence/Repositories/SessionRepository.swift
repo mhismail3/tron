@@ -72,9 +72,10 @@ final class SessionRepository: @unchecked Sendable {
     /// Apply one server session snapshot in a single SQLite transaction.
     ///
     /// `authoritativeSessionIds` is supplied only for a complete, unfiltered
-    /// server snapshot. Deletion is additionally bounded by `snapshotAsOf`, so
-    /// sessions created after the snapshot began cannot be mistaken for stale
-    /// rows. Event rows are deleted only for sessions proven absent.
+    /// server snapshot. Deletion is additionally bounded by a validated,
+    /// fixed-width nanosecond `snapshotAsOf`; malformed or noncanonical local
+    /// timestamps remain preserved. Event rows are deleted only for sessions
+    /// proven absent.
     @discardableResult
     func reconcileServerSnapshot(
         upserting sessions: [CachedSession],
@@ -107,21 +108,24 @@ final class SessionRepository: @unchecked Sendable {
                 }
 
                 var staleSessionIds: [String] = []
-                if let authoritativeSessionIds, let snapshotAsOf {
+                if let authoritativeSessionIds,
+                   let snapshotAsOf,
+                   CanonicalSessionTimestamp.isValid(snapshotAsOf) {
                     var selectStatement: OpaquePointer?
                     let selectSQL = """
-                        SELECT id FROM sessions
-                        WHERE server_origin = ? AND julianday(created_at) <= julianday(?)
+                        SELECT id, created_at FROM sessions
+                        WHERE server_origin = ?
                     """
                     guard sqlite3_prepare_v2(db, selectSQL, -1, &selectStatement, nil) == SQLITE_OK else {
                         throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
                     }
                     sqlite3_bind_text(selectStatement, 1, serverOrigin, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-                    sqlite3_bind_text(selectStatement, 2, snapshotAsOf, -1, SQLITE_TRANSIENT_DESTRUCTOR)
                     var selectStep = sqlite3_step(selectStatement)
                     while selectStep == SQLITE_ROW {
                         let id = String(cString: sqlite3_column_text(selectStatement, 0))
-                        if !authoritativeSessionIds.contains(id) {
+                        let createdAt = String(cString: sqlite3_column_text(selectStatement, 1))
+                        if CanonicalSessionTimestamp.isAtOrBefore(createdAt, boundary: snapshotAsOf),
+                           !authoritativeSessionIds.contains(id) {
                             staleSessionIds.append(id)
                         }
                         selectStep = sqlite3_step(selectStatement)
