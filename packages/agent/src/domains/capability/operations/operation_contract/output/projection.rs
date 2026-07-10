@@ -26,18 +26,21 @@
 
 use std::sync::LazyLock;
 
-use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
-use crate::domains::capability::operation_binding_metadata;
 use crate::shared::foundation::redaction::redact_sensitive_content;
+#[cfg(test)]
 use crate::shared::protocol::content::CapabilityResultContent;
+#[cfg(test)]
 use crate::shared::protocol::messages::CapabilityResultMessageContent;
+#[cfg(test)]
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
-pub(super) fn extract_model_context_result_text(
-    exec_result: &CapabilityInvocationExecutionResult,
-) -> String {
-    match extract_result_content(exec_result) {
+use super::spec::OutputProfile;
+
+#[cfg(test)]
+fn extract_model_context_result_text(result: &CapabilityResult) -> String {
+    match extract_result_content(result) {
         CapabilityResultMessageContent::Text(text) => text,
         CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
@@ -50,24 +53,21 @@ pub(super) fn extract_model_context_result_text(
     }
 }
 
+#[cfg(test)]
 const MODEL_CONTEXT_EVIDENCE_MAX_CHARS: usize = 80_000;
 const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
 const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
 const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 12;
 const MODEL_CONTEXT_OBJECT_MAX_KEYS: usize = 80;
 
-pub(super) fn extract_result_content(
-    exec_result: &CapabilityInvocationExecutionResult,
-) -> CapabilityResultMessageContent {
-    let projected = model_context_evidence(exec_result.result.details.as_ref());
-    match &exec_result.result.content {
-        crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
-            CapabilityResultMessageContent::Text(append_model_context_evidence(
-                text.clone(),
-                projected,
-            ))
-        }
-        crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
+#[cfg(test)]
+fn extract_result_content(result: &CapabilityResult) -> CapabilityResultMessageContent {
+    let projected = model_context_evidence(result.details.as_ref());
+    match &result.content {
+        CapabilityResultBody::Text(text) => CapabilityResultMessageContent::Text(
+            append_model_context_evidence(text.clone(), projected),
+        ),
+        CapabilityResultBody::Blocks(blocks) => {
             let has_images = blocks
                 .iter()
                 .any(|b| matches!(b, CapabilityResultContent::Image { .. }));
@@ -92,6 +92,7 @@ pub(super) fn extract_result_content(
     }
 }
 
+#[cfg(test)]
 fn append_model_context_evidence(text: String, projected: Option<String>) -> String {
     let Some(projected) = projected else {
         return text;
@@ -103,6 +104,7 @@ fn append_model_context_evidence(text: String, projected: Option<String>) -> Str
     }
 }
 
+#[cfg(test)]
 fn model_context_evidence(details: Option<&Value>) -> Option<String> {
     let details = details?;
     if let Some(projected) = project_error_evidence(details) {
@@ -112,24 +114,51 @@ fn model_context_evidence(details: Option<&Value>) -> Option<String> {
         .get("primitiveOperation")
         .and_then(Value::as_str)
         .or_else(|| details.get("operation").and_then(Value::as_str))?;
-    let metadata = operation_binding_metadata(operation)?;
-    let projected = match operation {
-        "capability_binding_cockpit_overview" => project_capability_cockpit_evidence(details),
-        "catalog_search" | "catalog_inspect" => project_catalog_evidence(details),
-        "log_recent" => project_log_evidence(details),
-        "trace_list" | "trace_get" => project_trace_evidence(details),
-        _ if metadata.family == "git" => project_git_evidence(details),
-        operation if metadata.family == "context_control" => {
-            project_context_control_evidence(operation, details)
-        }
-        operation if metadata.family == "goals_questions" => {
-            project_goal_question_evidence(operation, details)
-        }
-        operation => project_metadata_operation_evidence(operation, details),
-    }?;
-    render_model_context_evidence(projected)
+    let operation_id = super::super::OperationId::parse(operation)?;
+    render_model_context_evidence(project_evidence(
+        operation,
+        super::spec::profile(operation_id),
+        Some(details),
+    )?)
 }
 
+pub(super) fn project_evidence(
+    operation: &str,
+    profile: OutputProfile,
+    details: Option<&Value>,
+) -> Option<Value> {
+    let details = details?;
+    if let Some(projected) = project_error_evidence(details) {
+        return Some(projected);
+    }
+    match profile {
+        OutputProfile::Catalog => project_catalog_evidence(details),
+        OutputProfile::Git => project_git_evidence(details),
+        OutputProfile::TraceAudit => match operation {
+            "log_recent" => project_log_evidence(details),
+            "trace_list" | "trace_get" => project_trace_evidence(details),
+            _ => project_metadata_operation_evidence(operation, details),
+        },
+        OutputProfile::Context => project_context_control_evidence(operation, details),
+        OutputProfile::Resource => match operation {
+            "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel" | "question_create"
+            | "question_list" | "question_inspect" | "question_answer" => {
+                project_goal_question_evidence(operation, details)
+            }
+            _ => project_metadata_operation_evidence(operation, details),
+        },
+        OutputProfile::Governance if operation == "capability_binding_cockpit_overview" => {
+            project_capability_cockpit_evidence(details)
+        }
+        OutputProfile::Summary
+        | OutputProfile::Filesystem
+        | OutputProfile::Runtime
+        | OutputProfile::Governance
+        | OutputProfile::Web => project_metadata_operation_evidence(operation, details),
+    }
+}
+
+#[cfg(test)]
 fn render_model_context_evidence(projected: Value) -> Option<String> {
     let mut text = serde_json::to_string_pretty(&json!({
         "modelContextEvidence": projected

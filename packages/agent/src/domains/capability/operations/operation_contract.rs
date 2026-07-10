@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 #[cfg(test)]
 use crate::engine::validate_engine_schema_definition;
 use crate::engine::{FunctionId, validate_engine_schema_payload};
-use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
 mod authority;
@@ -22,6 +21,8 @@ mod metadata;
 mod output;
 mod policy;
 mod records;
+
+pub(crate) use output::{provider_result_content, provider_result_text};
 
 macro_rules! define_operation_ids {
     ($($variant:ident => $name:literal,)+) => {
@@ -255,13 +256,11 @@ pub(crate) use authority::{
 pub(super) use policy::InvocationScope;
 pub(crate) use policy::OperationEffect;
 
-/// Paired provider-visible schemas for one execute operation.
+/// Exact request schema for one execute operation.
 #[derive(Clone, Debug)]
 pub(super) struct OperationSchemaContract {
     /// Closed top-level payload schema consumed by catalog and runtime.
     pub(super) input_schema: Value,
-    /// Provider-safe result schema consumed by catalog and runtime validation.
-    pub(super) output_schema: Value,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -312,19 +311,15 @@ fn input_schema(operation: OperationId) -> Option<Value> {
         .or_else(|| direct::input_schema(operation))
 }
 
-/// Return the paired provider-visible schemas for one supported operation.
+/// Return the exact request contract for one supported operation.
 ///
 /// Binding, scope, effect, risk, and authority remain typed sibling policies in
 /// this owner module and have lightweight accessors so runtime validation does
 /// not rebuild unrelated JSON schemas.
 pub(super) fn contract(operation: &str) -> Option<OperationSchemaContract> {
     let operation_id = OperationId::parse(operation)?;
-    let operation = operation_id.as_str();
     let input_schema = input_schema(operation_id)?;
-    Some(OperationSchemaContract {
-        input_schema,
-        output_schema: output::output_schema(operation)?,
-    })
+    Some(OperationSchemaContract { input_schema })
 }
 
 /// Return the exact schema for catalog projection or runtime validation.
@@ -449,31 +444,6 @@ pub(crate) fn validate_payload(payload: &Value) -> Result<(), CapabilityError> {
     )
     .map_err(|error| CapabilityError::InvalidParams {
         message: format!("Invalid {operation} payload: {error}"),
-    })
-}
-
-/// Validate the selected operation's serialized provider-safe result before it
-/// is committed to trace evidence or returned to the model.
-pub(crate) fn validate_output(
-    operation: &str,
-    result: &CapabilityResult,
-) -> Result<(), CapabilityError> {
-    let contract = contract(operation).ok_or_else(|| CapabilityError::Internal {
-        message: format!("missing canonical output contract for {operation}"),
-    })?;
-    let value = serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
-        message: format!("serialize {operation} result for validation: {error}"),
-    })?;
-    let function_id =
-        FunctionId::new("capability::execute").expect("canonical capability function id is valid");
-    validate_engine_schema_payload(
-        &function_id,
-        "operation result",
-        &contract.output_schema,
-        &value,
-    )
-    .map_err(|error| CapabilityError::Internal {
-        message: format!("invalid provider-safe output contract for {operation}: {error}"),
     })
 }
 

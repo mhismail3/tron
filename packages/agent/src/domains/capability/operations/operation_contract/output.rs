@@ -1,657 +1,523 @@
-//! Canonical provider-visible result contracts for `capability::execute`.
+//! Canonical provider-visible result contract for `capability::execute`.
 //!
-//! Operation-specific schemas describe only bounded, redacted result fields
-//! that the provider may consume. All other registered operations use the
-//! same minimal provider-safe envelope. Unknown operation names fail closed.
+//! Raw [`CapabilityResult`] values remain internal audit/UI state. This module
+//! owns the exact model-facing envelope, operation profile, redacted evidence
+//! projection, common failure branch, and structural byte budget. Provider
+//! adapters transport the resulting bytes; they must not rebuild or truncate
+//! the contract.
 
+use crate::engine::{FunctionId, validate_engine_schema_payload};
+use crate::shared::foundation::text::truncate_str;
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::messages::CapabilityResultMessageContent;
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use serde_json::{Value, json};
 
 use super::OperationId;
 
+mod normalize;
+mod projection;
+mod spec;
+mod types;
+
+use normalize::{bounded_text, normalize_error, normalize_evidence, normalize_next_actions};
+use spec::{OutputProfile, profile};
+use types::{
+    PROVIDER_OUTPUT_MAX_BYTES, PROVIDER_OUTPUT_SCHEMA_VERSION, ProviderEvidence,
+    ProviderOperationError, ProviderOperationOutput, ProviderTruncation,
+};
+
 pub(super) fn output_schema(operation: &str) -> Option<Value> {
-    if OperationId::parse(operation).is_none() {
-        return None;
+    let operation = OperationId::parse(operation)?;
+    Some(provider_output_schema(
+        operation.as_str(),
+        profile(operation),
+    ))
+}
+
+pub(crate) fn provider_result_content(
+    operation: &str,
+    result: &CapabilityResult,
+) -> CapabilityResultMessageContent {
+    let rendered = render_provider_output(operation, result)
+        .unwrap_or_else(|error| render_internal_contract_failure(operation, &error));
+    match &result.content {
+        CapabilityResultBody::Blocks(blocks)
+            if blocks
+                .iter()
+                .any(|block| matches!(block, CapabilityResultContent::Image { .. })) =>
+        {
+            let mut projected = blocks
+                .iter()
+                .filter_map(|block| match block {
+                    CapabilityResultContent::Image { data, mime_type } => Some(
+                        CapabilityResultContent::image(data.clone(), mime_type.clone()),
+                    ),
+                    CapabilityResultContent::Text { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            projected.push(CapabilityResultContent::text(rendered));
+            CapabilityResultMessageContent::Blocks(projected)
+        }
+        _ => CapabilityResultMessageContent::Text(rendered),
     }
-
-    Some(match operation {
-        "git_status" => git_status_output_schema(),
-        "web_robots_check" => web_robots_check_output_schema(),
-        "web_fetch" => web_fetch_output_schema(),
-        "job_status" | "job_list" => job_lifecycle_output_schema(operation),
-        "job_log" => job_log_output_schema(),
-        "trace_list" => trace_list_output_schema(),
-        "trace_get" => trace_get_output_schema(),
-        _ => generic_provider_safe_output_schema(operation),
-    })
 }
 
-fn generic_provider_safe_output_schema(operation: &str) -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe text summary of the operation result."
-            },
-            "details": {
-                "type": "object",
-                "description": "Bounded provider-safe evidence for the operation result.",
-                "properties": {
-                    "primitiveOperation": {"const": operation},
-                    "status": {"type": "string"}
+pub(crate) fn provider_result_text(operation: &str, result: &CapabilityResult) -> String {
+    match provider_result_content(operation, result) {
+        CapabilityResultMessageContent::Text(text) => text,
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
+            .into_iter()
+            .filter_map(|block| match block {
+                CapabilityResultContent::Text { text } => Some(text),
+                CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<String, String> {
+    let operation_id = OperationId::parse(operation);
+    let profile = operation_id.map_or(OutputProfile::Summary, profile);
+    let projected = projection::project_evidence(operation, profile, result.details.as_ref());
+    let summary = bounded_text(&raw_result_text(result), 1_200);
+    let (evidence, mut truncation) = normalize_evidence(projected.clone());
+    let ok = !result.is_error.unwrap_or(false);
+    let status = result
+        .details
+        .as_ref()
+        .and_then(|details| details.get("status"))
+        .and_then(Value::as_str)
+        .map_or_else(
+            || {
+                if ok {
+                    "ok".to_owned()
+                } else {
+                    "failed".to_owned()
                 }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn git_status_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe text summary of repository status."
             },
-            "details": {
-                "type": "object",
-                "description": "Bounded provider-safe git status evidence. Absolute paths, raw commands, raw logs, grants, and authority ids are excluded.",
-                "required": ["primitiveOperation", "status", "git"],
-                "properties": {
-                    "primitiveOperation": {"const": "git_status"},
-                    "status": {"type": "string"},
-                    "git": {
-                        "type": "object",
-                        "required": ["schemaVersion", "status", "operation", "summary", "repository", "evidence"],
-                        "properties": {
-                            "schemaVersion": {"const": "tron.git_readonly.v1"},
-                            "status": {"type": "string"},
-                            "operation": {"const": "status"},
-                            "summary": {
-                                "type": "object",
-                                "properties": {
-                                    "stagedCount": {"type": "integer"},
-                                    "unstagedCount": {"type": "integer"},
-                                    "untrackedCount": {"type": "integer"},
-                                    "conflictedCount": {"type": "integer"}
-                                }
-                            },
-                            "repository": {
-                                "type": "object",
-                                "description": "Provider-safe repository facts using workspace-relative path refs.",
-                                "properties": {
-                                    "branch": {"type": ["string", "null"]},
-                                    "detachedHead": {"type": "boolean"},
-                                    "headOid": {"type": ["string", "null"]},
-                                    "headTreeOid": {"type": ["string", "null"]},
-                                    "treeObjectRef": {"type": ["string", "null"], "description": "Provider-safe bounded tree object token for repository_tree_snapshot."},
-                                    "repositoryTreeSnapshotInput": {"type": "object", "description": "Copyable provider-safe refs for repository_tree_snapshot."},
-                                    "hasUpstream": {"type": "boolean"},
-                                    "ahead": {"type": ["integer", "null"]},
-                                    "behind": {"type": ["integer", "null"]},
-                                    "pathspec": {"type": "string"},
-                                    "repositoryRoot": {"description": "Workspace-relative repository root ref."},
-                                    "worktreeRoot": {"description": "Workspace-relative worktree root ref."},
-                                    "requestedPath": {"description": "Workspace-relative requested path ref."}
-                                }
-                            },
-                            "evidence": {
-                                "type": "object",
-                                "properties": {
-                                    "resourceRefs": {"type": "array"},
-                                    "statusLimitBytes": {"type": "integer"},
-                                    "statusTruncated": {"type": "boolean"},
-                                    "statusPorcelainV1Z": {"type": "string"}
-                                }
-                            },
-                            "staged": {"type": "array"},
-                            "unstaged": {"type": "array"},
-                            "untracked": {"type": "array"},
-                            "conflicted": {"type": "array"}
-                        }
-                    }
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn web_robots_check_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe robots-policy summary including copy-ready robots evidence refs for a later robots-gated web_fetch."
-            },
-            "details": {
-                "type": "object",
-                "required": ["primitiveOperation", "status", "web"],
-                "properties": {
-                    "primitiveOperation": {"const": "web_robots_check"},
-                    "status": {"const": "ok"},
-                    "web": {
-                        "type": "object",
-                        "required": [
-                            "schemaVersion",
-                            "status",
-                            "operation",
-                            "webRobotsPolicyResourceId",
-                            "webRobotsPolicyVersionId",
-                            "resourceRefs"
-                        ],
-                        "properties": {
-                            "schemaVersion": {"const": "tron.web_robots_policy.v1"},
-                            "status": {"const": "checked"},
-                            "operation": {"const": "web_robots_check"},
-                            "webRobotsPolicyResourceId": {"type": "string", "description": "Copy this into web_fetch.webRobotsPolicyResourceId when a subsequent fetch must be robots-gated."},
-                            "webRobotsPolicyVersionId": {"type": "string", "description": "Copy this into web_fetch.expectedWebRobotsPolicyVersionId for freshness."},
-                            "resourceRefs": {"type": "array", "description": "Bounded robots-policy resource refs; resourceRefs[0].versionId equals webRobotsPolicyVersionId."}
-                        }
-                    }
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn web_fetch_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe fetch/source summary; raw HTML and raw bytes are not returned directly."
-            },
-            "details": {
-                "type": "object",
-                "required": ["primitiveOperation", "status", "web"],
-                "properties": {
-                    "primitiveOperation": {"const": "web_fetch"},
-                    "status": {"const": "ok"},
-                    "web": {
-                        "type": "object",
-                        "required": [
-                            "schemaVersion",
-                            "status",
-                            "operation",
-                            "webSourceResourceId",
-                            "webSourceVersionId",
-                            "resourceRefs"
-                        ],
-                        "properties": {
-                            "schemaVersion": {"const": "tron.web_source.v1"},
-                            "status": {"const": "fetched"},
-                            "operation": {"const": "web_fetch"},
-                            "webSourceResourceId": {"type": "string"},
-                            "webSourceVersionId": {"type": "string"},
-                            "robotsPolicyRefs": {"type": "array", "description": "Present when fetch was linked to current robots evidence; contains bounded resource/version refs only."},
-                            "resourceRefs": {"type": "array", "description": "Bounded source resource refs for later web_source_list/inspect/archive operations."}
-                        }
-                    }
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn job_lifecycle_output_schema(operation: &str) -> Value {
-    let jobs_schema = if operation == "job_status" {
-        json!({
-            "type": "object",
-            "required": ["schemaVersion", "status", "job", "resourceRefs"],
-            "properties": {
-                "schemaVersion": {"type": "string"},
-                "status": {"type": "string"},
-                "job": redacted_job_output_schema(),
-                "resourceRefs": {"type": "array", "description": "Provider-safe job/output refs only."}
-            }
-        })
-    } else {
-        json!({
-            "type": "object",
-            "required": ["schemaVersion", "status", "jobs"],
-            "properties": {
-                "schemaVersion": {"type": "string"},
-                "status": {"const": "ok"},
-                "jobs": {"type": "array", "items": redacted_job_output_schema()}
-            }
-        })
+            |status| bounded_text(status, 120),
+        );
+    let error = (!ok).then(|| normalize_error(projected.as_ref(), &summary));
+    truncation.max_bytes = PROVIDER_OUTPUT_MAX_BYTES;
+    let mut output = ProviderOperationOutput {
+        schema_version: PROVIDER_OUTPUT_SCHEMA_VERSION,
+        operation: operation.to_owned(),
+        profile: profile.as_str(),
+        ok,
+        status,
+        summary,
+        evidence,
+        next_actions: normalize_next_actions(projected.as_ref()),
+        truncation,
+        error,
     };
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe lifecycle summary for durable jobs."
-            },
-            "details": {
-                "type": "object",
-                "description": "Provider-safe durable job lifecycle projection. Raw commands, working directories, authority/grant ids, raw idempotency keys, stdout, stderr, and raw job/output payloads are excluded.",
-                "required": ["primitiveOperation", "status", "jobs"],
-                "properties": {
-                    "primitiveOperation": {"const": operation},
-                    "status": {"type": "string"},
-                    "jobs": jobs_schema
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
+    fit_output_budget(&mut output)?;
+    let value = serde_json::to_value(&output)
+        .map_err(|error| format!("serialize provider output: {error}"))?;
+    validate_provider_output(operation, profile, &value)?;
+    serde_json::to_string(&output).map_err(|error| format!("encode provider output: {error}"))
 }
 
-fn job_log_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe bounded stdout/stderr preview summary for one durable job."
-            },
-            "details": {
-                "type": "object",
-                "description": "Bounded job log projection for explicit output inspection. Raw working directories, authority/grant ids, raw idempotency keys, and raw job payloads are excluded.",
-                "required": ["primitiveOperation", "status", "jobs"],
-                "properties": {
-                    "primitiveOperation": {"const": "job_log"},
-                    "status": {"type": "string"},
-                    "jobs": {
-                        "type": "object",
-                        "required": ["schemaVersion", "status", "jobResourceId", "jobVersionId", "stdoutPreview", "stderrPreview", "outputTruncated", "resourceRefs"],
-                        "properties": {
-                            "schemaVersion": {"type": "string"},
-                            "status": {"type": "string"},
-                            "jobResourceId": {"type": "string"},
-                            "jobVersionId": {"type": "string"},
-                            "stdoutPreview": {"type": "string"},
-                            "stderrPreview": {"type": "string"},
-                            "outputResourceId": {"type": ["string", "null"]},
-                            "outputVersionId": {"type": ["string", "null"]},
-                            "outputTruncated": {"type": "boolean"},
-                            "resourceRefs": {"type": "array"}
-                        }
-                    }
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn redacted_job_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "description": "Redacted durable job lifecycle projection.",
-        "required": ["jobResourceId", "jobVersionId", "state", "limits", "retention", "cancellation", "projection"],
-        "properties": {
-            "jobResourceId": {"type": "string"},
-            "jobVersionId": {"type": "string"},
-            "state": {"type": "string"},
-            "limits": {
-                "type": "object",
-                "properties": {
-                    "timeoutMs": {"type": "integer"},
-                    "maxOutputBytes": {"type": "integer"}
-                }
-            },
-            "retention": {"type": "object"},
-            "createdAt": {"type": "string"},
-            "startedAt": {"type": ["string", "null"]},
-            "completedAt": {"type": ["string", "null"]},
-            "cancellation": {
-                "type": "object",
-                "properties": {
-                    "requested": {"type": "boolean"},
-                    "reasonRedacted": {"type": "boolean"},
-                    "rawReasonReturned": {"const": false}
-                }
-            },
-            "terminal": {
-                "type": ["object", "null"],
-                "properties": {
-                    "status": {"type": "string"},
-                    "exitCode": {"type": ["integer", "null"]},
-                    "timedOut": {"type": "boolean"},
-                    "cancelled": {"type": "boolean"},
-                    "errorRedacted": {"type": "boolean"},
-                    "rawErrorReturned": {"const": false}
-                }
-            },
-            "output": {
-                "type": ["object", "null"],
-                "properties": {
-                    "kind": {"type": "string"},
-                    "resourceId": {"type": "string"},
-                    "versionId": {"type": "string"},
-                    "contentHash": {"type": "string"},
-                    "durationMs": {"type": "integer"},
-                    "exitCode": {"type": ["integer", "null"]},
-                    "outputTruncated": {"type": "boolean"},
-                    "stdoutPreviewReturned": {"const": false},
-                    "stderrPreviewReturned": {"const": false},
-                    "rawOutputReturned": {"const": false}
-                }
-            },
-            "projection": {
-                "type": "object",
-                "properties": {
-                    "rawCommandReturned": {"const": false},
-                    "workingDirectoryReturned": {"const": false},
-                    "authorityReturned": {"const": false},
-                    "stdoutPreviewReturned": {"const": false},
-                    "stderrPreviewReturned": {"const": false},
-                    "rawOutputReturned": {"const": false}
-                }
+fn fit_output_budget(output: &mut ProviderOperationOutput) -> Result<(), String> {
+    loop {
+        let encoded = serde_json::to_vec(output)
+            .map_err(|error| format!("measure provider output: {error}"))?;
+        output.truncation.serialized_bytes = encoded.len();
+        if encoded.len() <= PROVIDER_OUTPUT_MAX_BYTES {
+            let final_size = serde_json::to_vec(output)
+                .map_err(|error| format!("remeasure provider output: {error}"))?
+                .len();
+            output.truncation.serialized_bytes = final_size;
+            if final_size <= PROVIDER_OUTPUT_MAX_BYTES {
+                return Ok(());
             }
         }
-    })
-}
-
-fn trace_list_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe trace summary with completed/in-progress counts and projection-boundary guidance."
-            },
-            "details": {
-                "type": "object",
-                "description": "Provider-safe current-session trace list. Raw provider invocation ids, grant ids, idempotency keys, raw requests/results, paths, commands, logs, and file contents are excluded from records[].",
-                "required": ["primitiveOperation", "status", "projectionBoundary", "statusSummary", "records"],
-                "properties": {
-                    "primitiveOperation": {"const": "trace_list"},
-                    "status": {"const": "ok"},
-                    "projectionBoundary": trace_projection_boundary_output_schema(),
-                    "statusSummary": {
-                        "type": "object",
-                        "required": ["totalRecords", "completedStatusCounts", "inProgressCount", "currentTraceListMayAppearRunning", "currentInvocationStatus"],
-                        "properties": {
-                            "totalRecords": {"type": "integer"},
-                            "completedStatusCounts": {
-                                "type": "object",
-                                "description": "Counts by completed trace status, normally ok/failed."
-                            },
-                            "completedStatusValuesOnlyOkFailed": {"type": "boolean"},
-                            "inProgressCount": {"type": "integer"},
-                            "currentTraceListMayAppearRunning": {"const": true},
-                            "currentInvocationStatus": {
-                                "const": "pending_at_projection_time",
-                                "description": "The current trace_list invocation is projected before its own completion is recorded."
-                            },
-                            "inProgressInterpretation": {"type": "string"},
-                            "completedStatusGuidance": {"type": "string"},
-                            "answerGuidance": {"type": "string"}
-                        }
-                    },
-                    "records": {
-                        "type": "array",
-                        "description": "Bounded provider-safe trace records for the current session.",
-                        "items": provider_safe_trace_record_output_schema()
-                    }
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn trace_get_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["content", "details"],
-        "properties": {
-            "content": {
-                "description": "Provider-safe trace-record summary for one current-session trace record."
-            },
-            "details": {
-                "type": "object",
-                "description": "Provider-safe focused trace record. Raw provider invocation ids, grant ids, idempotency keys, raw requests/results, paths, commands, logs, and file contents are excluded.",
-                "required": ["primitiveOperation", "status", "projectionBoundary", "record"],
-                "properties": {
-                    "primitiveOperation": {"const": "trace_get"},
-                    "status": {"const": "ok"},
-                    "projectionBoundary": trace_projection_boundary_output_schema(),
-                    "record": provider_safe_trace_record_output_schema()
-                }
-            }
-        },
-        "schemaCompleteness": "operation_specific_contract"
-    })
-}
-
-fn trace_projection_boundary_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "description": "Explains that traceId, invocationId, parentInvocationId, runId, sessionRef, and workspaceRef are provider-safe engine refs, not raw provider invocation ids.",
-        "properties": {
-            "providerVisibleProjection": {"type": "string"},
-            "providerVisibleMeaning": {"type": "string"},
-            "internalAuditStorage": {"type": "string"},
-            "safeRefSemantics": {"type": "string"},
-            "recordProof": {"type": "string"},
-            "transcriptToolCallBoundary": {"type": "string"},
-            "operationBoundary": {"type": "string"},
-            "rawCommandEvidenceGuidance": {"type": "string"},
-            "answerGuidance": {"type": "string"},
-            "traceGetUse": {"type": "string"}
+        output.truncation.truncated = true;
+        if let Some(collection) = output.evidence.collections.pop() {
+            output.truncation.omitted_collections += 1;
+            output.truncation.omitted_items += collection.total;
+        } else if output.evidence.facts.pop().is_some() {
+            output.truncation.omitted_facts += 1;
+        } else if output.evidence.resources.pop().is_some() {
+            output.truncation.omitted_resources += 1;
+        } else if output.next_actions.pop().is_some() {
+            output.truncation.omitted_facts += 1;
+        } else if output.summary.len() > 240 {
+            output.summary = truncate_str(&output.summary, output.summary.len() / 2).to_owned();
+        } else {
+            return Err("minimal provider output exceeds structural byte budget".to_owned());
         }
+    }
+}
+
+fn render_internal_contract_failure(operation: &str, message: &str) -> String {
+    let error = ProviderOperationError {
+        code: "PROVIDER_OUTPUT_CONTRACT_FAILED".to_owned(),
+        category: "internal".to_owned(),
+        message: bounded_text(message, 800),
+        recoverable: false,
+    };
+    let output = ProviderOperationOutput {
+        schema_version: PROVIDER_OUTPUT_SCHEMA_VERSION,
+        operation: bounded_text(operation, 200),
+        profile: "summary",
+        ok: false,
+        status: "failed".to_owned(),
+        summary: "The operation completed, but its provider-safe output contract failed closed."
+            .to_owned(),
+        evidence: ProviderEvidence::default(),
+        next_actions: Vec::new(),
+        truncation: ProviderTruncation {
+            max_bytes: PROVIDER_OUTPUT_MAX_BYTES,
+            ..ProviderTruncation::default()
+        },
+        error: Some(error),
+    };
+    serde_json::to_string(&output).unwrap_or_else(|_| {
+        r#"{"schemaVersion":"tron.provider_operation_output.v1","operation":"unknown","profile":"summary","ok":false,"status":"failed","summary":"Provider output failed closed.","evidence":{"facts":[],"resources":[],"collections":[]},"nextActions":[],"truncation":{"truncated":false,"omittedFacts":0,"omittedResources":0,"omittedCollections":0,"omittedItems":0,"serializedBytes":0,"maxBytes":15000},"error":{"code":"PROVIDER_OUTPUT_CONTRACT_FAILED","category":"internal","message":"Provider output failed closed.","recoverable":false}}"#.to_owned()
     })
 }
 
-fn provider_safe_trace_record_output_schema() -> Value {
+fn raw_result_text(result: &CapabilityResult) -> String {
+    match &result.content {
+        CapabilityResultBody::Text(text) => text.clone(),
+        CapabilityResultBody::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                CapabilityResultContent::Text { text } => Some(text.as_str()),
+                CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn validate_provider_output(
+    operation: &str,
+    profile: OutputProfile,
+    value: &Value,
+) -> Result<(), String> {
+    let function_id =
+        FunctionId::new("capability::execute").expect("canonical capability function id");
+    validate_engine_schema_payload(
+        &function_id,
+        "provider operation output",
+        &provider_output_schema(operation, profile),
+        value,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn provider_output_schema(operation: &str, profile: OutputProfile) -> Value {
     json!({
         "type": "object",
         "required": [
-            "schemaVersion",
-            "id",
-            "traceId",
-            "invocationId",
-            "modelPrimitiveName",
-            "operation",
-            "status",
-            "request",
-            "result",
-            "projectionBoundary",
-            "authority",
-            "redaction"
+            "schemaVersion", "operation", "profile", "ok", "status", "summary",
+            "evidence", "nextActions", "truncation"
         ],
+        "additionalProperties": false,
         "properties": {
-            "schemaVersion": {"const": "tron.trace.provider_safe.v1"},
-            "id": {"type": ["string", "null"], "description": "Provider-safe trace record ref."},
-            "version": {"type": ["string", "null"]},
-            "timestamp": {"type": ["string", "null"]},
-            "traceId": {"type": ["string", "null"], "description": "Provider-safe engine trace ref, not a raw provider invocation id."},
-            "invocationId": {"type": ["string", "null"], "description": "Provider-safe engine invocation ref, not a raw provider tool-call id."},
-            "parentInvocationId": {"type": ["string", "null"]},
-            "runId": {"type": ["string", "null"]},
-            "sessionRef": {"type": ["string", "null"]},
-            "workspaceRef": {"type": ["string", "null"]},
-            "turn": {"type": ["integer", "null"]},
-            "modelPrimitiveName": {"type": ["string", "null"]},
-            "operation": {"type": ["string", "null"]},
-            "status": {"type": ["string", "null"]},
-            "startedAt": {"type": ["string", "null"]},
-            "completedAt": {"type": ["string", "null"]},
-            "durationMs": {"type": ["integer", "null"]},
-            "request": {
-                "type": "object",
-                "required": ["hash", "rawStoredInProjection"],
-                "properties": {
-                    "hash": {"type": ["string", "null"]},
-                    "rawStoredInProjection": {"const": false}
-                }
+            "schemaVersion": {"const": PROVIDER_OUTPUT_SCHEMA_VERSION},
+            "operation": {"const": operation},
+            "profile": {"const": profile.as_str()},
+            "ok": {"type": "boolean"},
+            "status": {"type": "string", "maxLength": 120},
+            "summary": {"type": "string", "maxLength": 1200},
+            "evidence": evidence_schema(),
+            "nextActions": {
+                "type": "array",
+                "maxItems": 8,
+                "items": next_action_schema()
             },
-            "result": {
-                "type": "object",
-                "required": ["hash", "rawStoredInProjection"],
-                "properties": {
-                    "hash": {"type": ["string", "null"]},
-                    "rawStoredInProjection": {"const": false}
-                }
+            "truncation": truncation_schema(),
+            "error": error_schema()
+        },
+        "allOf": [
+            {
+                "if": {"properties": {"ok": {"const": false}}},
+                "then": {"required": ["error"]}
             },
-            "projectionBoundary": {
-                "type": "object",
-                "required": [
-                    "providerVisibleProjection",
-                    "safeEngineRefsOnly",
-                    "rawAuditFieldsProjected",
-                    "internalAuditStorageMayRetainRawAuditFields"
-                ],
-                "properties": {
-                    "providerVisibleProjection": {"const": true},
-                    "safeEngineRefsOnly": {"const": true},
-                    "rawAuditFieldsProjected": {"const": false},
-                    "internalAuditStorageMayRetainRawAuditFields": {"const": true}
-                }
+            {
+                "if": {"properties": {"ok": {"const": true}}},
+                "then": {"not": {"required": ["error"]}}
+            }
+        ],
+        "schemaCompleteness": "exact_provider_operation_output"
+    })
+}
+
+fn evidence_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["facts", "resources", "collections"],
+        "additionalProperties": false,
+        "properties": {
+            "facts": {
+                "type": "array",
+                "maxItems": 160,
+                "items": fact_schema()
             },
-            "authority": {
-                "type": "object",
-                "required": [
-                    "actorKind",
-                    "scopeCount",
-                    "rawActorIdStored",
-                    "rawAuthorityGrantIdStored",
-                    "rawIdempotencyKeyStored"
-                ],
-                "properties": {
-                    "actorKind": {"type": ["string", "null"]},
-                    "scopeCount": {"type": "integer"},
-                    "rawActorIdStored": {"const": false},
-                    "rawAuthorityGrantIdStored": {"const": false},
-                    "rawIdempotencyKeyStored": {"const": false}
-                }
+            "resources": {
+                "type": "array",
+                "maxItems": 64,
+                "items": resource_ref_schema()
             },
-            "error": {
-                "type": ["object", "null"],
-                "description": "Provider-safe error summary. Raw error details are not stored in the projection."
-            },
-            "redaction": {
-                "type": "object",
-                "required": [
-                    "rawProviderInvocationIdsExcluded",
-                    "rawGrantIdsExcluded",
-                    "rawAuthorityIdsExcluded",
-                    "rawIdempotencyKeysExcluded",
-                    "rawWorkingDirectoryExcluded",
-                    "rawRequestExcluded",
-                    "rawResultExcluded",
-                    "rawFilesExcluded",
-                    "rawVcsExcluded"
-                ],
-                "properties": {
-                    "rawProviderInvocationIdsExcluded": {"const": true},
-                    "rawGrantIdsExcluded": {"const": true},
-                    "rawAuthorityIdsExcluded": {"const": true},
-                    "rawIdempotencyKeysExcluded": {"const": true},
-                    "rawWorkingDirectoryExcluded": {"const": true},
-                    "rawRequestExcluded": {"const": true},
-                    "rawResultExcluded": {"const": true},
-                    "rawFilesExcluded": {"const": true},
-                    "rawVcsExcluded": {"const": true}
+            "collections": {
+                "type": "array",
+                "maxItems": 24,
+                "items": collection_schema()
+            }
+        }
+    })
+}
+
+fn fact_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["field", "value"],
+        "additionalProperties": false,
+        "properties": {
+            "field": {"type": "string", "maxLength": 200},
+            "value": {"type": ["string", "number", "integer", "boolean", "null"]}
+        }
+    })
+}
+
+fn resource_ref_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["kind", "resourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "kind": {"type": "string", "maxLength": 200},
+            "resourceId": {"type": "string", "maxLength": 800},
+            "versionId": {"type": "string", "maxLength": 800},
+            "role": {"type": "string", "maxLength": 200}
+        }
+    })
+}
+
+fn collection_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["field", "total", "returned", "truncated", "items"],
+        "additionalProperties": false,
+        "properties": {
+            "field": {"type": "string", "maxLength": 200},
+            "total": {"type": "integer", "minimum": 0},
+            "returned": {"type": "integer", "minimum": 0, "maximum": 12},
+            "truncated": {"type": "boolean"},
+            "items": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {
+                    "type": "object",
+                    "required": ["facts", "resources"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "facts": {"type": "array", "maxItems": 32, "items": fact_schema()},
+                        "resources": {"type": "array", "maxItems": 8, "items": resource_ref_schema()}
+                    }
                 }
             }
-        },
-        "notProjectedFields": [
-            "providerInvocationId",
-            "authorityGrantId",
-            "actorId",
-            "idempotencyKey",
-            "workingDirectory",
-            "rawRequest",
-            "rawResult",
-            "rawCommand",
-            "rawLog",
-            "rawPath",
-            "fileContents"
-        ]
+        }
+    })
+}
+
+fn next_action_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["source", "summary"],
+        "additionalProperties": false,
+        "properties": {
+            "source": {"type": "string", "maxLength": 200},
+            "summary": {"type": "string", "maxLength": 500},
+            "operation": {"type": "string", "maxLength": 200},
+            "inspectId": {"type": "string", "maxLength": 800}
+        }
+    })
+}
+
+fn truncation_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "truncated", "omittedFacts", "omittedResources", "omittedCollections",
+            "omittedItems", "serializedBytes", "maxBytes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+            "truncated": {"type": "boolean"},
+            "omittedFacts": {"type": "integer", "minimum": 0},
+            "omittedResources": {"type": "integer", "minimum": 0},
+            "omittedCollections": {"type": "integer", "minimum": 0},
+            "omittedItems": {"type": "integer", "minimum": 0},
+            "serializedBytes": {"type": "integer", "minimum": 0, "maximum": PROVIDER_OUTPUT_MAX_BYTES},
+            "maxBytes": {"const": PROVIDER_OUTPUT_MAX_BYTES}
+        }
+    })
+}
+
+fn error_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["code", "category", "message", "recoverable"],
+        "additionalProperties": false,
+        "properties": {
+            "code": {"type": "string", "maxLength": 800},
+            "category": {"type": "string", "maxLength": 200},
+            "message": {"type": "string", "maxLength": 800},
+            "recoverable": {"type": "boolean"}
+        }
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
-    use crate::engine::FunctionId;
-    use crate::engine::kernel::schema;
 
-    fn function_id() -> FunctionId {
-        FunctionId::new("capability::execute").expect("canonical function id")
-    }
-
-    #[test]
-    fn every_supported_operation_has_one_output_contract() {
-        assert_eq!(OperationId::ALL_NAMES.len(), 188);
-        for operation in OperationId::ALL_NAMES {
-            assert!(
-                output_schema(operation).is_some(),
-                "missing output schema for {operation}"
-            );
+    fn result(text: &str, is_error: bool, details: Value) -> CapabilityResult {
+        CapabilityResult {
+            content: CapabilityResultBody::Text(text.to_owned()),
+            details: Some(details),
+            is_error: is_error.then_some(true),
+            stop_turn: None,
         }
     }
 
     #[test]
-    fn special_operations_preserve_their_provider_safe_shapes() {
-        let expected = [
-            ("git_status", "git"),
-            ("web_robots_check", "web"),
-            ("web_fetch", "web"),
-            ("job_status", "jobs"),
-            ("job_list", "jobs"),
-            ("job_log", "jobs"),
-            ("trace_list", "records"),
-            ("trace_get", "record"),
-        ];
-        for (operation, field) in expected {
-            let contract = output_schema(operation).expect("special output schema");
+    fn every_operation_has_one_closed_profiled_output_schema() {
+        for operation in OperationId::ALL_NAMES {
+            let schema = output_schema(operation).expect("supported output schema");
+            assert_eq!(schema["additionalProperties"], false, "{operation}");
+            assert_eq!(schema["properties"]["operation"]["const"], *operation);
             assert_eq!(
-                contract["properties"]["details"]["properties"]["primitiveOperation"]["const"],
-                operation,
-                "wrong operation selector for {operation}"
-            );
-            assert!(
-                contract["properties"]["details"]["properties"][field].is_object(),
-                "missing {field} projection for {operation}"
+                schema["schemaCompleteness"], "exact_provider_operation_output",
+                "{operation}"
             );
         }
     }
 
     #[test]
-    fn generic_contract_has_only_the_minimal_provider_safe_envelope() {
-        let contract = output_schema("goal_list").expect("generic output schema");
-        assert_eq!(
-            contract["properties"]["details"]["properties"]["primitiveOperation"]["const"],
-            "goal_list"
-        );
-        assert_eq!(
-            contract["properties"]["details"]["properties"]
-                .as_object()
-                .expect("generic details properties")
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec!["primitiveOperation", "status"]
-        );
-        assert_eq!(contract["required"], json!(["content", "details"]));
-    }
-
-    #[test]
-    fn unknown_operations_fail_closed() {
-        assert!(output_schema("unknown_operation").is_none());
-        assert!(output_schema("").is_none());
-    }
-
-    #[test]
-    fn every_output_contract_is_a_valid_schema_definition() {
-        for operation in OperationId::ALL_NAMES {
-            let contract = output_schema(operation).expect("registered output schema");
-            schema::validate_schema_definition(&function_id(), "operation response", &contract)
-                .unwrap_or_else(|error| panic!("invalid {operation} output schema: {error}"));
+    fn success_and_failure_outputs_are_closed_and_bounded() {
+        for result in [
+            result(
+                "ok",
+                false,
+                json!({
+                    "primitiveOperation": "git_status",
+                    "status": "ok",
+                    "git": {"status": "clean", "summary": {"stagedCount": 0}}
+                }),
+            ),
+            result(
+                "failed",
+                true,
+                json!({
+                    "primitiveOperation": "git_status",
+                    "failure": {
+                        "code": "ROUTE_STALE",
+                        "category": "invalid_request",
+                        "message": "route evidence is stale",
+                        "recoverable": true
+                    },
+                    "dynamicReplacement": {"status": "failed_closed"}
+                }),
+            ),
+        ] {
+            let rendered = render_provider_output("git_status", &result).expect("provider output");
+            assert!(rendered.len() <= PROVIDER_OUTPUT_MAX_BYTES);
+            let value: Value = serde_json::from_str(&rendered).expect("valid JSON");
+            let operation = OperationId::GitStatus;
+            validate_provider_output(operation.as_str(), profile(operation), &value)
+                .expect("valid output");
         }
+    }
+
+    #[test]
+    fn raw_details_cannot_bypass_provider_evidence_algebra() {
+        let result = result(
+            "done",
+            false,
+            json!({
+                "primitiveOperation": "observe",
+                "status": "ok",
+                "command": "secret command",
+                "workingDirectory": "/private/example",
+                "apiKey": "sk-example-secret-value"
+            }),
+        );
+        let rendered = render_provider_output("observe", &result).expect("provider output");
+        assert!(!rendered.contains("secret command"));
+        assert!(!rendered.contains("/private/example"));
+        assert!(!rendered.contains("sk-example-secret-value"));
+    }
+
+    #[test]
+    fn large_outputs_are_structurally_truncated_as_valid_json() {
+        let values = (0..1_000)
+            .map(|index| json!({"kind": "record", "resourceId": format!("record-{index}"), "summary": "x".repeat(1_000)}))
+            .collect::<Vec<_>>();
+        let result = result(
+            "large",
+            false,
+            json!({
+                "primitiveOperation": "module_list",
+                "status": "ok",
+                "records": values
+            }),
+        );
+        let rendered = render_provider_output("module_list", &result).expect("provider output");
+        assert!(rendered.len() <= PROVIDER_OUTPUT_MAX_BYTES);
+        let value: Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert_eq!(value["truncation"]["truncated"], true);
+    }
+
+    #[test]
+    fn schema_rejects_wrong_operation_and_extra_fields() {
+        let result = result(
+            "ok",
+            false,
+            json!({
+                "primitiveOperation": "git_status",
+                "status": "ok",
+                "git": {"status": "clean"}
+            }),
+        );
+        let rendered = render_provider_output("git_status", &result).expect("provider output");
+        let mut value: Value = serde_json::from_str(&rendered).expect("valid JSON");
+        value["operation"] = json!("git_diff");
+        assert!(validate_provider_output("git_status", OutputProfile::Git, &value).is_err());
+        value["operation"] = json!("git_status");
+        value["unexpected"] = json!(true);
+        assert!(validate_provider_output("git_status", OutputProfile::Git, &value).is_err());
+    }
+
+    #[test]
+    fn unsupported_operation_errors_keep_safe_recovery_evidence() {
+        let result = result(
+            "unsupported operation",
+            true,
+            json!({
+                "failure": {
+                    "code": "INVALID_PARAMS",
+                    "category": "invalid_request",
+                    "message": "Unsupported operation. Use catalog_search.",
+                    "recoverable": true,
+                    "suggestion": "Call catalog_search with the intended user goal."
+                }
+            }),
+        );
+        let rendered =
+            render_provider_output("guessed_operation", &result).expect("common failure envelope");
+        let value: Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert_eq!(value["operation"], "guessed_operation");
+        assert_eq!(value["profile"], "summary");
+        assert_eq!(value["error"]["recoverable"], true);
+        assert!(rendered.contains("catalog_search"));
+        validate_provider_output("guessed_operation", OutputProfile::Summary, &value)
+            .expect("valid common failure envelope");
     }
 }

@@ -1221,6 +1221,18 @@ schemas are opt-in through `includeOutputSchema: true`; ordinary inspection
 returns one input schema rather than duplicating input/output contracts across
 multiple result fields.
 
+Every supported operation uses the same closed
+`tron.provider_operation_output.v1` model envelope. The capability domain owns
+the operation-specific profile, redacted evidence projection, common failure
+branch, and structural 15 KB byte budget; the turn runner and provider adapters
+do not reconstruct domain output. Raw `CapabilityResult` details remain
+internal audit/UI state, while model context receives only bounded facts,
+resource refs, collections, next actions, explicit truncation proof, and a
+typed recoverable error when applicable. Oversized evidence is removed as
+whole JSON elements rather than slicing serialized bytes, so provider context
+always receives valid JSON. Unsupported operation guesses use the same safe
+failure envelope and retain catalog-based recovery guidance.
+
 Catalog search extracts complete operation-like tokens from natural-language
 queries. Unsupported names are reported explicitly and do not produce unrelated
 fuzzy operation matches, while valid prefixes still expand to supported

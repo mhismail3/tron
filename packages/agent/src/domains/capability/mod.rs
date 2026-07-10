@@ -252,6 +252,7 @@ pub(crate) use operations::{
     operation_required_payload_fields, operation_risk, validate_operation_payload,
 };
 pub(crate) use operations::{OperationEffect, operation_effect};
+pub(crate) use operations::{provider_result_content, provider_result_text};
 
 use std::sync::Arc;
 

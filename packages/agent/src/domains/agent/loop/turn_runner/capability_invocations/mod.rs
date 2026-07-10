@@ -2,8 +2,9 @@
 //!
 //! This module persists provider-requested primitive executions, dispatches
 //! child `capability::execute` invocations, and writes the provider-facing
-//! capability result message. The bounded model-context evidence projection is
-//! owned by [`projection`] so raw execution details stay out of provider text.
+//! capability result message. The capability domain owns the bounded,
+//! schema-validated model envelope so raw execution details stay available to
+//! audit/UI persistence without entering provider context.
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled.
@@ -20,17 +21,15 @@ use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::Invo
 use crate::domains::agent::r#loop::primitive_surface::ExecutionMode;
 use crate::domains::agent::r#loop::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::r#loop::types::{CapabilityInvocationExecutionResult, StreamResult};
-use crate::domains::capability::is_supported_operation;
+use crate::domains::capability::{
+    is_supported_operation, provider_result_content, provider_result_text,
+};
 use crate::domains::session::event_store::{EventRow, EventType};
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::Message;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
-
-mod projection;
-
-use self::projection::{extract_model_context_result_text, extract_result_content};
 
 pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
@@ -358,7 +357,8 @@ pub(super) async fn execute_capability_invocation_phase(
 
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
-                        let model_context_content = extract_model_context_result_text(&result);
+                        let model_context_content =
+                            provider_result_text(&operation, &result.result);
                         let is_error = result.result.is_error.unwrap_or(false);
                         let base_identity = primitive_identity_json(
                             &capability_invocation.name,
@@ -466,12 +466,15 @@ async fn process_capability_results(
         };
         outcome.capability_invocations_executed += 1;
         let is_error = exec_result.result.is_error.unwrap_or(false);
+        let operation = validated_operation_name_from_map(&capability_invocation.arguments)
+            .or_else(|| requested_operation_name_from_map(&capability_invocation.arguments))
+            .unwrap_or_else(|| "unknown".to_owned());
 
         params
             .context_manager
             .add_message(Message::CapabilityResult {
                 invocation_id: capability_invocation.id.clone(),
-                content: extract_result_content(&exec_result),
+                content: provider_result_content(&operation, &exec_result.result),
                 is_error: if is_error { Some(true) } else { None },
             });
 

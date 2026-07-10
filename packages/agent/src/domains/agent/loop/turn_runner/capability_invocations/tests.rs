@@ -128,19 +128,16 @@ struct DelayedCapabilityHandler;
 #[async_trait]
 impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
     async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
-        let delay_ms = invocation
+        let trace_id = invocation
             .payload
-            .get("delayMs")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
+            .get("traceId")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let delay_ms = if trace_id == "slow" { 25 } else { 0 };
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
-        let label = invocation
-            .payload
-            .get("label")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
+        let label = trace_id;
         serde_json::to_value(CapabilityResult {
             content: CapabilityResultBody::Text(format!("done-{label}")),
             details: Some(json!({
@@ -282,14 +279,13 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         CapabilityInvocationDraft::new("call-slow", "execute", {
             let mut args = Map::new();
             args.insert("operation".to_owned(), json!("log_recent"));
-            args.insert("label".to_owned(), json!("slow"));
-            args.insert("delayMs".to_owned(), json!(25));
+            args.insert("traceId".to_owned(), json!("slow"));
             args
         }),
         CapabilityInvocationDraft::new("call-fast", "execute", {
             let mut args = Map::new();
             args.insert("operation".to_owned(), json!("log_recent"));
-            args.insert("label".to_owned(), json!("fast"));
+            args.insert("traceId".to_owned(), json!("fast"));
             args
         }),
     ]);
@@ -393,7 +389,7 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         })
         .expect("slow started event");
     assert_eq!(started.0, "execute");
-    assert_eq!(started.1.as_ref().unwrap()["label"], "slow");
+    assert_eq!(started.1.as_ref().unwrap()["traceId"], "slow");
     assert_eq!(started.2.model_primitive_name.as_deref(), Some("execute"));
     assert_eq!(started.2.operation_name.as_deref(), Some("log_recent"));
 

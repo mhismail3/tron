@@ -1,27 +1,22 @@
 use super::*;
-use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::CapabilityResultMessageContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use serde_json::{Value, json};
 
-fn make_exec_result(content: CapabilityResultBody) -> CapabilityInvocationExecutionResult {
+fn make_exec_result(content: CapabilityResultBody) -> CapabilityResult {
     make_exec_result_with_details(content, None)
 }
 
 fn make_exec_result_with_details(
     content: CapabilityResultBody,
     details: Option<Value>,
-) -> CapabilityInvocationExecutionResult {
-    CapabilityInvocationExecutionResult {
-        result: CapabilityResult {
-            content,
-            details,
-            is_error: None,
-            stop_turn: None,
-        },
-        duration_ms: 100,
-        stops_turn: false,
+) -> CapabilityResult {
+    CapabilityResult {
+        content,
+        details,
+        is_error: None,
+        stop_turn: None,
     }
 }
 

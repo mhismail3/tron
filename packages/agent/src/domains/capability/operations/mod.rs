@@ -84,6 +84,7 @@ pub(crate) use operation_contract::{
     operation_list_text, required_payload_fields as operation_required_payload_fields,
     risk as operation_risk, supported_operation_names,
 };
+pub(crate) use operation_contract::{provider_result_content, provider_result_text};
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,
@@ -125,7 +126,6 @@ pub(crate) async fn execute_value(
         );
         let result =
             dispatch::execute_operation(operation_id, invocation, deps, operation_at).await?;
-        operation_contract::validate_output(&operation, &result)?;
         return result_value(result);
     }
 
@@ -148,12 +148,7 @@ pub(crate) async fn execute_value(
         "primitive execute trace record started"
     );
 
-    let result = dispatch::execute_operation(operation_id, invocation, deps, operation_at)
-        .await
-        .and_then(|result| {
-            operation_contract::validate_output(&operation, &result)?;
-            Ok(result)
-        });
+    let result = dispatch::execute_operation(operation_id, invocation, deps, operation_at).await;
     match result {
         Ok(result) => {
             complete_trace_record(
