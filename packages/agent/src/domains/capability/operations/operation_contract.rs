@@ -590,6 +590,27 @@ mod tests {
     }
 
     #[test]
+    fn every_non_read_only_operation_requires_caller_idempotency() {
+        let missing = supported_operation_names()
+            .iter()
+            .filter(|operation| {
+                effect(operation).is_some_and(|effect| effect != OperationEffect::ReadOnly)
+            })
+            .filter(|operation| {
+                let schema = exact_input_schema(operation).expect("canonical input schema");
+                !schema["required"]
+                    .as_array()
+                    .is_some_and(|required| required.contains(&json!("idempotencyKey")))
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "non-read-only operations missing caller idempotency: {missing:?}"
+        );
+    }
+
+    #[test]
     fn host_union_is_derived_exactly_from_canonical_contract_fields() {
         let host = host_request_schema();
         let host_properties = host["properties"].as_object().expect("host properties");

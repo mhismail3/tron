@@ -81,7 +81,7 @@ const GOVERNANCE_OPERATIONS: &[&str] = &[
 pub(super) fn input_schema(operation: &str) -> Option<Value> {
     let (required, fields) = match operation {
         "procedural_definition_record" => (
-            vec!["operation", "proceduralKind", "summary"],
+            vec!["operation", "proceduralKind", "summary", "idempotencyKey"],
             procedural_definition_fields(),
         ),
         "procedural_state_list" => (
@@ -93,7 +93,12 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
             procedural_inspect_fields("proceduralRecordResourceId"),
         ),
         "procedural_activation_request_record" => (
-            vec!["operation", "proceduralKind", "proceduralRecordResourceId"],
+            vec![
+                "operation",
+                "proceduralKind",
+                "proceduralRecordResourceId",
+                "idempotencyKey",
+            ],
             procedural_activation_request_fields(),
         ),
         "procedural_activation_request_list" => (
@@ -115,6 +120,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
                 "proceduralActivationRequestResourceId",
                 "decision",
                 "reason",
+                "idempotencyKey",
             ],
             procedural_activation_decision_fields(),
         ),

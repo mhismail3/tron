@@ -8,7 +8,9 @@
 //! runtime routing, producer extension, or source-level kernel evolution.
 //! The model-facing projection is agent-first: it advertises exact invocation
 //! payloads, authority selectors, and read-only-vs-write effect contracts before
-//! any UI-oriented wording.
+//! any UI-oriented wording. Operation preflight is projected mechanically from
+//! the canonical operation contract; this module must not classify operation
+//! names or maintain a second authority policy.
 
 use std::borrow::Cow;
 
@@ -16,8 +18,10 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{
-    operation_binding_metadata, operation_required_payload_fields, operation_risk,
-    operations::{OperationEffect, operation_effect},
+    AuthorityPolicy, ConditionalAuthority, ResourceKindPolicy, SelectorAddition,
+    WorkerPackageKindSource, authority_policy, operation_binding_metadata,
+    operation_required_payload_fields, operation_risk,
+    operations::{OperationEffect, OperationId, operation_effect},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -209,17 +213,23 @@ pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolM
 
 pub(crate) fn operation_agent_usage_projection(operation: &str) -> Option<Value> {
     let binding = operation_binding_metadata(operation)?;
+    let audience = operation_pool_metadata(binding.operation)?
+        .audience
+        .as_str();
+    let effect = operation_effect(operation)?;
+    let risk = operation_risk(operation)?;
+    let authority = authority_policy(operation)?;
+    let required_payload_fields = operation_required_payload_fields(operation)?;
     Some(json!({
         "callable": true,
         "tool": "capability::execute",
         "operation": binding.operation,
         "arguments": {"operation": binding.operation},
-        "audience": operation_pool_metadata(binding.operation)
-            .map(|metadata| metadata.audience.as_str())
-            .unwrap_or("session_work"),
-        "defaultUse": default_use_for_operation(binding.operation, binding.family, binding.ownership_class),
-        "effect": operation_effect_projection(binding.operation, binding.family, binding.ownership_class),
-        "preflight": preflight_guidance_for_operation(binding.operation, binding.family, binding.ownership_class),
+        "audience": audience,
+        "defaultUse": default_use_for_effect(effect, binding.family, binding.ownership_class),
+        "effect": operation_effect_projection(binding.operation, binding.family, effect, risk, authority),
+        "risk": risk,
+        "preflight": preflight_guidance_for_operation(binding.operation, effect, authority, required_payload_fields),
         "failureRecovery": failure_recovery_for_operation(binding.family, binding.ownership_class),
     }))
 }
@@ -382,8 +392,12 @@ fn next_action_for_ownership(class: &str) -> &'static str {
     }
 }
 
-fn default_use_for_operation(operation: &str, family: &str, ownership_class: &str) -> &'static str {
-    if !operation_is_read_only_safe(operation) {
+fn default_use_for_effect(
+    effect: OperationEffect,
+    family: &str,
+    ownership_class: &str,
+) -> &'static str {
+    if effect != OperationEffect::ReadOnly {
         return match ownership_class {
             "governance_locked" => "governed_write_after_evidence_and_approval",
             "record_plane" => "record_after_evidence_and_idempotency",
@@ -406,43 +420,50 @@ fn default_use_for_operation(operation: &str, family: &str, ownership_class: &st
     }
 }
 
-fn operation_effect_projection(operation: &str, family: &str, ownership_class: &str) -> Value {
-    let read_only = operation_is_read_only_safe(operation);
-    let mode = if read_only {
-        "read_only"
-    } else if operation_starts_work(operation) {
-        "starts_work"
-    } else if operation_writes_metadata(operation) {
-        "metadata_write"
-    } else {
-        "state_change"
-    };
+fn operation_effect_projection(
+    operation: &str,
+    family: &str,
+    effect: OperationEffect,
+    risk: &str,
+    authority: AuthorityPolicy,
+) -> Value {
+    let read_only = effect == OperationEffect::ReadOnly;
+    let starts_work = effect == OperationEffect::StartsWork;
+    let writes_resource = authority.base_scope_additions().contains(&"resource.write");
     json!({
-        "mode": mode,
+        "mode": effect.as_str(),
+        "risk": risk,
         "readOnlyInspectionSafe": read_only,
         "mutatesState": !read_only,
-        "writesResource": !read_only && (operation_writes_metadata(operation) || matches!(ownership_class, "record_plane" | "governance_locked")),
-        "startsWork": operation_starts_work(operation),
+        "writesResource": writes_resource,
+        "startsWork": starts_work,
         "readOnlyInstruction": if read_only {
             "safe to call during read-only inspection"
         } else {
             "do not call during read-only inspection; inspect schema/catalog/list operations instead"
         },
-        "priorEvidence": prior_evidence_for_operation(operation),
-        "requiresPriorEvidence": !read_only && matches!(ownership_class, "record_plane" | "governance_locked"),
+        "priorEvidence": prior_evidence_projection(operation, authority.conditional_authority()),
+        "requiresPriorEvidence": false,
         "family": family
     })
 }
 
-fn prior_evidence_for_operation(operation: &str) -> Value {
-    match operation {
-        "web_fetch" => json!({
+fn prior_evidence_projection(
+    operation: &str,
+    conditional_authority: ConditionalAuthority,
+) -> Value {
+    match conditional_authority {
+        ConditionalAuthority::WebRobotsProof {
+            resource_id_field,
+            version_id_field,
+            ..
+        } => json!({
             "mode": "conditional",
             "requiredWhen": "the task requires robots-gated fetch proof or a robots policy was checked for this target",
-            "sourceOperation": "web_robots_check",
+            "sourceOperation": OperationId::WebRobotsCheck.as_str(),
             "copyFields": {
-                "webRobotsPolicyResourceId": "web_fetch.webRobotsPolicyResourceId",
-                "webRobotsPolicyVersionId": "web_fetch.expectedWebRobotsPolicyVersionId"
+                "webRobotsPolicyResourceId": format!("{operation}.{resource_id_field}"),
+                "webRobotsPolicyVersionId": format!("{operation}.{version_id_field}")
             },
             "failClosed": "missing, mismatched, or stale robots refs are rejected before target network I/O"
         }),
@@ -450,209 +471,175 @@ fn prior_evidence_for_operation(operation: &str) -> Value {
     }
 }
 
-fn operation_is_read_only_safe(operation: &str) -> bool {
-    matches!(operation_effect(operation), Some(OperationEffect::ReadOnly))
-}
-
-fn operation_writes_metadata(operation: &str) -> bool {
-    matches!(
-        operation_effect(operation),
-        Some(OperationEffect::MetadataWrite)
-    )
-}
-
-fn operation_starts_work(operation: &str) -> bool {
-    matches!(
-        operation_effect(operation),
-        Some(OperationEffect::StartsWork)
-    )
-}
-
-fn preflight_guidance_for_operation(operation: &str, family: &str, ownership_class: &str) -> Value {
-    let required_payload_fields = operation_required_payload_fields(operation)
-        .expect("supported operation has canonical required fields");
-    if operation == "capability_shadow_trial_request_record" {
-        return json!({
-            "authorityScopes": [
-                "capability_binding.read",
-                "capability_binding.write",
-                "resource.read",
-                "resource.write"
-            ],
-            "resourceSelectors": [
-                "kind:capability_shadow_trial_request",
-                "kind:capability_shadow_trial_decision",
-                "kind:capability_shadow_trial_run",
-                "kind:capability_shadow_trial_evidence"
-            ],
-            "networkPolicy": "none",
-            "agentStateInherited": false,
-            "requiredPayloadFields": required_payload_fields,
-            "example": {
-                "operation": "capability_shadow_trial_request_record",
-                "targetOperation": "git_status",
-                "bindingMode": "shadow",
-                "candidateAdapter": {
-                    "adapterId": "candidate_git_status_adapter",
-                    "adapterVersion": "metadata-v1",
-                    "executionMode": "metadata_only",
-                    "networkPolicy": "none"
-                }
-            },
-            "readOnlyInstruction": "Do not call during read-only inspection; this records durable shadow-trial request metadata.",
-            "beforeCalling": "Inspect capability_binding_cockpit_overview or catalog_inspect for git_status, copy the server-owned owner/class metadata exactly, inspect the operation schema for exact field names, and provide bounded evidence refs only."
-        });
-    }
-
-    if operation.starts_with("capability_binding_")
-        || operation.starts_with("capability_shadow_trial_")
-        || operation.starts_with("capability_replacement_")
-        || operation.starts_with("capability_route_")
-    {
-        let write = operation.ends_with("_record")
-            || operation.ends_with("_activate")
-            || operation.ends_with("_disable")
-            || operation.ends_with("_rollback");
-        let mut scopes = vec!["capability_binding.read", "resource.read"];
-        if write {
-            scopes.extend(["capability_binding.write", "resource.write"]);
-        }
-        return json!({
-            "authorityScopes": scopes,
-            "resourceSelectors": capability_binding_kind_selectors_for_operation(operation),
-            "networkPolicy": "none",
-            "agentStateInherited": false,
-            "requiredPayloadFields": required_payload_fields,
-            "readOnlyInstruction": if operation_is_read_only_safe(operation) {
-                "safe to call during read-only inspection"
-            } else {
-                "do not call during read-only inspection; use list/inspect/search/overview operations instead"
-            },
-            "beforeCalling": "Use exact kind/resource selectors. Do not use wildcard selectors, opaque authority tokens, local paths, commands, logs, or code bodies."
-        });
-    }
-
-    if family == "context_control" {
-        let write = !operation_is_read_only_safe(operation);
-        let mut scopes = vec!["context_control.read", "resource.read"];
-        if write {
-            scopes.extend(["context_control.write", "resource.write"]);
-        }
-        return json!({
-            "authorityScopes": scopes,
-            "resourceSelectors": [
-                "kind:context_control_snapshot",
-                "kind:context_control_action",
-                "kind:context_control_epoch",
-                "kind:context_survivor",
-                "kind:context_exclusion",
-                "kind:context_policy_snapshot"
-            ],
-            "networkPolicy": "none",
-            "agentStateInherited": false,
-            "requiredPayloadFields": required_payload_fields,
-            "readOnlyInstruction": if write {
-                "do not call during read-only inspection; use context_control_status, list, or inspect operations instead"
-            } else {
-                "safe to call during read-only current-session context inspection"
-            },
-            "beforeCalling": "Use the trusted current session, exact sessionId when supplied, and provider-safe refs only. Do not use wildcard selectors, raw prompt bodies, hidden system/soul prompt text, local paths, commands, logs, grants, authority ids, or hidden chain-of-thought."
-        });
-    }
-
-    if operation_is_read_only_safe(operation) && ownership_class == "adapter_replaceable" {
-        return json!({
-            "authority": "derived_read_only_adapter_authority_for_exact_operation",
-            "networkPolicy": if matches!(family, "web") { "declared_by_operation" } else { "none" },
-            "agentStateInherited": false,
-            "requiredPayloadFields": required_payload_fields,
-            "readOnlyInstruction": "safe to call during read-only session work after inspecting the execute::<operation> schema when field names are unclear",
-            "beforeCalling": "Use the exact operation selector and operation-specific top-level fields only. Do not request replacement, route, shadow, binding, or rollback authority unless the user task is explicitly about replacing this operation."
-        });
-    }
-
+fn preflight_guidance_for_operation(
+    operation: &str,
+    effect: OperationEffect,
+    authority: AuthorityPolicy,
+    required_payload_fields: Vec<String>,
+) -> Value {
+    let resource_kind_policy = authority.resource_kind_policy();
+    let resource_selectors = resource_kind_policy
+        .base_kinds()
+        .iter()
+        .map(|kind| format!("kind:{kind}"))
+        .collect::<Vec<_>>();
+    let selector_derivations = authority
+        .selector_additions()
+        .iter()
+        .copied()
+        .map(selector_addition_projection)
+        .collect::<Vec<_>>();
+    let read_only = effect == OperationEffect::ReadOnly;
     json!({
-        "authority": authority_boundary_for_ownership(ownership_class),
-        "evidence": evidence_boundary_for_ownership(ownership_class),
-        "networkPolicy": if matches!(family, "web") { "declared_by_operation" } else { "none_unless_schema_requires_otherwise" },
+        "authorityScopes": authority.base_scope_additions(),
+        "capabilitySelectors": authority.capability_additions(),
+        "resourceSelectors": resource_selectors,
+        "dynamicResourceSelectors": dynamic_resource_selector_projection(resource_kind_policy),
+        "exactResourceIdFields": authority.exact_resource_id_fields(),
+        "selectorDerivations": selector_derivations,
+        "conditionalAuthority": conditional_authority_projection(authority.conditional_authority()),
+        "networkPolicy": authority.network_policy().as_str(),
+        "agentStateInherited": false,
         "requiredPayloadFields": required_payload_fields,
-        "beforeCalling": "Put operation-specific fields at the top level of the capability::execute payload and inspect the operation schema when required fields are unclear."
+        "readOnlyInstruction": if read_only {
+            "safe to call during read-only inspection"
+        } else {
+            "do not call during read-only inspection; inspect the exact operation schema or a read-only list/inspect operation first"
+        },
+        "beforeCalling": format!(
+            "Invoke capability::execute with operation={operation}. Put only the canonical top-level payload fields in the request, use exact provider-safe resource refs, and never request wildcard selectors or opaque authority tokens."
+        )
     })
 }
 
-fn capability_binding_kind_selectors_for_operation(operation: &str) -> Vec<&'static str> {
-    if operation == "capability_binding_cockpit_overview" {
-        let mut selectors = vec![
-            "kind:capability_binding_request",
-            "kind:capability_binding_decision",
-            "kind:capability_binding_policy",
-        ];
-        selectors.extend(capability_route_kind_selectors());
-        selectors.sort_unstable();
-        selectors.dedup();
-        return selectors;
+fn conditional_authority_projection(authority: ConditionalAuthority) -> Value {
+    match authority {
+        ConditionalAuthority::None => json!({"mode": "none"}),
+        ConditionalAuthority::WebRobotsProof {
+            resource_id_field,
+            version_id_field,
+            additional_scopes,
+        } => json!({
+            "mode": "web_robots_proof",
+            "whenFieldsPresent": [resource_id_field, version_id_field],
+            "additionalAuthorityScopes": additional_scopes
+        }),
+        ConditionalAuthority::NotificationPush {
+            requested_field,
+            additional_scopes,
+            additional_resource_kind,
+        } => json!({
+            "mode": "notification_push",
+            "whenFieldTrue": requested_field,
+            "additionalAuthorityScopes": additional_scopes,
+            "additionalResourceSelector": format!("kind:{additional_resource_kind}")
+        }),
     }
-    if operation.starts_with("capability_shadow_trial_") {
-        return capability_shadow_trial_kind_selectors();
-    }
-    if operation.starts_with("capability_route_")
-        || operation.starts_with("capability_replacement_")
-    {
-        return capability_route_kind_selectors();
-    }
-    match operation {
-        "capability_binding_request_record"
-        | "capability_binding_request_list"
-        | "capability_binding_request_inspect" => return vec!["kind:capability_binding_request"],
-        "capability_binding_decision_record" => {
-            return vec![
-                "kind:capability_binding_request",
-                "kind:capability_binding_decision",
-            ];
-        }
-        "capability_binding_decision_list" | "capability_binding_decision_inspect" => {
-            return vec!["kind:capability_binding_decision"];
-        }
-        "capability_binding_policy_activate" => {
-            return vec![
-                "kind:capability_binding_decision",
-                "kind:capability_binding_policy",
-            ];
-        }
-        "capability_binding_policy_list" | "capability_binding_policy_inspect" => {
-            return vec!["kind:capability_binding_policy"];
-        }
-        _ => {}
-    }
-    vec![
-        "kind:capability_binding_request",
-        "kind:capability_binding_decision",
-        "kind:capability_binding_policy",
-    ]
 }
 
-fn capability_shadow_trial_kind_selectors() -> Vec<&'static str> {
-    vec![
-        "kind:capability_shadow_trial_request",
-        "kind:capability_shadow_trial_decision",
-        "kind:capability_shadow_trial_run",
-        "kind:capability_shadow_trial_evidence",
-    ]
+fn dynamic_resource_selector_projection(policy: ResourceKindPolicy) -> Value {
+    match policy {
+        ResourceKindPolicy::None
+        | ResourceKindPolicy::Static(_)
+        | ResourceKindPolicy::CapabilityBinding(_)
+        | ResourceKindPolicy::CapabilityRouteUnion
+        | ResourceKindPolicy::ModuleRuntime(_)
+        | ResourceKindPolicy::ModuleProgramExecution(_)
+        | ResourceKindPolicy::Subagent(_) => json!({"mode": "none"}),
+        ResourceKindPolicy::OptionalGoal {
+            field, linked_kind, ..
+        } => json!({
+            "mode": "field_present",
+            "field": field,
+            "additionalResourceSelector": format!("kind:{linked_kind}")
+        }),
+        ResourceKindPolicy::WebFetchRobotsProof { proof_kind, .. } => json!({
+            "mode": "web_robots_proof",
+            "additionalResourceSelector": format!("kind:{proof_kind}")
+        }),
+        ResourceKindPolicy::NotificationPush { push_kind, .. } => json!({
+            "mode": "notification_push",
+            "additionalResourceSelector": format!("kind:{push_kind}")
+        }),
+        ResourceKindPolicy::Procedural {
+            kind_field,
+            resources,
+        } => json!({
+            "mode": "field_selected",
+            "field": kind_field,
+            "allowedResourceSelectors": resources
+                .resource_kinds()
+                .iter()
+                .map(|kind| format!("kind:{kind}"))
+                .collect::<Vec<_>>()
+        }),
+        ResourceKindPolicy::WorkerPackage(source) => match source {
+            WorkerPackageKindSource::ListArgument { field } => json!({
+                "mode": "field_selected",
+                "field": field,
+                "allowedResourceSelectors": source
+                    .allowed_resource_kinds()
+                    .iter()
+                    .map(|kind| format!("kind:{kind}"))
+                    .collect::<Vec<_>>()
+            }),
+            WorkerPackageKindSource::InspectResourceIdPrefix { field } => json!({
+                "mode": "resource_id_prefix",
+                "field": field,
+                "allowedResourceSelectors": source
+                    .allowed_resource_kinds()
+                    .iter()
+                    .map(|kind| format!("kind:{kind}"))
+                    .collect::<Vec<_>>()
+            }),
+        },
+    }
 }
 
-fn capability_route_kind_selectors() -> Vec<&'static str> {
-    vec![
-        "kind:capability_replacement_candidate",
-        "kind:capability_route_binding",
-        "kind:capability_route_activation",
-        "kind:capability_route_event",
-        "kind:capability_route_rollback",
-        "kind:capability_shadow_trial_request",
-        "kind:capability_shadow_trial_decision",
-        "kind:capability_shadow_trial_run",
-        "kind:capability_shadow_trial_evidence",
-        "kind:capability_binding_policy",
-    ]
+fn selector_addition_projection(addition: SelectorAddition) -> Value {
+    match addition {
+        SelectorAddition::Session => json!({
+            "mode": "trusted_current_session"
+        }),
+        SelectorAddition::WebRobotsProof {
+            resource_id_field,
+            version_id_field,
+        } => json!({
+            "mode": "web_robots_proof_fields",
+            "resourceIdField": resource_id_field,
+            "versionIdField": version_id_field
+        }),
+        SelectorAddition::ProceduralKind { field } => json!({
+            "mode": "procedural_kind_field",
+            "field": field
+        }),
+        SelectorAddition::DerivedModuleLifecycleState {
+            install_decision_field,
+        } => json!({
+            "mode": "derived_module_lifecycle_state",
+            "installDecisionField": install_decision_field
+        }),
+        SelectorAddition::DerivedModuleRuntimeState {
+            lifecycle_field,
+            request_id_field,
+            idempotency_field,
+        } => json!({
+            "mode": "derived_module_runtime_state",
+            "lifecycleField": lifecycle_field,
+            "requestIdField": request_id_field,
+            "idempotencyField": idempotency_field
+        }),
+        SelectorAddition::DerivedSubagentTask { task_id_field } => json!({
+            "mode": "derived_subagent_task",
+            "taskIdField": task_id_field
+        }),
+        SelectorAddition::DelegatedSubagentResources {
+            task_resource_field,
+        } => json!({
+            "mode": "delegated_subagent_resources",
+            "taskResourceField": task_resource_field
+        }),
+    }
 }
 
 fn failure_recovery_for_operation(family: &str, ownership_class: &str) -> &'static str {
@@ -1084,184 +1071,151 @@ mod tests {
     }
 
     #[test]
-    fn capability_binding_agent_usage_advertises_operation_specific_selectors() {
-        for (operation, expected_selectors) in [
-            (
-                "capability_binding_request_list",
-                vec!["kind:capability_binding_request"],
-            ),
-            (
-                "capability_binding_decision_list",
-                vec!["kind:capability_binding_decision"],
-            ),
-            (
-                "capability_binding_policy_list",
-                vec!["kind:capability_binding_policy"],
-            ),
-        ] {
+    fn every_operation_projects_exact_canonical_effect_risk_and_preflight() {
+        assert_eq!(supported_operation_names().len(), 188);
+        for operation in supported_operation_names() {
+            let effect = operation_effect(operation).expect("canonical effect");
+            let risk = operation_risk(operation).expect("canonical risk");
+            let authority = authority_policy(operation).expect("canonical authority");
+            let required_fields =
+                operation_required_payload_fields(operation).expect("canonical required fields");
+            let expected_resource_selectors = authority
+                .resource_kind_policy()
+                .base_kinds()
+                .iter()
+                .map(|kind| format!("kind:{kind}"))
+                .collect::<Vec<_>>();
+            let expected_selector_derivations = authority
+                .selector_additions()
+                .iter()
+                .copied()
+                .map(selector_addition_projection)
+                .collect::<Vec<_>>();
             let usage = operation_agent_usage_projection(operation)
                 .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
-            let selectors = usage["preflight"]["resourceSelectors"]
-                .as_array()
-                .expect("resource selectors")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>();
+            let preflight = &usage["preflight"];
+
+            assert_eq!(usage["operation"], **operation, "{operation} operation");
+            assert_eq!(usage["risk"], risk, "{operation} risk");
             assert_eq!(
-                selectors, expected_selectors,
-                "{operation} selectors drifted"
+                usage["effect"]["mode"],
+                effect.as_str(),
+                "{operation} effect"
             );
-            assert_eq!(usage["preflight"]["networkPolicy"], "none");
-            assert_eq!(usage["preflight"]["agentStateInherited"], false);
-            let scopes = usage["preflight"]["authorityScopes"]
-                .as_array()
-                .expect("authority scopes")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>();
-            assert!(scopes.contains(&"capability_binding.read"));
-            assert!(scopes.contains(&"resource.read"));
-            assert!(!scopes.contains(&"capability_binding.write"));
-            assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
-            assert_eq!(usage["effect"]["mutatesState"], false);
+            assert_eq!(usage["effect"]["risk"], risk, "{operation} effect risk");
+            assert_eq!(
+                usage["effect"]["readOnlyInspectionSafe"],
+                effect == OperationEffect::ReadOnly,
+                "{operation} read-only classification"
+            );
+            assert_eq!(
+                usage["effect"]["startsWork"],
+                effect == OperationEffect::StartsWork,
+                "{operation} starts-work classification"
+            );
+            assert_eq!(
+                usage["effect"]["writesResource"],
+                authority.base_scope_additions().contains(&"resource.write"),
+                "{operation} resource-write classification"
+            );
+            assert_eq!(
+                preflight["authorityScopes"],
+                json!(authority.base_scope_additions()),
+                "{operation} authority scopes"
+            );
+            assert_eq!(
+                preflight["capabilitySelectors"],
+                json!(authority.capability_additions()),
+                "{operation} capability selectors"
+            );
+            assert_eq!(
+                preflight["resourceSelectors"],
+                json!(expected_resource_selectors),
+                "{operation} resource selectors"
+            );
+            assert_eq!(
+                preflight["exactResourceIdFields"],
+                json!(authority.exact_resource_id_fields()),
+                "{operation} exact resource-id fields"
+            );
+            assert_eq!(
+                preflight["selectorDerivations"],
+                json!(expected_selector_derivations),
+                "{operation} selector derivations"
+            );
+            assert_eq!(
+                preflight["dynamicResourceSelectors"],
+                dynamic_resource_selector_projection(authority.resource_kind_policy()),
+                "{operation} dynamic resource selectors"
+            );
+            assert_eq!(
+                preflight["conditionalAuthority"],
+                conditional_authority_projection(authority.conditional_authority()),
+                "{operation} conditional authority"
+            );
+            assert_eq!(
+                preflight["networkPolicy"],
+                authority.network_policy().as_str(),
+                "{operation} network policy"
+            );
+            assert_eq!(
+                preflight["requiredPayloadFields"],
+                json!(required_fields),
+                "{operation} required fields"
+            );
+            assert_eq!(preflight["agentStateInherited"], false, "{operation}");
         }
     }
 
     #[test]
-    fn capability_cockpit_and_route_usage_advertise_full_governance_selectors() {
-        let expected_route_selectors = vec![
-            "kind:capability_replacement_candidate",
-            "kind:capability_route_binding",
-            "kind:capability_route_activation",
-            "kind:capability_route_event",
-            "kind:capability_route_rollback",
-            "kind:capability_shadow_trial_request",
-            "kind:capability_shadow_trial_decision",
-            "kind:capability_shadow_trial_run",
-            "kind:capability_shadow_trial_evidence",
-            "kind:capability_binding_policy",
-        ];
-        for operation in [
-            "capability_replacement_candidate_list",
-            "capability_route_binding_list",
-            "capability_route_event_list",
-        ] {
-            let usage = operation_agent_usage_projection(operation)
-                .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
-            let selectors = usage["preflight"]["resourceSelectors"]
-                .as_array()
-                .expect("resource selectors")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>();
-            assert_eq!(
-                selectors, expected_route_selectors,
-                "{operation} route selectors drifted"
-            );
-            assert_eq!(usage["preflight"]["networkPolicy"], "none");
-            assert_eq!(usage["preflight"]["agentStateInherited"], false);
-            assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
-        }
-
-        let cockpit = operation_agent_usage_projection("capability_binding_cockpit_overview")
-            .expect("cockpit usage");
-        let cockpit_selectors = cockpit["preflight"]["resourceSelectors"]
-            .as_array()
-            .expect("resource selectors")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        for expected in [
-            "kind:capability_binding_request",
-            "kind:capability_binding_decision",
-            "kind:capability_binding_policy",
-            "kind:capability_replacement_candidate",
-            "kind:capability_route_binding",
-            "kind:capability_route_activation",
-            "kind:capability_route_event",
-            "kind:capability_route_rollback",
-            "kind:capability_shadow_trial_request",
-            "kind:capability_shadow_trial_decision",
-            "kind:capability_shadow_trial_run",
-            "kind:capability_shadow_trial_evidence",
+    fn operation_projection_has_no_local_operation_name_policy() {
+        let implementation = include_str!("pool.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("implementation section");
+        for forbidden in [
+            "match operation {",
+            "operation ==",
+            "operation.starts_with(",
+            "operation.ends_with(",
+            "none_unless_schema_requires_otherwise",
         ] {
             assert!(
-                cockpit_selectors.contains(&expected),
-                "cockpit preflight missing selector {expected}: {cockpit_selectors:?}"
+                !implementation.contains(forbidden),
+                "capability pool must not duplicate operation policy via {forbidden}"
             );
         }
-        assert_eq!(cockpit["preflight"]["networkPolicy"], "none");
-        assert_eq!(cockpit["preflight"]["agentStateInherited"], false);
-        assert_eq!(cockpit["effect"]["readOnlyInspectionSafe"], true);
-        assert_eq!(cockpit["effect"]["mutatesState"], false);
-    }
-
-    #[test]
-    fn capability_shadow_trial_usage_advertises_exact_trial_selectors() {
-        for (operation, write) in [
-            ("capability_shadow_trial_request_record", true),
-            ("capability_shadow_trial_decision_record", true),
-            ("capability_shadow_trial_run_record", true),
-            ("capability_shadow_trial_evidence_inspect", false),
-        ] {
-            let usage = operation_agent_usage_projection(operation)
-                .unwrap_or_else(|| panic!("missing usage projection for {operation}"));
-            let selectors = usage["preflight"]["resourceSelectors"]
-                .as_array()
-                .expect("resource selectors")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>();
-            assert_eq!(
-                selectors,
-                vec![
-                    "kind:capability_shadow_trial_request",
-                    "kind:capability_shadow_trial_decision",
-                    "kind:capability_shadow_trial_run",
-                    "kind:capability_shadow_trial_evidence",
-                ],
-                "{operation} shadow selectors drifted"
+        for operation in supported_operation_names() {
+            let literal = format!("\"{operation}\"");
+            assert!(
+                !implementation.contains(&literal),
+                "capability pool must source operation {operation} from the canonical registry"
             );
-            let scopes = usage["preflight"]["authorityScopes"]
-                .as_array()
-                .expect("authority scopes")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>();
-            assert!(scopes.contains(&"capability_binding.read"));
-            assert!(scopes.contains(&"resource.read"));
-            assert_eq!(scopes.contains(&"capability_binding.write"), write);
-            assert_eq!(scopes.contains(&"resource.write"), write);
-            assert_eq!(usage["preflight"]["networkPolicy"], "none");
-            assert_eq!(usage["preflight"]["agentStateInherited"], false);
         }
     }
 
     #[test]
-    fn read_only_adapter_preflight_does_not_require_replacement_route_authority() {
+    fn canonical_preflight_remains_model_first_and_provider_safe() {
         let usage = operation_agent_usage_projection("git_status").expect("git_status usage");
-        assert_eq!(usage["effect"]["readOnlyInspectionSafe"], true);
         assert_eq!(
-            usage["preflight"]["authority"],
-            "derived_read_only_adapter_authority_for_exact_operation"
+            usage["preflight"]["authorityScopes"],
+            json!(["git.read", "resource.read"])
         );
         assert_eq!(usage["preflight"]["networkPolicy"], "none");
-        assert_eq!(usage["preflight"]["agentStateInherited"], false);
         assert_eq!(
             usage["preflight"]["requiredPayloadFields"],
             json!(["operation"])
-        );
-        let preflight = serde_json::to_string(&usage["preflight"]).expect("json");
-        assert!(
-            !preflight.contains("route_authority"),
-            "plain read-only adapter preflight must not imply replacement route authority: {preflight}"
         );
         assert!(
             usage["preflight"]["beforeCalling"]
                 .as_str()
                 .expect("before calling")
-                .contains("unless the user task is explicitly about replacing this operation")
+                .starts_with("Invoke capability::execute with operation=git_status")
         );
+        let preflight = serde_json::to_string(&usage["preflight"]).expect("json");
+        assert!(!preflight.contains("route_authority"));
+        assert!(!preflight.contains("agent_state"));
+        assert!(!preflight.contains("grantId"));
     }
 
     #[test]

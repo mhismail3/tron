@@ -242,6 +242,7 @@ pub(crate) mod contract;
 mod operations;
 pub(crate) mod pool;
 
+pub(crate) use contract::{EXECUTE_MODEL_PRIMITIVE, EXECUTE_MODEL_PRIMITIVE_EFFECT};
 pub(crate) use operations::execute_value;
 pub(crate) use operations::supported_operation_names;
 pub(crate) use operations::{
@@ -250,6 +251,7 @@ pub(crate) use operations::{
     operation_binding_metadata, operation_host_request_schema, operation_list_text,
     operation_required_payload_fields, operation_risk, validate_operation_payload,
 };
+pub(crate) use operations::{OperationEffect, operation_effect};
 
 use std::sync::Arc;
 

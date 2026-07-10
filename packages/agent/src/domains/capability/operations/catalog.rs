@@ -2398,11 +2398,11 @@ mod tests {
         let process = execute_operation_inspect_projection("process_run", "execute::process_run");
         assert_eq!(
             process["schema"]["requiredPayloadFields"],
-            json!(["operation", "command"])
+            json!(["operation", "command", "idempotencyKey"])
         );
         assert_eq!(
             process["inputSchema"]["required"],
-            json!(["operation", "command"])
+            json!(["operation", "command", "idempotencyKey"])
         );
         assert_eq!(process["inputSchema"]["additionalProperties"], false);
         assert_eq!(
@@ -2594,7 +2594,8 @@ mod tests {
                 "capabilityShadowTrialRequestResourceId",
                 "expectedCapabilityShadowTrialRequestVersionId",
                 "decision",
-                "reason"
+                "reason",
+                "idempotencyKey"
             ])
         );
         assert_eq!(
@@ -2604,7 +2605,8 @@ mod tests {
                 "capabilityShadowTrialRequestResourceId",
                 "expectedCapabilityShadowTrialRequestVersionId",
                 "decision",
-                "reason"
+                "reason",
+                "idempotencyKey"
             ])
         );
         assert_eq!(
@@ -2629,7 +2631,8 @@ mod tests {
                 "capabilityShadowTrialDecisionResourceId",
                 "expectedCapabilityShadowTrialDecisionVersionId",
                 "builtInProjection",
-                "candidateProjection"
+                "candidateProjection",
+                "idempotencyKey"
             ])
         );
         assert_eq!(
@@ -2639,7 +2642,8 @@ mod tests {
                 "capabilityShadowTrialDecisionResourceId",
                 "expectedCapabilityShadowTrialDecisionVersionId",
                 "builtInProjection",
-                "candidateProjection"
+                "candidateProjection",
+                "idempotencyKey"
             ])
         );
         assert_eq!(
@@ -2788,10 +2792,6 @@ mod tests {
             discovery["inputSchema"]["properties"]["repositoryRefId"]["description"],
             "Optional bounded repository ref id filter; unsupported aliases are rejected."
         );
-        assert_eq!(
-            discovery["inputSchema"]["properties"]["networkPolicy"]["const"],
-            "none"
-        );
         assert!(
             !discovery.to_string().contains("repositoryTreeRefId"),
             "catalog must not suggest unsupported repository tree aliases"
@@ -2921,8 +2921,8 @@ mod tests {
             "Bounded provider-safe git status evidence. Absolute paths, raw commands, raw logs, grants, and authority ids are excluded."
         );
         assert_eq!(
-            discovery["agentUsage"]["preflight"]["authority"],
-            "derived_read_only_adapter_authority_for_exact_operation"
+            discovery["agentUsage"]["preflight"]["authorityScopes"],
+            json!(["git.read", "resource.read"])
         );
         assert_eq!(
             discovery["agentUsage"]["preflight"]["networkPolicy"],
@@ -2991,9 +2991,12 @@ mod tests {
             discovery["functions"][2]["modelFacingInvocation"]["operation"],
             "capability_binding_cockpit_overview"
         );
-        assert_eq!(
-            discovery["functions"][2]["agentUsage"]["preflight"]["resourceSelectors"][0],
-            "kind:capability_binding_decision"
+        assert!(
+            discovery["functions"][2]["agentUsage"]["preflight"]["resourceSelectors"]
+                .as_array()
+                .expect("resource selectors")
+                .iter()
+                .any(|selector| selector == "kind:capability_binding_decision")
         );
         assert!(
             discovery["functions"][2]["agentUsage"]["preflight"]["resourceSelectors"]
@@ -3207,7 +3210,7 @@ mod tests {
             matches[0]["agentUsage"]["preflight"]["readOnlyInstruction"]
                 .as_str()
                 .expect("preflight instruction")
-                .contains("Do not call during read-only inspection")
+                .contains("do not call during read-only inspection")
         );
     }
 

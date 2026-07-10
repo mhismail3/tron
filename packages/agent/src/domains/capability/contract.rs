@@ -35,6 +35,8 @@ use super::operation_host_request_schema;
 pub(crate) const STREAM_TOPICS: &[&str] = &["capability.runtime"];
 
 pub(crate) const EXECUTE_FUNCTION_ID: &str = "capability::execute";
+pub(crate) const EXECUTE_MODEL_PRIMITIVE: &str = "execute";
+pub(crate) const EXECUTE_MODEL_PRIMITIVE_EFFECT: &str = "delegated_invocation";
 
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
@@ -167,17 +169,13 @@ mod tests {
         let operations = schema["properties"]["operation"]["description"]
             .as_str()
             .expect("operation description");
-        assert!(operations.contains("For read-only inspection prefer"));
-        assert!(
-            operations.contains("catalog_conformance creates a durable catalog_discovery_report")
-        );
-        assert!(operations.contains("is not read-only inspection"));
-        let effect_description = schema["properties"]["effectClass"]["description"]
-            .as_str()
-            .expect("effect class description");
-        assert!(effect_description.contains("pure_read"));
-        assert!(effect_description.contains("read_only"));
-        assert!(effect_description.contains("Accepted values"));
+        assert!(operations.contains("Never guess an operation name"));
+        assert!(operations.contains("use catalog_search, then catalog_inspect"));
+        let effect_values = schema["properties"]["effectClass"]["enum"]
+            .as_array()
+            .expect("effect class values");
+        assert!(effect_values.contains(&json!("pure_read")));
+        assert!(effect_values.contains(&json!("read_only")));
         for operation in crate::domains::capability::supported_operation_names() {
             assert!(operations.contains(operation), "missing {operation}");
         }

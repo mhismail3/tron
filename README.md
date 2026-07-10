@@ -1338,6 +1338,14 @@ primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `transcriptionText`, `transcriptionLanguage`, `transcriptionModel`,
 `workerPackageResourceId`, `workerPackageKind`, `moduleManifestResourceId`,
 catalog search filters, `idempotencyKey`, and `reason`.
+The canonical operation-contract registry owns each operation's closed input
+schema, effect, risk, authority, and preflight metadata. Every operation that
+is not read-only structurally requires a stable caller-supplied
+`idempotencyKey`; provider guidance, capability-pool projections, runtime
+validation, and module-manifest effect validation derive from that registry
+instead of maintaining parallel operation-name policy lists. The separate
+model primitive `execute` remains capability-domain-owned and delegates one
+validated operation per call.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is

@@ -441,374 +441,80 @@ fn clarification_includes_tron_identity() {
 }
 
 #[test]
-fn clarification_includes_capability_execution_guidance() {
+fn clarification_uses_catalog_owned_operation_contracts() {
     let result = generate_capability_instruction_text(&[]);
-    assert!(result.contains("Execute Operations"));
+
+    for required in [
+        "Use only `capability::execute`",
+        "Never guess operation names",
+        "`catalog_search`",
+        "`catalog_inspect`",
+        "`kind: \"function\"`",
+        "`id: \"execute::<operation>\"`",
+        "canonical inspect schema",
+        "exact required fields, effect, risk, preflight",
+    ] {
+        assert!(
+            result.contains(required),
+            "schema-led guidance missing {required:?}"
+        );
+    }
+}
+
+#[test]
+fn clarification_derives_operation_index_from_canonical_contract() {
+    let result = generate_capability_instruction_text(&[]);
+
     for operation in crate::domains::capability::supported_operation_names() {
         assert!(
-            result.contains(operation),
-            "OpenAI guidance missing execute operation {operation}"
+            result.contains(*operation),
+            "canonical execute operation missing from generated index: {operation}"
         );
     }
-    assert!(result.contains("state_get"));
-    assert!(result.contains("filesystem_read"));
-    assert!(result.contains("filesystem_write"));
-    assert!(result.contains("git_status"));
-    assert!(result.contains("git_diff"));
-    assert!(result.contains("git_branch_inventory"));
-    assert!(result.contains("git_stage"));
-    assert!(result.contains("git_unstage"));
-    assert!(result.contains("git_commit"));
-    assert!(result.contains("git_branch_start"));
-    assert!(result.contains("goal_create"));
-    assert!(result.contains("goal_list"));
-    assert!(result.contains("goal_inspect"));
-    assert!(result.contains("goal_cancel"));
-    assert!(result.contains("question_create"));
-    assert!(result.contains("question_list"));
-    assert!(result.contains("question_inspect"));
-    assert!(result.contains("question_answer"));
-    assert!(result.contains("expectedQuestionVersionId"));
-    assert!(result.contains("expectedHead"));
-    assert!(result.contains("expectedIndexTree"));
-    assert!(result.contains("branchName"));
-    assert!(!result.contains("git_push"));
-    assert!(!result.contains("git_reset"));
-    assert!(!result.contains("git_checkout"));
-    assert!(!result.contains("git_branch_delete"));
-    assert!(!result.contains("reminder"));
-    assert!(!result.contains("planner"));
-    assert!(!result.contains("file_read"));
-    assert!(!result.contains("file_write"));
-    assert!(result.contains("process_run"));
-    assert!(result.contains("web_fetch"));
-    assert!(result.contains("web_robots_check"));
-    assert!(result.contains("web_source_list"));
-    assert!(result.contains("web_source_inspect"));
-    assert!(result.contains("web_source_archive"));
-    assert!(result.contains("expectedWebSourceVersionId"));
-    assert!(result.contains("media_create"));
-    assert!(result.contains("media_list"));
-    assert!(result.contains("media_inspect"));
-    assert!(result.contains("media_archive"));
-    assert!(result.contains("expectedMediaVersionId"));
-    assert!(result.contains("blob refs and bounded metadata only"));
-    assert!(result.contains("provider-visible raw audio disabled"));
-    assert!(result.contains("import_history_record"));
-    assert!(result.contains("import_history_list"));
-    assert!(result.contains("import_history_inspect"));
-    assert!(result.contains("bounded generic graph lineage refs only"));
-    assert!(result.contains("render hints fixed to `generic_graph`"));
-    assert!(result.contains("repository_tree_snapshot"));
-    assert!(result.contains("repository_tree_list"));
-    assert!(result.contains("repository_tree_inspect"));
-    assert!(result.contains("content-free repository/root refs"));
-    assert!(result.contains("raw file contents, blob bytes, absolute paths"));
-    assert!(result.contains("import_preview_record"));
-    assert!(result.contains("import_preview_list"));
-    assert!(result.contains("import_preview_inspect"));
-    assert!(result.contains("link import-history and repository-tree refs"));
-    assert!(result.contains("raw import payloads, preview payloads, file contents"));
-    assert!(result.contains("previewFingerprint"));
-    assert!(result.contains("program_execution_record"));
-    assert!(result.contains("program_execution_list"));
-    assert!(result.contains("program_execution_inspect"));
-    assert!(result.contains("runtime/language identifiers"));
-    assert!(result.contains("raw code, stdin/stdout/stderr"));
-    assert!(result.contains("programFingerprint"));
-    assert!(result.contains("prompt_artifact_record"));
-    assert!(result.contains("prompt_artifact_list"));
-    assert!(result.contains("prompt_artifact_inspect"));
-    assert!(result.contains("explicit opt-in artifact kind"));
-    assert!(result.contains("raw prompt bodies"));
-    assert!(result.contains("contentFingerprint"));
-    assert!(result.contains("device_list"));
-    assert!(result.contains("device_inspect"));
-    assert!(result.contains("notification_send"));
-    assert!(result.contains("notification_list"));
-    assert!(result.contains("notification_inspect"));
-    assert!(result.contains("notification_mark_read"));
-    assert!(result.contains("notification_mark_all_read"));
-    assert!(result.contains("live APNs transport disabled"));
-    assert!(result.contains("subagent_launch"));
-    assert!(result.contains("subagent_status"));
-    assert!(result.contains("subagent_result"));
-    assert!(result.contains("subagent_cancel"));
-    assert!(result.contains("modelPolicy: accepted_jobs_program_execution_v1"));
-    assert!(result.contains("subagent_task_list"));
-    assert!(result.contains("subagent_task_inspect"));
-    assert!(result.contains("delegated module-program-execution work"));
-    assert!(result.contains("module_list"));
-    assert!(result.contains("module_inspect"));
-    assert!(result.contains("module manifest identity"));
-    assert!(result.contains("module_validation_record"));
-    assert!(result.contains("module_validation_list"));
-    assert!(result.contains("module_validation_inspect"));
-    assert!(result.contains("module_validation_report"));
-    assert!(result.contains("required docs/tests evidence"));
-    assert!(result.contains("raw logs/commands/env/code/file contents"));
-    assert!(result.contains("without install, activation, execution, dependency resolution"));
-    assert!(result.contains("module_install_request_record"));
-    assert!(result.contains("module_install_request_list"));
-    assert!(result.contains("module_install_request_inspect"));
-    assert!(result.contains("module_install_decision_record"));
-    assert!(result.contains("module_install_decision_list"));
-    assert!(result.contains("module_install_decision_inspect"));
-    assert!(result.contains("module_install_request"));
-    assert!(result.contains("module_install_decision"));
-    assert!(result.contains("metadata-only review gate resources"));
-    assert!(result.contains("approval freshness evidence"));
-    assert!(result.contains("approval evidence minting authority"));
-    assert!(result.contains("module_dependency_request_record"));
-    assert!(result.contains("module_dependency_request_list"));
-    assert!(result.contains("module_dependency_request_inspect"));
-    assert!(result.contains("module_dependency_decision_record"));
-    assert!(result.contains("module_dependency_decision_list"));
-    assert!(result.contains("module_dependency_decision_inspect"));
-    assert!(result.contains("module_dependency_policy_activate"));
-    assert!(result.contains("module_dependency_policy_list"));
-    assert!(result.contains("module_dependency_policy_inspect"));
-    assert!(result.contains("module_dependency_request"));
-    assert!(result.contains("module_dependency_decision"));
-    assert!(result.contains("module_dependency_policy"));
-    assert!(result.contains("Cargo.toml/Cargo.lock parity evidence"));
-    assert!(result.contains("without package-manager execution"));
-    assert!(result.contains("raw dependency artifacts"));
-    assert!(result.contains("capability_binding_request_record"));
-    assert!(result.contains("capability_binding_request_list"));
-    assert!(result.contains("capability_binding_request_inspect"));
-    assert!(result.contains("capability_binding_decision_record"));
-    assert!(result.contains("capability_binding_decision_list"));
-    assert!(result.contains("capability_binding_decision_inspect"));
-    assert!(result.contains("capability_binding_policy_activate"));
-    assert!(result.contains("capability_binding_policy_list"));
-    assert!(result.contains("capability_binding_policy_inspect"));
-    assert!(result.contains("capability_binding_request"));
-    assert!(result.contains("capability_binding_decision"));
-    assert!(result.contains("capability_binding_policy"));
-    assert!(result.contains("capability_shadow_trial_request_record"));
-    assert!(result.contains("capability_shadow_trial_decision_record"));
-    assert!(result.contains("capability_shadow_trial_run_record"));
-    assert!(result.contains("capability_shadow_trial_evidence_inspect"));
-    assert!(result.contains("capability_shadow_trial_request"));
-    assert!(result.contains("capability_shadow_trial_decision"));
-    assert!(result.contains("capability_shadow_trial_run"));
-    assert!(result.contains("capability_shadow_trial_evidence"));
-    assert!(result.contains("exact `targetOperation: git_status`"));
-    assert!(result.contains("rollback/disable/abort refs"));
-    assert!(result.contains("without candidate execution, runtime routing, dispatch mutation"));
-    assert!(result.contains("server-verified current built-in owner"));
-    assert!(result.contains("matching `currentBuiltInOwner` and `ownershipClass` assertions"));
-    assert!(result.contains("binding mode"));
-    assert!(result.contains("stale-version guards"));
-    assert!(result.contains("without runtime routing, dispatch mutation, hot-swap"));
-    assert!(result.contains("wildcard selectors"));
-    assert!(result.contains("agent_state inheritance"));
-    assert!(result.contains("procedural_state_list"));
-    assert!(result.contains("procedural_state_inspect"));
-    assert!(result.contains("procedural_definition_record"));
-    assert!(result.contains("procedural_activation_request_record"));
-    assert!(result.contains("procedural_activation_request_list"));
-    assert!(result.contains("procedural_activation_request_inspect"));
-    assert!(result.contains("procedural_activation_decision_record"));
-    assert!(result.contains("procedural_activation_decision_list"));
-    assert!(result.contains("procedural_activation_decision_inspect"));
-    assert!(result.contains("skill/rule/hook/procedure provenance evidence"));
-    assert!(result.contains("without activation, trigger firing, prompt injection"));
-    assert!(result.contains("Procedural module-pack operations"));
-    assert!(result.contains("scoped-authority proof"));
-    assert!(result.contains("definition records require `definitionId`"));
-    assert!(result.contains("trace_list"));
-    assert!(result.contains("replay_manifest"));
-    assert!(result.contains("memory_status"));
-    assert!(result.contains("memory_list"));
-    assert!(result.contains("memory_inspect"));
-    assert!(result.contains("memory_query_list"));
-    assert!(result.contains("memory_query_inspect"));
-    assert!(result.contains("memory_decision_list"));
-    assert!(result.contains("memory_decision_inspect"));
-    assert!(result.contains("deterministic retrieval and prompt-inclusion evidence"));
-    assert!(result.contains("bounded preview snippets only when policy allowed"));
-    assert!(result.contains("never raw body refs"));
-    assert!(result.contains("context_control_status"));
-    assert!(result.contains("context_control_snapshot"));
-    assert!(result.contains("context_control_compact"));
-    assert!(result.contains("context_control_clear"));
-    assert!(result.contains("context_control_action_list"));
-    assert!(result.contains("context_control_action_inspect"));
-    assert!(result.contains("context_survivor_record"));
-    assert!(result.contains("context_survivor_disable"));
-    assert!(result.contains("context_exclusion_record"));
-    assert!(result.contains("context_exclusion_disable"));
-    assert!(result.contains("context_policy_snapshot"));
-    assert!(result.contains("contextControlActionResourceId"));
-    assert!(result.contains("contextSurvivorResourceId"));
-    assert!(result.contains("contextExclusionResourceId"));
-    assert!(result.contains("read-only current-session context composition"));
-    assert!(result.contains("server-owned survivor/exclusion policy refs"));
-    assert!(result.contains("hidden system/soul prompt text"));
-    for non_goal in [
-        "web_search",
-        "web_sitemap_traverse",
-        "browser_open",
-        "browser_click",
-        "web_crawl",
-        "web_login",
-        "job_fetch",
-        "job_http",
-        "job_network",
-        "subagent_task_create",
-        "subagent_task_update",
-        "subagent_task_cancel",
-        "subagent_task_result",
-        "subagent_task_status",
-        "subagent_delegate",
-        "spawn_subagent",
-        "subagent_spawn",
-        concat!("notifications", "::send"),
-        concat!("notifications", "::list"),
-        concat!("notifications", "::mark_read"),
-        concat!("notifications", "::mark_all_read"),
-        concat!("device", "::register"),
-        concat!("device", "::unregister"),
-        concat!("apns", "_send"),
-        concat!("apns", "_deliver"),
-        "local_inbox",
-        "procedural_state_create",
-        "procedural_state_update",
-        "procedural_state_activate",
-        "skill_activate",
-        "rule_apply",
-        "hook_fire",
-        "procedure_execute",
-        "prompt_inject",
-        "learn_behavior",
-        "self_modify",
-        "autonomous_execute",
-        "trigger_register",
-        "package_install",
-        "module_install_physical",
-        "module_activate",
-        "module_execute",
-        "module_validation_execute",
-        "module_dependency_resolve",
-        "capability_binding_route",
-        "capability_hot_swap",
-    ] {
-        assert!(
-            !result.contains(non_goal),
-            "non-goal operation {non_goal} must not be provider-visible"
-        );
-    }
-    assert!(result.contains("Do not send `target`"));
-    assert!(result.contains("Put operation fields at the top level"));
-    assert!(result.contains("Except for read-only `replay_manifest`"));
-    assert!(result.contains("When authority is unavailable"));
 }
 
 #[test]
-fn clarification_describes_web_research_metadata_only_contract() {
+fn clarification_includes_generic_execution_invariants() {
     let result = generate_capability_instruction_text(&[]);
 
     for required in [
-        "web_research_request_record",
-        "web_research_request_list",
-        "web_research_request_inspect",
-        "web_research_review_record",
-        "web_research_review_list",
-        "web_research_review_inspect",
-        "web_research_source_record",
-        "web_research_source_list",
-        "web_research_source_inspect",
-        "metadata-only web research custody",
-        "bounded summaries, policy labels, source refs, citation refs, robots evidence refs, dependency-request refs, trace/replay refs, idempotency fingerprints",
-        "exact linked resource selectors",
-        "networkPolicy: none",
-        "without search, crawl, browser automation, login/cookie reuse, raw HTML/page dumps, browser logs, cookies",
-        "web_research_request_record requires title and questionSummary",
-        "web_research_review_record requires webResearchRequestResourceId and reviewSummary",
-        "web_research_source_record requires request or review linkage plus artifactKind, title, and summary",
-        "all web research record operations require stable idempotencyKey, bounded summaries and refs only, exact selectors for linked writes, and networkPolicy none",
+        "Every non-read-only schema structurally requires a stable, caller-supplied `idempotencyKey`",
+        "exact refs and selectors",
+        "Normal task invocation must not enter a capability replacement workflow unless the user explicitly requests replacement",
+        "If a call is invalid or unsupported, recover by catalog inspection",
+        "do not retry guessed variants",
+        "Provider-safe outputs are the model-first evidence path",
     ] {
         assert!(
             result.contains(required),
-            "web research guidance missing {required:?}"
-        );
-    }
-
-    for forbidden in [
-        "web_search",
-        "web_sitemap_traverse",
-        "browser_open",
-        "browser_click",
-        "web_crawl",
-        "web_login",
-    ] {
-        assert!(
-            !result.contains(forbidden),
-            "web research must not expose broad browser/search operation {forbidden:?}"
+            "generic execution guidance missing {required:?}"
         );
     }
 }
 
 #[test]
-fn clarification_describes_delegated_subagent_module_pack_contract() {
+fn clarification_omits_duplicate_operation_policy() {
     let result = generate_capability_instruction_text(&[]);
 
-    for required in [
-        "scoped delegated module-program-execution work",
-        "accepted `jobs_program_execution` module pack",
-        "bounded summaries/refs/fingerprints/trace/replay refs only",
-        "networkPolicy: none",
-        "modelPolicy: accepted_jobs_program_execution_v1",
-        "workerKind: module_program_execution",
-        "modulePackId: jobs_program_execution",
-        "bounded summary-only `handoffRefs`",
-        "both `resource:<subagent_task_id>` and `kind:subagent_task` selectors",
-        "delegated `moduleRuntimeResourceId`/`jobResourceId` binding",
-        "`parentConversationMutated: false` merge proposal refs",
-        "without raw prompts/results/tool logs/local paths/secrets/provider-visible grant IDs/authority IDs/hidden chain-of-thought/raw job payloads/package-manager output or silent parent-state mutation",
+    assert!(
+        result.len() < 10_000,
+        "provider guidance should stay concise and schema-led"
+    );
+    assert_eq!(
+        result.matches("idempotencyKey").count(),
+        1,
+        "idempotency policy must not be duplicated per operation"
+    );
+    for stale_guidance in [
+        "Set `operation` to exactly one of",
+        "Mutating filesystem package operations",
+        "all web research record operations",
     ] {
         assert!(
-            result.contains(required),
-            "delegated subagent guidance missing {required:?}"
+            !result.contains(stale_guidance),
+            "stale operation guidance remains: {stale_guidance:?}"
         );
     }
-
-    for forbidden in [
-        "modelPolicy: bounded_placeholder_v1",
-        "bounded-placeholder subagent lifecycle records",
-        "no worker/job/process/tool/network/package/result-merge side effects",
-    ] {
-        assert!(
-            !result.contains(forbidden),
-            "stale placeholder subagent guidance still present: {forbidden:?}"
-        );
-    }
-}
-
-#[test]
-fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
-    let result = generate_capability_instruction_text(&[]);
-
-    assert!(result.contains("Use ONLY this model-facing tool"));
-    assert!(result.contains("Each `execute` call performs one direct host operation"));
-    assert!(result.contains("catalog_search"));
-    assert!(result.contains("catalog_inspect"));
-    assert!(result.contains("catalog_conformance"));
-    assert!(result.contains("web_fetch"));
-    assert!(result.contains("web_robots_check"));
-    assert!(result.contains("web_source_list"));
-    assert!(result.contains("web_source_inspect"));
-    assert!(result.contains("Do not send `target`, `contractId`, `functionId`, or `arguments`"));
-    assert!(result.contains("Catalog discovery operations inspect metadata/conformance only"));
-    assert!(result.contains("When the user asks you to extend yourself"));
-    assert!(result.contains("Do not describe raw `process_run`, direct SQLite inspection"));
-    assert!(result.contains("Put operation fields at the top level"));
-    assert!(result.contains("Use one operation per `execute` call"));
-    assert!(result.contains("Use relative paths under the current working directory"));
-    assert!(!result.contains("absolute path is clearly required"));
-    assert!(result.contains("When authority is unavailable"));
 }
 
 // ── normalize_schema_for_openai ──────────────────────────────────

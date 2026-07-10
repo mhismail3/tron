@@ -127,7 +127,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
             vec!["operation", "decisionResourceId"],
             inspect_fields("decisionResourceId"),
         ),
-        "context_control_status" => (vec!["operation"], session_field()),
+        "context_control_status" => (vec!["operation"], vec![]),
         "context_control_snapshot" | "context_policy_snapshot" => (
             vec!["operation", "idempotencyKey"],
             context_snapshot_fields(),
@@ -449,10 +449,6 @@ fn memory_list_fields() -> Vec<(&'static str, Value)> {
         ("lifecycle", non_empty_string()),
         ("limit", bounded_integer(1, 500)),
     ]
-}
-
-fn session_field() -> Vec<(&'static str, Value)> {
-    vec![("sessionId", non_empty_string())]
 }
 
 fn context_snapshot_fields() -> Vec<(&'static str, Value)> {

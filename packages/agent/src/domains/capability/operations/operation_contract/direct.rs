@@ -58,7 +58,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
         "observe" => (vec!["operation"], vec![("input", string_schema())]),
         "state_get" => (vec!["operation", "namespace", "key"], state_key_fields()),
         "state_set" => (
-            vec!["operation", "namespace", "key", "value"],
+            vec!["operation", "namespace", "key", "value", "idempotencyKey"],
             state_set_fields(),
         ),
         "state_list" => (
@@ -162,7 +162,10 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
             ],
             git_branch_start_fields(),
         ),
-        "process_run" => (vec!["operation", "command"], process_fields(false)),
+        "process_run" => (
+            vec!["operation", "command", "idempotencyKey"],
+            process_fields(true),
+        ),
         "job_start" => (
             vec!["operation", "command", "idempotencyKey"],
             job_start_fields(),
@@ -204,7 +207,12 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
         "trace_list" => (vec!["operation"], trace_filter_fields()),
         "trace_get" => (
             vec!["operation", "traceRecordId"],
-            vec![("traceRecordId", nonempty_string_schema())],
+            vec![(
+                "traceRecordId",
+                described_nonempty_string_schema(
+                    "Exact provider-safe trace record id returned by trace_list.",
+                ),
+            )],
         ),
         "log_recent" => (vec!["operation"], trace_filter_fields()),
         "replay_manifest" => (vec!["operation"], Vec::new()),
@@ -239,7 +247,12 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
             vec![
                 ("limit", bounded_integer(1, 100)),
                 ("includeArchived", boolean_schema()),
-                ("repositoryRefId", nonempty_string_schema()),
+                (
+                    "repositoryRefId",
+                    described_nonempty_string_schema(
+                        "Optional bounded repository ref id filter; unsupported aliases are rejected.",
+                    ),
+                ),
             ],
         ),
         "repository_tree_inspect" => (
@@ -351,7 +364,10 @@ fn state_key_fields() -> Vec<(&'static str, Value)> {
 
 fn state_set_fields() -> Vec<(&'static str, Value)> {
     let mut fields = state_key_fields();
-    fields.push(("value", json!({})));
+    fields.extend([
+        ("value", json!({})),
+        ("idempotencyKey", idempotency_schema()),
+    ]);
     fields
 }
 
@@ -530,15 +546,38 @@ fn catalog_query_fields() -> Vec<(&'static str, Value)> {
 fn repository_tree_snapshot_fields() -> Vec<(&'static str, Value)> {
     vec![
         ("snapshotId", nonempty_string_schema()),
-        ("repositoryRef", reference_schema()),
-        ("rootRef", reference_schema()),
-        ("treeObjectRef", nonempty_string_schema()),
-        ("headRef", reference_schema()),
+        (
+            "repositoryRef",
+            reference_schema("Complete repository reference including kind and id or resourceId."),
+        ),
+        (
+            "rootRef",
+            reference_schema(
+                "Complete workspace-root reference including kind and id or resourceId. Passing only .id is invalid.",
+            ),
+        ),
+        (
+            "treeObjectRef",
+            described_nonempty_string_schema(
+                "Content-free repositoryTreeSnapshotInput.treeObjectRef identity.",
+            ),
+        ),
+        (
+            "headRef",
+            reference_schema(
+                "Optional complete HEAD reference including kind and id or resourceId.",
+            ),
+        ),
         ("snapshotLabel", nonempty_string_schema()),
         ("snapshotSummary", nonempty_string_schema()),
         (
             "pathEntries",
-            json!({"type": "array", "maxItems": 100, "items": path_entry_schema()}),
+            json!({
+                "type": "array",
+                "maxItems": 100,
+                "description": "Bounded content-free path metadata; never raw file contents.",
+                "items": path_entry_schema()
+            }),
         ),
         ("totalEntries", bounded_integer(0, 100_000)),
         ("fileCount", bounded_integer(0, 100_000)),
@@ -548,20 +587,21 @@ fn repository_tree_snapshot_fields() -> Vec<(&'static str, Value)> {
         ("maxDepth", bounded_integer(0, 64)),
         (
             "sourceRefs",
-            json!({"type": "array", "maxItems": 25, "items": reference_schema()}),
+            json!({"type": "array", "maxItems": 25, "items": reference_schema("Source evidence reference.")}),
         ),
         (
             "evidenceRefs",
-            json!({"type": "array", "maxItems": 25, "items": reference_schema()}),
+            json!({"type": "array", "maxItems": 25, "items": reference_schema("Validation evidence reference.")}),
         ),
         ("maxAgeDays", bounded_integer(1, 366)),
         ("idempotencyKey", idempotency_schema()),
     ]
 }
 
-fn reference_schema() -> Value {
+fn reference_schema(description: &str) -> Value {
     json!({
         "type": "object",
+        "description": description,
         "required": ["kind"],
         "anyOf": [
             {"required": ["id"]},
@@ -734,7 +774,7 @@ mod tests {
     #[test]
     fn representative_payloads_validate_and_unused_fields_fail_closed() {
         let valid = [
-            json!({"operation": "state_set", "scope": "session", "namespace": "agent", "key": "draft", "value": {"ready": true}}),
+            json!({"operation": "state_set", "scope": "session", "namespace": "agent", "key": "draft", "value": {"ready": true}, "idempotencyKey": "state-set-1"}),
             json!({"operation": "filesystem_find", "query": "contract", "maxResults": 25}),
             json!({"operation": "git_commit", "expectedHead": "head", "expectedIndexTree": "tree", "message": "test: exact contract", "reason": "verified", "idempotencyKey": "commit-1"}),
             json!({"operation": "job_start", "command": "printf test", "idempotencyKey": "job-1", "timeoutMs": 1000}),

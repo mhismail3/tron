@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::manifest::LIST_LIMIT_MAX;
+use super::manifest::{LIST_LIMIT_MAX, validate_manifest_payload};
 use super::service::{inspect_module_value, list_modules_value};
 use super::{MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, SCHEMA_VERSION, WORKER};
 use crate::engine::kernel::ids::{
@@ -59,6 +59,94 @@ async fn built_in_definition_and_seed_resources_are_registered() {
             json!(SCHEMA_VERSION)
         );
     }
+}
+
+#[tokio::test]
+async fn current_built_in_manifests_match_canonical_capability_contracts() {
+    let host = EngineHostHandle::new_in_memory().expect("engine host");
+    let mut resources = host
+        .list_resources(ListResources {
+            kind: Some(MODULE_MANIFEST_KIND.to_owned()),
+            scope: Some(EngineResourceScope::System),
+            lifecycle: None,
+            limit: 1000,
+        })
+        .await
+        .expect("list built-in module manifests");
+    resources.sort_by(|left, right| left.resource_id.cmp(&right.resource_id));
+    assert!(
+        !resources.is_empty(),
+        "built-in module manifests must exist"
+    );
+
+    let mut drift = Vec::new();
+    for resource in resources {
+        let inspection = host
+            .inspect_resource(&resource.resource_id)
+            .await
+            .expect("inspect built-in module manifest")
+            .expect("listed built-in module manifest must exist");
+        if let Err(error) =
+            validate_manifest_payload(&inspection.versions[0].payload, "built_in_manifest")
+        {
+            drift.push(format!("{}: {error}", resource.resource_id));
+        }
+    }
+
+    assert!(
+        drift.is_empty(),
+        "built-in module manifests drifted from canonical capability contracts:\n{}",
+        drift.join("\n")
+    );
+}
+
+#[test]
+fn manifest_rejects_unsupported_capability_operation() {
+    let mut payload = valid_manifest_payload("unsupported_operation");
+    payload["capabilityDeclarations"][0]["operation"] = json!("module_inspect_typo");
+
+    let error = validate_manifest_payload(&payload, "module_inspect")
+        .expect_err("unsupported operation must fail closed")
+        .to_string();
+
+    assert!(
+        error.contains(
+            "operation is not a supported canonical capability operation or model primitive"
+        ),
+        "{error}"
+    );
+    assert!(!error.contains("module_inspect_typo"), "{error}");
+}
+
+#[test]
+fn manifest_rejects_unsupported_declared_effect() {
+    let mut payload = valid_manifest_payload("unsupported_effect");
+    payload["capabilityDeclarations"][0]["effect"] = json!("read_only");
+
+    let error = validate_manifest_payload(&payload, "module_inspect")
+        .expect_err("unsupported manifest effect must fail closed")
+        .to_string();
+
+    assert!(
+        error.contains("effect must be read, write, or delegated_invocation"),
+        "{error}"
+    );
+    assert!(!error.contains("read_only"), "{error}");
+}
+
+#[test]
+fn manifest_rejects_effect_drift_from_canonical_operation() {
+    let mut payload = valid_manifest_payload("effect_drift");
+    payload["capabilityDeclarations"][0]["effect"] = json!("write");
+
+    let error = validate_manifest_payload(&payload, "module_inspect")
+        .expect_err("canonical effect drift must fail closed")
+        .to_string();
+
+    assert!(
+        error.contains("effect write does not match canonical module_inspect effect read"),
+        "{error}"
+    );
 }
 
 #[tokio::test]

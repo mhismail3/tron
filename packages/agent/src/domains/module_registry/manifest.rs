@@ -1,5 +1,14 @@
+//! Fail-closed validation for stored module manifest payloads.
+//!
+//! Capability declarations use the manifest-level `read`/`write` effect split:
+//! canonical read-only operations declare `read`, while every canonical
+//! mutating or work-starting operation declares `write`.
+
 use serde_json::Value;
 
+use crate::domains::capability::{
+    EXECUTE_MODEL_PRIMITIVE, EXECUTE_MODEL_PRIMITIVE_EFFECT, OperationEffect, operation_effect,
+};
 use crate::shared::server::errors::CapabilityError;
 
 use super::SCHEMA_VERSION;
@@ -64,6 +73,7 @@ pub(crate) fn validate_manifest_payload(
     for field in ARRAY_FIELDS {
         ensure_bounded_array(payload.get(*field), field, operation)?;
     }
+    ensure_capability_declarations(payload, operation)?;
     ensure_bounded_array(
         payload.pointer("/validation/checks"),
         "validation.checks",
@@ -82,6 +92,64 @@ pub(crate) fn validate_manifest_payload(
     ensure_lifecycle(payload, operation)?;
     ensure_redaction_proof(payload, operation)?;
     validate_safe_value(payload, operation, 0, false)?;
+    Ok(())
+}
+
+fn ensure_capability_declarations(payload: &Value, operation: &str) -> Result<(), CapabilityError> {
+    let declarations = payload
+        .get("capabilityDeclarations")
+        .and_then(Value::as_array)
+        .expect("capabilityDeclarations shape was validated");
+    for (index, declaration) in declarations.iter().enumerate() {
+        let declaration = declaration.as_object().ok_or_else(|| {
+            invalid(format!(
+                "{operation} module manifest capabilityDeclarations[{index}] must be an object"
+            ))
+        })?;
+        let declared_operation = declaration
+            .get("operation")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{operation} module manifest capabilityDeclarations[{index}].operation must be a string"
+                ))
+            })?;
+        let declared_effect = declaration
+            .get("effect")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{operation} module manifest capabilityDeclarations[{index}].effect must be a string"
+                ))
+            })?;
+        let expected_effect = match operation_effect(declared_operation) {
+            Some(OperationEffect::ReadOnly) => "read",
+            Some(
+                OperationEffect::MetadataWrite
+                | OperationEffect::StateChange
+                | OperationEffect::StartsWork,
+            ) => "write",
+            None if declared_operation == EXECUTE_MODEL_PRIMITIVE => EXECUTE_MODEL_PRIMITIVE_EFFECT,
+            None => {
+                return Err(invalid(format!(
+                    "{operation} module manifest capabilityDeclarations[{index}].operation is not a supported canonical capability operation or model primitive"
+                )));
+            }
+        };
+        if !matches!(
+            declared_effect,
+            "read" | "write" | EXECUTE_MODEL_PRIMITIVE_EFFECT
+        ) {
+            return Err(invalid(format!(
+                "{operation} module manifest capabilityDeclarations[{index}].effect must be read, write, or delegated_invocation"
+            )));
+        }
+        if declared_effect != expected_effect {
+            return Err(invalid(format!(
+                "{operation} module manifest capabilityDeclarations[{index}] effect {declared_effect} does not match canonical {declared_operation} effect {expected_effect}"
+            )));
+        }
+    }
     Ok(())
 }
 
