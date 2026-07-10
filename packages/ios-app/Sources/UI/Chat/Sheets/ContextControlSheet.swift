@@ -3,10 +3,10 @@ import SwiftUI
 struct ContextControlSheet: View {
     let sessionId: String
     let initialActionResourceId: String?
-    let fallbackModelName: String
-    let fallbackContextPercentage: Int
-    let fallbackContextWindow: Int
-    let fallbackTokensRemaining: Int
+    let initialModelName: String
+    let initialContextPercentage: Int
+    let initialContextWindow: Int
+    let initialTokensRemaining: Int
     let reasoningLevel: String?
     let client: any ContextControlRepository
     let modelRepository: any ModelRepository
@@ -32,13 +32,13 @@ struct ContextControlSheet: View {
     }
 
     private var currentModelId: String {
-        selectedModelId.isEmpty ? fallbackModelName : selectedModelId
+        selectedModelId.isEmpty ? initialModelName : selectedModelId
     }
 
     private var displayModelName: String {
         if let selectedModelInfo { return selectedModelInfo.formattedModelName }
         if let snapshotModel = snapshot?.model, !snapshotModel.isEmpty { return snapshotModel }
-        return fallbackModelName.isEmpty ? "Server default" : fallbackModelName
+        return initialModelName.isEmpty ? "Server default" : initialModelName
     }
 
     private var displayModelCaption: String {
@@ -55,15 +55,15 @@ struct ContextControlSheet: View {
     }
 
     private var contextWindowTokens: Int {
-        snapshot?.contextWindowTokens ?? fallbackContextWindow
+        snapshot?.contextWindowTokens ?? initialContextWindow
     }
 
     private var tokensRemaining: Int {
-        snapshot?.tokensRemaining ?? fallbackTokensRemaining
+        snapshot?.tokensRemaining ?? initialTokensRemaining
     }
 
     private var usagePercentRounded: Int {
-        snapshot?.usagePercentRounded ?? fallbackContextPercentage
+        snapshot?.usagePercentRounded ?? initialContextPercentage
     }
 
     var body: some View {
@@ -150,7 +150,7 @@ struct ContextControlSheet: View {
         .interactiveDismissDisabled(isMutating)
         .tint(.tronEmerald)
         .task {
-            selectedModelId = fallbackModelName
+            selectedModelId = initialModelName
             await load(initialActionResourceId: initialActionResourceId)
             await loadModels(force: false)
         }
@@ -407,7 +407,7 @@ struct ContextControlSheet: View {
             let models = try await modelRepository.list(forceRefresh: force)
             availableModels = models
             if selectedModelId.isEmpty {
-                selectedModelId = fallbackModelName
+                selectedModelId = initialModelName
             }
         } catch {
             errorMessage = agentControlErrorMessage(error)

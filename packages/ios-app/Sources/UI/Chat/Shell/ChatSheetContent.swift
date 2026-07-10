@@ -67,10 +67,10 @@ struct ChatSheetContent: View {
             ContextControlSheet(
                 sessionId: sessionId,
                 initialActionResourceId: data.initialActionResourceId,
-                fallbackModelName: viewModel.currentModel,
-                fallbackContextPercentage: viewModel.contextState.contextPercentage,
-                fallbackContextWindow: viewModel.contextState.currentContextWindow,
-                fallbackTokensRemaining: viewModel.contextState.tokensRemaining,
+                initialModelName: viewModel.currentModel,
+                initialContextPercentage: viewModel.contextState.contextPercentage,
+                initialContextWindow: viewModel.contextState.currentContextWindow,
+                initialTokensRemaining: viewModel.contextState.tokensRemaining,
                 reasoningLevel: currentModelSupportsReasoning ? viewModel.inputBarState.reasoningLevel : nil,
                 client: dependencies.contextControlRepository,
                 modelRepository: dependencies.modelRepository

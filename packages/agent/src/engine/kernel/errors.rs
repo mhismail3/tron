@@ -87,7 +87,7 @@ pub enum EngineError {
         message: String,
     },
 
-    /// A historical stored invocation error was replayed from the ledger.
+    /// A stored invocation error was replayed from the ledger.
     #[error("stored invocation error {kind}: {message}")]
     StoredInvocationError {
         /// Stable stored error kind.

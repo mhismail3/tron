@@ -303,7 +303,7 @@ fn handle_finish(
     events.extend(state.acc.close_text(None));
 
     let content = if state.ordered_content.is_empty() {
-        build_bucketed_content_fallback(state)
+        build_bucketed_content(state)
     } else {
         state.ordered_content.clone()
     };
@@ -334,7 +334,7 @@ fn handle_finish(
     events
 }
 
-fn build_bucketed_content_fallback(state: &StreamState) -> Vec<AssistantContent> {
+fn build_bucketed_content(state: &StreamState) -> Vec<AssistantContent> {
     let mut content = Vec::new();
     if !state.acc.accumulated_thinking.is_empty() {
         content.push(AssistantContent::Thinking {

@@ -482,7 +482,7 @@ fn project_capability_cockpit_evidence(details: &Value) -> Option<Value> {
                 "diagnostics": "Use audience=agent_diagnostics operations to inspect traces, logs, catalog state, and verification evidence.",
                 "governance": "Use audience=governance operations only for binding, shadow, route, module, or policy workflows; follow preflight exactly.",
                 "kernelEvolution": "Kernel-evolution-only operations are inspectable and improvable through source-level review/integration, not runtime-routed.",
-                "fallbackRule": "Do not infer selectors, authority scopes, or required fields from names. Use the operation entry, catalog inspection, or schema before attempting a call."
+                "schemaRule": "Do not infer selectors, authority scopes, or required fields from names. Use the operation entry, catalog inspection, or schema before attempting a call."
             }),
         );
     }

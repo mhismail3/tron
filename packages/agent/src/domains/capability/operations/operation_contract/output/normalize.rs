@@ -38,11 +38,11 @@ pub(super) fn normalize_next_actions(projected: Option<&Value>) -> Vec<ProviderN
 
 pub(super) fn normalize_error(
     projected: Option<&Value>,
-    fallback_summary: &str,
+    default_summary: &str,
 ) -> ProviderOperationError {
     let code = find_scalar(projected, "code").unwrap_or_else(|| "CAPABILITY_FAILED".to_owned());
     let category = find_scalar(projected, "category").unwrap_or_else(|| "execution".to_owned());
-    let message = find_scalar(projected, "message").unwrap_or_else(|| fallback_summary.to_owned());
+    let message = find_scalar(projected, "message").unwrap_or_else(|| default_summary.to_owned());
     let recoverable = find_bool(projected, "recoverable").unwrap_or(false);
     ProviderOperationError {
         code: bounded_text(&code, MAX_VALUE_BYTES),

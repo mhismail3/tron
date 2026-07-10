@@ -5,10 +5,9 @@ use serde_json::Value;
 
 /// Primitive execution identity attached to provider protocol capability events.
 ///
-/// The event names still use the historical `capability.*` labels because they
-/// describe persisted event kinds, not a model-visible catalog. The identity
-/// itself stays at the bare loop layer: primitive name, optional operation, and
-/// trace anchors.
+/// The durable `capability.*` event names describe persisted event kinds, not a
+/// model-visible catalog. The identity itself stays at the bare loop layer:
+/// primitive name, optional operation, and trace anchors.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityEventIdentity {

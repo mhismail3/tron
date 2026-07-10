@@ -63,7 +63,7 @@ final class AnimationCoordinator {
         visibleInvocationIds.contains(invocationId)
     }
 
-    /// Directly mark a capability as visible (for catch-up and historical capabilities)
+    /// Directly mark a capability as visible during catch-up and reconstruction.
     func makeCapabilityInvocationVisible(_ invocationId: String) {
         visibleInvocationIds.insert(invocationId)
     }

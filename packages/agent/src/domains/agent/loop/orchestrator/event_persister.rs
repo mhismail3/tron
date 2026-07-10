@@ -260,10 +260,10 @@ fn is_sequence_collision(error: &RuntimeError) -> bool {
 async fn persist_worker(
     mut rx: mpsc::Receiver<PersistRequest>,
     event_store: Arc<EventStore>,
-    #[allow(unused_variables)] worker_start_gate: Option<WorkerStartGate>,
+    _worker_start_gate: Option<WorkerStartGate>,
 ) {
     #[cfg(test)]
-    if let Some((entered, release)) = worker_start_gate {
+    if let Some((entered, release)) = _worker_start_gate {
         entered.notify_waiters();
         release.notified().await;
     }

@@ -22,7 +22,7 @@ pub enum ThinkingContentKind {
 }
 
 impl ThinkingContentKind {
-    /// Returns true for the default historical thinking kind.
+    /// Returns true for the default thinking kind.
     #[must_use]
     pub fn is_thinking(kind: &Self) -> bool {
         *kind == Self::Thinking

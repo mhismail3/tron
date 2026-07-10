@@ -201,12 +201,10 @@ async fn create_agent_result_resource(
 fn resolve_agent_result_message(
     event_store: &crate::domains::session::event_store::EventStore,
     session_id: &str,
-    fallback_error: Option<&str>,
+    run_error: Option<&str>,
 ) -> AgentResultMessage {
     match event_store.get_messages_at_head(session_id) {
-        Ok(reconstruction) => {
-            agent_result_message_from_reconstruction(&reconstruction, fallback_error)
-        }
+        Ok(reconstruction) => agent_result_message_from_reconstruction(&reconstruction, run_error),
         Err(error) => {
             warn!(
                 session_id,
@@ -214,7 +212,7 @@ fn resolve_agent_result_message(
                 "failed to reconstruct final assistant message for agent_result"
             );
             AgentResultMessage {
-                text: fallback_error.unwrap_or_default().to_owned(),
+                text: run_error.unwrap_or_default().to_owned(),
                 event_ref: None,
             }
         }
@@ -223,7 +221,7 @@ fn resolve_agent_result_message(
 
 fn agent_result_message_from_reconstruction(
     reconstruction: &crate::domains::session::event_store::reconstruction::ReconstructionResult,
-    fallback_error: Option<&str>,
+    run_error: Option<&str>,
 ) -> AgentResultMessage {
     let assistant = reconstruction
         .messages_with_event_ids
@@ -235,7 +233,7 @@ fn agent_result_message_from_reconstruction(
         .filter(|text| !text.is_empty());
 
     AgentResultMessage {
-        text: text.unwrap_or_else(|| fallback_error.unwrap_or_default().to_owned()),
+        text: text.unwrap_or_else(|| run_error.unwrap_or_default().to_owned()),
         event_ref: assistant.and_then(|entry| {
             entry
                 .event_ids
@@ -433,7 +431,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            agent_result_message_from_reconstruction(&state, Some("fallback")),
+            agent_result_message_from_reconstruction(&state, Some("run failed")),
             AgentResultMessage {
                 text: "first\nsecond".into(),
                 event_ref: Some("evt-assistant-2".into()),

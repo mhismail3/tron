@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// Resolves display content from two sources:
 /// - **Live**: `ThinkingState.currentText` when streaming or text is still populated from the current turn
-/// - **Static**: Snapshot string passed when the sheet was opened for historical blocks
+/// - **Static**: Snapshot string passed when the sheet opens for persisted blocks
 ///
 /// Also tracks auto-scroll state: enabled by default during streaming, disabled when the user
 /// scrolls up, re-enabled when they scroll back to bottom.

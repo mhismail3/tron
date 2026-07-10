@@ -332,12 +332,12 @@ mod tests {
                 "approved restored function missing from startup catalog: {expected}"
             );
         }
-        for retired_prefix in retired_startup_prefixes() {
+        for forbidden_prefix in forbidden_startup_prefixes() {
             assert!(
                 !function_ids
                     .iter()
-                    .any(|function_id| function_id.starts_with(&retired_prefix)),
-                "retired startup function prefix {retired_prefix} still registered in {function_ids:?}"
+                    .any(|function_id| function_id.starts_with(&forbidden_prefix)),
+                "noncanonical startup function prefix {forbidden_prefix} registered in {function_ids:?}"
             );
         }
     }
@@ -428,7 +428,7 @@ mod tests {
         )
     }
 
-    fn retired_startup_prefixes() -> Vec<String> {
+    fn forbidden_startup_prefixes() -> Vec<String> {
         let product_namespaces = vec![
             "browser".to_owned(),
             "cron".to_owned(),

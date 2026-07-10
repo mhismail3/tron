@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Displays thinking content with a vertical line indicator (matching TextContentView exactly)
 /// - Only shows pulsing sparkle + "Thinking" label when actively streaming
-/// - Historical (non-streaming) blocks show just the text with vertical line
+/// - Persisted non-streaming blocks show the text with a vertical line
 struct ThinkingContentView: View {
     let content: String
     let isExpanded: Bool

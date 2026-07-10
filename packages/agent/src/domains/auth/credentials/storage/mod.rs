@@ -30,15 +30,11 @@ pub fn auth_file_path(data_dir: &Path) -> PathBuf {
 /// * `Err(..)`      — read I/O failure, parse failure, or unsupported version.
 ///
 /// INVARIANT: A parse error surfaces as [`AuthError::MalformedAuthFile`] and
-/// is **never** silently treated as "no auth configured". Earlier versions
-/// returned `Option<AuthStorage>` and logged a `warn!` on parse failure,
-/// which silently masked the entire file and made a single malformed
-/// provider or service block look like a global "no auth" state. The only
+/// is **never** silently treated as "no auth configured". The only
 /// present-file exception is the exact empty object sentinel (`{}`). Callers
 /// must distinguish "not configured" (`Ok(None)` or the pristine sentinel)
-/// from "broken on disk" (`Err(_)`) — especially writers, which would otherwise
-/// `unwrap_or_default()` and overwrite the user's real file with an empty
-/// default.
+/// from "broken on disk" (`Err(_)`) so writers cannot replace invalid stored
+/// credentials with an empty default.
 pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
@@ -76,9 +72,8 @@ pub fn load_auth_storage(path: &Path) -> Result<Option<AuthStorage>, AuthError> 
 ///
 /// Returns the parsed storage if the file exists, a fresh default if the file
 /// is missing (legitimate first-use), or an error if the file is present but
-/// malformed. Writers must use this helper to avoid the historical
-/// `load_auth_storage(path).unwrap_or_default()` footgun, which silently
-/// replaced a corrupt file with an empty default and destroyed user data.
+/// malformed. Writers must use this helper so invalid stored credentials are
+/// never replaced with an empty default.
 pub fn load_or_init_for_write(path: &Path) -> Result<AuthStorage, AuthError> {
     Ok(load_auth_storage(path)?.unwrap_or_default())
 }

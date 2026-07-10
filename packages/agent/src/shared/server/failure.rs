@@ -21,7 +21,7 @@ pub const ENGINE_UNSUPPORTED_DELIVERY_MODE: &str = "ENGINE_UNSUPPORTED_DELIVERY_
 pub const ENGINE_DELIVERY_MODE_NOT_ALLOWED: &str = "ENGINE_DELIVERY_MODE_NOT_ALLOWED";
 /// Engine ledger or durable store operation failed.
 pub const ENGINE_LEDGER_FAILURE: &str = "ENGINE_LEDGER_FAILURE";
-/// Historical stored invocation failure replayed from the ledger.
+/// Stored invocation failure replayed from the ledger.
 pub const ENGINE_STORED_INVOCATION_ERROR: &str = "ENGINE_STORED_INVOCATION_ERROR";
 /// Engine schema definition is invalid.
 pub const ENGINE_INVALID_SCHEMA: &str = "ENGINE_INVALID_SCHEMA";
