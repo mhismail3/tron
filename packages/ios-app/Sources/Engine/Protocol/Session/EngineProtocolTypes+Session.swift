@@ -119,6 +119,26 @@ struct SessionListResult: Decodable {
     let totalCount: Int?
     let hasMore: Bool?
     let nextCursor: String?
+    /// Immutable upper creation-time boundary shared by every page.
+    let snapshotAsOf: String?
+    /// Whether this query covers every session needed for destructive reconciliation.
+    let snapshotCanReconcile: Bool?
+
+    init(
+        sessions: [SessionInfo],
+        totalCount: Int?,
+        hasMore: Bool?,
+        nextCursor: String?,
+        snapshotAsOf: String? = nil,
+        snapshotCanReconcile: Bool? = nil
+    ) {
+        self.sessions = sessions
+        self.totalCount = totalCount
+        self.hasMore = hasMore
+        self.nextCursor = nextCursor
+        self.snapshotAsOf = snapshotAsOf
+        self.snapshotCanReconcile = snapshotCanReconcile
+    }
 }
 
 struct SessionResumeParams: Encodable {

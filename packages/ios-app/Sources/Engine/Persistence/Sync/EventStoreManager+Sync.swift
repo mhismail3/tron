@@ -17,41 +17,46 @@ extension EventStoreManager {
             let serverSessionIds = Set(serverSessions.map(\.sessionId))
             logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
 
-            // Upsert server sessions into local DB
+            let localSessions = try await eventDB.sessions.getAll()
+            let localSessionsById = Dictionary(uniqueKeysWithValues: localSessions.map { ($0.id, $0) })
+            var sessionsToUpsert: [CachedSession] = []
+            sessionsToUpsert.reserveCapacity(serverSessions.count)
+
             for serverSession in serverSessions {
                 let sessionId = serverSession.sessionId
-
-                if try await sessionSynchronizer.sessionHasDifferentOrigin(sessionId, expectedOrigin: serverOrigin) {
+                let existing = localSessionsById[sessionId]
+                if let existingOrigin = existing?.serverOrigin,
+                   existingOrigin != serverOrigin {
                     continue
                 }
 
-                let cachedSession: CachedSession
-                if try await eventDB.sessions.exists(sessionId), let existing = try await eventDB.sessions.get(sessionId) {
-                    cachedSession = mergeSessionData(existing: existing, serverInfo: serverSession, serverOrigin: serverOrigin)
+                if let existing {
+                    sessionsToUpsert.append(
+                        mergeSessionData(
+                            existing: existing,
+                            serverInfo: serverSession,
+                            serverOrigin: serverOrigin
+                        )
+                    )
                 } else {
-                    cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
+                    sessionsToUpsert.append(
+                        serverSessionToCached(serverSession, serverOrigin: serverOrigin)
+                    )
                 }
-                try await eventDB.sessions.insert(cachedSession)
             }
 
-            // Remove server-missing sessions only after a complete snapshot. A
-            // bounded partial snapshot means older rows were not queried, not deleted.
-            if snapshot.isComplete {
-                let localSessions = try await eventDB.sessions.getByOrigin(serverOrigin)
-                var removedCount = 0
-                for local in localSessions {
-                    if !serverSessionIds.contains(local.id) {
-                        try await eventDB.events.deleteBySession(local.id)
-                        try await eventDB.sessions.delete(local.id)
-                        removedCount += 1
-                    }
-                }
-                if removedCount > 0 {
-                    logger.info("Removed \(removedCount) stale local sessions", category: .session)
-                }
-            } else {
+            let removedCount = try await eventDB.sessions.reconcileServerSnapshot(
+                upserting: sessionsToUpsert,
+                serverOrigin: serverOrigin,
+                authoritativeSessionIds: snapshot.isComplete ? serverSessionIds : nil,
+                snapshotAsOf: snapshot.isComplete ? snapshot.snapshotAsOf : nil
+            )
+            if removedCount > 0 {
+                logger.info("Removed \(removedCount) stale local sessions", category: .session)
+            }
+            if !snapshot.isComplete {
                 logger.warning(
-                    "Session refresh reached the \(SessionListPageLoader.maximumSessionCount)-session safety cap; preserving older cached rows",
+                    "Session refresh was partial or unverified; preserving server-missing cached rows",
                     category: .session
                 )
             }
@@ -154,6 +159,7 @@ extension EventStoreManager {
         )
         session.title = info.title
         session.isFork = info.isFork
+        session.archivedAt = info.isArchived == true ? (info.lastActivity ?? info.createdAt) : nil
         session.serverOrigin = serverOrigin
         session.source = info.source
         session.profile = info.profile
@@ -195,6 +201,9 @@ extension EventStoreManager {
         session.headEventId = existing.headEventId
         session.title = title
         session.isFork = serverInfo.isFork
+        session.archivedAt = serverInfo.isArchived == true
+            ? (existing.archivedAt ?? serverInfo.lastActivity ?? serverInfo.createdAt)
+            : nil
         session.serverOrigin = serverOrigin
         session.source = serverInfo.source ?? existing.source
         session.profile = serverInfo.profile ?? existing.profile

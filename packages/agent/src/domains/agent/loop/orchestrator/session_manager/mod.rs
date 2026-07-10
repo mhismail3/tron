@@ -75,8 +75,10 @@ pub struct SessionFilter {
     pub limit: Option<usize>,
     /// Skip results.
     pub offset: Option<usize>,
-    /// Stable keyset boundary activity timestamp.
-    pub before_last_activity_at: Option<String>,
+    /// Immutable upper creation-time boundary for a paginated snapshot.
+    pub snapshot_created_at: Option<String>,
+    /// Stable keyset boundary creation timestamp.
+    pub before_created_at: Option<String>,
     /// Stable keyset boundary session ID tie-breaker.
     pub before_session_id: Option<String>,
 }
@@ -272,7 +274,8 @@ impl SessionManager {
             limit: filter.limit.map(|l| l as i64),
             #[allow(clippy::cast_possible_wrap)]
             offset: filter.offset.map(|o| o as i64),
-            before_last_activity_at: filter.before_last_activity_at.as_deref(),
+            snapshot_created_at: filter.snapshot_created_at.as_deref(),
+            before_created_at: filter.before_created_at.as_deref(),
             before_session_id: filter.before_session_id.as_deref(),
         };
         self.event_store

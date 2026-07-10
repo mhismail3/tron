@@ -450,7 +450,7 @@ final class EventStoreManager {
 
             // Filter by current server origin if enabled
             let origin = filterByOrigin ? currentServerOrigin : nil
-            sessions = try await eventDB.sessions.getByOrigin(origin)
+            sessions = try await eventDB.sessions.getByOrigin(origin).filter { !$0.isArchived }
             logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"))", category: .session)
 
             // Restore preserved transient state

@@ -124,15 +124,12 @@ final class SessionSynchronizer {
     /// Fetch a bounded, cursor-paginated session snapshot from the server.
     func fetchServerSessions() async throws -> ServerSessionListSnapshot {
         try await SessionListPageLoader().load { [engineClient] limit, cursor in
-            try await engineClient.session.list(limit: limit, cursor: cursor)
+            try await engineClient.session.list(
+                limit: limit,
+                cursor: cursor,
+                includeArchived: true
+            )
         }
-    }
-
-    /// Check if a session exists locally with a different origin.
-    func sessionHasDifferentOrigin(_ sessionId: String, expectedOrigin: String) async throws -> Bool {
-        guard try await eventDB.sessions.exists(sessionId) else { return false }
-        let existingOrigin = try await eventDB.sessions.getOrigin(sessionId)
-        return existingOrigin != nil && existingOrigin != expectedOrigin
     }
 
     // MARK: - Helpers

@@ -1,8 +1,10 @@
 //! Shared query-side services for session read capabilities.
 //!
 //! `session::list` clamps every page to 200 rows and returns an opaque cursor
-//! over the deterministic activity/session-ID ordering. Clients can assemble a
-//! generous bounded snapshot without one unbounded database read.
+//! over immutable creation/session-ID keys beneath one server-issued
+//! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
+//! and clients can assemble a generous bounded snapshot without one unbounded
+//! database read.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,8 +21,12 @@ const SESSION_LIST_MAX_LIMIT: usize = 200;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionListCursor {
-    last_activity_at: String,
-    session_id: String,
+    version: u8,
+    snapshot_as_of: String,
+    before_created_at: String,
+    before_session_id: String,
+    include_archived: bool,
+    working_directory: Option<String>,
 }
 
 mod operations;
@@ -65,15 +71,22 @@ impl SessionQueryService {
             .unwrap_or(SESSION_LIST_DEFAULT_LIMIT)
             .clamp(1, SESSION_LIST_MAX_LIMIT);
         let fetch_limit = limit.saturating_add(1);
+        let snapshot_as_of = cursor.as_ref().map_or_else(
+            || chrono::Utc::now().to_rfc3339(),
+            |cursor| cursor.snapshot_as_of.clone(),
+        );
         let filter = crate::domains::agent::r#loop::SessionFilter {
             workspace_path: working_directory,
             include_archived,
             limit: Some(fetch_limit),
             offset,
-            before_last_activity_at: cursor
+            snapshot_created_at: Some(snapshot_as_of.clone()),
+            before_created_at: cursor
                 .as_ref()
-                .map(|cursor| cursor.last_activity_at.clone()),
-            before_session_id: cursor.as_ref().map(|cursor| cursor.session_id.clone()),
+                .map(|cursor| cursor.before_created_at.clone()),
+            before_session_id: cursor
+                .as_ref()
+                .map(|cursor| cursor.before_session_id.clone()),
             ..Default::default()
         };
         let session_manager = deps.session_manager.clone();
@@ -92,8 +105,12 @@ impl SessionQueryService {
             let next_cursor = if has_more {
                 sessions.last().map(|session| {
                     serde_json::to_string(&SessionListCursor {
-                        last_activity_at: session.last_activity_at.clone(),
-                        session_id: session.id.clone(),
+                        version: 1,
+                        snapshot_as_of: snapshot_as_of.clone(),
+                        before_created_at: session.created_at.clone(),
+                        before_session_id: session.id.clone(),
+                        include_archived,
+                        working_directory: filter.workspace_path.clone(),
                     })
                     .expect("session list cursor serialization cannot fail")
                 })
@@ -148,6 +165,8 @@ impl SessionQueryService {
                 "sessions": items,
                 "hasMore": has_more,
                 "nextCursor": next_cursor,
+                "snapshotAsOf": snapshot_as_of,
+                "snapshotCanReconcile": include_archived && filter.workspace_path.is_none() && offset.is_none(),
             }))
         })
         .await
@@ -531,6 +550,8 @@ mod tests {
         let sessions = result["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(result["hasMore"].as_bool(), Some(true));
+        assert_eq!(result["snapshotCanReconcile"].as_bool(), Some(false));
+        let snapshot_as_of = result["snapshotAsOf"].as_str().unwrap().to_owned();
         let cursor: SessionListCursor =
             serde_json::from_str(result["nextCursor"].as_str().unwrap()).unwrap();
 
@@ -551,6 +572,7 @@ mod tests {
             next_sessions[0]["sessionId"].as_str()
         );
         assert_eq!(next["hasMore"].as_bool(), Some(false));
+        assert_eq!(next["snapshotAsOf"].as_str(), Some(snapshot_as_of.as_str()));
 
         let filtered = SessionQueryService::list(
             &Deps::from_test_context(&ctx),
@@ -572,8 +594,12 @@ mod tests {
     async fn list_rejects_mixed_cursor_and_offset_pagination() {
         let ctx = make_test_context();
         let cursor = serde_json::to_string(&SessionListCursor {
-            last_activity_at: "2026-07-01T12:00:00Z".into(),
-            session_id: "sess_cursor".into(),
+            version: 1,
+            snapshot_as_of: "2026-07-01T12:00:01Z".into(),
+            before_created_at: "2026-07-01T12:00:00Z".into(),
+            before_session_id: "sess_cursor".into(),
+            include_archived: false,
+            working_directory: None,
         })
         .unwrap();
         let params = json!({
@@ -585,6 +611,32 @@ mod tests {
         let error = session_list_value(Some(&params), &Deps::from_test_context(&ctx))
             .await
             .unwrap_err();
+        assert!(matches!(error, CapabilityError::InvalidParams { .. }));
+    }
+
+    #[tokio::test]
+    async fn list_rejects_reusing_a_cursor_with_different_filters() {
+        let ctx = make_test_context();
+        let cursor = serde_json::to_string(&SessionListCursor {
+            version: 1,
+            snapshot_as_of: "2026-07-01T12:00:01Z".into(),
+            before_created_at: "2026-07-01T12:00:00Z".into(),
+            before_session_id: "sess_cursor".into(),
+            include_archived: true,
+            working_directory: None,
+        })
+        .unwrap();
+
+        let error = session_list_value(
+            Some(&json!({
+                "cursor": cursor,
+                "includeArchived": false,
+                "limit": 20
+            })),
+            &Deps::from_test_context(&ctx),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(error, CapabilityError::InvalidParams { .. }));
     }
 }

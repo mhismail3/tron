@@ -20,7 +20,9 @@ final class SessionListPageLoaderTests: XCTestCase {
                 sessions: Array(expected[start..<end]),
                 totalCount: expected.count,
                 hasMore: hasMore,
-                nextCursor: hasMore ? String(end) : nil
+                nextCursor: hasMore ? String(end) : nil,
+                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotCanReconcile: true
             )
         }
 
@@ -49,14 +51,18 @@ final class SessionListPageLoaderTests: XCTestCase {
                     sessions: firstPage,
                     totalCount: 3,
                     hasMore: true,
-                    nextCursor: "next"
+                    nextCursor: "next",
+                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotCanReconcile: true
                 )
             }
             return SessionListResult(
                 sessions: secondPage,
                 totalCount: 3,
                 hasMore: false,
-                nextCursor: nil
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotCanReconcile: true
             )
         }
 
@@ -76,7 +82,9 @@ final class SessionListPageLoaderTests: XCTestCase {
                 sessions: Array(expected[start..<end]),
                 totalCount: expected.count,
                 hasMore: end < expected.count,
-                nextCursor: String(end)
+                nextCursor: String(end),
+                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotCanReconcile: true
             )
         }
 
@@ -92,12 +100,110 @@ final class SessionListPageLoaderTests: XCTestCase {
                     sessions: [],
                     totalCount: 1,
                     hasMore: true,
-                    nextCursor: nil
+                    nextCursor: nil,
+                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotCanReconcile: true
                 )
             }
             XCTFail("Expected missing cursor error")
         } catch {
             XCTAssertEqual(error as? SessionListPageLoadingError, .missingCursor)
+        }
+    }
+
+    func testRejectsCursorCycleAcrossNonAdjacentPages() async {
+        var requestCount = 0
+        do {
+            _ = try await SessionListPageLoader().load { _, cursor in
+                requestCount += 1
+                let nextCursor: String
+                switch cursor {
+                case nil: nextCursor = "a"
+                case "a": nextCursor = "b"
+                default: nextCursor = "a"
+                }
+                return SessionListResult(
+                    sessions: [makeSessionInfo(index: requestCount, project: 0)],
+                    totalCount: nil,
+                    hasMore: true,
+                    nextCursor: nextCursor,
+                    snapshotAsOf: "2026-07-01T13:00:00Z",
+                    snapshotCanReconcile: true
+                )
+            }
+            XCTFail("Expected repeated cursor error")
+        } catch {
+            XCTAssertEqual(error as? SessionListPageLoadingError, .repeatedCursor)
+        }
+    }
+
+    func testChangingEmptyCursorsStopAsIncompleteAfterNoProgressBound() async throws {
+        var requestCount = 0
+        let snapshot = try await SessionListPageLoader().load { _, _ in
+            requestCount += 1
+            return SessionListResult(
+                sessions: [],
+                totalCount: nil,
+                hasMore: true,
+                nextCursor: "cursor-\(requestCount)",
+                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+
+        XCTAssertFalse(snapshot.isComplete)
+        XCTAssertEqual(requestCount, SessionListPageLoader.maximumNoProgressPageCount)
+    }
+
+    func testPageCountIsBoundedIndependentlyOfUniqueRows() async throws {
+        var requestCount = 0
+        let snapshot = try await SessionListPageLoader().load { _, _ in
+            requestCount += 1
+            return SessionListResult(
+                sessions: [makeSessionInfo(index: requestCount, project: 0)],
+                totalCount: nil,
+                hasMore: true,
+                nextCursor: "cursor-\(requestCount)",
+                snapshotAsOf: "2026-07-01T13:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+
+        XCTAssertFalse(snapshot.isComplete)
+        XCTAssertEqual(requestCount, SessionListPageLoader.maximumPageCount)
+    }
+
+    func testUnverifiedSnapshotNeverAuthorizesReconciliation() async throws {
+        let snapshot = try await SessionListPageLoader().load { _, _ in
+            SessionListResult(
+                sessions: [makeSessionInfo(index: 0, project: 0)],
+                totalCount: 1,
+                hasMore: false,
+                nextCursor: nil
+            )
+        }
+
+        XCTAssertFalse(snapshot.isComplete)
+        XCTAssertNil(snapshot.snapshotAsOf)
+    }
+
+    func testRejectsSnapshotBoundaryChangeBetweenPages() async {
+        do {
+            _ = try await SessionListPageLoader().load { _, cursor in
+                SessionListResult(
+                    sessions: [makeSessionInfo(index: cursor == nil ? 0 : 1, project: 0)],
+                    totalCount: 2,
+                    hasMore: cursor == nil,
+                    nextCursor: cursor == nil ? "next" : nil,
+                    snapshotAsOf: cursor == nil
+                        ? "2026-07-01T13:00:00Z"
+                        : "2026-07-01T13:00:01Z",
+                    snapshotCanReconcile: true
+                )
+            }
+            XCTFail("Expected inconsistent snapshot error")
+        } catch {
+            XCTAssertEqual(error as? SessionListPageLoadingError, .inconsistentSnapshot)
         }
     }
 

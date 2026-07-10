@@ -237,6 +237,82 @@ final class SessionRepositoryTests: XCTestCase {
         try await database.sessions.delete("non-existent")
     }
 
+    func testLargeServerSnapshotReconcilesInOneBatchAndPreservesRetainedEvents() async throws {
+        let origin = "prod:8080"
+        let allSessions = (0..<2_000).map { index in
+            makeSession(
+                id: String(format: "session-%04d", index),
+                title: "Session \(index)",
+                serverOrigin: origin
+            )
+        }
+        let allIds = Set(allSessions.map(\.id))
+
+        let initialRemoved = try await database.sessions.reconcileServerSnapshot(
+            upserting: allSessions,
+            serverOrigin: origin,
+            authoritativeSessionIds: allIds,
+            snapshotAsOf: "2026-04-02T00:00:00Z"
+        )
+        XCTAssertEqual(initialRemoved, 0)
+        let initialSessions = try await database.sessions.getByOrigin(origin)
+        XCTAssertEqual(initialSessions.count, 2_000)
+
+        try await database.events.insert(
+            makeEvent(id: "retained-event", sessionId: "session-0000", type: "message.user")
+        )
+        try await database.events.insert(
+            makeEvent(id: "stale-event", sessionId: "session-1999", type: "message.user")
+        )
+        var futureSession = makeSession(
+            id: "session-future",
+            createdAt: "2026-04-02T00:00:00.500Z",
+            serverOrigin: origin
+        )
+        futureSession.title = "Created after snapshot"
+        try await database.sessions.insert(futureSession)
+        try await database.events.insert(
+            makeEvent(id: "future-event", sessionId: futureSession.id, type: "message.user")
+        )
+
+        let retainedSessions = Array(allSessions.dropLast())
+        let removed = try await database.sessions.reconcileServerSnapshot(
+            upserting: retainedSessions,
+            serverOrigin: origin,
+            authoritativeSessionIds: Set(retainedSessions.map(\.id)),
+            snapshotAsOf: "2026-04-02T00:00:00Z"
+        )
+
+        XCTAssertEqual(removed, 1)
+        let staleSession = try await database.sessions.get("session-1999")
+        let preservedFutureSession = try await database.sessions.get("session-future")
+        let retainedEventExists = try await database.events.exists("retained-event")
+        let staleEventExists = try await database.events.exists("stale-event")
+        let futureEventExists = try await database.events.exists("future-event")
+        XCTAssertNil(staleSession)
+        XCTAssertNotNil(preservedFutureSession)
+        XCTAssertTrue(retainedEventExists)
+        XCTAssertFalse(staleEventExists)
+        XCTAssertTrue(futureEventExists)
+    }
+
+    func testPartialServerSnapshotNeverDeletesMissingSessions() async throws {
+        let origin = "prod:8080"
+        let existing = makeSession(id: "existing", serverOrigin: origin)
+        try await database.sessions.insert(existing)
+
+        let removed = try await database.sessions.reconcileServerSnapshot(
+            upserting: [],
+            serverOrigin: origin,
+            authoritativeSessionIds: nil,
+            snapshotAsOf: nil
+        )
+
+        XCTAssertEqual(removed, 0)
+        let preserved = try await database.sessions.get(existing.id)
+        XCTAssertNotNil(preserved)
+    }
+
     // MARK: - Origin Filtering
 
     func testGetByOriginNilReturnsAll() async throws {
