@@ -72,6 +72,8 @@ pub(super) struct ProviderNextAction {
     pub(super) operation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) inspect_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) arguments: Option<Value>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

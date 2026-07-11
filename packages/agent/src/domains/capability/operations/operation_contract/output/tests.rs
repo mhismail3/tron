@@ -23,7 +23,8 @@ fn successful_details(operation: &str) -> Value {
                 "schemaVersion": "tron.git_readonly.v1",
                 "operation": "status",
                 "status": "clean",
-                "summary": {"stagedCount": 0}
+                "summary": {"stagedCount": 0},
+                "evidence": {"resourceRefs": []}
             }
         }),
         "web_robots_check" => json!({
@@ -50,7 +51,16 @@ fn successful_details(operation: &str) -> Value {
                 "resourceRefs": []
             }
         }),
-        "job_status" | "job_list" => json!({
+        "job_status" => json!({
+            "primitiveOperation": operation,
+            "status": "ok",
+            "jobs": {
+                "schemaVersion": "tron.jobs.provider_safe.v1",
+                "job": {"state": "completed"},
+                "resourceRefs": []
+            }
+        }),
+        "job_list" => json!({
             "primitiveOperation": operation,
             "status": "ok",
             "jobs": {"schemaVersion": "tron.jobs.provider_safe.v1", "jobs": []}
@@ -124,7 +134,8 @@ fn success_and_failure_outputs_are_closed_and_bounded() {
                     "schemaVersion": "tron.git_readonly.v1",
                     "operation": "status",
                     "status": "clean",
-                    "summary": {"stagedCount": 0}
+                    "summary": {"stagedCount": 0},
+                    "evidence": {"resourceRefs": []}
                 }
             }),
         ),
@@ -316,6 +327,7 @@ fn byte_budget_omission_proof_counts_each_removed_item_once() {
             summary: "inspect".repeat(200),
             operation: Some("catalog_inspect".to_owned()),
             inspect_id: Some("execute::observe".to_owned()),
+            arguments: None,
         }],
         truncation: ProviderTruncation {
             truncated: true,
@@ -326,7 +338,7 @@ fn byte_budget_omission_proof_counts_each_removed_item_once() {
         error: None,
     };
 
-    fit_output_budget(&mut output, &[]).expect("output fits after structural removal");
+    fit_output_budget(&mut output, &[], &[]).expect("output fits after structural removal");
 
     assert_eq!(output.truncation.omitted_collections, 1);
     assert_eq!(output.truncation.omitted_items, 100);
@@ -370,7 +382,7 @@ fn byte_budget_never_removes_required_semantic_facts() {
         error: None,
     };
 
-    fit_output_budget(&mut output, &["primitiveOperation", "status"])
+    fit_output_budget(&mut output, &["primitiveOperation", "status"], &[])
         .expect("non-required facts make the envelope reducible");
 
     assert!(
@@ -388,6 +400,64 @@ fn byte_budget_never_removes_required_semantic_facts() {
             .any(|fact| fact.field == "status")
     );
     assert!(output.truncation.omitted_facts > 0);
+}
+
+#[test]
+fn byte_budget_preserves_newest_item_in_required_collection() {
+    let items = (0..12)
+        .map(|index| ProviderCollectionItem {
+            facts: vec![
+                ProviderFact {
+                    field: "traceRecordId".to_owned(),
+                    value: json!(format!("trace-record-{index}")),
+                },
+                ProviderFact {
+                    field: "operation".to_owned(),
+                    value: json!("trace_list"),
+                },
+                ProviderFact {
+                    field: "verboseProof".to_owned(),
+                    value: json!("x".repeat(800)),
+                },
+            ],
+            resources: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let mut output = ProviderOperationOutput {
+        schema_version: PROVIDER_OUTPUT_SCHEMA_VERSION,
+        operation: "trace_list".to_owned(),
+        profile: "trace_audit",
+        ok: true,
+        status: "ok".to_owned(),
+        summary: "x".repeat(PROVIDER_OUTPUT_MAX_BYTES),
+        evidence: ProviderEvidence {
+            facts: Vec::new(),
+            resources: Vec::new(),
+            collections: vec![ProviderCollection {
+                field: "records".to_owned(),
+                total: items.len(),
+                returned: items.len(),
+                truncated: false,
+                items,
+            }],
+        },
+        next_actions: Vec::new(),
+        truncation: ProviderTruncation {
+            max_bytes: PROVIDER_OUTPUT_MAX_BYTES,
+            ..ProviderTruncation::default()
+        },
+        error: None,
+    };
+
+    fit_output_budget(&mut output, &[], &["records"])
+        .expect("required collection has a reducible bounded representation");
+
+    let records = &output.evidence.collections[0];
+    assert_eq!(records.field, "records");
+    assert_eq!(records.returned, 1);
+    assert_eq!(records.items[0].facts[0].value, "trace-record-0");
+    assert!(records.truncated);
+    assert_eq!(output.truncation.omitted_items, 11);
 }
 
 #[test]
@@ -428,6 +498,11 @@ fn unsupported_operation_errors_keep_safe_recovery_evidence() {
     assert_eq!(value["profile"], "summary");
     assert_eq!(value["error"]["recoverable"], true);
     assert!(rendered.contains("catalog_search"));
+    assert_eq!(value["nextActions"][0]["operation"], "catalog_search");
+    assert_eq!(
+        value["nextActions"][0]["arguments"],
+        json!({"operation": "catalog_search", "text": "guessed_operation"})
+    );
     validate_provider_output("guessed_operation", unsupported_contract(), &value)
         .expect("valid common failure envelope");
 }

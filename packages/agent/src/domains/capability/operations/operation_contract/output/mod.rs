@@ -7,12 +7,14 @@
 //! the contract. Common semantic facts (`primitiveOperation` and `status`) are
 //! synthesized from this envelope's authoritative invocation/result state, not
 //! duplicated by every domain handler, and byte-budget reduction never removes
-//! facts required by the operation's semantic evidence contract.
-//! `normalize`, `projection`, `spec`, and `types` own the production layers;
+//! facts or collections required by the operation's semantic evidence contract.
+//! Required collections retain a bounded newest-first item subset with exact
+//! omission proof; unsupported names return a structured `catalog_search`
+//! recovery action rather than prose-only guidance.
+//! `budget`, `normalize`, `projection`, `spec`, and `types` own the production layers;
 //! sibling `tests` owns envelope-wide contract and budget regression coverage.
 
 use crate::engine::{FunctionId, validate_engine_schema_payload};
-use crate::shared::foundation::text::truncate_str;
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::CapabilityResultMessageContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -20,20 +22,22 @@ use serde_json::{Value, json};
 
 use super::OperationId;
 
+mod budget;
 mod normalize;
 mod projection;
 mod spec;
 mod types;
 
+use budget::fit_output_budget;
 use normalize::{bounded_text, normalize_error, normalize_evidence, normalize_next_actions};
 pub(super) use spec::OutputContract;
 use spec::{contract as output_contract, unsupported_contract};
 use types::{
     PROVIDER_OUTPUT_MAX_BYTES, PROVIDER_OUTPUT_SCHEMA_VERSION, ProviderEvidence, ProviderFact,
-    ProviderOperationError, ProviderOperationOutput, ProviderTruncation,
+    ProviderNextAction, ProviderOperationError, ProviderOperationOutput, ProviderTruncation,
 };
 #[cfg(test)]
-use types::{ProviderCollection, ProviderCollectionItem, ProviderNextAction};
+use types::{ProviderCollection, ProviderCollectionItem};
 
 #[cfg(test)]
 pub(super) fn output_schema(operation: &str) -> Option<Value> {
@@ -121,6 +125,11 @@ fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<
     );
     let error = (!ok).then(|| normalize_error(projected.as_ref(), &summary));
     truncation.max_bytes = PROVIDER_OUTPUT_MAX_BYTES;
+    let mut next_actions = normalize_next_actions(projected.as_ref());
+    if operation_id.is_none() && !ok {
+        next_actions.insert(0, unsupported_operation_recovery_action(operation));
+        next_actions.truncate(8);
+    }
     let mut output = ProviderOperationOutput {
         schema_version: PROVIDER_OUTPUT_SCHEMA_VERSION,
         operation: operation.to_owned(),
@@ -129,13 +138,14 @@ fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<
         status,
         summary,
         evidence,
-        next_actions: normalize_next_actions(projected.as_ref()),
+        next_actions,
         truncation,
         error,
     };
     fit_output_budget(
         &mut output,
         output_contract.semantic_evidence.required_fact_fields,
+        output_contract.semantic_evidence.expected_collection_fields,
     )?;
     validate_semantic_evidence(output_contract, &output)?;
     let value = serde_json::to_value(&output)
@@ -176,50 +186,20 @@ fn ensure_authoritative_fact(
     }
 }
 
-fn fit_output_budget(
-    output: &mut ProviderOperationOutput,
-    required_fact_fields: &[&str],
-) -> Result<(), String> {
-    loop {
-        let encoded_len = stabilize_serialized_byte_count(output)?;
-        if encoded_len <= PROVIDER_OUTPUT_MAX_BYTES {
-            return Ok(());
-        }
-        output.truncation.truncated = true;
-        if let Some(collection) = output.evidence.collections.pop() {
-            output.truncation.omitted_collections += 1;
-            output.truncation.omitted_items += collection.returned;
-        } else if let Some(index) = output
-            .evidence
-            .facts
-            .iter()
-            .rposition(|fact| !required_fact_fields.contains(&fact.field.as_str()))
-        {
-            output.evidence.facts.remove(index);
-            output.truncation.omitted_facts += 1;
-        } else if output.evidence.resources.pop().is_some() {
-            output.truncation.omitted_resources += 1;
-        } else if output.next_actions.pop().is_some() {
-            output.truncation.omitted_actions += 1;
-        } else if output.summary.len() > 240 {
-            output.summary = truncate_str(&output.summary, output.summary.len() / 2).to_owned();
-        } else {
-            return Err("minimal provider output exceeds structural byte budget".to_owned());
-        }
+fn unsupported_operation_recovery_action(operation: &str) -> ProviderNextAction {
+    ProviderNextAction {
+        source: "unsupportedOperationRecovery".to_owned(),
+        summary: format!(
+            "Call catalog_search with the rejected operation name `{}` to discover an exact supported operation and inspect its schema before retrying.",
+            bounded_text(operation, 160)
+        ),
+        operation: Some("catalog_search".to_owned()),
+        inspect_id: None,
+        arguments: Some(json!({
+            "operation": "catalog_search",
+            "text": bounded_text(operation, 160)
+        })),
     }
-}
-
-fn stabilize_serialized_byte_count(output: &mut ProviderOperationOutput) -> Result<usize, String> {
-    for _ in 0..8 {
-        let encoded_len = serde_json::to_vec(&*output)
-            .map_err(|error| format!("measure provider output: {error}"))?
-            .len();
-        if output.truncation.serialized_bytes == encoded_len {
-            return Ok(encoded_len);
-        }
-        output.truncation.serialized_bytes = encoded_len;
-    }
-    Err("provider output serialized byte count did not converge".to_owned())
 }
 
 fn render_provider_boundary_failure(operation: &str, code: &str, message: &str) -> String {
@@ -357,6 +337,18 @@ fn validate_semantic_evidence(
             ));
         }
     }
+    for expected in contract.semantic_evidence.expected_collection_fields {
+        if !output
+            .evidence
+            .collections
+            .iter()
+            .any(|collection| collection.field == *expected)
+        {
+            return Err(format!(
+                "provider output is missing expected semantic collection `{expected}`"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -447,7 +439,16 @@ fn next_action_schema() -> Value {
             "source": {"type": "string", "maxLength": 200},
             "summary": {"type": "string", "maxLength": 500},
             "operation": {"type": "string", "maxLength": 200},
-            "inspectId": {"type": "string", "maxLength": 800}
+            "inspectId": {"type": "string", "maxLength": 800},
+            "arguments": {
+                "type": "object",
+                "maxProperties": 8,
+                "additionalProperties": false,
+                "properties": {
+                    "operation": {"type": "string", "maxLength": 200},
+                    "text": {"type": "string", "maxLength": 200}
+                }
+            }
         }
     })
 }

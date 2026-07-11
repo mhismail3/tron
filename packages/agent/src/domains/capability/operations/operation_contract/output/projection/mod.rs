@@ -983,9 +983,15 @@ fn project_trace_record(record: &Value) -> Value {
         .get("metadata")
         .and_then(|metadata| metadata.get("dev.tron"))
         .unwrap_or(&Value::Null);
+    if let Some(trace_record_id) = record
+        .get("traceRecordId")
+        .or_else(|| record.get("id"))
+        .or_else(|| metadata.get("traceRecordId"))
+        .or_else(|| metadata.get("id"))
+    {
+        projected.insert("traceRecordId".to_owned(), trace_record_id.clone());
+    }
     for key in [
-        "id",
-        "traceRecordId",
         "traceId",
         "invocationId",
         "parentInvocationId",
@@ -1526,6 +1532,7 @@ fn safe_array_metadata_key(key: &str) -> bool {
             | "sources"
             | "goals"
             | "questions"
+            | "jobs"
             | "artifacts"
             | "programs"
             | "snapshots"
@@ -1578,6 +1585,17 @@ fn safe_scalar_metadata_key(key: &str) -> bool {
             | "recordedAt"
             | "completedAt"
             | "startedAt"
+            | "durationMs"
+            | "exitCode"
+            | "exitCodeKnown"
+            | "timedOut"
+            | "cancelled"
+            | "outputTruncated"
+            | "cleanupAfterSeconds"
+            | "timeoutMs"
+            | "maxOutputBytes"
+            | "revision"
+            | "requested"
             | "timestamp"
             | "count"
             | "total"

@@ -317,8 +317,9 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         read_repo_file("packages/agent/src/domains/capability/operations/context.rs");
     let operation_guards = format!("{operations}\n{operations_context}");
     assert!(
-        operations.contains("validate_execute_context(invocation, &operation)?"),
-        "capability execute dispatch root must call the context validator"
+        operations
+            .contains(".and_then(|()| validate_execute_context(invocation, &attempted_operation))"),
+        "capability execute dispatch root must validate trusted context before dispatch"
     );
     for required in [
         "is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id)",

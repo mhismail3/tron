@@ -102,7 +102,7 @@ const fn semantic_evidence(operation: OperationId) -> SemanticEvidenceContract {
                 "web.webRobotsPolicyResourceId",
                 "web.webRobotsPolicyVersionId",
             ],
-            expected_collection_fields: &["web.resourceRefs"],
+            expected_collection_fields: &["web.resourceRefs.items"],
             expected_resource_kinds: &["web_robots_policy"],
             safety_exclusions: COMMON_EXCLUSIONS,
         },
@@ -116,7 +116,7 @@ const fn semantic_evidence(operation: OperationId) -> SemanticEvidenceContract {
                 "web.webSourceResourceId",
                 "web.webSourceVersionId",
             ],
-            expected_collection_fields: &["web.resourceRefs"],
+            expected_collection_fields: &["web.resourceRefs.items"],
             expected_resource_kinds: &["web_source"],
             safety_exclusions: &[
                 "raw response bytes and HTML",
@@ -125,11 +125,23 @@ const fn semantic_evidence(operation: OperationId) -> SemanticEvidenceContract {
                 "absolute local paths",
             ],
         },
-        OperationId::JobStatus | OperationId::JobList => SemanticEvidenceContract {
+        OperationId::JobStatus => SemanticEvidenceContract {
+            description: "One durable job lifecycle projection and bounded output refs without command or stream contents.",
+            required_fact_fields: &["primitiveOperation", "status", "jobs.schemaVersion"],
+            expected_collection_fields: &["jobs.resourceRefs.items"],
+            expected_resource_kinds: &["job_process", "execution_output"],
+            safety_exclusions: &[
+                "raw commands and working directories",
+                "raw stdout and stderr",
+                "raw idempotency keys",
+                "raw authority and grant identifiers",
+            ],
+        },
+        OperationId::JobList => SemanticEvidenceContract {
             description: "Durable job lifecycle and bounded output refs without command or stream contents.",
             required_fact_fields: &["primitiveOperation", "status", "jobs.schemaVersion"],
             expected_collection_fields: &["jobs.jobs.items"],
-            expected_resource_kinds: &["job_process", "job_output"],
+            expected_resource_kinds: &["job_process", "execution_output"],
             safety_exclusions: &[
                 "raw commands and working directories",
                 "raw stdout and stderr",
@@ -146,8 +158,8 @@ const fn semantic_evidence(operation: OperationId) -> SemanticEvidenceContract {
                 "jobs.jobResourceId",
                 "jobs.jobVersionId",
             ],
-            expected_collection_fields: &["jobs.resourceRefs"],
-            expected_resource_kinds: &["job_process", "job_output"],
+            expected_collection_fields: &["jobs.resourceRefs.items"],
+            expected_resource_kinds: &["job_process", "execution_output"],
             safety_exclusions: &[
                 "raw working directories",
                 "raw idempotency keys",

@@ -292,6 +292,7 @@ fn action_from_value(source: &str, value: &Value) -> ProviderNextAction {
         summary,
         operation,
         inspect_id,
+        arguments: None,
     }
 }
 

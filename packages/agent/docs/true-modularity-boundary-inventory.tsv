@@ -1133,6 +1133,7 @@ packages/agent/src/domains/web/robots/parser.rs	rust	implementation	agent:web	ow
 packages/agent/src/domains/web/robots/request.rs	rust	implementation	agent:web	owner-private robots request validation helper boundary; callers enter through the robots service
 packages/agent/src/domains/web/source.rs	rust	implementation	agent:web	owner-private read-only web_source citation list/inspect service; callers enter through capability::execute adapters and engine resource facades
 packages/agent/src/domains/web/tests/mod.rs	rust	test-support	agent:web	test-only authority, URL validation, source evidence, and replay regression coverage; production code must not depend on it
+packages/agent/src/domains/web/tests/policy_tests.rs	rust	test-support	agent:web	test-only URL, redirect, and DNS fail-closed policy coverage; production code must not depend on it
 packages/agent/src/domains/web/tests/archive_tests.rs	rust	test-support	agent:web	test-only archive lifecycle, CAS, authority, idempotency, filtering, inspect, and no-network regression coverage; production code must not depend on it
 packages/agent/src/domains/web/tests/extraction_tests.rs	rust	test-support	agent:web	test-only extraction, content-type, redaction-ordering, and backward-compatibility regression coverage; production code must not depend on it
 packages/agent/src/domains/web/tests/robots_tests.rs	rust	test-support	agent:web	test-only robots policy parser, authority, safety, sitemap metadata-only, and replay regression coverage; production code must not depend on it
@@ -1428,6 +1429,12 @@ packages/agent/src/domains/capability/operations/operation_contract/direct.rs	ru
 packages/agent/src/domains/capability/operations/operation_contract/governance.rs	rust	implementation	capability:execute	owner-private governance operation structural schemas
 packages/agent/src/domains/capability/operations/operation_contract/metadata.rs	rust	implementation	capability:execute	owner-private operation ownership and evolution metadata
 packages/agent/src/domains/capability/operations/operation_contract/output/mod.rs	rust	implementation	capability:execute	owner-private provider-safe result schemas
+packages/agent/src/domains/capability/operations/operation_contract/output/budget.rs	rust	implementation	capability:execute	owner-private deterministic provider output budget enforcement
+packages/agent/src/domains/capability/operations/operation_contract/output/normalize.rs	rust	implementation	capability:execute	owner-private canonical evidence and recovery normalization
+packages/agent/src/domains/capability/operations/operation_contract/output/projection/mod.rs	rust	implementation	capability:execute	owner-private provider-safe operation evidence projection
+packages/agent/src/domains/capability/operations/operation_contract/output/spec.rs	rust	implementation	capability:execute	owner-private semantic evidence and output profile policy
+packages/agent/src/domains/capability/operations/operation_contract/output/types.rs	rust	implementation	capability:execute	owner-private canonical provider output algebra
+packages/agent/src/domains/capability/operations/operation_contract/output/tests.rs	rust	test-support	capability:execute	owner-private provider-safe envelope contract coverage
 packages/agent/src/domains/capability/operations/operation_contract/policy.rs	rust	implementation	capability:execute	owner-private effect, scope, and idempotency policy
 packages/agent/src/domains/capability/operations/operation_contract/records.rs	rust	implementation	capability:execute	owner-private durable record-plane structural schemas
 packages/agent/src/domains/capability/pool.rs	rust	implementation	rust:domain-capability	owner-private agent-facing operation and catalog classification projection

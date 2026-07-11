@@ -188,7 +188,7 @@ fn provider_safe_trace_record(record: &Value) -> Value {
     let authority = metadata.get("authority").unwrap_or(&Value::Null);
     json!({
         "schemaVersion": "tron.trace.provider_safe.v1",
-        "id": record.get("id").cloned().unwrap_or(Value::Null),
+        "traceRecordId": record.get("id").cloned().unwrap_or(Value::Null),
         "version": record.get("version").cloned().unwrap_or(Value::Null),
         "timestamp": record.get("timestamp").cloned().unwrap_or(Value::Null),
         "traceId": metadata.get("traceId").cloned().unwrap_or(Value::Null),
@@ -277,6 +277,25 @@ pub(super) fn started_trace_record(
     operation: &str,
     timestamp: &str,
 ) -> Result<AgentTraceRecord, CapabilityError> {
+    started_trace_record_with_request(invocation, deps, operation, timestamp, true)
+}
+
+pub(super) fn started_rejected_trace_record(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation: &str,
+    timestamp: &str,
+) -> Result<AgentTraceRecord, CapabilityError> {
+    started_trace_record_with_request(invocation, deps, operation, timestamp, false)
+}
+
+fn started_trace_record_with_request(
+    invocation: &Invocation,
+    deps: &Deps,
+    operation: &str,
+    timestamp: &str,
+    store_raw_request: bool,
+) -> Result<AgentTraceRecord, CapabilityError> {
     let id = Uuid::now_v7().to_string();
     let session = match invocation.causal_context.session_id.as_deref() {
         Some(session_id) => deps
@@ -299,7 +318,7 @@ pub(super) fn started_trace_record(
         trace_working_directory_metadata(invocation)
     };
     let vcs = working_directory.as_ref().and_then(|path| git_vcs(path));
-    let mut trace_metadata = if module_safe_trace {
+    let mut trace_metadata = if module_safe_trace || !store_raw_request {
         let request = module_safe_trace_request(operation);
         json!({
             "request": request.clone(),
@@ -836,7 +855,8 @@ mod tests {
         let rendered = serde_json::to_string_pretty(&safe).expect("render safe trace record");
 
         assert_eq!(safe["schemaVersion"], "tron.trace.provider_safe.v1");
-        assert_eq!(safe["id"], "trace_record_1");
+        assert_eq!(safe["traceRecordId"], "trace_record_1");
+        assert!(safe.get("id").is_none());
         assert_eq!(safe["traceId"], "trace_1");
         assert_eq!(safe["invocationId"], "inv_1");
         assert!(safe.get("providerInvocationId").is_none());

@@ -41,7 +41,8 @@
 //! validation before returning it.
 //! The adapter seam for future module replacement is supervised-runtime
 //! authority plus durable lifecycle parity: a replacement must preserve
-//! resource-backed job/output evidence, provider-safe refs, replay/idempotency
+//! resource-backed job/output evidence, provider-safe refs plus terminal
+//! exit/duration/timeout/cancellation/truncation facts, replay/idempotency
 //! evidence, bounded side effects, and rollback/disable metadata before binding
 //! policy may later consider routing.
 

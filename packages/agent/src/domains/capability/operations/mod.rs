@@ -73,7 +73,7 @@ use common::{
     optional_u64, required_str, result_value,
 };
 use context::validate_execute_context;
-use trace::{complete_trace_record, started_trace_record};
+use trace::{complete_trace_record, started_rejected_trace_record, started_trace_record};
 
 pub(crate) use operation_contract::provider_result_text;
 pub(crate) use operation_contract::validate_payload as validate_operation_payload;
@@ -90,11 +90,46 @@ pub(crate) async fn execute_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let attempted_operation = invocation
+        .payload
+        .get("operation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|operation| !operation.is_empty())
+        .unwrap_or("<missing-operation>")
+        .to_owned();
+    if attempted_operation == OperationId::ReplayManifest.as_str() {
+        operation_contract::validate_payload(&invocation.payload)?;
+        validate_execute_context(invocation, &attempted_operation)?;
+        info!(
+            component = "agent.execute",
+            agent_event = "execute_operation_trace_bypassed",
+            operation = %attempted_operation,
+            trace_id = %invocation.causal_context.trace_id.as_str(),
+            invocation_id = %invocation.id.as_str(),
+            session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
+            "primitive execute operation bypassed trace mutation"
+        );
+        let result =
+            dispatch::execute_operation(OperationId::ReplayManifest, invocation, deps, Utc::now())
+                .await?;
+        return result_value(result);
+    }
+
+    let Some(operation_id) = OperationId::parse(&attempted_operation) else {
+        return trace_rejected_operation(invocation, deps, &attempted_operation);
+    };
     operation_contract::validate_payload(&invocation.payload)?;
-    let operation = required_str(&invocation.payload, "operation")?.to_owned();
-    let operation_id = OperationId::parse(&operation)
-        .expect("canonical payload validation guarantees a supported operation id");
-    validate_execute_context(invocation, &operation)?;
+    validate_execute_context(invocation, &attempted_operation)?;
+
+    let operation = attempted_operation;
+    let operation_at = Utc::now();
+    let started_at = operation_at.to_rfc3339();
+    let start = Instant::now();
+    let mut trace_record = started_trace_record(invocation, deps, &operation, &started_at)?;
+    deps.event_store
+        .append_trace_record(&trace_record)
+        .map_err(|error| internal(format!("record trace start: {error}")))?;
     info!(
         component = "agent.execute",
         agent_event = "execute_operation_started",
@@ -113,28 +148,6 @@ pub(crate) async fn execute_value(
         actor_id = %invocation.causal_context.actor_id.as_str(),
         "primitive execute operation started"
     );
-    let operation_at = Utc::now();
-    if operation_id == OperationId::ReplayManifest {
-        info!(
-            component = "agent.execute",
-            agent_event = "execute_operation_trace_bypassed",
-            operation = %operation,
-            trace_id = %invocation.causal_context.trace_id.as_str(),
-            invocation_id = %invocation.id.as_str(),
-            session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
-            "primitive execute operation bypassed trace mutation"
-        );
-        let result =
-            dispatch::execute_operation(operation_id, invocation, deps, operation_at).await?;
-        return result_value(result);
-    }
-
-    let started_at = operation_at.to_rfc3339();
-    let start = Instant::now();
-    let mut trace_record = started_trace_record(invocation, deps, &operation, &started_at)?;
-    deps.event_store
-        .append_trace_record(&trace_record)
-        .map_err(|error| internal(format!("record trace start: {error}")))?;
     info!(
         component = "agent.execute",
         agent_event = "execute_trace_record_started",
@@ -205,6 +218,45 @@ pub(crate) async fn execute_value(
             Err(provider_error)
         }
     }
+}
+
+fn trace_rejected_operation(
+    invocation: &Invocation,
+    deps: &Deps,
+    attempted_operation: &str,
+) -> Result<Value, CapabilityError> {
+    let started_at = Utc::now().to_rfc3339();
+    let start = Instant::now();
+    let mut trace_record =
+        started_rejected_trace_record(invocation, deps, attempted_operation, &started_at)?;
+    deps.event_store
+        .append_trace_record(&trace_record)
+        .map_err(|error| internal(format!("record rejected trace start: {error}")))?;
+
+    let error = operation_contract::validate_payload(&invocation.payload)
+        .expect_err("unknown operation must fail canonical payload validation");
+    let provider_error = redact_provider_visible_error(error);
+    complete_trace_record(
+        &mut trace_record,
+        invocation,
+        &error_capability_result(provider_error.to_string(), json!({"status": "failed"})),
+        Some(&provider_error),
+        start.elapsed(),
+    );
+    deps.event_store
+        .update_trace_record(&trace_record)
+        .map_err(|error| internal(format!("record rejected trace failure: {error}")))?;
+    warn!(
+        component = "agent.execute",
+        agent_event = "execute_operation_rejected",
+        operation = %attempted_operation,
+        trace_record_id = %trace_record.id,
+        trace_id = %trace_record.trace_id,
+        invocation_id = %trace_record.invocation_id,
+        error = %provider_error,
+        "unsupported primitive execute operation was recorded without its raw request"
+    );
+    Err(provider_error)
 }
 
 fn redact_provider_visible_error(error: CapabilityError) -> CapabilityError {
@@ -282,6 +334,12 @@ fn redact_token_after_marker(message: &str, marker: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::session::event_store::AgentTraceListOptions;
+    use crate::engine::{
+        ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, FunctionId,
+        InvocationId, TraceId,
+    };
+    use crate::shared::server::test_support::make_test_context;
 
     #[test]
     fn execute_error_redaction_removes_authority_grant_tokens() {
@@ -293,5 +351,64 @@ mod tests {
 
         assert!(redacted.contains("authority grant <redacted> requires"));
         assert!(!redacted.contains("authority_grant_019f3a"));
+    }
+
+    #[tokio::test]
+    async fn unsupported_operation_is_persisted_as_a_failed_trace() {
+        let ctx = make_test_context();
+        let deps = Deps {
+            engine_host: ctx.engine_host.clone(),
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
+            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
+                startup_cutoff: Utc::now(),
+            },
+        };
+        let session_id = "unsupported-operation-trace-session";
+        let invocation = Invocation {
+            id: InvocationId::new("unsupported-operation-invocation").expect("invocation id"),
+            function_id: FunctionId::new("capability::execute").expect("function id"),
+            delivery_mode: DeliveryMode::Sync,
+            payload: json!({
+                "operation": "guessed_operation",
+                "unsafePayload": "sensitive-fixture-value"
+            }),
+            causal_context: CausalContext::new(
+                ActorId::new("agent:unsupported-operation-test").expect("actor id"),
+                ActorKind::Agent,
+                AuthorityGrantId::new("test-grant").expect("grant id"),
+                TraceId::new("unsupported-operation-trace").expect("trace id"),
+            )
+            .with_session_id(session_id),
+        };
+
+        let error = execute_value(&invocation, &deps)
+            .await
+            .expect_err("unsupported operation must fail");
+        assert!(error.to_string().contains("catalog_search"));
+
+        let records = ctx
+            .event_store
+            .list_trace_records(&AgentTraceListOptions {
+                session_id: Some(session_id),
+                trace_id: None,
+                limit: Some(10),
+            })
+            .expect("list failed validation trace");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].operation, "guessed_operation");
+        assert_eq!(records[0].status, "failed");
+        assert!(records[0].completed_at.is_some());
+        assert_eq!(
+            records[0].record_json["metadata"]["dev.tron"]["rawRequestStored"],
+            false
+        );
+        assert!(
+            !records[0]
+                .record_json
+                .to_string()
+                .contains("sensitive-fixture-value")
+        );
     }
 }

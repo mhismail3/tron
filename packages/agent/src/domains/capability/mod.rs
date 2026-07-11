@@ -114,7 +114,11 @@
 //! `execute::<operation>` schema, invoke the target once, then inspect
 //! provider-safe trace evidence with `trace_list` instead of routing the agent
 //! through replacement-readiness surfaces; `trace_get` is reserved for focused
-//! per-record detail after `trace_list` returns an exact record id. Trace
+//! per-record detail after `trace_list` returns an exact `traceRecordId`, which
+//! is deliberately distinct from the causal `traceId`. Invalid and unsupported
+//! execute attempts are persisted as failed trace records before they return,
+//! and provider-byte budgeting retains a bounded newest-first record subset
+//! instead of deleting the complete records collection. Trace
 //! projections name visible trace/invocation fields as safe engine refs, not raw
 //! provider invocation ids, label the current `trace_list` invocation as pending
 //! at projection time until completion is recorded, and separate

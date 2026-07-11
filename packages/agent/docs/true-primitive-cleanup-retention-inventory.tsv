@@ -1766,6 +1766,7 @@ packages/agent/src/domains/web/robots/parser.rs	implementation	web	Phase2-Slice8
 packages/agent/src/domains/web/robots/request.rs	implementation	web	Phase2-Slice8E	Web robots request helpers retained for pending-review bounded payload parsing, user-agent validation, timeout, byte, redirect, and idempotency limits.
 packages/agent/src/domains/web/source.rs	implementation	web	Phase2-Slice8B	Web source inspection service retained for read-only bounded citation list/inspect operations over current-session web_source resources.
 packages/agent/src/domains/web/tests/mod.rs	test	test_harness	Phase2-Slice8A	Web tests retained for authority denial, deterministic loopback fetch, URL validation, redirects, truncation, redaction, hash evidence, and idempotent replay.
+packages/agent/src/domains/web/tests/policy_tests.rs	test	test_harness	latest-session-hardening	URL, redirect, DNS, and malformed-target fail-closed regressions retained in a concern-owned test module.
 packages/agent/src/domains/web/tests/archive_tests.rs	test	test_harness	Phase2-Slice8D	Web archive tests retained for pending-review archive lifecycle, CAS, authority, idempotency, filtering, inspect, and no-network regressions.
 packages/agent/src/domains/web/tests/extraction_tests.rs	test	test_harness	Phase2-Slice8C	Web extraction tests retained for HTML readable text, redaction ordering, non-HTML content behavior, and old source compatibility coverage.
 packages/agent/src/domains/web/tests/robots_tests.rs	test	test_harness	Phase2-Slice8E	Web robots tests retained for pending-review robots policy authority, parser, evidence, safety, metadata-only sitemap, and replay regressions.
@@ -2116,6 +2117,8 @@ packages/agent/src/domains/capability/operations/operation_contract/direct.rs	im
 packages/agent/src/domains/capability/operations/operation_contract/governance.rs	implementation	agent_runtime	TPC-10	canonical governance operation input contract owner
 packages/agent/src/domains/capability/operations/operation_contract/metadata.rs	implementation	agent_runtime	TPC-10	canonical operation metadata contract owner
 packages/agent/src/domains/capability/operations/operation_contract/output/mod.rs	implementation	agent_runtime	TPC-10	canonical provider operation output owner
+packages/agent/src/domains/capability/operations/operation_contract/output/budget.rs	implementation	agent_runtime	TPC-10	canonical provider output structural budget owner
+packages/agent/src/domains/capability/operations/operation_contract/output/tests.rs	test	test_harness	TPC-10	canonical provider envelope and structural budget regression coverage
 packages/agent/src/domains/capability/operations/operation_contract/output/normalize.rs	implementation	agent_runtime	TPC-10	canonical provider output normalization owner
 packages/agent/src/domains/capability/operations/operation_contract/output/projection/mod.rs	implementation	agent_runtime	TPC-10	canonical provider evidence projection owner
 packages/agent/src/domains/capability/operations/operation_contract/output/projection/tests.rs	test	test_harness	TPC-10	canonical provider evidence projection regression coverage

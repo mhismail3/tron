@@ -27,6 +27,7 @@
 //! | `robots` | Execute-only robots.txt policy check and bounded evidence capture |
 //! | `robots_link` | Fetch-side robots-policy evidence validation and bounded refs |
 //! | `source` | Bounded citation summaries for active and exact archived web sources |
+//! | `tests` | Concern-owned fetch, policy, robots, source, extraction, and archive regressions |
 //!
 //! # INVARIANT: web fetch is explicit and provenance-backed
 //!

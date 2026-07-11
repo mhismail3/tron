@@ -1624,7 +1624,12 @@ fn extract_result_content_projects_trace_metadata_ids() {
 
     let envelope = provider_envelope(&exec);
     let record = &collection(&envelope, "records")["items"][0];
-    assert_eq!(item_fact(record, "id"), "019f-trace-record");
+    assert_eq!(item_fact(record, "traceRecordId"), "019f-trace-record");
+    assert!(
+        record["facts"]
+            .as_array()
+            .is_some_and(|facts| facts.iter().all(|fact| fact["field"] != "id"))
+    );
     assert_eq!(item_fact(record, "traceId"), "trace_nested");
     assert_eq!(item_fact(record, "invocationId"), "inv_nested");
     assert_eq!(
@@ -1864,6 +1869,68 @@ fn extract_result_content_does_not_project_runtime_process_identifiers() {
     assert!(!text.contains("processId"));
     assert!(!text.contains("processGroupId"));
     assert!(!text.contains("\"pid\""));
+}
+
+#[test]
+fn extract_result_content_projects_safe_job_terminal_evidence() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "job_status completed: job_process:test",
+        )]),
+        Some(json!({
+            "primitiveOperation": "job_status",
+            "status": "completed",
+            "jobs": {
+                "schemaVersion": "tron.jobs.job_process.v1",
+                "status": "completed",
+                "job": {
+                    "jobResourceId": "job_process:test",
+                    "jobVersionId": "ver_job",
+                    "processId": 70033,
+                    "terminal": {
+                        "status": "completed",
+                        "exitCode": 0,
+                        "timedOut": false,
+                        "cancelled": false
+                    },
+                    "output": {
+                        "kind": "execution_output",
+                        "resourceId": "execution_output:job_process:test",
+                        "versionId": "ver_output",
+                        "durationMs": 1191,
+                        "exitCode": 0,
+                        "outputTruncated": false
+                    }
+                },
+                "resourceRefs": [{
+                    "kind": "job_process",
+                    "resourceId": "job_process:test",
+                    "versionId": "ver_job"
+                }, {
+                    "kind": "execution_output",
+                    "resourceId": "execution_output:job_process:test",
+                    "versionId": "ver_output",
+                    "role": "execution_output",
+                    "durationMs": 1191,
+                    "exitCode": 0,
+                    "outputTruncated": false
+                }]
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "jobs.job.terminal.exitCode"), 0);
+    assert_eq!(fact(&envelope, "jobs.job.terminal.timedOut"), false);
+    assert_eq!(fact(&envelope, "jobs.job.terminal.cancelled"), false);
+    assert_eq!(fact(&envelope, "jobs.job.output.durationMs"), 1191);
+    assert_eq!(fact(&envelope, "jobs.job.output.outputTruncated"), false);
+    let refs = collection(&envelope, "jobs.resourceRefs.items");
+    assert_eq!(refs["returned"], 2);
+    let text = envelope_text(&envelope);
+    assert!(text.contains("execution_output:job_process:test"));
+    assert!(!text.contains("70033"));
+    assert!(!text.contains("processId"));
 }
 
 #[test]

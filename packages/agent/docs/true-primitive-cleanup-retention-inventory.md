@@ -42,9 +42,9 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 113 |
-| implementation | 878 |
+| implementation | 879 |
 | support | 385 |
-| test | 609 |
+| test | 611 |
 | docs | 150 |
 | delete | 0 |
 
@@ -53,7 +53,7 @@ The TSV covers tracked and newly introduced files under:
 | Owner | Count |
 |-------|------:|
 | `agent_domain` | 16 |
-| `agent_runtime` | 91 |
+| `agent_runtime` | 92 |
 | `app_bootstrap` | 11 |
 | `approval` | 8 |
 | `auth` | 19 |
@@ -112,7 +112,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 607 |
+| `test_harness` | 609 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |
