@@ -293,12 +293,15 @@ jobs:
           set -euo pipefail
           brew install create-dmg
           mkdir -p build
+          # Xcode 26 adds an unsigned __preview.dylib to generic Debug builds;
+          # packaging validation does not need previews and re-signs the app.
           xcodebuild \
             -project TronMac.xcodeproj \
             -scheme TronMac \
             -configuration Debug \
             -derivedDataPath build/dd \
             -destination 'generic/platform=macOS' \
+            ENABLE_DEBUG_DYLIB=NO \
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
             -quiet build
           APP_PATH="$(find build/dd -name 'TronMac.app' -print -quit)"

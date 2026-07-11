@@ -569,6 +569,7 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
         "working-directory: packages/mac-app",
         "git check-ignore -q packages/mac-app/TronMac.xcodeproj",
         "Dry-run DMG assembly",
+        "ENABLE_DEBUG_DYLIB=NO",
     ] {
         assert!(ci.contains(required), "CI missing {required}");
     }
