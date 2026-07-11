@@ -4,7 +4,10 @@
 //! owns the exact model-facing envelope, operation profile, redacted evidence
 //! projection, common failure branch, and structural byte budget. Provider
 //! adapters transport the resulting bytes; they must not rebuild or truncate
-//! the contract.
+//! the contract. Common semantic facts (`primitiveOperation` and `status`) are
+//! synthesized from this envelope's authoritative invocation/result state, not
+//! duplicated by every domain handler, and byte-budget reduction never removes
+//! facts required by the operation's semantic evidence contract.
 
 use crate::engine::{FunctionId, validate_engine_schema_payload};
 use crate::shared::foundation::text::truncate_str;
@@ -24,7 +27,7 @@ use normalize::{bounded_text, normalize_error, normalize_evidence, normalize_nex
 pub(super) use spec::OutputContract;
 use spec::{contract as output_contract, unsupported_contract};
 use types::{
-    PROVIDER_OUTPUT_MAX_BYTES, PROVIDER_OUTPUT_SCHEMA_VERSION, ProviderEvidence,
+    PROVIDER_OUTPUT_MAX_BYTES, PROVIDER_OUTPUT_SCHEMA_VERSION, ProviderEvidence, ProviderFact,
     ProviderOperationError, ProviderOperationOutput, ProviderTruncation,
 };
 #[cfg(test)]
@@ -83,7 +86,6 @@ fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<
     let projected =
         projection::project_evidence(operation, output_contract.profile, result.details.as_ref());
     let summary = bounded_text(&raw_result_text(result), 1_200);
-    let (evidence, mut truncation) = normalize_evidence(projected.clone());
     let ok = !result.is_error.unwrap_or(false);
     let status = result
         .details
@@ -100,6 +102,21 @@ fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<
             },
             |status| bounded_text(status, 120),
         );
+    let (mut evidence, mut truncation) = normalize_evidence(projected.clone());
+    ensure_authoritative_fact(
+        &mut evidence,
+        &mut truncation,
+        output_contract,
+        "primitiveOperation",
+        json!(operation),
+    );
+    ensure_authoritative_fact(
+        &mut evidence,
+        &mut truncation,
+        output_contract,
+        "status",
+        json!(status.clone()),
+    );
     let error = (!ok).then(|| normalize_error(projected.as_ref(), &summary));
     truncation.max_bytes = PROVIDER_OUTPUT_MAX_BYTES;
     let mut output = ProviderOperationOutput {
@@ -114,7 +131,10 @@ fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<
         truncation,
         error,
     };
-    fit_output_budget(&mut output)?;
+    fit_output_budget(
+        &mut output,
+        output_contract.semantic_evidence.required_fact_fields,
+    )?;
     validate_semantic_evidence(output_contract, &output)?;
     let value = serde_json::to_value(&output)
         .map_err(|error| format!("serialize provider output: {error}"))?;
@@ -122,7 +142,42 @@ fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<
     serde_json::to_string(&output).map_err(|error| format!("encode provider output: {error}"))
 }
 
-fn fit_output_budget(output: &mut ProviderOperationOutput) -> Result<(), String> {
+fn ensure_authoritative_fact(
+    evidence: &mut ProviderEvidence,
+    truncation: &mut ProviderTruncation,
+    output_contract: OutputContract,
+    field: &str,
+    value: Value,
+) {
+    if let Some(fact) = evidence.facts.iter_mut().find(|fact| fact.field == field) {
+        fact.value = value;
+        return;
+    }
+    evidence.facts.insert(
+        0,
+        ProviderFact {
+            field: field.to_owned(),
+            value,
+        },
+    );
+    if evidence.facts.len() > 160
+        && let Some(index) = evidence.facts.iter().rposition(|fact| {
+            !output_contract
+                .semantic_evidence
+                .required_fact_fields
+                .contains(&fact.field.as_str())
+        })
+    {
+        evidence.facts.remove(index);
+        truncation.truncated = true;
+        truncation.omitted_facts += 1;
+    }
+}
+
+fn fit_output_budget(
+    output: &mut ProviderOperationOutput,
+    required_fact_fields: &[&str],
+) -> Result<(), String> {
     loop {
         let encoded_len = stabilize_serialized_byte_count(output)?;
         if encoded_len <= PROVIDER_OUTPUT_MAX_BYTES {
@@ -132,7 +187,13 @@ fn fit_output_budget(output: &mut ProviderOperationOutput) -> Result<(), String>
         if let Some(collection) = output.evidence.collections.pop() {
             output.truncation.omitted_collections += 1;
             output.truncation.omitted_items += collection.returned;
-        } else if output.evidence.facts.pop().is_some() {
+        } else if let Some(index) = output
+            .evidence
+            .facts
+            .iter()
+            .rposition(|fact| !required_fact_fields.contains(&fact.field.as_str()))
+        {
+            output.evidence.facts.remove(index);
             output.truncation.omitted_facts += 1;
         } else if output.evidence.resources.pop().is_some() {
             output.truncation.omitted_resources += 1;
@@ -627,6 +688,40 @@ mod tests {
     }
 
     #[test]
+    fn catalog_inspect_synthesizes_common_facts_from_the_canonical_envelope() {
+        let result = result(
+            "Catalog execute_operation inspected: execute::git_status.",
+            false,
+            json!({
+                "catalogDiscovery": {
+                    "kind": "execute_operation",
+                    "id": "execute::git_status",
+                    "operation": "git_status",
+                    "providerCallable": true,
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["operation"]
+                    }
+                }
+            }),
+        );
+
+        let rendered = render_provider_output("catalog_inspect", &result)
+            .expect("real catalog-inspect details must satisfy the canonical output contract");
+        let value: Value = serde_json::from_str(&rendered).expect("valid provider JSON");
+
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["status"], "ok");
+        assert!(value["evidence"]["facts"].as_array().is_some_and(|facts| {
+            facts.iter().any(|fact| {
+                fact["field"] == "primitiveOperation" && fact["value"] == "catalog_inspect"
+            }) && facts
+                .iter()
+                .any(|fact| fact["field"] == "status" && fact["value"] == "ok")
+        }));
+    }
+
+    #[test]
     fn raw_content_is_sanitized_at_the_provider_boundary() {
         let result = result(
             "authority grant grant_123456789 at /private/example; providerInvocationId=call_123456789; token sk-example-secret-value",
@@ -719,12 +814,68 @@ mod tests {
             error: None,
         };
 
-        fit_output_budget(&mut output).expect("output fits after structural removal");
+        fit_output_budget(&mut output, &[]).expect("output fits after structural removal");
 
         assert_eq!(output.truncation.omitted_collections, 1);
         assert_eq!(output.truncation.omitted_items, 100);
         assert_eq!(output.truncation.omitted_actions, 1);
         assert_eq!(output.truncation.omitted_facts, 0);
+    }
+
+    #[test]
+    fn byte_budget_never_removes_required_semantic_facts() {
+        let mut facts = vec![
+            ProviderFact {
+                field: "primitiveOperation".to_owned(),
+                value: json!("observe"),
+            },
+            ProviderFact {
+                field: "status".to_owned(),
+                value: json!("ok"),
+            },
+        ];
+        facts.extend((0..80).map(|index| ProviderFact {
+            field: format!("extra.{index}"),
+            value: json!("x".repeat(800)),
+        }));
+        let mut output = ProviderOperationOutput {
+            schema_version: PROVIDER_OUTPUT_SCHEMA_VERSION,
+            operation: "observe".to_owned(),
+            profile: "summary",
+            ok: true,
+            status: "ok".to_owned(),
+            summary: "done".to_owned(),
+            evidence: ProviderEvidence {
+                facts,
+                resources: Vec::new(),
+                collections: Vec::new(),
+            },
+            next_actions: Vec::new(),
+            truncation: ProviderTruncation {
+                max_bytes: PROVIDER_OUTPUT_MAX_BYTES,
+                ..ProviderTruncation::default()
+            },
+            error: None,
+        };
+
+        fit_output_budget(&mut output, &["primitiveOperation", "status"])
+            .expect("non-required facts make the envelope reducible");
+
+        assert!(
+            output
+                .evidence
+                .facts
+                .iter()
+                .any(|fact| fact.field == "primitiveOperation")
+        );
+        assert!(
+            output
+                .evidence
+                .facts
+                .iter()
+                .any(|fact| fact.field == "status")
+        );
+        assert!(output.truncation.omitted_facts > 0);
     }
 
     #[test]
