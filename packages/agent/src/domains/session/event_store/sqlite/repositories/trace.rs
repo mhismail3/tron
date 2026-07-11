@@ -78,77 +78,38 @@ impl TraceRepo {
         .map_err(Into::into)
     }
 
-    /// List records by session and/or trace, newest first.
+    /// List records by exact optional filters, newest first.
     pub fn list(
         conn: &Connection,
         options: &AgentTraceListOptions<'_>,
     ) -> Result<Vec<AgentTraceRecord>> {
         let limit = options.limit.unwrap_or(50).clamp(1, 500);
-        match (options.session_id, options.trace_id) {
-            (Some(session_id), Some(trace_id)) => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, trace_id, invocation_id, parent_invocation_id,
-                            provider_invocation_id, session_id, workspace_id, turn,
-                            model_primitive_name, operation, status, timestamp,
-                            completed_at, duration_ms, record_json
-                     FROM trace_records
-                     WHERE session_id = ?1 AND trace_id = ?2
-                     ORDER BY timestamp DESC
-                     LIMIT ?3",
-                )?;
-                let rows = stmt
-                    .query_map(params![session_id, trace_id, limit], Self::map_row)?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            }
-            (Some(session_id), None) => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, trace_id, invocation_id, parent_invocation_id,
-                            provider_invocation_id, session_id, workspace_id, turn,
-                            model_primitive_name, operation, status, timestamp,
-                            completed_at, duration_ms, record_json
-                     FROM trace_records
-                     WHERE session_id = ?1
-                     ORDER BY timestamp DESC
-                     LIMIT ?2",
-                )?;
-                let rows = stmt
-                    .query_map(params![session_id, limit], Self::map_row)?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            }
-            (None, Some(trace_id)) => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, trace_id, invocation_id, parent_invocation_id,
-                            provider_invocation_id, session_id, workspace_id, turn,
-                            model_primitive_name, operation, status, timestamp,
-                            completed_at, duration_ms, record_json
-                     FROM trace_records
-                     WHERE trace_id = ?1
-                     ORDER BY timestamp DESC
-                     LIMIT ?2",
-                )?;
-                let rows = stmt
-                    .query_map(params![trace_id, limit], Self::map_row)?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            }
-            (None, None) => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, trace_id, invocation_id, parent_invocation_id,
-                            provider_invocation_id, session_id, workspace_id, turn,
-                            model_primitive_name, operation, status, timestamp,
-                            completed_at, duration_ms, record_json
-                     FROM trace_records
-                     ORDER BY timestamp DESC
-                     LIMIT ?1",
-                )?;
-                let rows = stmt
-                    .query_map(params![limit], Self::map_row)?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            }
-        }
+        let mut stmt = conn.prepare(
+            "SELECT id, trace_id, invocation_id, parent_invocation_id,
+                    provider_invocation_id, session_id, workspace_id, turn,
+                    model_primitive_name, operation, status, timestamp,
+                    completed_at, duration_ms, record_json
+             FROM trace_records
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR trace_id = ?2)
+               AND (?3 IS NULL OR operation = ?3)
+               AND (?4 IS NULL OR status = ?4)
+             ORDER BY timestamp DESC
+             LIMIT ?5",
+        )?;
+        let rows = stmt
+            .query_map(
+                params![
+                    options.session_id,
+                    options.trace_id,
+                    options.operation,
+                    options.status,
+                    limit
+                ],
+                Self::map_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// List records for replay in deterministic ascending order.

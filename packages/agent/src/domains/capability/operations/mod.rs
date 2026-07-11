@@ -393,6 +393,8 @@ mod tests {
             .list_trace_records(&AgentTraceListOptions {
                 session_id: Some(session_id),
                 trace_id: None,
+                operation: None,
+                status: None,
                 limit: Some(10),
             })
             .expect("list failed validation trace");
@@ -410,5 +412,28 @@ mod tests {
                 .to_string()
                 .contains("sensitive-fixture-value")
         );
+
+        let filtered = ctx
+            .event_store
+            .list_trace_records(&AgentTraceListOptions {
+                session_id: Some(session_id),
+                trace_id: None,
+                operation: Some("guessed_operation"),
+                status: Some("failed"),
+                limit: Some(10),
+            })
+            .expect("filter failed validation trace");
+        assert_eq!(filtered.len(), 1);
+        let excluded = ctx
+            .event_store
+            .list_trace_records(&AgentTraceListOptions {
+                session_id: Some(session_id),
+                trace_id: None,
+                operation: Some("guessed_operation"),
+                status: Some("ok"),
+                limit: Some(10),
+            })
+            .expect("filter nonmatching validation trace");
+        assert!(excluded.is_empty());
     }
 }

@@ -505,6 +505,11 @@ fn catalog_inspect_projects_trace_output_record_schema() {
     assert_eq!(trace_list["inputSchema"]["additionalProperties"], false);
     assert!(trace_list["inputSchema"]["properties"]["limit"].is_object());
     assert!(trace_list["inputSchema"]["properties"]["traceId"].is_object());
+    assert!(trace_list["inputSchema"]["properties"]["recordOperation"].is_object());
+    assert_eq!(
+        trace_list["inputSchema"]["properties"]["recordStatus"]["enum"],
+        json!(["running", "ok", "failed", "timeout"])
+    );
     assert_provider_output_contract(&trace_list, "trace_list", "trace_audit");
     assert_eq!(
         trace_list["outputSchema"]["semanticEvidenceContract"]["requiredFactFieldsOnSuccess"],
@@ -541,6 +546,18 @@ fn catalog_inspect_projects_trace_output_record_schema() {
     assert!(
         execute_operation_invocation_guidance("trace_list")
             .contains("trace projections do not expose raw trace providerInvocationId fields")
+    );
+
+    let log_recent = execute_operation_inspect_projection_with_options(
+        "log_recent",
+        "execute::log_recent",
+        false,
+    );
+    assert!(log_recent["inputSchema"]["properties"]["traceId"].is_object());
+    assert!(
+        log_recent["inputSchema"]["properties"]
+            .get("recordOperation")
+            .is_none()
     );
 
     let trace_get =

@@ -1140,6 +1140,8 @@ fn assert_trace_records_are_redacted(ctx: &ServerRuntimeContext, session_id: &st
         .list_trace_records(&AgentTraceListOptions {
             session_id: Some(session_id),
             trace_id: None,
+            operation: None,
+            status: None,
             limit: Some(100),
         })
         .expect("list trace records");

@@ -47,6 +47,15 @@ pub(super) fn trace_list(
         .unwrap_or(50)
         .clamp(1, 500) as i64;
     let trace_id = optional_str(&invocation.payload, "traceId")?;
+    let record_operation = optional_str(&invocation.payload, "recordOperation")?;
+    let record_status = optional_str(&invocation.payload, "recordStatus")?;
+    if let Some(status) = record_status
+        && !matches!(status, "running" | "ok" | "failed" | "timeout")
+    {
+        return Err(invalid(
+            "trace_list recordStatus must be running, ok, failed, or timeout",
+        ));
+    }
     let session_id = invocation
         .causal_context
         .session_id
@@ -57,6 +66,8 @@ pub(super) fn trace_list(
         .list_trace_records(&AgentTraceListOptions {
             session_id: Some(session_id),
             trace_id,
+            operation: record_operation,
+            status: record_status,
             limit: Some(limit),
         })
         .map_err(|error| internal(format!("list trace records: {error}")))?;
@@ -64,12 +75,20 @@ pub(super) fn trace_list(
         .into_iter()
         .map(|record| provider_safe_trace_record(&record.record_json))
         .collect::<Vec<_>>();
-    let status_summary = trace_status_summary(&records);
+    let current_invocation_may_appear = record_operation
+        .is_none_or(|operation| operation == "trace_list")
+        && record_status.is_none_or(|status| status == "running");
+    let status_summary = trace_status_summary(&records, current_invocation_may_appear);
     Ok(ok_result(
         trace_list_content(records.len(), &status_summary),
         json!({
             "primitiveOperation": "trace_list",
             "status": "ok",
+            "filters": {
+                "traceId": trace_id,
+                "recordOperation": record_operation,
+                "recordStatus": record_status
+            },
             "projectionBoundary": trace_projection_boundary(),
             "statusSummary": status_summary,
             "records": records
@@ -90,12 +109,17 @@ fn trace_list_content(record_count: usize, status_summary: &Value) -> String {
         .pointer("/completedStatusCounts/failed")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let pending_guidance = if status_summary["currentTraceListMayAppearRunning"] == true {
+        " The current trace_list call is pending at projection time and may appear in-progress until this call completes."
+    } else {
+        " The active filters exclude the current trace_list invocation."
+    };
     format!(
-        "Trace records: {record_count}. Completed trace statuses: ok {ok_count}, failed {failed_count}. In-progress records: {in_progress}; the current trace_list call is pending at projection time and may appear in-progress until this call completes. {TRACE_PROJECTION_BOUNDARY_CONTENT}"
+        "Trace records: {record_count}. Completed trace statuses: ok {ok_count}, failed {failed_count}. In-progress records: {in_progress}.{pending_guidance} {TRACE_PROJECTION_BOUNDARY_CONTENT}"
     )
 }
 
-fn trace_status_summary(records: &[Value]) -> Value {
+fn trace_status_summary(records: &[Value], current_invocation_may_appear: bool) -> Value {
     let mut completed_status_counts = BTreeMap::<String, u64>::new();
     let mut in_progress_count = 0_u64;
     for record in records {
@@ -122,9 +146,13 @@ fn trace_status_summary(records: &[Value]) -> Value {
         "completedStatusCounts": completed_status_counts,
         "completedStatusValuesOnlyOkFailed": completed_status_values_only_ok_failed,
         "inProgressCount": in_progress_count,
-        "currentTraceListMayAppearRunning": true,
-        "currentInvocationStatus": "pending_at_projection_time",
-        "inProgressInterpretation": "The currently executing trace_list invocation can be included before its completion is recorded, so an in-progress trace_list record does not mean a completed trace has a non-ok/failed status.",
+        "currentTraceListMayAppearRunning": current_invocation_may_appear,
+        "currentInvocationStatus": current_invocation_may_appear.then_some("pending_at_projection_time"),
+        "inProgressInterpretation": if current_invocation_may_appear {
+            "The currently executing trace_list invocation can be included before its completion is recorded, so an in-progress trace_list record does not mean a completed trace has a non-ok/failed status."
+        } else {
+            "The active exact filters exclude the current trace_list invocation."
+        },
         "completedStatusGuidance": "Use completedStatusCounts and completedStatusValuesOnlyOkFailed for claims about finished trace records.",
         "answerGuidance": "When asked whether trace status values are only ok/failed, answer about completed trace records separately from in-progress records. Treat the current trace_list invocation as pending at projection time until this call is complete."
     })
@@ -970,7 +998,7 @@ mod tests {
             }),
         ];
 
-        let summary = trace_status_summary(&records);
+        let summary = trace_status_summary(&records, true);
         let content = trace_list_content(records.len(), &summary);
 
         assert_eq!(summary["completedStatusCounts"]["ok"], 1);
@@ -1001,6 +1029,22 @@ mod tests {
         );
         assert!(content.contains("Completed trace statuses: ok 1, failed 1"));
         assert!(content.contains("pending at projection time"));
+    }
+
+    #[test]
+    fn trace_status_summary_explains_when_filters_exclude_current_call() {
+        let records = vec![json!({
+            "status": "failed",
+            "completedAt": "2026-07-08T03:27:06Z"
+        })];
+
+        let summary = trace_status_summary(&records, false);
+        let content = trace_list_content(records.len(), &summary);
+
+        assert_eq!(summary["currentTraceListMayAppearRunning"], false);
+        assert!(summary["currentInvocationStatus"].is_null());
+        assert!(content.contains("active filters exclude"));
+        assert!(!content.contains("pending at projection time"));
     }
 
     #[test]

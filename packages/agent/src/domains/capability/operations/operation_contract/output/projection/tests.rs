@@ -1595,6 +1595,10 @@ fn extract_result_content_projects_trace_metadata_ids() {
             "statusSummary": {
                 "totalRecords": 1
             },
+            "filters": {
+                "recordOperation": "procedural_definition_record",
+                "recordStatus": "failed"
+            },
             "records": [{
                 "id": "019f-trace-record",
                 "timestamp": "2026-06-30T07:30:00Z",
@@ -1638,6 +1642,11 @@ fn extract_result_content_projects_trace_metadata_ids() {
     );
     assert_eq!(item_fact(record, "error.code"), "ENGINE_SCHEMA_VIOLATION");
     assert_eq!(item_fact(record, "error.details.path"), "$.field");
+    assert_eq!(
+        fact(&envelope, "filters.recordOperation"),
+        "procedural_definition_record"
+    );
+    assert_eq!(fact(&envelope, "filters.recordStatus"), "failed");
     assert!(
         item_fact(record, "error.message")
             .as_str()

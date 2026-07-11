@@ -204,7 +204,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
                 ("idempotencyKey", idempotency_schema()),
             ],
         ),
-        "trace_list" => (vec!["operation"], trace_filter_fields()),
+        "trace_list" => (vec!["operation"], trace_record_filter_fields()),
         "trace_get" => (
             vec!["operation", "traceRecordId"],
             vec![(
@@ -214,7 +214,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
                 ),
             )],
         ),
-        "log_recent" => (vec!["operation"], trace_filter_fields()),
+        "log_recent" => (vec!["operation"], log_filter_fields()),
         "replay_manifest" => (vec!["operation"], Vec::new()),
         "catalog_search" => (vec!["operation"], catalog_search_fields()),
         "catalog_inspect" => (
@@ -472,10 +472,22 @@ fn job_start_fields() -> Vec<(&'static str, Value)> {
     fields
 }
 
-fn trace_filter_fields() -> Vec<(&'static str, Value)> {
+fn log_filter_fields() -> Vec<(&'static str, Value)> {
     vec![
         ("limit", bounded_integer(1, 500)),
         ("traceId", nonempty_string_schema()),
+    ]
+}
+
+fn trace_record_filter_fields() -> Vec<(&'static str, Value)> {
+    vec![
+        ("limit", bounded_integer(1, 500)),
+        ("traceId", nonempty_string_schema()),
+        ("recordOperation", nonempty_string_schema()),
+        (
+            "recordStatus",
+            enum_schema(&["running", "ok", "failed", "timeout"]),
+        ),
     ]
 }
 

@@ -118,8 +118,9 @@
 //! is deliberately distinct from the causal `traceId`. Unsupported operation
 //! names receive a rejection-only child grant and are persisted as failed trace
 //! records without their raw request before they return; provider-byte budgeting
-//! retains a bounded newest-first record subset
-//! instead of deleting the complete records collection. Trace
+//! retains a bounded newest-first record subset instead of deleting the complete
+//! records collection, while exact operation/status filters let the agent isolate
+//! omitted failures without guessing record ids. Trace
 //! projections name visible trace/invocation fields as safe engine refs, not raw
 //! provider invocation ids, label the current `trace_list` invocation as pending
 //! at projection time until completion is recorded, and separate

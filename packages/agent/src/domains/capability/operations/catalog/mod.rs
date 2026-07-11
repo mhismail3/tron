@@ -319,7 +319,7 @@ fn execute_operation_invocation_guidance(operation: &str) -> &'static str {
             " Copy complete repositoryRef/rootRef/headRef objects, including kind, from git_status details.git.repository.repositoryTreeSnapshotInput; passing only .id values is invalid."
         }
         "trace_list" => {
-            " Current-session scope is supplied by trusted runtime context; do not invent selector or scope fields. Optional top-level fields are limit and traceId only. When using trace_list as whole-session evidence, call it after the operations being audited; otherwise say it only covers records visible at its projection time. Final answers must explicitly state that provider transcript tool-call ids may be visible in provider message history for protocol threading, while trace projections do not expose raw trace providerInvocationId fields."
+            " Current-session scope is supplied by trusted runtime context; do not invent selector or scope fields. Optional top-level fields are limit, traceId, recordOperation, and recordStatus. Use exact recordOperation/recordStatus filters when a broad result is truncated and the task needs one operation or failure class. When using trace_list as whole-session evidence, call it after the operations being audited; otherwise say it only covers records visible at its projection time. Final answers must explicitly state that provider transcript tool-call ids may be visible in provider message history for protocol threading, while trace projections do not expose raw trace providerInvocationId fields."
         }
         "trace_get" => {
             " Current-session scope is supplied by trusted runtime context; pass only operation and the traceRecordId returned by trace_list."

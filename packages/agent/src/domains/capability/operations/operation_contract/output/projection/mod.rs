@@ -953,6 +953,7 @@ fn project_trace_evidence(details: &Value) -> Option<Value> {
     copy_key(&mut projected, details, "status");
     copy_key(&mut projected, details, "projectionBoundary");
     copy_key(&mut projected, details, "statusSummary");
+    copy_key(&mut projected, details, "filters");
     if let Some(records) = details.get("records").and_then(Value::as_array) {
         projected.insert(
             "records".to_owned(),

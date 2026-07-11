@@ -56,6 +56,10 @@ pub struct AgentTraceListOptions<'a> {
     pub session_id: Option<&'a str>,
     /// Restrict to one trace.
     pub trace_id: Option<&'a str>,
+    /// Restrict to one exact execute operation.
+    pub operation: Option<&'a str>,
+    /// Restrict to one exact lifecycle status.
+    pub status: Option<&'a str>,
     /// Maximum rows to return.
     pub limit: Option<i64>,
 }
