@@ -572,6 +572,7 @@ async fn execute_capability_primitive_via_engine(
     let result = engine_host.invoke(invocation).await;
     let result_trace_id = Some(result.trace_id.clone());
     let result_invocation_id = Some(result.invocation_id.clone());
+    let replayed_from = result.replayed_from.clone();
 
     if let Some(error) = result.error {
         let mut failure = engine_error_to_failure(&error);
@@ -612,34 +613,52 @@ async fn execute_capability_primitive_via_engine(
             Some(json!({ "primitiveTargetId": function_id.to_string() })),
         );
     };
-    serde_json::from_value(value).unwrap_or_else(|error| {
-        let mut failure = FailureEnvelope::new(
-            CAPABILITY_RESULT_INVALID,
-            FailureCategory::Parse,
-            format!(
-                "Engine capability invocation returned invalid capability result for {function_id}"
-            ),
-            false,
-            false,
-            FailureOrigin::Capability,
-        );
-        failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
-        failure.references.invocation_id = result_invocation_id
-            .as_ref()
-            .map(|id| id.as_str().to_owned());
-        capability_failure_result(
-            failure,
-            model_primitive_name,
-            invocation_id,
-            session_id,
-            result_trace_id.as_ref(),
-            parent_invocation_id,
-            Some(json!({
-                "primitiveTargetId": function_id.to_string(),
-                "serdeError": error.to_string(),
-            })),
-        )
-    })
+    let mut capability_result = match serde_json::from_value(value) {
+        Ok(result) => result,
+        Err(error) => {
+            let mut failure = FailureEnvelope::new(
+                CAPABILITY_RESULT_INVALID,
+                FailureCategory::Parse,
+                format!(
+                    "Engine capability invocation returned invalid capability result for {function_id}"
+                ),
+                false,
+                false,
+                FailureOrigin::Capability,
+            );
+            failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
+            failure.references.invocation_id = result_invocation_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned());
+            return capability_failure_result(
+                failure,
+                model_primitive_name,
+                invocation_id,
+                session_id,
+                result_trace_id.as_ref(),
+                parent_invocation_id,
+                Some(json!({
+                    "primitiveTargetId": function_id.to_string(),
+                    "serdeError": error.to_string(),
+                })),
+            );
+        }
+    };
+    attach_engine_outcome(&mut capability_result, replayed_from.as_ref());
+    capability_result
+}
+
+fn attach_engine_outcome(result: &mut CapabilityResult, replayed_from: Option<&InvocationId>) {
+    let Some(Value::Object(details)) = result.details.as_mut() else {
+        return;
+    };
+    details.insert(
+        "engineOutcome".to_owned(),
+        json!({
+            "replayed": replayed_from.is_some(),
+            "replaySourceInvocationRef": replayed_from.map(InvocationId::as_str)
+        }),
+    );
 }
 
 #[cfg(test)]

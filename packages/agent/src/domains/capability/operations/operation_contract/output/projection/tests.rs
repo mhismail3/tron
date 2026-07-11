@@ -1663,6 +1663,30 @@ fn extract_result_content_projects_trace_metadata_ids() {
 }
 
 #[test]
+fn extract_result_content_projects_canonical_engine_replay_outcome() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Text("State updated.".to_owned()),
+        Some(json!({
+            "primitiveOperation": "state_set",
+            "status": "ok",
+            "state": {"revision": 1},
+            "engineOutcome": {
+                "replayed": true,
+                "replaySourceInvocationRef": "invocation-safe-ref"
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+
+    assert_eq!(fact(&envelope, "engineOutcome.replayed"), true);
+    assert_eq!(
+        fact(&envelope, "engineOutcome.replaySourceInvocationRef"),
+        "invocation-safe-ref"
+    );
+}
+
+#[test]
 fn extract_result_content_projects_trace_projection_proof_for_agent() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(

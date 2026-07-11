@@ -83,34 +83,48 @@ pub(super) fn project_evidence(
     details: Option<&Value>,
 ) -> Option<Value> {
     let details = details?;
-    if let Some(projected) = project_error_evidence(details) {
-        return Some(projected);
-    }
-    match profile {
-        OutputProfile::Catalog => project_catalog_evidence(details),
-        OutputProfile::Git => project_git_evidence(details),
-        OutputProfile::TraceAudit => match operation {
-            "log_recent" => project_log_evidence(details),
-            "trace_list" | "trace_get" => project_trace_evidence(details),
-            _ => project_metadata_operation_evidence(operation, details),
-        },
-        OutputProfile::Context => project_context_control_evidence(operation, details),
-        OutputProfile::Resource => match operation {
-            "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel" | "question_create"
-            | "question_list" | "question_inspect" | "question_answer" => {
-                project_goal_question_evidence(operation, details)
+    let mut projected = if let Some(projected) = project_error_evidence(details) {
+        projected
+    } else {
+        match profile {
+            OutputProfile::Catalog => project_catalog_evidence(details),
+            OutputProfile::Git => project_git_evidence(details),
+            OutputProfile::TraceAudit => match operation {
+                "log_recent" => project_log_evidence(details),
+                "trace_list" | "trace_get" => project_trace_evidence(details),
+                _ => project_metadata_operation_evidence(operation, details),
+            },
+            OutputProfile::Context => project_context_control_evidence(operation, details),
+            OutputProfile::Resource => match operation {
+                "goal_create" | "goal_list" | "goal_inspect" | "goal_cancel"
+                | "question_create" | "question_list" | "question_inspect" | "question_answer" => {
+                    project_goal_question_evidence(operation, details)
+                }
+                _ => project_metadata_operation_evidence(operation, details),
+            },
+            OutputProfile::Governance if operation == "capability_binding_cockpit_overview" => {
+                project_capability_cockpit_evidence(details)
             }
-            _ => project_metadata_operation_evidence(operation, details),
-        },
-        OutputProfile::Governance if operation == "capability_binding_cockpit_overview" => {
-            project_capability_cockpit_evidence(details)
-        }
-        OutputProfile::Summary
-        | OutputProfile::Filesystem
-        | OutputProfile::Runtime
-        | OutputProfile::Governance
-        | OutputProfile::Web => project_metadata_operation_evidence(operation, details),
+            OutputProfile::Summary
+            | OutputProfile::Filesystem
+            | OutputProfile::Runtime
+            | OutputProfile::Governance
+            | OutputProfile::Web => project_metadata_operation_evidence(operation, details),
+        }?
+    };
+    if let (Value::Object(projected), Some(outcome)) =
+        (&mut projected, details.get("engineOutcome"))
+    {
+        projected.insert("engineOutcome".to_owned(), project_engine_outcome(outcome));
     }
+    Some(projected)
+}
+
+fn project_engine_outcome(outcome: &Value) -> Value {
+    let mut projected = Map::new();
+    copy_key(&mut projected, outcome, "replayed");
+    copy_key(&mut projected, outcome, "replaySourceInvocationRef");
+    Value::Object(projected)
 }
 
 fn project_catalog_evidence(details: &Value) -> Option<Value> {
@@ -1629,6 +1643,8 @@ fn safe_scalar_metadata_key(key: &str) -> bool {
             | "approvalStatus"
             | "validationStatus"
             | "verificationStatus"
+            | "replayed"
+            | "replaySourceInvocationRef"
     ) || safe_id_like_metadata_key(&lower)
 }
 

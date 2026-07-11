@@ -235,6 +235,7 @@ async fn catalog_conformance_replays_end_to_end_without_duplicate_evidence() {
         "first report must succeed"
     );
     let first_details = first.result.details.as_ref().expect("first details");
+    assert_eq!(first_details["engineOutcome"]["replayed"], false);
     let first_resource_id = first_details["catalogDiscovery"]["reportResourceId"]
         .as_str()
         .expect("first report resource id");
@@ -260,6 +261,12 @@ async fn catalog_conformance_replays_end_to_end_without_duplicate_evidence() {
     .await;
     assert_eq!(second.result.is_error, Some(false), "replay must succeed");
     let second_details = second.result.details.as_ref().expect("replay details");
+    assert_eq!(second_details["engineOutcome"]["replayed"], true);
+    assert!(
+        second_details["engineOutcome"]["replaySourceInvocationRef"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(
         second_details["catalogDiscovery"]["reportResourceId"],
         first_resource_id

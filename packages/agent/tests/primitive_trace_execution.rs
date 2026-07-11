@@ -53,6 +53,8 @@ async fn execute_replay_manifest_is_read_only_and_does_not_create_trace_record()
         .list_trace_records(&AgentTraceListOptions {
             session_id: Some(&created.session.id),
             trace_id: None,
+            operation: None,
+            status: None,
             limit: Some(10),
         })
         .unwrap();
@@ -307,7 +309,10 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
         true
     );
     assert!(provider_write_record.get("providerInvocationId").is_none());
-    let write_record_id = provider_write_record["id"].as_str().unwrap().to_owned();
+    let write_record_id = provider_write_record["traceRecordId"]
+        .as_str()
+        .expect("provider-safe trace record id")
+        .to_owned();
 
     let get_value = invoke_execute(
         &runtime.ctx,
@@ -333,7 +338,7 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
         "filesystem_write"
     );
     assert_eq!(
-        get_result.details.as_ref().unwrap()["record"]["id"],
+        get_result.details.as_ref().unwrap()["record"]["traceRecordId"],
         write_record_id
     );
 
@@ -446,6 +451,8 @@ async fn execute_process_run_expands_home_alias_in_trace_working_directory() {
         .list_trace_records(&AgentTraceListOptions {
             session_id: Some(&created.session.id),
             trace_id: Some(trace_id.as_str()),
+            operation: None,
+            status: None,
             limit: Some(10),
         })
         .unwrap();
