@@ -75,10 +75,6 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
 #[test]
 fn ssarr_artifacts_lineage_branch_and_readme_wiring_exist() {
     assert_current_lineage_base();
-    assert_eq!(
-        git_output(&["rev-parse", STALE_BRANCH]).trim(),
-        STALE_BRANCH_HEAD
-    );
 
     for path in [
         SCORECARD_PATH,

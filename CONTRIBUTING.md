@@ -125,6 +125,11 @@ cost of Linux minutes). The Rust job checks out full history because accepted
 baseline invariants verify commit ancestry. `CI summary` is the required
 mainline check.
 
+Repository invariants must not depend on developer-local branch refs. Historical
+or quarantined branches belong in tracked evidence with immutable commit hashes;
+only commits reachable from the checked-out repository may be queried at test
+time.
+
 ## Commits
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/) loosely:
