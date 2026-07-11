@@ -280,7 +280,8 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         "INSERT INTO trace_records",
         "UPDATE trace_records",
         "FROM trace_records",
-        "WHERE session_id = ?1 AND trace_id = ?2",
+        "(?1 IS NULL OR session_id = ?1)",
+        "(?2 IS NULL OR trace_id = ?2)",
         "ORDER BY timestamp DESC",
         "serde_json::from_str",
     ] {

@@ -5,11 +5,11 @@ Status: **foundational runtime route complete**
 This manifest records the source-backed evidence for the first dynamic
 replacement slice. The slice adds governed route records and a scoped
 `git_status` route seam that resolves an active route, verifies lifecycle and
-runtime refs, projects supervised module-runtime provider-safe output, and
-fails closed when the replacement boundary is unsafe. Engine Cockpit also
+runtime refs, uses a supervised accepted-shadow-projection replay boundary,
+and fails closed when the replacement boundary is unsafe. Engine Cockpit also
 projects server-owned route-story cards so route changes, failures, and
 rollback availability are visible before operation-level drill-down. It does not claim full
-autonomous self-update across every operation.
+autonomous self-update across every operation or live module-code execution.
 
 ## Reviewed Source Files
 

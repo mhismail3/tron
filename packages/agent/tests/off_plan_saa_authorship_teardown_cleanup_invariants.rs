@@ -413,7 +413,13 @@ fn provider_visible_execute_surface_is_renarrowed() {
 
     assert!(
         contract.contains("operation_host_request_schema()")
-            && operations_registry.contains("\"enum\": supported_operation_names()")
+            && operations_registry.contains("pub(crate) fn host_request_schema()")
+            && operations_registry.contains("for operation in supported_operation_names()")
+            && operations_registry.contains("contract(operation)")
+            && operations_registry.contains(
+                "\"schemaCompleteness\": \"mechanical_union_of_exact_operation_contracts\""
+            )
+            && operations_registry.contains("\"additionalProperties\": false")
             && operations_registry.contains("operation_list_text()"),
         "execute schema must delegate to the canonical registry-backed operation contract"
     );

@@ -290,13 +290,14 @@ fn replacement_contract_is_verifiable_not_best_effort() {
     }
 
     for required in [
-        "project_provider_safe_adapter_output",
+        "validate_accepted_shadow_projection",
         "accepted_shadow_trial_evidence",
         "supervisorEnvelopeOnly",
+        "liveModuleCodeExecutionSupported",
         "liveModuleCodeExecuted",
-        "module runtime adapter projection rejected stale lifecycle ref",
-        "module runtime adapter projection rejected stale runtime ref",
-        "git_status adapter projection requires concrete evidenceRef",
+        "accepted shadow projection validation rejected stale lifecycle ref",
+        "accepted shadow projection validation rejected stale runtime ref",
+        "git_status shadow projection requires concrete evidenceRef",
     ] {
         assert!(
             module_runtime.contains(required),
@@ -319,7 +320,7 @@ fn replacement_contract_is_verifiable_not_best_effort() {
     }
 
     assert!(
-        dynamic.contains("not arbitrary live module-code execution"),
+        dynamic.contains("does not execute live module code"),
         "dynamic scorecard must keep the first route boundary honest"
     );
 }

@@ -512,9 +512,14 @@ async fn execute_rejects_unsupported_file_write_operation() {
         execute_context(&ctx, root.path(), "unsupported-file-write-rejected", true).await,
     )
     .await;
-    assert!(error.contains("request schema violation"), "{error}");
-    assert!(error.contains("$.operation"), "{error}");
-    assert!(error.contains("value is not in enum"), "{error}");
+    assert!(
+        error.contains("Unsupported capability::execute operation 'file_write'"),
+        "{error}"
+    );
+    assert!(
+        error.contains("Use catalog_search to discover an exact supported operation name"),
+        "{error}"
+    );
     assert!(
         !error.contains("filesystem_read, filesystem_list"),
         "unsupported operation errors must not dump the full registry"

@@ -1,9 +1,10 @@
 //! Primitive execute operations for the bare engine loop.
 //!
 //! `capability::execute` is the only model-facing tool on this branch. It
-//! performs one direct host primitive operation, records trace evidence, rejects
-//! bootstrap grants, requires least-privilege authority, and keeps delegated
-//! operations bound to trusted runtime context. Module-owned program-execution
+//! performs one direct host primitive operation, records trace evidence for
+//! canonical operations before structural/context validation, rejects bootstrap
+//! grants, requires least-privilege authority, and keeps delegated operations
+//! bound to trusted runtime context. Module-owned program-execution
 //! follow-ups must prove the inspected module runtime's delegated job ref
 //! matches the requested job resource before status, cancellation, or cleanup
 //! can read or mutate job state; procedural module-pack operations similarly
@@ -119,8 +120,6 @@ pub(crate) async fn execute_value(
     let Some(operation_id) = OperationId::parse(&attempted_operation) else {
         return trace_rejected_operation(invocation, deps, &attempted_operation);
     };
-    operation_contract::validate_payload(&invocation.payload)?;
-    validate_execute_context(invocation, &attempted_operation)?;
 
     let operation = attempted_operation;
     let operation_at = Utc::now();
@@ -161,7 +160,12 @@ pub(crate) async fn execute_value(
         "primitive execute trace record started"
     );
 
-    let result = dispatch::execute_operation(operation_id, invocation, deps, operation_at).await;
+    let result = match operation_contract::validate_payload(&invocation.payload)
+        .and_then(|()| validate_execute_context(invocation, &operation))
+    {
+        Ok(()) => dispatch::execute_operation(operation_id, invocation, deps, operation_at).await,
+        Err(error) => Err(error),
+    };
     match result {
         Ok(result) => {
             complete_trace_record(

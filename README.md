@@ -1331,7 +1331,11 @@ routes must satisfy. It does not claim broad autonomous self-update across every
 operation.
 `catalog_inspect` also projects operation-specific contracts for provider-safe
 trace and web operations. `execute::trace_list` and `execute::trace_get` show the
-model the safe record shape and redaction guarantees before invocation. Whole
+model the safe record shape and redaction guarantees before invocation.
+Canonical operations start a safe trace before their exact payload and trusted
+runtime-context gates, so structural or context rejection remains inspectable
+without storing the raw request; unknown operation names use the same redacted
+failed-trace contract. Whole
 session trace proof is point-in-time: agents call `trace_list` after the
 operations being audited or explicitly qualify that later operations are not
 covered. Final answers should explicitly say provider transcript tool-call ids

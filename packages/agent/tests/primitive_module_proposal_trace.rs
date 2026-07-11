@@ -180,7 +180,10 @@ async fn rejected_module_proposal_trace_uses_safe_request_projection() {
     )
     .await;
     assert!(
-        error.contains("bounded metadata") || error.contains("path-like"),
+        error.contains("bounded metadata")
+            || error.contains("path-like")
+            || (error.contains("request schema violation")
+                && error.contains("additional property is not allowed")),
         "unsafe module proposal must be rejected before storage: {error}"
     );
 
@@ -209,41 +212,34 @@ async fn rejected_module_proposal_trace_uses_safe_request_projection() {
         .expect("trace records array");
     let module_record = records
         .iter()
-        .find(|record| record["metadata"]["dev.tron"]["operation"] == "module_proposal_record")
-        .expect("module proposal trace record");
-    assert_eq!(module_record["metadata"]["dev.tron"]["status"], "failed");
+        .find(|record| record["operation"] == "module_proposal_record")
+        .unwrap_or_else(|| panic!("module proposal trace record missing from {records:#?}"));
+    assert_eq!(module_record["status"], "failed");
     assert_eq!(
-        module_record["metadata"]["dev.tron"]["request"]["projection"],
-        "module_trace_safe_request.v1"
+        module_record["schemaVersion"],
+        "tron.trace.provider_safe.v1"
     );
+    assert_eq!(module_record["request"]["rawStoredInProjection"], false);
+    assert!(module_record["request"]["hash"].as_str().is_some());
+    assert_eq!(module_record["result"]["rawStoredInProjection"], false);
+    assert!(module_record["result"]["hash"].as_str().is_some());
+    assert_eq!(module_record["redaction"]["rawRequestExcluded"], true);
+    assert_eq!(module_record["redaction"]["rawResultExcluded"], true);
     assert_eq!(
-        module_record["metadata"]["dev.tron"]["request"]["rawPayloadStored"],
-        false
+        module_record["redaction"]["rawWorkingDirectoryExcluded"],
+        true
     );
+    assert_eq!(module_record["redaction"]["rawGrantIdsExcluded"], true);
+    assert_eq!(module_record["redaction"]["rawAuthorityIdsExcluded"], true);
     assert_eq!(
-        module_record["metadata"]["dev.tron"]["rawRequestStored"],
-        false
-    );
-    assert_eq!(
-        module_record["metadata"]["dev.tron"]["workingDirectoryRedacted"],
+        module_record["redaction"]["rawIdempotencyKeysExcluded"],
         true
     );
     assert_eq!(
-        module_record["metadata"]["dev.tron"]["authority"]["authorityGrantId"]["redacted"],
-        true
-    );
-    assert_eq!(
-        module_record["metadata"]["dev.tron"]["authority"]["authorityGrantId"]["rawStored"],
+        module_record["authority"]["rawAuthorityGrantIdStored"],
         false
     );
-    assert_eq!(
-        module_record["metadata"]["dev.tron"]["authority"]["idempotencyKey"]["redacted"],
-        true
-    );
-    assert_eq!(
-        module_record["metadata"]["dev.tron"]["authority"]["idempotencyKey"]["rawStored"],
-        false
-    );
+    assert_eq!(module_record["authority"]["rawIdempotencyKeyStored"], false);
     assert_trace_record_has_no_module_proposal_leaks(
         "trace_list module_proposal_record",
         module_record,
@@ -262,7 +258,7 @@ async fn rejected_module_proposal_trace_uses_safe_request_projection() {
         ],
     );
 
-    let module_record_id = module_record["id"].as_str().unwrap().to_owned();
+    let module_record_id = module_record["traceRecordId"].as_str().unwrap().to_owned();
     let get_value = invoke_execute(
         &runtime.ctx,
         json!({
@@ -283,7 +279,7 @@ async fn rejected_module_proposal_trace_uses_safe_request_projection() {
     .await;
     let get_result: CapabilityResult = serde_json::from_value(get_value).unwrap();
     let get_record = &get_result.details.as_ref().unwrap()["record"];
-    assert_eq!(get_record["id"], module_record_id);
+    assert_eq!(get_record["traceRecordId"], module_record_id);
     assert_trace_record_has_no_module_proposal_leaks(
         "trace_get module_proposal_record",
         get_record,
