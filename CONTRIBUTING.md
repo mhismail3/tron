@@ -115,12 +115,13 @@ work test-first whenever practical — write the failing test, then make it pass
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | All-in-one (workspace only) | `scripts/tron ci` |
 
-CI runs the same Rust test harness through `scripts/tron ci test` when the Rust
-job is selected. A separate Ubuntu static-gates job runs the same named
+CI runs `scripts/tron ci fmt`, `check`, `clippy`, and `test` as its one Rust
+quality path for every repository change. The test command owns the named
 closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
-database-path, and serial integration targets, for docs/template/iOS/Mac
-changes. iOS and Mac jobs only run for their package paths, relevant labels, or
-pushes to `main` (macOS minutes are ~10× the cost of Linux minutes).
+database-path, and serial integration targets; the workflow does not duplicate
+that list. iOS and Mac jobs only run for their package paths, relevant labels,
+or full validation on `main` and manual dispatch (macOS minutes are ~10× the
+cost of Linux minutes). `CI summary` is the required mainline check.
 
 ## Commits
 
@@ -146,9 +147,9 @@ developer-machine identifiers from sneaking into source.
 ## Code style
 
 - **Rust**: `cargo fmt` (config in `rustfmt.toml` if present, otherwise
-  defaults), `cargo clippy --all-targets`. CI fails on high-signal lint classes
-  configured in `packages/agent/Cargo.toml`; broad style/pedantic suggestions
-  remain advisory.
+  defaults), `cargo clippy --all-targets`. `scripts/tron ci` and GitHub both
+  deny emitted warnings; the Cargo lint policy keeps broad style/pedantic
+  suggestions disabled while enforcing correctness and configured Rust lints.
 - **Swift**: project-wide style follows the existing patterns in
   `packages/ios-app/Sources/`. There is no auto-formatter in CI; match
   surrounding code.

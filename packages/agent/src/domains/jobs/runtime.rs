@@ -599,13 +599,10 @@ fn process_group_id_for_child(_process_id: u32) -> Option<i32> {
     None
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn configure_owned_process_group(command: &mut Command) {
     command.process_group(0);
 }
-
-#[cfg(not(unix))]
-fn configure_owned_process_group(_command: &mut Command) {}
 
 #[cfg(target_os = "macos")]
 fn network_denied_shell_command(command: &str, root: PathBuf) -> Result<Command, CapabilityError> {

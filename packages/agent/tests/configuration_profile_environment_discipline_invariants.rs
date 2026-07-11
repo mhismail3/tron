@@ -294,13 +294,13 @@ fn cpe_artifacts_and_static_gate_wiring_exist() {
         );
     }
 
-    for path in ["scripts/tron.d/quality.sh", ".github/workflows/ci.yml"] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(TARGET_NAME),
-            "{path} must run CPE invariant target"
-        );
-    }
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    assert!(
+        quality.contains(TARGET_NAME),
+        "local CI must own CPE target"
+    );
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    assert!(workflow.contains("run: scripts/tron ci test"));
 }
 
 #[test]

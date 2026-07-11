@@ -391,35 +391,16 @@ fn parse_quality_closeout_targets() -> Vec<String> {
     targets
 }
 
-fn parse_github_static_gate_targets() -> Vec<String> {
+fn assert_github_delegates_to_local_ci_test() {
     let ci = read_repo_file(".github/workflows/ci.yml");
-    let mut targets = Vec::new();
-    let mut in_block = false;
-    for line in ci.lines() {
-        if line.contains("Run Rust-owned closeout target set") {
-            in_block = true;
-            continue;
-        }
-        if in_block && line.trim_start().starts_with("- name:") && !targets.is_empty() {
-            break;
-        }
-        if !in_block {
-            continue;
-        }
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("cargo test --test ") {
-            let target = rest
-                .split_whitespace()
-                .next()
-                .expect("cargo test target should have a name");
-            targets.push(target.to_owned());
-        }
-    }
     assert!(
-        !targets.is_empty(),
-        "GitHub static-gates target block not found"
+        ci.contains("run: scripts/tron ci test"),
+        "GitHub Rust quality must delegate to the local test owner"
     );
-    targets
+    assert!(
+        !ci.contains("Run Rust-owned closeout target set") && !ci.contains("cargo test --test "),
+        "GitHub CI must not duplicate the local closeout target list"
+    );
 }
 
 #[test]
@@ -1087,11 +1068,7 @@ fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_
 #[test]
 fn static_gate_is_wired_in_local_and_github_closeout_targets() {
     let local_targets = parse_quality_closeout_targets();
-    let github_targets = parse_github_static_gate_targets();
-    assert_eq!(
-        local_targets, github_targets,
-        "local and GitHub closeout target order must match"
-    );
+    assert_github_delegates_to_local_ci_test();
     let iarm_index = local_targets
         .iter()
         .position(|target| target == TARGET_NAME)

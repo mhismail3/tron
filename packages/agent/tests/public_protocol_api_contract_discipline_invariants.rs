@@ -282,8 +282,8 @@ fn ppacd_wiring_is_present_in_readme_local_ci_and_github_ci() {
 
     let ci = read_repo_file(".github/workflows/ci.yml");
     assert!(
-        ci.contains(&format!("cargo test --test {TARGET_NAME} -- --quiet")),
-        "GitHub static-gates job missing {TARGET_NAME}"
+        ci.contains("run: scripts/tron ci test"),
+        "GitHub Rust quality must delegate to the local test owner"
     );
 }
 

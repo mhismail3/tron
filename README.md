@@ -1160,7 +1160,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
-| `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step runs serial lib/bin tests, closeout invariant targets, primitive trace, database-path, and serial integration targets |
+| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step is the single owner of serial lib/bin tests, closeout invariant targets, primitive trace, database-path, and serial integration targets |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | First-time project setup |
@@ -3475,8 +3475,10 @@ tron ci clippy test          # Subset: linting + tests
 `ios_self_adapting_agent_cockpit_baseline_invariants`,
 `ios_affordance_restoration_map_invariants`,
 `primitive_trace_execution`, and
-serial `integration`. GitHub's Rust static-gates job runs the same named target
-set for docs, template, iOS, Mac, script, and CI changes.
+serial `integration`. GitHub delegates to this command instead of maintaining a
+second closeout-target list, and runs the Rust quality path for every repository
+change because the invariant targets inspect code, docs, scripts, workflows,
+and client source.
 
 Before restoring any feature from the primitive baseline feature index, the
 feature slice must satisfy the BPRC pre-restoration entry contract: worker or
@@ -3489,9 +3491,10 @@ Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info
 guard on staged changes.
 
-Rust clippy CI uses the lint policy in `packages/agent/Cargo.toml`: correctness,
-suspicious, performance, and a short list of footgun lints fail the build;
-style/pedantic suggestions stay advisory so the signal is not buried.
+Rust CI uses the lint policy in `packages/agent/Cargo.toml` and denies every
+warning that policy emits. Correctness, suspicious, performance, and configured
+Rust lints fail the build; style/pedantic suggestions remain disabled so the
+signal is not buried.
 
 ---
 

@@ -334,11 +334,7 @@ fn ssarr_inventory_is_structured_and_covers_required_dimensions() {
 #[test]
 fn static_gate_wiring_matches_local_and_github_closeout_order() {
     let local_targets = parse_quality_closeout_targets();
-    let github_targets = parse_github_static_gate_targets();
-    assert_eq!(
-        local_targets, github_targets,
-        "scripts/tron ci test and GitHub rust-static-gates must run the same closeout target set in the same order"
-    );
+    assert_github_delegates_to_local_ci_test();
     assert!(
         local_targets.contains(&TARGET_NAME.to_owned()),
         "SSARR target must be in the closeout set"

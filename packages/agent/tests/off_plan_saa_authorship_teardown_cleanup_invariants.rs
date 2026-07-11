@@ -315,11 +315,7 @@ fn active_saa_docs_tests_and_static_targets_are_absent() {
         );
     }
 
-    for path in [
-        "scripts/tron.d/quality.sh",
-        ".github/workflows/ci.yml",
-        "README.md",
-    ] {
+    for path in ["scripts/tron.d/quality.sh", "README.md"] {
         let source = read_repo_file(path);
         assert!(
             source.contains(INVARIANT_TARGET),
@@ -330,6 +326,16 @@ fn active_saa_docs_tests_and_static_targets_are_absent() {
             "{path} must not list retired SAA invariant target"
         );
     }
+
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    assert!(
+        workflow.contains("run: scripts/tron ci test"),
+        "GitHub CI must delegate Rust tests to scripts/tron ci test"
+    );
+    assert!(
+        !workflow.contains(RETIRED_SAA_TARGET),
+        "GitHub CI must not list the retired SAA invariant target"
+    );
 }
 
 #[test]

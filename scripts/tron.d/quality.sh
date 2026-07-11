@@ -151,6 +151,13 @@ run_bench_gate() {
 cmd_ci() {
     require_project_dir
 
+    # CI is warning-clean locally and on GitHub. Keep this policy here so the
+    # contributor command is the source of truth rather than an action default.
+    case " ${RUSTFLAGS:-} " in
+        *" -D warnings "*) ;;
+        *) export RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-D warnings" ;;
+    esac
+
     local steps=()
 
     while [[ $# -gt 0 ]]; do

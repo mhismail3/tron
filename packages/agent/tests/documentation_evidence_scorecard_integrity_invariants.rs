@@ -179,35 +179,16 @@ fn parse_quality_closeout_targets() -> Vec<String> {
     targets
 }
 
-fn parse_github_static_gate_targets() -> Vec<String> {
+fn assert_github_delegates_to_local_ci_test() {
     let ci = read_repo_file(".github/workflows/ci.yml");
-    let mut targets = Vec::new();
-    let mut in_block = false;
-    for line in ci.lines() {
-        if line.contains("Run Rust-owned closeout target set") {
-            in_block = true;
-            continue;
-        }
-        if in_block && line.trim_start().starts_with("- name:") && !targets.is_empty() {
-            break;
-        }
-        if !in_block {
-            continue;
-        }
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("cargo test --test ") {
-            let target = rest
-                .split_whitespace()
-                .next()
-                .expect("cargo test target should have a name");
-            targets.push(target.to_owned());
-        }
-    }
     assert!(
-        !targets.is_empty(),
-        "GitHub static-gates target block not found"
+        ci.contains("run: scripts/tron ci test"),
+        "GitHub Rust quality must delegate to the local test owner"
     );
-    targets
+    assert!(
+        !ci.contains("Run Rust-owned closeout target set") && !ci.contains("cargo test --test "),
+        "GitHub CI must not duplicate the local closeout target list"
+    );
 }
 
 fn all_scorecard_paths() -> Vec<String> {
@@ -655,11 +636,7 @@ fn active_docs_use_present_tense_and_reject_open_loop_residue() {
 #[test]
 fn local_and_github_static_gate_targets_match_exactly_with_desi() {
     let local_targets = parse_quality_closeout_targets();
-    let github_targets = parse_github_static_gate_targets();
-    assert_eq!(
-        local_targets, github_targets,
-        "scripts/tron ci test and GitHub rust-static-gates must run the same closeout target set in the same order"
-    );
+    assert_github_delegates_to_local_ci_test();
     assert!(
         local_targets.contains(&TARGET_NAME.to_owned()),
         "DESI target must be in the closeout set"
