@@ -890,6 +890,9 @@ fn project_cockpit_operation_for_agent(operation: &Value, detailed: bool) -> Val
     for key in ["name", "family", "familyLabel"] {
         copy_key(&mut projected, operation, key);
     }
+    if detailed && let Some(route) = operation.get("route") {
+        projected.insert("route".to_owned(), project_cockpit_route(route));
+    }
     if let Some(pool) = operation.get("capabilityPool") {
         projected.insert("capabilityPool".to_owned(), project_cockpit_pool(pool));
     }
@@ -924,9 +927,6 @@ fn project_cockpit_operation_for_agent(operation: &Value, detailed: bool) -> Val
                 "shadowTrial".to_owned(),
                 project_cockpit_shadow_trial(shadow_trial),
             );
-        }
-        if let Some(route) = operation.get("route") {
-            projected.insert("route".to_owned(), project_cockpit_route(route));
         }
         if let Some(rollback) = operation.get("rollback") {
             projected.insert("rollback".to_owned(), project_cockpit_rollback(rollback));
@@ -1116,6 +1116,10 @@ fn project_cockpit_shadow_trial(shadow_trial: &Value) -> Value {
 fn project_cockpit_route(route: &Value) -> Value {
     let mut projected = Map::new();
     for key in [
+        "executionMode",
+        "candidateProjectionSource",
+        "liveModuleCodeExecutionSupported",
+        "executionBoundaryDetail",
         "candidates",
         "bindings",
         "activeRoutes",

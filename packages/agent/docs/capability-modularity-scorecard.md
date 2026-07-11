@@ -4,13 +4,13 @@ Status: **complete**
 
 Current score: **100/100**
 
-The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now executes through the supervised module-runtime provider-safe adapter projection boundary; broader operation coverage stays governed by the dynamic replacement scorecard.
+The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now revalidates and replays accepted provider-safe shadow evidence; it does not execute live module code. Broader operation coverage stays governed by the dynamic replacement scorecard.
 
 Source of truth: `packages/agent/src/domains/capability/operations/operation_contract/mod.rs`
 
 Provider-visible surface: one tool, `capability::execute`
 
-This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, a metadata-only `git_status` shadow trial, governed route records, a scoped `git_status` route seam, supervised module-runtime adapter projection for that route, and a redacted cockpit projection for operator visibility; they do not add package installation, dependency restoration, network behavior, production deployment, or broad unapproved module-adapter execution.
+This scorecard makes true modularity measurable. Every current `capability::execute` operation is classified as intentionally engine-owned, governance-owned, record-plane custody, adapter-replaceable, module-owned, or deferred. The current slices add documentation, invariants, source-backed adapter seam contracts, governance-owned binding-policy records, a metadata-only `git_status` shadow trial, governed route records, a scoped `git_status` accepted-shadow-projection replay seam, and a redacted cockpit projection for operator visibility; they do not add live module execution, package installation, dependency restoration, network behavior, production deployment, or broad unapproved module execution.
 
 ## Artifacts
 
@@ -55,7 +55,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 
 | Family | Operations | Default decision |
 |---|---:|---|
-| `capability_binding` | 25 | Governance substrate for metadata-only binding requests, decisions, policies, the provider-visible cockpit overview, the `git_status` shadow trial, scoped route records, and the first scoped supervised module-runtime adapter projection for `git_status`; broader route targets remain dynamic replacement follow-ons. |
+| `capability_binding` | 25 | Governance substrate for metadata-only binding requests, decisions, policies, the provider-visible cockpit overview, the `git_status` shadow trial, scoped route records, and the first scoped accepted-shadow-projection replay for `git_status`; broader route targets and live module execution remain dynamic replacement follow-ons. |
 | `catalog_discovery` | 3 | Engine-owned catalog trust and freshness substrate. |
 | `context_control` | 13 | Record-plane status/snapshot/action/epoch and survivor/exclusion policy custody; the compaction summarizer strategy is replaceable only behind a server-owned context-audit and policy-snapshot seam. |
 | `core` | 3 | Kernel diagnostics plus adapter review for `process_run`. |
@@ -100,7 +100,7 @@ A `0` is acceptable for binding and rollback on `kernel_locked` and `governance_
 | CMS-1 | Ownership taxonomy | 10 | passed | Six explicit classes and deterministic prefix grouping define what may and may not be module-routed. |
 | CMS-2 | Per-operation inventory | 20 | passed | `capability-modularity-inventory.tsv` lists all 188 operations exactly once. |
 | CMS-3 | Kernel/governance lock | 12 | passed | Invariant test rejects binding/rollback routes for locked rows and checks source-backed kernel boundary anchors. |
-| CMS-4 | Adapter replacement targets | 12 | passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; capability binding can record proposals, shadow trials, governed route controls, and the first scoped supervised module-runtime adapter projection for `git_status`. |
+| CMS-4 | Adapter replacement targets | 12 | passed | Filesystem, Git, jobs, process, web, subagent, and compaction strategy seams name authority, evidence, side-effect, provider-safety, replay/idempotency, and rollback/disable prerequisites; capability binding can record proposals, shadow trials, governed route controls, and the first scoped accepted-shadow-projection replay for `git_status`. Live module execution remains absent. |
 | CMS-5 | Record-plane custody | 10 | passed | Record-plane rows require durable custody semantics and reject raw storage bypass as the replacement model. |
 | CMS-6 | Module-owned template | 8 | passed | `module_program_execution_*` is classified as the first governed module-owned execution template. |
 | CMS-7 | Cockpit visibility contract | 8 | passed | `capability_binding::cockpit_overview` projects truthful total/returned operation counts, operation-list/resource-scan completeness, redacted operation owner and replacement-target summaries, server-derived readiness/next-action labels, scoped binding/shadow attempts, rollback/disable/abort availability, and redaction policy for cockpit clients. |
@@ -162,9 +162,10 @@ The Dynamic Replacement slice adds scoped route records for the first read-only 
 The current dispatcher seam resolves an active scoped `git_status` route. When
 no active route exists, it returns the built-in provider-safe projection. When a
 validated route is active, it verifies the route/binding/candidate refs,
-lifecycle/runtime refs, and supervised-envelope proof, then invokes the
-supervised module-runtime provider-safe adapter projection and emits route
-events. It fails closed on stale, disabled, missing-authority,
+lifecycle/runtime refs, and supervised-envelope proof, then revalidates and
+replays accepted provider-safe shadow evidence and emits route events. This
+route mode does not execute live module code. It fails closed on stale,
+disabled, missing-authority,
 missing-lifecycle, or unsafe route records without returning a built-in success
 projection as the unsafe route result.
 

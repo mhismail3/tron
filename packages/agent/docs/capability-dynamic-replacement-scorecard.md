@@ -1,6 +1,6 @@
 # Capability Dynamic Replacement Scorecard
 
-Status: **foundational runtime route complete**
+Status: **foundational projection route complete**
 
 Current foundation score: **100/100**
 
@@ -17,18 +17,18 @@ activations, route events, and route rollbacks through the model-facing
 `capability::execute` path. The dispatcher can resolve an active scoped
 `git_status` route through the same path, require accepted shadow evidence,
 verify the candidate lifecycle/runtime refs at candidate-record and invocation
-time, reject ambiguous multiple active routes in one scope, and route to a
-supervised module-runtime provider-safe adapter projection. Engine Cockpit now
+time, reject ambiguous multiple active routes in one scope, and revalidate and
+replay accepted provider-safe shadow evidence. Engine Cockpit now
 also projects bounded route-story cards from server-owned route facts so users
 can see what changed, what failed closed, and whether rollback/disable evidence
 exists before drilling into operation detail. The first route uses
 accepted shadow-trial evidence as the candidate projection source; it is a
-supervised projection boundary, not arbitrary live module-code execution. If the runtime envelope, lifecycle
+supervised projection replay boundary and does not execute live module code. If the runtime envelope, lifecycle
 authorization, version refs, scope, network policy, or projection shape are not
 safe, candidate recording or routing fails closed and does not fall back to a
 built-in success result.
 Successful routed invocations report route state
-`active_route_module_adapter_projection`; rejected projections report
+`active_route_accepted_shadow_projection`; rejected projections report
 `active_route_failed_closed`.
 
 Source of truth:
@@ -46,12 +46,12 @@ Provider-visible surface remains one tool: `capability::execute`.
 
 | ID | Area | Weight | Status | Score | Acceptance |
 |---|---|---:|---|---:|---|
-| CDR-0 | Runtime route model | 15 | passed | 15 | Active replacement routes are explicit, versioned, scoped, reversible, single-active per scope at lookup, and executed through the supervised module-runtime provider-safe projection boundary for `git_status`. |
-| CDR-1 | Candidate module contract | 15 | passed | 15 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route validates candidate lifecycle/runtime refs through the same supervised module-runtime projection boundary used at invocation, and regression coverage proves those refs can come from the real module lifecycle/runtime operation path. |
+| CDR-0 | Runtime route model | 15 | passed | 15 | Active projection routes are explicit, versioned, scoped, reversible, single-active per scope at lookup, and use supervised accepted-shadow-projection replay for `git_status`; live module execution is not supported by this route mode. |
+| CDR-1 | Candidate module contract | 15 | passed | 15 | Candidates publish schemas, authority, risk, evidence, lifecycle/runtime refs, rollback controls, and provider-safe projection contracts. The first route validates candidate lifecycle/runtime refs through the same accepted-shadow-projection boundary used at invocation, and regression coverage proves those refs can come from the real module lifecycle/runtime operation path. |
 | CDR-2 | Shadow execution | 12 | passed | 12 | Built-in and candidate can run side by side safely before activation. Current shadow trial is metadata-only for `git_status` and preserves no-candidate-execution proof. |
-| CDR-3 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidates. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and routes through the supervised runtime projection boundary. |
+| CDR-3 | Activation and routing | 14 | passed | 14 | Only approved adapter-replaceable/module-owned operations can route to candidate projections. Current activation is limited to `git_status`, requires approval refs, candidate/binding/shadow-evidence stale guards, and replays accepted shadow evidence through the supervised projection boundary. |
 | CDR-4 | Rollback and disable | 12 | passed | 12 | Every route can be disabled, rolled back, and audited deterministically. Current route events and rollback resources provide terminal route controls. |
-| CDR-5 | Agent workflow | 10 | passed | 10 | Tron can inspect gaps, propose replacements, run shadow trials, inspect evidence, request approval, activate, invoke, explain, disable, and roll back the first route through durable `capability::execute` operations. Broader live stress workflows should now test model ergonomics and breadth rather than unblock foundation. |
+| CDR-5 | Agent workflow | 10 | passed | 10 | Tron can inspect gaps, propose candidate projections, run metadata-only shadow trials, inspect evidence, request approval, activate, replay, explain, disable, and roll back the first projection route through durable `capability::execute` operations. Live module execution remains a separate unimplemented milestone. |
 | CDR-6 | Cockpit/session visibility | 10 | passed | 10 | Engine Cockpit derives route operations, replacement metadata, active/failed/disabled/rolled-back route state, route events, routed invocations, terminal controls, and bounded high-level route-story cards from server-owned catalog/binding/route facts. Route-story cards tap through to operation detail without exposing raw IDs or local-only truth. |
 | CDR-7 | Tests/stress harness | 8 | passed | 8 | Backend lifecycle tests, dispatcher-level `capability::execute` route coverage, and static invariants prove the first route. Simulator/live Tron stress tests are the next practical product validation layer, not another foundation scorecard. |
 | CDR-8 | Minimal-engine guardrails | 4 | passed | 4 | Kernel/governance operations remain non-routable and no fallback/legacy paths return. Route operations are governance-locked and do not create package-manager, network, deploy, or raw-material side effects. |
@@ -68,8 +68,7 @@ capability::execute(git_status)
                     -> verify route/binding/candidate refs
                     -> verify lifecycle/runtime refs and enabled state
                        already checked when the candidate was recorded
-                    -> project supervised module-runtime provider-safe output
-                       from accepted shadow-trial evidence
+                    -> revalidate and replay accepted provider-safe shadow evidence
                     -> emit route event
                     -> return routed projection with dynamicReplacement evidence
        unsafe route -> emit failed_closed route event
@@ -77,8 +76,9 @@ capability::execute(git_status)
 ```
 
 This is deliberately not a domain-specific module adapter executor. The route
-resolver only chooses whether a governed route exists and whether it is safe to
-invoke the supervised module-runtime projection boundary. It fails closed if
+resolver only chooses whether a governed projection route exists and whether it
+is safe to replay accepted shadow evidence through the supervised projection
+boundary. It fails closed if
 route records are stale, terminal, wrong-scope, missing authority evidence,
 missing referenced records, lifecycle/runtime refs are stale or mismatched, or
 the provider-safe projection is unsafe.

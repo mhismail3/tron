@@ -37,7 +37,7 @@ pub(crate) struct DelegatedJobRuntimeUpdate {
     pub(crate) cleanup: Option<Value>,
 }
 
-pub(crate) async fn project_provider_safe_adapter_output(
+pub(crate) async fn validate_accepted_shadow_projection(
     deps: &Deps,
     invocation: &Invocation,
     operation: &str,
@@ -48,7 +48,7 @@ pub(crate) async fn project_provider_safe_adapter_output(
     reject_unsafe_payload(provider_safe_projection)?;
     if operation != "git_status" {
         return Err(invalid(
-            "module runtime adapter projection currently supports exactly git_status",
+            "accepted shadow projection validation currently supports exactly git_status",
         ));
     }
     let scope = resource_scope(invocation)?;
@@ -74,7 +74,7 @@ pub(crate) async fn project_provider_safe_adapter_output(
         != Some(lifecycle_version_id.as_str())
     {
         return Err(invalid(
-            "module runtime adapter projection rejected stale lifecycle ref",
+            "accepted shadow projection validation rejected stale lifecycle ref",
         ));
     }
 
@@ -86,19 +86,19 @@ pub(crate) async fn project_provider_safe_adapter_output(
     validate_module_runtime_resource_id(&runtime_resource_id)?;
     let runtime =
         inspect_resource_required(deps, &runtime_resource_id, "module runtime state").await?;
-    ensure_module_runtime_state(&runtime, "module_runtime_adapter_projection")?;
-    ensure_scope(&runtime, &scope, "module_runtime_adapter_projection")?;
+    ensure_module_runtime_state(&runtime, "accepted_shadow_projection_validation")?;
+    ensure_scope(&runtime, &scope, "accepted_shadow_projection_validation")?;
     if !matches!(runtime.resource.lifecycle.as_str(), "running" | "completed") {
         return Err(invalid(format!(
-            "module runtime adapter projection denied for runtime state {}",
+            "accepted shadow projection validation denied for runtime state {}",
             runtime.resource.lifecycle
         )));
     }
     let (runtime_version, runtime_payload) =
-        current_payload(&runtime, "module_runtime_adapter_projection")?;
+        current_payload(&runtime, "accepted_shadow_projection_validation")?;
     if runtime_version.version_id != runtime_version_id {
         return Err(invalid(
-            "module runtime adapter projection rejected stale runtime ref",
+            "accepted shadow projection validation rejected stale runtime ref",
         ));
     }
     if runtime_payload
@@ -111,7 +111,7 @@ pub(crate) async fn project_provider_safe_adapter_output(
             != Some(lifecycle_version_id.as_str())
     {
         return Err(invalid(
-            "module runtime adapter projection rejected mismatched lifecycle authorization",
+            "accepted shadow projection validation rejected mismatched lifecycle authorization",
         ));
     }
     ensure_supervised_runtime_projection(runtime_payload)?;
@@ -120,15 +120,17 @@ pub(crate) async fn project_provider_safe_adapter_output(
         "operation": operation,
         "status": projection["status"],
         "git": projection,
-        "adapterRuntime": {
-            "moduleAdapterInvoked": true,
-            "moduleAdapterInvocationState": "supervised_runtime_projection",
+        "routeRuntimeProof": {
+            "projectionBoundaryEvaluated": true,
+            "projectionBoundaryState": "accepted_shadow_projection_validated",
+            "acceptedProjectionReplayed": true,
             "builtInProjectionUsed": false,
-            "routeExecutionMode": "supervised_projection_boundary",
+            "routeExecutionMode": "supervised_shadow_projection_replay",
             "candidateProjectionSource": "accepted_shadow_trial_evidence",
+            "liveModuleCodeExecutionSupported": false,
             "liveModuleCodeExecuted": false,
             "providerSafeProjection": true,
-            "moduleRuntime": adapter_runtime_summary(&runtime.resource, runtime_payload)?,
+            "moduleRuntime": route_runtime_summary(&runtime.resource, runtime_payload)?,
             "moduleLifecycle": {
                 "state": "enabled",
                 "versionMatched": true,
@@ -140,7 +142,7 @@ pub(crate) async fn project_provider_safe_adapter_output(
     }))
 }
 
-fn adapter_runtime_summary(
+fn route_runtime_summary(
     resource: &EngineResource,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
@@ -149,7 +151,7 @@ fn adapter_runtime_summary(
         .and_then(Value::as_str)
         .unwrap_or("module_adapter");
     let runtime_kind = bounded_provider_visible_token(
-        "adapterRuntime.runtimeKind",
+        "routeRuntimeProof.runtimeKind",
         runtime_kind,
         TOKEN_MAX_BYTES,
     )?;
@@ -158,7 +160,7 @@ fn adapter_runtime_summary(
         .and_then(Value::as_str)
         .unwrap_or("Module adapter");
     let runtime_label = bounded_text(
-        "adapterRuntime.runtimeLabel",
+        "routeRuntimeProof.runtimeLabel",
         runtime_label,
         SUMMARY_MAX_BYTES,
     )?;
@@ -167,7 +169,7 @@ fn adapter_runtime_summary(
         .and_then(Value::as_str)
         .unwrap_or("none");
     let network_policy = bounded_provider_visible_token(
-        "adapterRuntime.networkPolicy",
+        "routeRuntimeProof.networkPolicy",
         network_policy,
         TOKEN_MAX_BYTES,
     )?;
@@ -423,7 +425,7 @@ fn ensure_supervised_runtime_projection(payload: &Value) -> Result<(), Capabilit
     for (pointer, expected) in checks {
         if payload.pointer(pointer).and_then(Value::as_bool) != Some(expected) {
             return Err(invalid(
-                "module runtime adapter projection requires supervised metadata-only runtime proof",
+                "accepted shadow projection validation requires supervised metadata-only runtime proof",
             ));
         }
     }
@@ -433,7 +435,7 @@ fn ensure_supervised_runtime_projection(payload: &Value) -> Result<(), Capabilit
         != Some("none")
     {
         return Err(invalid(
-            "module runtime adapter projection requires networkPolicy none",
+            "accepted shadow projection validation requires networkPolicy none",
         ));
     }
     Ok(())
@@ -442,18 +444,18 @@ fn ensure_supervised_runtime_projection(payload: &Value) -> Result<(), Capabilit
 fn git_status_provider_safe_projection(value: &Value) -> Result<Value, CapabilityError> {
     if value.get("operation").and_then(Value::as_str) != Some("git_status") {
         return Err(invalid(
-            "module runtime adapter projection must return git_status projection",
+            "accepted shadow projection validation requires a git_status projection",
         ));
     }
     let status = value
         .get("status")
         .and_then(Value::as_str)
-        .ok_or_else(|| invalid("git_status adapter projection requires status"))?;
+        .ok_or_else(|| invalid("git_status shadow projection requires status"))?;
     bounded_provider_visible_token("gitStatusAdapterProjection.status", status, TOKEN_MAX_BYTES)?;
     for field in ["headState", "indexState", "worktreeState", "truncation"] {
         let Some(text) = value.get(field).and_then(Value::as_str) else {
             return Err(invalid(format!(
-                "git_status adapter projection requires {field}"
+                "git_status shadow projection requires {field}"
             )));
         };
         bounded_provider_visible_token(
@@ -463,9 +465,7 @@ fn git_status_provider_safe_projection(value: &Value) -> Result<Value, Capabilit
         )?;
     }
     let Some(evidence_ref) = value.get("evidenceRef").and_then(Value::as_object) else {
-        return Err(invalid(
-            "git_status adapter projection requires evidenceRef",
-        ));
+        return Err(invalid("git_status shadow projection requires evidenceRef"));
     };
     let evidence_resource_id = evidence_ref
         .get("resourceId")
@@ -474,7 +474,7 @@ fn git_status_provider_safe_projection(value: &Value) -> Result<Value, Capabilit
     if evidence_resource_id == "evidence:none" || evidence_resource_id.starts_with("evidence:none:")
     {
         return Err(invalid(
-            "git_status adapter projection requires concrete evidenceRef",
+            "git_status shadow projection requires concrete evidenceRef",
         ));
     }
     Ok(json!({

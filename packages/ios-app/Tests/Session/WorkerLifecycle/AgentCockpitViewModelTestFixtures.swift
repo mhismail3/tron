@@ -311,7 +311,7 @@ extension AgentCockpitViewModelTests {
                         lastUpdatedAt: "2026-06-27T12:01:00Z",
                         state: "active",
                         label: "Active route",
-                        detail: "A scoped dynamic replacement route is active and recent invocations used the module adapter projection."
+                        detail: "A scoped projection route is active and recent invocations replayed accepted provider-safe shadow evidence."
                     ),
                     rollback: CapabilityCockpitRollbackDTO(
                         available: true,

@@ -724,10 +724,12 @@ async fn emit_route_lookup_failed_event(
             "label": activation_payload.pointer("/candidate/label")
                 .and_then(Value::as_str)
                 .unwrap_or("Governed Git status adapter"),
-            "moduleAdapterInvoked": false,
-            "moduleAdapterInvocationState": "not_invoked",
-            "routeExecutionMode": "not_invoked",
+            "projectionBoundaryEvaluated": false,
+            "projectionBoundaryState": "not_evaluated",
+            "acceptedProjectionReplayed": false,
+            "routeExecutionMode": "not_evaluated",
             "candidateProjectionSource": "none",
+            "liveModuleCodeExecutionSupported": false,
             "liveModuleCodeExecuted": false,
             "providerSafeProjectionRequired": true
         },
@@ -784,7 +786,7 @@ pub(crate) async fn emit_routed_invocation_event(
     route: &ActiveRoute,
     event_state: &str,
     event_result: &str,
-    module_adapter_invoked: bool,
+    projection_boundary_evaluated: bool,
     fail_closed: bool,
 ) -> Result<Option<Value>, CapabilityError> {
     let scope = match resource_scope(invocation) {
@@ -823,10 +825,12 @@ pub(crate) async fn emit_routed_invocation_event(
         "candidate": {
             "owner": route.candidate_owner,
             "label": route.candidate_label,
-            "moduleAdapterInvoked": module_adapter_invoked,
-            "moduleAdapterInvocationState": if module_adapter_invoked { "supervised_runtime_projection" } else { "not_invoked" },
-            "routeExecutionMode": if module_adapter_invoked { "supervised_projection_boundary" } else { "not_invoked" },
-            "candidateProjectionSource": if module_adapter_invoked { "accepted_shadow_trial_evidence" } else { "none" },
+            "projectionBoundaryEvaluated": projection_boundary_evaluated,
+            "projectionBoundaryState": if projection_boundary_evaluated && fail_closed { "accepted_shadow_projection_rejected" } else if projection_boundary_evaluated { "accepted_shadow_projection_validated" } else { "not_evaluated" },
+            "acceptedProjectionReplayed": projection_boundary_evaluated && !fail_closed,
+            "routeExecutionMode": if projection_boundary_evaluated { "supervised_shadow_projection_replay" } else { "not_evaluated" },
+            "candidateProjectionSource": if projection_boundary_evaluated { "accepted_shadow_trial_evidence" } else { "none" },
+            "liveModuleCodeExecutionSupported": false,
             "liveModuleCodeExecuted": false,
             "providerSafeProjectionRequired": true
         },
@@ -884,7 +888,7 @@ pub(crate) async fn execute_routed_git_status(
         engine_host: deps.engine_host.clone(),
     };
     let projected =
-        match crate::domains::module_runtime::service::project_provider_safe_adapter_output(
+        match crate::domains::module_runtime::service::validate_accepted_shadow_projection(
             &runtime_deps,
             invocation,
             TARGET_OPERATION,
@@ -901,14 +905,14 @@ pub(crate) async fn execute_routed_git_status(
                     invocation,
                     route,
                     "failed_closed",
-                    "adapter_projection_failed",
+                    "accepted_shadow_projection_rejected",
                     true,
                     true,
                 )
                 .await?;
                 return Ok(CapabilityResult {
                     content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
-                        "git_status route failed closed: supervised adapter projection was rejected",
+                        "git_status route failed closed: accepted shadow projection was rejected",
                     )]),
                     details: Some(json!({
                         "primitiveOperation": TARGET_OPERATION,
@@ -919,16 +923,18 @@ pub(crate) async fn execute_routed_git_status(
                             "routeVersion": route.route_version,
                             "candidateOwner": route.candidate_owner,
                             "candidateLabel": route.candidate_label,
-                            "moduleAdapterInvoked": true,
-                            "moduleAdapterInvocationState": "supervised_runtime_projection_rejected",
-                            "routeExecutionMode": "supervised_projection_boundary",
+                            "projectionBoundaryEvaluated": true,
+                            "projectionBoundaryState": "accepted_shadow_projection_rejected",
+                            "acceptedProjectionReplayed": false,
+                            "routeExecutionMode": "supervised_shadow_projection_replay",
                             "candidateProjectionSource": "accepted_shadow_trial_evidence",
+                            "liveModuleCodeExecutionSupported": false,
                             "liveModuleCodeExecuted": false,
                             "builtInProjectionUsed": false,
                             "networkPolicy": "none",
                             "failClosed": true,
                             "routeEvent": route_event,
-                            "failureKind": "adapter_projection_rejected"
+                            "failureKind": "accepted_shadow_projection_rejected"
                         }
                     })),
                     is_error: Some(true),
@@ -941,7 +947,7 @@ pub(crate) async fn execute_routed_git_status(
         invocation,
         route,
         "routed",
-        "adapter_projection_succeeded",
+        "accepted_shadow_projection_replayed",
         true,
         false,
     )
@@ -952,7 +958,7 @@ pub(crate) async fn execute_routed_git_status(
         .unwrap_or("ok");
     Ok(CapabilityResult {
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
-            "git_status routed: {status}"
+            "git_status served from accepted shadow projection: {status}"
         ))]),
         details: Some(json!({
             "primitiveOperation": TARGET_OPERATION,
@@ -960,19 +966,21 @@ pub(crate) async fn execute_routed_git_status(
             "git": projected["git"],
             "dynamicReplacement": {
                 "operation": TARGET_OPERATION,
-                "routeState": "active_route_module_adapter_projection",
+                "routeState": "active_route_accepted_shadow_projection",
                 "routeVersion": route.route_version,
                 "candidateOwner": route.candidate_owner,
                 "candidateLabel": route.candidate_label,
-                "moduleAdapterInvoked": true,
-                "moduleAdapterInvocationState": "supervised_runtime_projection",
-                "routeExecutionMode": "supervised_projection_boundary",
+                "projectionBoundaryEvaluated": true,
+                "projectionBoundaryState": "accepted_shadow_projection_validated",
+                "acceptedProjectionReplayed": true,
+                "routeExecutionMode": "supervised_shadow_projection_replay",
                 "candidateProjectionSource": "accepted_shadow_trial_evidence",
+                "liveModuleCodeExecutionSupported": false,
                 "liveModuleCodeExecuted": false,
                 "builtInProjectionUsed": false,
                 "networkPolicy": "none",
                 "failClosed": false,
-                "adapterRuntime": projected["adapterRuntime"],
+                "routeRuntimeProof": projected["routeRuntimeProof"],
                 "routeEvent": route_event
             }
         })),
@@ -1660,7 +1668,7 @@ fn route_operation_record(reason: &str) -> Value {
         "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
         "ownershipClass": "adapter_replaceable",
         "requestedReplacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
-        "currentExecutionOwner": "supervised_module_runtime_adapter_when_active_else_builtin",
+        "currentExecutionOwner": "accepted_shadow_projection_when_active_else_builtin",
         "routeReason": reason,
         "dispatchChanged": true
     })
@@ -1823,7 +1831,7 @@ async fn validate_candidate_runtime_contract(
     let runtime_deps = crate::domains::module_runtime::Deps {
         engine_host: deps.engine_host.clone(),
     };
-    let projection = crate::domains::module_runtime::service::project_provider_safe_adapter_output(
+    let projection = crate::domains::module_runtime::service::validate_accepted_shadow_projection(
         &runtime_deps,
         invocation,
         TARGET_OPERATION,
@@ -1832,8 +1840,8 @@ async fn validate_candidate_runtime_contract(
         &shadow_evidence.candidate_projection,
     )
     .await?;
-    let adapter_runtime = projection
-        .get("adapterRuntime")
+    let route_runtime_proof = projection
+        .get("routeRuntimeProof")
         .cloned()
         .unwrap_or_else(|| json!({"providerSafeProjection": true}));
     Ok(CandidateRuntimeContract {
@@ -1845,7 +1853,7 @@ async fn validate_candidate_runtime_contract(
             "lifecycleRuntimeAuthorizationChecked": true,
             "acceptedShadowProjectionRevalidated": true,
             "routeCandidateAcceptedOnlyAfterRuntimeProjectionCheck": true,
-            "adapterRuntime": adapter_runtime,
+            "routeRuntimeProof": route_runtime_proof,
             "networkPolicy": "none",
             "failClosed": true
         }),
@@ -1877,11 +1885,12 @@ fn candidate_contract(
         "shadowEvidenceRef": shadow_evidence.version_ref,
         "operation": TARGET_OPERATION,
         "outputContract": "git_status_provider_safe_projection_v1",
-        "executionMode": "supervised_module_runtime_adapter",
-        "moduleAdapterInvokedByDispatcher": true,
-        "moduleAdapterInvocationState": "supervised_runtime_projection",
-        "routeExecutionMode": "supervised_projection_boundary",
+        "executionMode": "supervised_shadow_projection_replay",
+        "routeReplaysAcceptedProjection": true,
+        "projectionBoundaryState": "accepted_shadow_projection_validated",
+        "routeExecutionMode": "supervised_shadow_projection_replay",
         "candidateProjectionSource": "accepted_shadow_trial_evidence",
+        "liveModuleCodeExecutionSupported": false,
         "liveModuleCodeExecutedByRoute": false,
         "runtimeContract": runtime_contract.proof,
         "providerSafeProjectionRequired": true

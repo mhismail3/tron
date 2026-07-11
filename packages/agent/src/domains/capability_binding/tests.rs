@@ -2034,12 +2034,12 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         json!("git_status")
     );
     assert_eq!(
-        candidate["replacementCandidate"]["candidate"]["moduleAdapterInvokedByDispatcher"],
+        candidate["replacementCandidate"]["candidate"]["routeReplaysAcceptedProjection"],
         json!(true)
     );
     assert_eq!(
         candidate["replacementCandidate"]["candidate"]["routeExecutionMode"],
-        json!("supervised_projection_boundary")
+        json!("supervised_shadow_projection_replay")
     );
     assert_eq!(
         candidate["replacementCandidate"]["candidate"]["candidateProjectionSource"],
@@ -2054,7 +2054,7 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
         json!(true)
     );
     assert_eq!(
-        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["adapterRuntime"]["providerSafeProjection"],
+        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["routeRuntimeProof"]["providerSafeProjection"],
         json!(true)
     );
     let replay = record_replacement_candidate_value_at(
@@ -2166,12 +2166,12 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     assert_eq!(routed.is_error, Some(false));
     let routed_details = routed.details.expect("routed details");
     assert_eq!(
-        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
+        routed_details["dynamicReplacement"]["acceptedProjectionReplayed"],
         json!(true)
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeExecutionMode"],
-        json!("supervised_projection_boundary")
+        json!("supervised_shadow_projection_replay")
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["candidateProjectionSource"],
@@ -2187,14 +2187,14 @@ async fn route_records_candidate_binding_activation_disable_and_rollback_for_git
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeState"],
-        json!("active_route_module_adapter_projection")
+        json!("active_route_accepted_shadow_projection")
     );
     assert_eq!(
-        routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
+        routed_details["dynamicReplacement"]["routeRuntimeProof"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
         json!(true)
     );
     assert_eq!(
-        routed_details["dynamicReplacement"]["adapterRuntime"]["liveModuleCodeExecuted"],
+        routed_details["dynamicReplacement"]["routeRuntimeProof"]["liveModuleCodeExecuted"],
         json!(false)
     );
     assert!(
@@ -2354,7 +2354,7 @@ async fn route_candidate_accepts_refs_created_by_module_lifecycle_and_runtime_op
         json!(true)
     );
     assert_eq!(
-        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["adapterRuntime"]["moduleLifecycle"]
+        candidate["replacementCandidate"]["candidate"]["runtimeContract"]["routeRuntimeProof"]["moduleLifecycle"]
             ["versionMatched"],
         json!(true)
     );
@@ -2448,12 +2448,12 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
     assert_eq!(executed["isError"], json!(false));
     let routed_details = &executed["details"];
     assert_eq!(
-        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
+        routed_details["dynamicReplacement"]["acceptedProjectionReplayed"],
         json!(true)
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeExecutionMode"],
-        json!("supervised_projection_boundary")
+        json!("supervised_shadow_projection_replay")
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["candidateProjectionSource"],
@@ -2469,15 +2469,15 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeState"],
-        json!("active_route_module_adapter_projection")
+        json!("active_route_accepted_shadow_projection")
     );
     assert_eq!(
-        routed_details["dynamicReplacement"]["adapterRuntime"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
+        routed_details["dynamicReplacement"]["routeRuntimeProof"]["moduleLifecycle"]["runtimeAuthorizationChecked"],
         json!(true)
     );
     assert_eq!(
-        routed_details["dynamicReplacement"]["adapterRuntime"]["routeExecutionMode"],
-        json!("supervised_projection_boundary")
+        routed_details["dynamicReplacement"]["routeRuntimeProof"]["routeExecutionMode"],
+        json!("supervised_shadow_projection_replay")
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeEvent"]["event"]["kind"],
@@ -2791,12 +2791,12 @@ async fn assert_route_execution_failed_closed(
         json!("active_route_failed_closed")
     );
     assert_eq!(
-        routed_details["dynamicReplacement"]["moduleAdapterInvoked"],
+        routed_details["dynamicReplacement"]["projectionBoundaryEvaluated"],
         json!(true)
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeExecutionMode"],
-        json!("supervised_projection_boundary")
+        json!("supervised_shadow_projection_replay")
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["candidateProjectionSource"],
@@ -2812,7 +2812,7 @@ async fn assert_route_execution_failed_closed(
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["failureKind"],
-        json!("adapter_projection_rejected")
+        json!("accepted_shadow_projection_rejected")
     );
     assert!(
         routed_details["dynamicReplacement"]
@@ -2848,7 +2848,7 @@ async fn assert_route_execution_failed_closed(
     );
     assert_eq!(
         routed_details["dynamicReplacement"]["routeEvent"]["event"]["result"],
-        json!("adapter_projection_failed")
+        json!("accepted_shadow_projection_rejected")
     );
     routed_details
 }
@@ -3116,7 +3116,7 @@ async fn route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs() {
     .expect_err("stale runtime ref rejected at candidate record time")
     .to_string();
     assert!(
-        error.contains("module runtime adapter projection rejected stale runtime ref"),
+        error.contains("accepted shadow projection validation rejected stale runtime ref"),
         "{error}"
     );
 
@@ -3132,7 +3132,7 @@ async fn route_candidate_rejects_stale_or_unauthorized_runtime_contract_refs() {
     .expect_err("stale lifecycle ref rejected at candidate record time")
     .to_string();
     assert!(
-        error.contains("module runtime adapter projection rejected stale lifecycle ref"),
+        error.contains("accepted shadow projection validation rejected stale lifecycle ref"),
         "{error}"
     );
 

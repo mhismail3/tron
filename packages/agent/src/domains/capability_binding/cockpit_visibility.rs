@@ -450,6 +450,10 @@ struct ShadowEvidenceRefProjection {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RouteProjection {
+    execution_mode: &'static str,
+    candidate_projection_source: &'static str,
+    live_module_code_execution_supported: bool,
+    execution_boundary_detail: &'static str,
     candidates: usize,
     bindings: usize,
     active_routes: usize,
@@ -1566,7 +1570,7 @@ fn readiness_projection(
         (
             "runtime_route_active",
             "Runtime route active",
-            "A governed scoped route is active for this operation. Invocations use the supervised module-runtime adapter projection boundary.",
+            "A governed scoped projection route is active for this operation. It validates lifecycle/runtime authorization and replays accepted provider-safe shadow evidence; this route mode does not execute live module code.",
             "Monitor route events",
             "Use route events and rollback controls to verify or restore built-in ownership.",
         )
@@ -1800,9 +1804,9 @@ fn route_projection(facts: &RouteFacts) -> RouteProjection {
     let (state, label, detail) = if active_routes > 0 {
         (
             "active",
-            "Active route",
+            "Active projection route",
             format!(
-                "{} governed route{} active; {} routed invocation{} recorded.",
+                "{} governed projection route{} active; {} accepted shadow projection replay{} recorded.",
                 active_routes,
                 plural(active_routes),
                 facts.routed_invocations,
@@ -1861,6 +1865,10 @@ fn route_projection(facts: &RouteFacts) -> RouteProjection {
         )
     };
     RouteProjection {
+        execution_mode: "supervised_shadow_projection_replay",
+        candidate_projection_source: "accepted_shadow_trial_evidence",
+        live_module_code_execution_supported: false,
+        execution_boundary_detail: "Active routes validate exact lifecycle/runtime authorization and replay accepted provider-safe shadow evidence. This route mode does not execute live module code.",
         candidates: facts.candidates,
         bindings: facts.bindings,
         active_routes,

@@ -1136,6 +1136,16 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
                         }],
                         "detail": "must_not_project_shadow_detail"
                     },
+                    "route": {
+                        "executionMode": "supervised_shadow_projection_replay",
+                        "candidateProjectionSource": "accepted_shadow_trial_evidence",
+                        "liveModuleCodeExecutionSupported": false,
+                        "executionBoundaryDetail": "Active routes validate exact lifecycle/runtime authorization and replay accepted provider-safe shadow evidence. This route mode does not execute live module code.",
+                        "candidates": 0,
+                        "bindings": 0,
+                        "activeRoutes": 0,
+                        "routeEvents": 0
+                    },
                     "agentPath": {
                         "purpose": "Inspect replacement readiness for git_status without invoking the adapter.",
                         "primaryInspection": {
@@ -1175,6 +1185,22 @@ fn extract_result_content_keeps_targeted_capability_cockpit_agent_path() {
     assert_eq!(fact(&envelope, "operationDirectory.returned"), 1);
     let target = &collection(&envelope, "operationDirectory.operations")["items"][0];
     assert_eq!(item_fact(target, "name"), "git_status");
+    assert_eq!(
+        item_fact(target, "route.executionMode"),
+        "supervised_shadow_projection_replay"
+    );
+    assert_eq!(
+        item_fact(target, "route.candidateProjectionSource"),
+        "accepted_shadow_trial_evidence"
+    );
+    assert_eq!(
+        item_fact(target, "route.liveModuleCodeExecutionSupported"),
+        &json!(false)
+    );
+    assert_eq!(
+        item_fact(target, "route.executionBoundaryDetail"),
+        "Active routes validate exact lifecycle/runtime authorization and replay accepted provider-safe shadow evidence. This route mode does not execute live module code."
+    );
     assert_eq!(
         item_fact(target, "agentPath.completion.state"),
         "answer_now_no_current_scope_evidence"

@@ -1292,10 +1292,11 @@ Candidate and binding records revalidate the exact current accepted
 `capability_shadow_trial_evidence` resource/version before a route can activate.
 Candidate records also require exact lifecycle/runtime selectors and validate the
 referenced current module lifecycle/runtime records through the same supervised
-module-runtime provider-safe projection boundary used at invocation. The
-dispatcher seam resolves an active scoped `git_status` route, verifies accepted
-shadow evidence plus lifecycle/runtime refs, projects supervised module-runtime
-provider-safe output, and emits route events. If the replacement runtime
+shadow-projection boundary used at invocation. The dispatcher seam resolves an
+active scoped `git_status` route, verifies accepted shadow evidence plus
+lifecycle/runtime refs, revalidates and replays the accepted provider-safe shadow
+projection, and emits route events. This route mode does not execute live module
+code. If the replacement runtime
 envelope, lifecycle authorization, version refs, scope, network policy, or
 projection shape are unsafe, candidate recording or routing fails closed and does
 not substitute a built-in success projection for the unsafe route.
@@ -1315,7 +1316,7 @@ route state, bounded route-story cards for "What Changed" cockpit summaries,
 verification context, and rollback/disable/abort availability
 without exposing raw resource IDs, paths, commands, logs, grants, authority
 IDs, or token-like material, package-manager output, dependency artifacts, or
-module adapter payloads. `capability_binding` is the projection source for
+candidate module payloads. `capability_binding` is the projection source for
 these facts, not the operation owner.
 The Minimal Kernel Self-Adaptation Hardening capstone in
 `packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md`
@@ -1533,11 +1534,11 @@ Current primitive operations:
 | `capability_route_binding_record` | Dynamic Replacement operation that records one scoped `capability_route_binding` after exact candidate and shadow-evidence selector authority plus expected candidate/shadow-evidence version freshness, linking a validated `git_status` candidate to a route version with activation gates, rollback/disable requirements, idempotency, `networkPolicy: none`, and no dispatch-table mutation. |
 | `capability_route_binding_list` | Dynamic Replacement operation that lists scoped route bindings as bounded provider-safe summaries with ready/disabled state, route version, target operation, truncation metadata, and no package-manager, network, deploy, or module execution side effects. |
 | `capability_route_binding_inspect` | Dynamic Replacement operation that inspects one scoped route binding through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded activation-gate and route-version evidence without raw local material or authority internals. |
-| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, lifecycle/runtime refs, and `networkPolicy: none`, recording activation and route-event resources so invocation can route through the supervised module-runtime provider-safe projection boundary. |
+| `capability_route_activate` | Dynamic Replacement operation that activates one scoped `git_status` projection route after a ready binding, exact expected binding version, approval refs, rollback/disable controls, exact selectors, lifecycle/runtime refs, and `networkPolicy: none`, recording activation and route-event resources so invocation can revalidate and replay accepted provider-safe shadow evidence. This route mode does not execute live module code. |
 | `capability_route_disable` | Dynamic Replacement operation that records a terminal disable event for one active scoped route after exact binding and activation selector authority plus expected current versions, restoring built-in ownership for future route lookups without mutating dispatch tables. |
 | `capability_route_rollback` | Dynamic Replacement operation that records deterministic rollback evidence for one active scoped route after exact binding and activation selector authority plus expected current versions, proving built-in ownership is restored and preserving audit refs. |
 | `capability_route_event_list` | Dynamic Replacement operation that lists bounded scoped route events for activation, routed invocation, disable, and rollback history without exposing raw resource IDs, trace IDs, commands, paths, logs, grants, or authority IDs. |
-| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded route evidence, supervised adapter projection state, routed invocation results, fail-closed status, and rollback/disable history. |
+| `capability_route_event_inspect` | Dynamic Replacement operation that inspects one scoped route event through exact `resource:<id>` selector authorization and stored kind/schema/scope/current-version revalidation, returning bounded accepted-shadow-projection replay state, route results, fail-closed status, and rollback/disable history. |
 | `capability_binding::cockpit_overview` | Cockpit Visibility system-visible pure-read function that returns a bounded, redacted Engine Cockpit projection over all current `capability::execute` operations, joining registry ownership classes, Engine Capability Pool role classifications, agent usage guidance, and current-session/workspace binding-policy, shadow-trial, and route facts so native clients can display a single operation count, total/returned operations, operation-list and resource-scan completeness, redacted owner and replacement-target summaries, session-work/diagnostics/governance/kernel-evolution role, runtime-routable/producer-extensible/kernel-evolution-only replacement class, server-derived readiness/next-action labels, locked/built-in/module status, replacement/shadow/extension eligibility, failed attempts, rollback/disable/abort availability, and verification context without treating `capability_binding` as the operation owner and without raw resource ids, paths, env values, commands, logs, code, file contents, grants, authority ids, trace ids, invocation ids, token-like material, module execution, hot swap, dispatch-table mutation, dependency restore, package-manager, network, or autonomy side effects. |
 | `module_lifecycle_request` | Slice 23E accepted operation that records a pending scoped `module_lifecycle_state` request for metadata-only enable, disable, quarantine, or rollback after current-scope install-candidate decision revalidation, and appends follow-up pending transitions on the existing lifecycle resource with current-version freshness/provenance, rollback proof refs/readiness, bounded evidence refs, `networkPolicy: none`, and explicit no-install/no-execution/no-activation proof. |
 | `module_lifecycle_decision` | Slice 23E accepted operation that applies an approved lifecycle transition with expected current lifecycle version freshness, fresh scoped approval, derived authority, install-candidate prerequisite revalidation, and no approval-evidence authority minting, producing enabled/disabled/quarantined/rolled_back metadata state without runtime execution or package/dependency side effects. |
