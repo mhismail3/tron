@@ -344,9 +344,11 @@ pub(super) fn exact_output_schema(operation: &str) -> Option<Value> {
 }
 
 /// Build the engine-facing host union mechanically from the exact operation
-/// contracts. The union is intentionally permissive only across operations;
-/// [`validate_payload`] still applies the selected operation's closed schema
-/// before authority derivation or dispatch.
+/// contracts. The union is intentionally permissive only across known fields.
+/// Operation membership is owned by [`validate_payload`], allowing an unknown
+/// bounded selector to reach canonical structured recovery while arbitrary
+/// fields still fail at the host boundary. Supported operations still apply
+/// their exact closed schema before authority derivation or dispatch.
 pub(crate) fn host_request_schema() -> Value {
     let mut field_variants = BTreeMap::<String, Vec<Value>>::new();
     for operation in supported_operation_names() {
@@ -371,7 +373,8 @@ pub(crate) fn host_request_schema() -> Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "enum": supported_operation_names(),
+            "minLength": 1,
+            "maxLength": 200,
             "description": format!(
                 "One exact capability::execute operation. Never guess an operation name: use catalog_search, then catalog_inspect. Supported operations: {}.",
                 operation_list_text()
@@ -600,13 +603,9 @@ mod tests {
             "mechanical_union_of_exact_operation_contracts"
         );
         assert_eq!(host["additionalProperties"], false);
-        assert_eq!(
-            host_properties["operation"]["enum"]
-                .as_array()
-                .expect("operation enum")
-                .len(),
-            supported_operation_names().len()
-        );
+        assert!(host_properties["operation"].get("enum").is_none());
+        assert_eq!(host_properties["operation"]["minLength"], 1);
+        assert_eq!(host_properties["operation"]["maxLength"], 200);
 
         let mut expected_fields = std::collections::BTreeSet::new();
         for operation in supported_operation_names() {
@@ -626,6 +625,25 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>(),
             expected_fields
         );
+    }
+
+    #[test]
+    fn host_union_defers_unknown_operation_membership_to_canonical_validation() {
+        let host = host_request_schema();
+        let function_id = FunctionId::new("capability::execute").expect("function id");
+        let unknown = json!({"operation": "definitely_not_a_real_operation"});
+
+        validate_engine_schema_payload(&function_id, "operation request", &host, &unknown)
+            .expect("bounded unknown selector reaches canonical recovery");
+        let error = validate_payload(&unknown).expect_err("canonical membership must reject");
+        assert!(error.to_string().contains("catalog_search"));
+
+        let unsafe_unknown = json!({
+            "operation": "definitely_not_a_real_operation",
+            "unknownField": "must-not-cross-host-boundary"
+        });
+        validate_engine_schema_payload(&function_id, "operation request", &host, &unsafe_unknown)
+            .expect_err("unknown fields remain closed at the host boundary");
     }
 
     #[test]
