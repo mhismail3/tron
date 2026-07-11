@@ -41,8 +41,10 @@
 //! operations: `execute::web_robots_check` must expose `url` and bounded robots
 //! controls, while `execute::web_fetch` must expose `url` plus optional
 //! `webRobotsPolicyResourceId`/`expectedWebRobotsPolicyVersionId` linkage so
-//! agents do not infer fetch arguments from generic schemas. Web idempotency is
-//! supplied by trusted runtime context, not by model-facing web payload fields.
+//! agents do not infer fetch arguments from generic schemas. Network and archive
+//! writes require a caller-supplied stable bounded `idempotencyKey`; the trusted
+//! runtime binds it to the invocation ledger and provider projections never
+//! echo the key back.
 //! Source list/inspect/archive operations are resource inspections or
 //! append-only resource lifecycle updates and must remain valid under
 //! `networkPolicy none`. `web_robots_check` fetches only one origin's

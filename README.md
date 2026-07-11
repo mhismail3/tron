@@ -1859,9 +1859,10 @@ name the explicit allow/deny decision and reason, bounded body and redirect
 facts, sanitized target URL, and copy-ready `webRobotsPolicyResourceId` and
 `webRobotsPolicyVersionId`; callers use the version as
 `expectedWebRobotsPolicyVersionId` when a later `web_fetch` must be robots-gated.
-The model-facing web schemas do not ask the agent for
-`idempotencyKey`; web replay/idempotency is supplied by trusted runtime context
-and stored as bounded evidence. The accepted Slice 8F foundation lets callers
+The model-facing network and archive schemas require a stable bounded
+`idempotencyKey`; trusted runtime context binds that caller key to the engine
+ledger, while provider-safe results and source inspection never echo the raw
+key. The accepted Slice 8F foundation lets callers
 supply robots evidence when they need policy-bound fetch proof, and when
 `web_fetch` receives
 `webRobotsPolicyResourceId` plus
