@@ -7,8 +7,8 @@
 //! before optimizing for UI readability. Keep the field allowlists narrow: ids,
 //! lifecycle/status, refs, truncation metadata, preflight selectors, required
 //! fields, and schema failure coordinates are useful to the model; raw content,
-//! local paths, commands, secrets, grant ids, and authority ids stay out of this
-//! channel. Trace projections also preserve bounded top-level proof metadata so
+//! local paths, commands, process ids, secrets, grant ids, and authority ids
+//! stay out of this channel. Trace projections also preserve bounded top-level proof metadata so
 //! the model can verify redaction and status semantics without inferring from
 //! missing raw fields.
 //! Context-control action lists expose exact provider-safe inspect arguments for
@@ -1627,6 +1627,9 @@ fn safe_id_like_metadata_key(lower: &str) -> bool {
 fn denied_model_context_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     lower == "authority"
+        || lower == "pid"
+        || lower.contains("processid")
+        || lower.contains("processgroupid")
         || lower.contains("grant")
         || lower.contains("authoritygrant")
         || lower.contains("secret")

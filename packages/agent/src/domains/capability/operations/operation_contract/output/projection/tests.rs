@@ -1833,6 +1833,40 @@ fn extract_result_content_does_not_project_unlisted_raw_details() {
 }
 
 #[test]
+fn extract_result_content_does_not_project_runtime_process_identifiers() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "job_start running: job_process:test",
+        )]),
+        Some(json!({
+            "primitiveOperation": "job_start",
+            "status": "running",
+            "jobs": {
+                "jobResourceId": "job_process:test",
+                "jobVersionId": "ver_test",
+                "processId": 70033,
+                "processGroupId": 70033,
+                "pid": 70033,
+                "resourceRefs": [{
+                    "kind": "job_process",
+                    "resourceId": "job_process:test",
+                    "versionId": "ver_test"
+                }]
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    let text = envelope_text(&envelope);
+
+    assert!(text.contains("job_process:test"));
+    assert!(!text.contains("70033"));
+    assert!(!text.contains("processId"));
+    assert!(!text.contains("processGroupId"));
+    assert!(!text.contains("\"pid\""));
+}
+
+#[test]
 fn extract_result_content_projects_canonical_metadata_without_an_operation_allowlist() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(

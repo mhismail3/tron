@@ -1598,6 +1598,9 @@ contract under `operations::operation_contract`, including the normalized
 envelope profile, required semantic success facts, expected resource/collection
 evidence, summary policy, and safety exclusions, together with canonical
 ownership/replacement, effect, context/idempotency, and base-authority policy.
+The shared provider projection excludes raw commands, paths, process and
+process-group identifiers, credentials, grant/authority identifiers, and other
+runtime-only material while preserving typed resource/version refs.
 Catalog inspection, pre-authority validation, capability-pool projection, and
 grant derivation consume those contracts; permissive cross-operation payloads
 and duplicate catalog/grant policy tables are not retained. Domain services remain the
