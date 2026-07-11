@@ -461,6 +461,40 @@ fn byte_budget_preserves_newest_item_in_required_collection() {
 }
 
 #[test]
+fn collection_normalization_prioritizes_core_navigation_facts() {
+    let mut record = serde_json::Map::new();
+    for index in 0..40 {
+        record.insert(format!("auditField{index:02}"), json!(index));
+    }
+    record.insert("traceRecordId".to_owned(), json!("trace-record-1"));
+    record.insert("traceId".to_owned(), json!("trace-1"));
+    record.insert("invocationId".to_owned(), json!("invocation-1"));
+    record.insert("operation".to_owned(), json!("trace_list"));
+    record.insert("status".to_owned(), json!("ok"));
+
+    let (evidence, truncation) = normalize_evidence(Some(json!({
+        "records": [Value::Object(record)]
+    })));
+    let facts = &evidence.collections[0].items[0].facts;
+
+    for field in [
+        "traceRecordId",
+        "traceId",
+        "invocationId",
+        "operation",
+        "status",
+    ] {
+        assert!(
+            facts.iter().any(|fact| fact.field == field),
+            "missing {field}"
+        );
+    }
+    assert_eq!(facts.len(), 32);
+    assert!(truncation.truncated);
+    assert_eq!(truncation.omitted_facts, 13);
+}
+
+#[test]
 fn schema_rejects_wrong_operation_and_extra_fields() {
     let result = result("ok", false, successful_details("git_status"));
     let rendered = render_provider_output("git_status", &result).expect("provider output");

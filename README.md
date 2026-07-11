@@ -1231,7 +1231,9 @@ the canonical text without reconstructing domain output. Raw
 receives only bounded facts, resource refs, collections, next actions, explicit
 truncation proof, and a typed recoverable error when applicable. Oversized
 evidence is removed as whole JSON elements rather than slicing serialized
-bytes, and omission counters describe the final retained structure exactly.
+bytes, collection fact limits reserve room for navigation identifiers such as
+trace/resource/invocation refs before optional audit detail, and omission
+counters describe the final retained structure exactly.
 Inline capability-result images fail closed because provider media must enter
 through durable resource custody. Unsupported operation guesses use the same
 safe failure envelope and retain catalog-based recovery guidance.

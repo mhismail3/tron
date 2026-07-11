@@ -17,6 +17,17 @@ const MAX_FIELD_BYTES: usize = 200;
 const MAX_VALUE_BYTES: usize = 800;
 const MAX_ACTION_BYTES: usize = 500;
 
+const CORE_COLLECTION_FACT_FIELDS: &[&str] = &[
+    "traceRecordId",
+    "traceId",
+    "invocationId",
+    "operation",
+    "status",
+    "kind",
+    "resourceId",
+    "versionId",
+];
+
 pub(super) fn normalize_evidence(
     projected: Option<Value>,
 ) -> (ProviderEvidence, ProviderTruncation) {
@@ -83,7 +94,9 @@ fn collect_value(
                 items: Vec::new(),
             };
             for item in items.iter().take(MAX_COLLECTION_ITEMS) {
-                collection.items.push(normalize_collection_item(item));
+                collection
+                    .items
+                    .push(normalize_collection_item(item, truncation));
             }
             collection.returned = collection.items.len();
             if collection.truncated {
@@ -96,13 +109,21 @@ fn collect_value(
     }
 }
 
-fn normalize_collection_item(value: &Value) -> ProviderCollectionItem {
+fn normalize_collection_item(
+    value: &Value,
+    truncation: &mut ProviderTruncation,
+) -> ProviderCollectionItem {
     let mut item = ProviderCollectionItem::default();
-    collect_item_value(value, "", &mut item);
+    collect_item_value(value, "", &mut item, truncation);
     item
 }
 
-fn collect_item_value(value: &Value, field: &str, item: &mut ProviderCollectionItem) {
+fn collect_item_value(
+    value: &Value,
+    field: &str,
+    item: &mut ProviderCollectionItem,
+    truncation: &mut ProviderTruncation,
+) {
     match value {
         Value::Object(object) => {
             if let Some(resource) = resource_ref(value)
@@ -110,11 +131,20 @@ fn collect_item_value(value: &Value, field: &str, item: &mut ProviderCollectionI
             {
                 item.resources.push(resource);
             }
-            for (key, value) in object {
-                if item.facts.len() >= MAX_ITEM_FACTS {
-                    break;
+            for core_field in CORE_COLLECTION_FACT_FIELDS {
+                if let Some(value) = object.get(*core_field) {
+                    let child = join_field(field, core_field);
+                    if core_collection_fact(&child) {
+                        collect_item_value(value, &child, item, truncation);
+                    }
                 }
-                collect_item_value(value, &join_field(field, key), item);
+            }
+            for (key, value) in object {
+                let child = join_field(field, key);
+                if core_collection_fact(&child) {
+                    continue;
+                }
+                collect_item_value(value, &child, item, truncation);
             }
         }
         Value::Array(values) => {
@@ -123,14 +153,25 @@ fn collect_item_value(value: &Value, field: &str, item: &mut ProviderCollectionI
                     field: bounded_text(field, MAX_FIELD_BYTES),
                     value: Value::String(format!("{} item(s)", values.len())),
                 });
+            } else {
+                record_omitted_item_fact(truncation);
             }
         }
         scalar if item.facts.len() < MAX_ITEM_FACTS => item.facts.push(ProviderFact {
             field: bounded_text(field, MAX_FIELD_BYTES),
             value: bounded_scalar(scalar),
         }),
-        _ => {}
+        _ => record_omitted_item_fact(truncation),
     }
+}
+
+pub(super) fn core_collection_fact(field: &str) -> bool {
+    CORE_COLLECTION_FACT_FIELDS.contains(&field)
+}
+
+fn record_omitted_item_fact(truncation: &mut ProviderTruncation) {
+    truncation.truncated = true;
+    truncation.omitted_facts += 1;
 }
 
 fn push_fact(

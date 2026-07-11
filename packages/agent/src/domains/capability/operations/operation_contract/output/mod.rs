@@ -9,7 +9,9 @@
 //! duplicated by every domain handler, and byte-budget reduction never removes
 //! facts or collections required by the operation's semantic evidence contract.
 //! Required collections retain a bounded newest-first item subset with exact
-//! omission proof; unsupported names return a structured `catalog_search`
+//! omission proof, and collection normalization reserves its bounded fact
+//! budget for navigation identifiers before optional audit detail. Unsupported
+//! names return a structured `catalog_search`
 //! recovery action rather than prose-only guidance.
 //! `budget`, `normalize`, `projection`, `spec`, and `types` own the production layers;
 //! sibling `tests` owns envelope-wide contract and budget regression coverage.

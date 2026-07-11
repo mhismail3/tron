@@ -6,6 +6,7 @@
 
 use crate::shared::foundation::text::truncate_str;
 
+use super::normalize::core_collection_fact;
 use super::types::{PROVIDER_OUTPUT_MAX_BYTES, ProviderOperationOutput};
 
 pub(super) fn fit_output_budget(
@@ -100,20 +101,6 @@ fn trim_collection_item_evidence(
         return true;
     }
     false
-}
-
-fn core_collection_fact(field: &str) -> bool {
-    matches!(
-        field,
-        "traceRecordId"
-            | "traceId"
-            | "invocationId"
-            | "operation"
-            | "status"
-            | "kind"
-            | "resourceId"
-            | "versionId"
-    )
 }
 
 fn stabilize_serialized_byte_count(output: &mut ProviderOperationOutput) -> Result<usize, String> {
