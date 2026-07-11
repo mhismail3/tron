@@ -53,6 +53,11 @@ pub struct CompactBoundaryPayload {
     /// available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_control_snapshot_resource_id: Option<String>,
+    /// Internal capability invocation whose result is superseded by this
+    /// boundary. Automatic compactions have no provider invocation and omit
+    /// this field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_invocation_id: Option<String>,
 }
 
 /// Event range for a compaction boundary.
@@ -149,6 +154,7 @@ mod tests {
         assert_eq!(parsed.compacted_tokens, 10);
         assert_eq!(parsed.reason, "manual");
         assert!(parsed.range.is_none());
+        assert!(parsed.boundary_invocation_id.is_none());
     }
 
     #[test]
@@ -159,6 +165,7 @@ mod tests {
             "reason": "threshold_exceeded",
             "contextControlActionResourceId": "context_control_action:test",
             "contextControlSnapshotResourceId": "context_control_snapshot:test",
+            "boundaryInvocationId": "invocation:test",
         });
         let parsed: CompactBoundaryPayload = serde_json::from_value(ok).unwrap();
         assert_eq!(
@@ -168,6 +175,10 @@ mod tests {
         assert_eq!(
             parsed.context_control_snapshot_resource_id.as_deref(),
             Some("context_control_snapshot:test")
+        );
+        assert_eq!(
+            parsed.boundary_invocation_id.as_deref(),
+            Some("invocation:test")
         );
     }
 

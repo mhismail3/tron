@@ -536,7 +536,8 @@ pub(crate) async fn compact_value_at(
                     "summarizedTurns": message_count,
                     "preservedMessages": 0,
                     "contextControlActionResourceId": &action_resource_id,
-                    "contextControlSnapshotResourceId": &snapshot_resource.resource_id
+                    "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
+                    "boundaryInvocationId": invocation.id.as_str()
                 }),
                 parent_id: None,
                 sequence: None,
@@ -668,7 +669,8 @@ pub(crate) async fn clear_value_at(
                 "tokensAfter": 0,
                 "reason": reason.clone(),
                 "contextControlActionResourceId": &action_resource_id,
-                "contextControlSnapshotResourceId": &snapshot_resource.resource_id
+                "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
+                "boundaryInvocationId": invocation.id.as_str()
             }),
             parent_id: None,
             sequence: None,

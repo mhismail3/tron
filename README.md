@@ -2835,7 +2835,12 @@ context-control proof cannot be recorded, compaction fails closed: the runtime
 restores the pre-compaction provider context checkpoint, appends no unaudited
 boundary, and emits a terminal live `agent.compaction` event with
 `success=false` so connected clients can retire any in-progress compaction
-indicator without reconstructing a false boundary.
+indicator without reconstructing a false boundary. Manual compact and clear
+boundaries also correlate the capability invocation that created them;
+reconstruction removes the matching completion after the boundary removes its
+call, keeping resumed provider histories free of orphaned function outputs.
+Historical boundaries apply the same suppression only to an immediately
+adjacent matching completion.
 
 Compaction is internal prompt-loop infrastructure. It is observable through
 session events and primitive trace records, not through public `context::*`

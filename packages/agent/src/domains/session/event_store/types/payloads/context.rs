@@ -20,4 +20,9 @@ pub struct ContextClearedPayload {
     /// when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_control_snapshot_resource_id: Option<String>,
+    /// Internal capability invocation whose result is superseded by this
+    /// boundary. Reconstruction uses this to avoid emitting an orphaned
+    /// provider function result after the matching call was cleared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_invocation_id: Option<String>,
 }

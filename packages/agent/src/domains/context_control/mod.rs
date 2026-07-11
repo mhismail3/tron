@@ -33,7 +33,9 @@
 //! projection. Clear and compact mutate only the session event stream through
 //! existing `context.cleared` and `compact.boundary` reducers; prior history
 //! remains durable and inspectable but is excluded from future provider context
-//! after those boundaries.
+//! after those boundaries. Manual boundaries carry their internal invocation
+//! correlation so reconstruction also excludes the matching post-boundary
+//! capability result instead of producing an orphaned provider function output.
 //! The compaction adapter seam is the summarizer strategy only. Context-control
 //! snapshot/action/epoch and survivor/exclusion policy records, provider-safe
 //! projections, replay refs, and audit custody stay server-owned; a future

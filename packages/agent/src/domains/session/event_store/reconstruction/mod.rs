@@ -6,7 +6,13 @@
 //! 1. **First pass**: collect deleted event IDs, capability invocation argument
 //!    maps, and system prompt.
 //! 2. **Second pass**: build messages while handling deletions, compaction,
-//!    context clears, capability result injection, and consecutive-role merging.
+//!    context clears, boundary-invalidated capability results, capability
+//!    result injection, and consecutive-role merging.
+//!
+//! Manual compact/clear operations persist their boundary before the outer
+//! capability executor persists its completion. Boundary correlation suppresses
+//! that one completion after removing the matching invocation call; otherwise a
+//! resumed provider request would contain an orphaned function output.
 //!
 //! The output is a [`ReconstructionResult`] containing messages with event IDs,
 //! aggregate token usage and turn count.
@@ -119,6 +125,8 @@ struct BuildState {
     turn_count: i64,
     current_turn: i64,
     pending_capability_results: Vec<PendingCapabilityResult>,
+    suppressed_capability_result_ids: std::collections::HashSet<String>,
+    legacy_boundary_operation: Option<&'static str>,
 }
 
 /// Pass 2: Build messages from events using metadata from pass 1.
@@ -129,15 +137,20 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         turn_count: 0,
         current_turn: 0,
         pending_capability_results: Vec::new(),
+        suppressed_capability_result_ids: std::collections::HashSet::new(),
+        legacy_boundary_operation: None,
     };
 
     for event in ancestors {
         if metadata.deleted_event_ids.contains(&event.id) {
             continue;
         }
+        if suppress_legacy_boundary_result(event, &metadata, &mut st) {
+            continue;
+        }
         match event.event_type {
             EventType::CompactBoundary => handle_compact_boundary(event, &mut st),
-            EventType::ContextCleared => handle_context_cleared(&mut st),
+            EventType::ContextCleared => handle_context_cleared(event, &mut st),
             EventType::CapabilityInvocationCompleted => handle_capability_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
             EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
@@ -176,6 +189,7 @@ fn handle_compact_boundary(event: &SessionEvent, st: &mut BuildState) {
         return;
     };
     inject_compaction_summary_pair(summary, st);
+    register_boundary_result_suppression(event, st, "context_control_compact");
 }
 
 fn inject_compaction_summary_pair(summary: &str, st: &mut BuildState) {
@@ -203,9 +217,10 @@ fn inject_compaction_summary_pair(summary: &str, st: &mut BuildState) {
 }
 
 /// Handle `context.cleared`: discard all messages.
-fn handle_context_cleared(st: &mut BuildState) {
+fn handle_context_cleared(event: &SessionEvent, st: &mut BuildState) {
     st.combined.clear();
     st.pending_capability_results.clear();
+    register_boundary_result_suppression(event, st, "context_control_clear");
 }
 
 /// Handle `capability.invocation.completed`: accumulate for later flushing.
@@ -216,6 +231,9 @@ fn handle_capability_result(event: &SessionEvent, st: &mut BuildState) {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    if st.suppressed_capability_result_ids.remove(&tc_id) {
+        return;
+    }
     let content = event
         .payload
         .get("modelContextContent")
@@ -234,6 +252,52 @@ fn handle_capability_result(event: &SessionEvent, st: &mut BuildState) {
         content,
         is_error,
     });
+}
+
+fn register_boundary_result_suppression(
+    event: &SessionEvent,
+    st: &mut BuildState,
+    legacy_operation: &'static str,
+) {
+    if let Some(invocation_id) = event
+        .payload
+        .get("boundaryInvocationId")
+        .and_then(Value::as_str)
+    {
+        let _ = st
+            .suppressed_capability_result_ids
+            .insert(invocation_id.to_owned());
+    } else {
+        // Historical manual boundaries predate exact invocation correlation.
+        // Their outer completion is the immediately following event. Runtime
+        // compactions do not have a capability completion, so this fallback is
+        // discarded as soon as any other event appears.
+        st.legacy_boundary_operation = Some(legacy_operation);
+    }
+}
+
+fn suppress_legacy_boundary_result(
+    event: &SessionEvent,
+    metadata: &Metadata,
+    st: &mut BuildState,
+) -> bool {
+    let Some(expected_operation) = st.legacy_boundary_operation.take() else {
+        return false;
+    };
+    if event.event_type != EventType::CapabilityInvocationCompleted {
+        return false;
+    }
+    let invocation_id = event
+        .payload
+        .get("invocationId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    metadata
+        .capability_invocation_args_map
+        .get(invocation_id)
+        .and_then(|arguments| arguments.get("operation"))
+        .and_then(Value::as_str)
+        == Some(expected_operation)
 }
 
 /// Handle `message.user`: merge consecutive, discard pending capability results.
