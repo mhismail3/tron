@@ -201,6 +201,9 @@ fn collect_next_actions(value: &Value, field: &str, actions: &mut Vec<ProviderNe
     match value {
         Value::Object(object) => {
             for (key, child) in object {
+                if actions.len() >= MAX_NEXT_ACTIONS {
+                    return;
+                }
                 let child_field = join_field(field, key);
                 let normalized = key.to_ascii_lowercase();
                 if normalized.contains("nextstep")
@@ -226,6 +229,41 @@ fn collect_next_actions(value: &Value, field: &str, actions: &mut Vec<ProviderNe
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{MAX_NEXT_ACTIONS, normalize_next_actions};
+
+    #[test]
+    fn nested_next_actions_never_overrun_the_provider_contract_bound() {
+        let nested = (0..MAX_NEXT_ACTIONS)
+            .map(|index| {
+                (
+                    format!("nextStep{index}"),
+                    json!({"operation": "catalog_inspect", "id": format!("execute::op_{index}")}),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let projected = json!({
+            "nested": nested,
+            "nextActionAfterNestedTraversal": {
+                "operation": "catalog_inspect",
+                "id": "execute::must_not_overrun"
+            }
+        });
+
+        let actions = normalize_next_actions(Some(&projected));
+
+        assert_eq!(actions.len(), MAX_NEXT_ACTIONS);
+        assert!(
+            actions.iter().all(|action| {
+                action.inspect_id.as_deref() != Some("execute::must_not_overrun")
+            })
+        );
     }
 }
 

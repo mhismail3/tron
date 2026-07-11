@@ -18,7 +18,9 @@
 //! records, module dependency policy metadata records, metadata-only capability
 //! binding policy and shadow-trial records, and media artifacts,
 //! `ui_surface` validates the runtime UI surface payload, and `store` contains
-//! the in-memory and SQLite persistence implementations.
+//! the in-memory and SQLite persistence implementations. Source-owned built-in
+//! module manifests retain durable version history, but their current versions
+//! are reconciled to the canonical source payload when the engine starts.
 
 mod capability_binding_definitions;
 mod context_control_definitions;

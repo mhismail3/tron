@@ -1,4 +1,9 @@
 //! Primitive store backends and host handle wiring.
+//!
+//! Registered resource types are durable substrate, while built-in module
+//! manifests are source-owned versioned records. Startup reconciles those
+//! exact built-in resource ids to their canonical payloads so accepted source
+//! changes cannot leave a persistent engine on stale governance metadata.
 
 use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
@@ -584,14 +589,135 @@ impl PrimitiveStores {
         for definition in builtin_resource_type_definitions() {
             resources.register_type(definition)?;
         }
-        for resource in builtin_module_manifest_resources() {
+        for mut resource in builtin_module_manifest_resources() {
             let Some(resource_id) = resource.resource_id.clone() else {
                 continue;
             };
-            if resources.inspect(&resource_id)?.is_none() {
+            let Some(inspection) = resources.inspect(&resource_id)? else {
                 resources.create(resource)?;
+                continue;
+            };
+            let Some(canonical_payload) = resource.initial_payload.take() else {
+                continue;
+            };
+            let current_version_id =
+                inspection
+                    .resource
+                    .current_version_id
+                    .clone()
+                    .ok_or_else(|| {
+                        EngineError::HandlerFailed(format!(
+                            "built-in resource {resource_id} has no current version"
+                        ))
+                    })?;
+            let current = inspection
+                .versions
+                .iter()
+                .find(|version| version.version_id == current_version_id)
+                .ok_or_else(|| {
+                    EngineError::HandlerFailed(format!(
+                        "built-in resource {resource_id} current version is missing"
+                    ))
+                })?;
+            if current.payload != canonical_payload {
+                resources.update(UpdateResource {
+                    resource_id,
+                    expected_current_version_id: Some(current_version_id),
+                    lifecycle: resource.lifecycle,
+                    payload: canonical_payload,
+                    state: None,
+                    locations: resource.locations,
+                    trace_id: resource.trace_id,
+                    invocation_id: None,
+                })?;
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::PrimitiveStores;
+    use crate::engine::durability::resources::UpdateResource;
+    use crate::engine::kernel::ids::TraceId;
+
+    #[test]
+    fn sqlite_startup_reconciles_stale_builtin_module_manifest_payloads() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let database = directory.path().join("engine.sqlite");
+        let stores = PrimitiveStores::sqlite(&database).expect("initial stores");
+        let resource_id = "module_manifest:notification_delivery_module";
+        let stale_version_id = {
+            let mut resources = stores.resources.lock().expect("resource store lock");
+            let inspection = resources
+                .inspect(resource_id)
+                .expect("inspect canonical manifest")
+                .expect("canonical manifest exists");
+            let current_version_id = inspection
+                .resource
+                .current_version_id
+                .expect("canonical current version");
+            let mut stale_payload = inspection
+                .versions
+                .iter()
+                .find(|version| version.version_id == current_version_id)
+                .expect("canonical current payload")
+                .payload
+                .clone();
+            stale_payload["capabilityDeclarations"]
+                .as_array_mut()
+                .expect("capability declarations")
+                .insert(
+                    2,
+                    json!({
+                        "operation": "device_register",
+                        "effect": "write",
+                        "providerVisible": false,
+                        "description": "stale declaration"
+                    }),
+                );
+            resources
+                .update(UpdateResource {
+                    resource_id: resource_id.to_owned(),
+                    expected_current_version_id: Some(current_version_id),
+                    lifecycle: None,
+                    payload: stale_payload,
+                    state: None,
+                    locations: Vec::new(),
+                    trace_id: TraceId::new("test-stale-seed").expect("trace id"),
+                    invocation_id: None,
+                })
+                .expect("write stale manifest")
+                .version_id
+        };
+        drop(stores);
+
+        let reopened = PrimitiveStores::sqlite(&database).expect("reopened stores");
+        let resources = reopened.resources.lock().expect("resource store lock");
+        let inspection = resources
+            .inspect(resource_id)
+            .expect("inspect reconciled manifest")
+            .expect("reconciled manifest exists");
+        let current_version_id = inspection
+            .resource
+            .current_version_id
+            .expect("reconciled current version");
+        assert_ne!(current_version_id, stale_version_id);
+        let current_payload = &inspection
+            .versions
+            .iter()
+            .find(|version| version.version_id == current_version_id)
+            .expect("reconciled current payload")
+            .payload;
+        assert!(
+            current_payload["capabilityDeclarations"]
+                .as_array()
+                .expect("capability declarations")
+                .iter()
+                .all(|declaration| declaration["operation"] != json!("device_register"))
+        );
     }
 }
