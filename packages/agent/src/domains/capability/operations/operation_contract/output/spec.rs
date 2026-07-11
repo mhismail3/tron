@@ -77,15 +77,20 @@ pub(super) const fn unsupported_contract() -> OutputContract {
 const fn semantic_evidence(operation: OperationId) -> SemanticEvidenceContract {
     match operation {
         OperationId::GitStatus => SemanticEvidenceContract {
-            description: "Provider-safe repository status facts, bounded change counts, and evidence refs.",
+            description: "Provider-safe repository status facts, bounded change counts, optional durable resource evidence, and explicitly non-durable content-free navigation inputs for repository tree custody.",
             required_fact_fields: &[
                 "primitiveOperation",
                 "status",
                 "git.schemaVersion",
                 "git.operation",
+                "git.repositoryNavigation.available",
+                "git.repositoryNavigation.referenceClass",
+                "git.repositoryNavigation.durableResource",
+                "git.repositoryNavigation.resourceCreationPerformed",
+                "git.repositoryNavigation.consumerOperation",
             ],
             expected_collection_fields: &["git.evidence.resourceRefs.returned"],
-            expected_resource_kinds: &["git_status_evidence"],
+            expected_resource_kinds: &[],
             safety_exclusions: &[
                 "absolute paths",
                 "raw commands and logs",

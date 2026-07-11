@@ -51,6 +51,10 @@
 //! already-present local upstream refs, reports oversized last-commit metadata
 //! as truncated row evidence, and never fetches, switches, creates, deletes,
 //! renames, or contacts remotes.
+//! `git_status` repository/root/HEAD/tree identities are content-free navigation
+//! inputs for `repository_tree_snapshot`, not resource-store records; provider
+//! projections must state that distinction and must not count those identities
+//! as durable evidence created by the status read.
 //! The adapter seam for future module replacement is exact repository authority
 //! plus HEAD/index parity: a replacement must preserve provider-safe refs,
 //! replay/idempotency evidence, guarded mutation evidence, and

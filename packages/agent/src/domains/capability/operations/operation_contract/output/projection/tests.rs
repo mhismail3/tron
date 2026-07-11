@@ -433,7 +433,33 @@ fn extract_result_content_projects_git_status_evidence_for_agent() {
                     "behind": 0,
                     "headOid": "should_not_be_required_for_summary",
                     "indexTreeTruncated": false,
-                    "indexTreeOidUnavailable": false
+                    "indexTreeOidUnavailable": false,
+                    "repositoryTreeSnapshotInput": {
+                        "referenceClass": "content_free_navigation_input",
+                        "durableResource": false,
+                        "resourceCreationPerformed": false,
+                        "consumerOperation": "repository_tree_snapshot",
+                        "copySemantics": "complete_ref_objects",
+                        "repositoryRef": {
+                            "kind": "git_repository",
+                            "id": "git_repository:repo",
+                            "role": "repository"
+                        },
+                        "rootRef": {
+                            "kind": "git_root",
+                            "id": "git_root:root",
+                            "role": "root"
+                        },
+                        "headRef": {
+                            "kind": "git_commit",
+                            "id": "git_commit:head",
+                            "role": "head"
+                        },
+                        "treeObjectRef": "git_tree:abc123",
+                        "pathEntrySource": "git_status_provider_safe_projection",
+                        "contentFree": true,
+                        "rawRepositoryContentsIncluded": false
+                    }
                 },
                 "dirty": false,
                 "summary": {
@@ -486,6 +512,34 @@ fn extract_result_content_projects_git_status_evidence_for_agent() {
         &json!(false)
     );
     assert_eq!(fact(&envelope, "git.relativePath"), ".");
+    assert_eq!(
+        fact(&envelope, "git.repositoryNavigation.available"),
+        &json!(true)
+    );
+    assert_eq!(
+        fact(&envelope, "git.repositoryNavigation.referenceClass"),
+        "content_free_navigation_input"
+    );
+    assert_eq!(
+        fact(&envelope, "git.repositoryNavigation.durableResource"),
+        &json!(false)
+    );
+    assert_eq!(
+        fact(
+            &envelope,
+            "git.repositoryNavigation.resourceCreationPerformed"
+        ),
+        &json!(false)
+    );
+    assert_eq!(
+        fact(&envelope, "git.repositoryNavigation.consumerOperation"),
+        "repository_tree_snapshot"
+    );
+    assert_eq!(
+        fact(&envelope, "git.repositoryNavigation.repositoryRefJson"),
+        r#"{"id":"git_repository:repo","kind":"git_repository","role":"repository"}"#
+    );
+    assert_eq!(envelope["evidence"]["resources"], json!([]));
     assert_eq!(
         fact(&envelope, "dynamicReplacement.routeState"),
         "active_route_accepted_shadow_projection"
@@ -1730,6 +1784,62 @@ fn extract_result_content_projects_trace_metadata_ids() {
     assert!(!text.contains("providerInvocationId"));
     assert!(!text.contains("/Users/example"));
     assert!(!text.contains("cat hidden"));
+}
+
+#[test]
+fn extract_result_content_projects_trace_get_required_schema_fact() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            "Trace record: trace-record-safe.",
+        )]),
+        Some(json!({
+            "primitiveOperation": "trace_get",
+            "status": "ok",
+            "projectionBoundary": {
+                "providerVisibleProjection": "provider_safe_trace_projection",
+                "safeEngineRefsOnly": true,
+                "rawAuditFieldsProjected": false
+            },
+            "record": {
+                "schemaVersion": "tron.trace.provider_safe.v1",
+                "version": "0.1",
+                "traceRecordId": "trace-record-safe",
+                "traceId": "trace-safe",
+                "invocationId": "invocation-safe",
+                "operation": "git_status",
+                "status": "ok",
+                "redaction": {
+                    "rawProviderInvocationIdsExcluded": true
+                },
+                "metadata": {
+                    "dev.tron": {
+                        "providerInvocationId": "provider-must-not-project",
+                        "authority": {
+                            "authorityGrantId": "grant-must-not-project"
+                        }
+                    }
+                }
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(
+        fact(&envelope, "record.schemaVersion"),
+        "tron.trace.provider_safe.v1"
+    );
+    assert_eq!(fact(&envelope, "record.version"), "0.1");
+    assert_eq!(fact(&envelope, "record.traceRecordId"), "trace-record-safe");
+    assert_eq!(
+        fact(
+            &envelope,
+            "record.redaction.rawProviderInvocationIdsExcluded"
+        ),
+        &json!(true)
+    );
+    let rendered = envelope_text(&envelope);
+    assert!(!rendered.contains("provider-must-not-project"));
+    assert!(!rendered.contains("grant-must-not-project"));
 }
 
 #[test]

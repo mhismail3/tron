@@ -952,12 +952,17 @@ fn catalog_inspect_documents_git_status_evidence_contract() {
             "primitiveOperation",
             "status",
             "git.schemaVersion",
-            "git.operation"
+            "git.operation",
+            "git.repositoryNavigation.available",
+            "git.repositoryNavigation.referenceClass",
+            "git.repositoryNavigation.durableResource",
+            "git.repositoryNavigation.resourceCreationPerformed",
+            "git.repositoryNavigation.consumerOperation"
         ])
     );
     assert_eq!(
         discovery["outputSchema"]["semanticEvidenceContract"]["expectedResourceKinds"],
-        json!(["git_status_evidence"])
+        json!([])
     );
     assert_eq!(
         discovery["agentUsage"]["preflight"]["authorityScopes"],

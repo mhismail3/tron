@@ -26,6 +26,10 @@
 //! Routed Git projections preserve the bounded route mode/source and live-code
 //! execution facts needed to distinguish accepted-shadow replay from a built-in
 //! call, while route-event and runtime resource identifiers remain audit-only.
+//! Git status also projects repository-tree inputs as explicitly non-durable,
+//! content-free navigation facts; complete copy-ready ref objects remain JSON
+//! strings so the generic evidence normalizer cannot misclassify them as
+//! resource-store records.
 
 use std::sync::LazyLock;
 
@@ -711,6 +715,58 @@ fn project_git_evidence(details: &Value) -> Option<Value> {
             git_projected.insert("summary".to_owned(), Value::Object(summary_projected));
         }
     }
+    let mut navigation = Map::from_iter([
+        ("available".to_owned(), Value::Bool(false)),
+        (
+            "referenceClass".to_owned(),
+            Value::String("not_returned".to_owned()),
+        ),
+        ("durableResource".to_owned(), Value::Bool(false)),
+        ("resourceCreationPerformed".to_owned(), Value::Bool(false)),
+        (
+            "consumerOperation".to_owned(),
+            Value::String("repository_tree_snapshot".to_owned()),
+        ),
+    ]);
+    if let Some(snapshot_input) = git
+        .pointer("/repository/repositoryTreeSnapshotInput")
+        .and_then(Value::as_object)
+    {
+        navigation.insert("available".to_owned(), Value::Bool(true));
+        for key in [
+            "referenceClass",
+            "durableResource",
+            "resourceCreationPerformed",
+            "consumerOperation",
+            "copySemantics",
+            "contentFree",
+            "rawRepositoryContentsIncluded",
+            "pathEntrySource",
+            "treeObjectRef",
+        ] {
+            if let Some(value) = snapshot_input.get(key) {
+                navigation.insert(key.to_owned(), bounded_model_context_value(value));
+            }
+        }
+        for (key, projected_key) in [
+            ("repositoryRef", "repositoryRefJson"),
+            ("rootRef", "rootRefJson"),
+            ("headRef", "headRefJson"),
+        ] {
+            if let Some(value) = snapshot_input.get(key)
+                && !value.is_null()
+                && let Ok(encoded) = serde_json::to_string(value)
+            {
+                navigation.insert(
+                    projected_key.to_owned(),
+                    Value::String(truncate_model_context_string(&encoded)),
+                );
+            }
+        }
+        navigation.insert("completeRefObjectsRequired".to_owned(), Value::Bool(true));
+        navigation.insert("bareIdsAccepted".to_owned(), Value::Bool(false));
+    }
+    git_projected.insert("repositoryNavigation".to_owned(), Value::Object(navigation));
     if let Some(evidence) = git.get("evidence") {
         let mut evidence_projected = Map::new();
         copy_key(&mut evidence_projected, evidence, "statusTruncated");
@@ -1333,6 +1389,8 @@ fn project_trace_record(record: &Value) -> Value {
         projected.insert("traceRecordId".to_owned(), trace_record_id.clone());
     }
     for key in [
+        "schemaVersion",
+        "version",
         "traceId",
         "invocationId",
         "parentInvocationId",

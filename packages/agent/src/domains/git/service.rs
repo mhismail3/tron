@@ -1310,6 +1310,11 @@ fn repository_tree_snapshot_input(repository: &RepositoryFacts) -> Value {
         short_sha256_hex(repository.worktree_relative_path.as_bytes())
     );
     json!({
+        "referenceClass": "content_free_navigation_input",
+        "durableResource": false,
+        "resourceCreationPerformed": false,
+        "consumerOperation": "repository_tree_snapshot",
+        "copySemantics": "complete_ref_objects",
         "repositoryRef": {
             "kind": "git_repository",
             "id": repository_id,

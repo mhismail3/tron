@@ -13,6 +13,9 @@
 //! budget for navigation identifiers before optional audit detail. Unsupported
 //! names return a structured `catalog_search`
 //! recovery action rather than prose-only guidance.
+//! Focused `trace_get` output preserves the provider-safe record schema/version
+//! facts required by its semantic contract; raw provider and authority ids stay
+//! outside the projection.
 //! `budget`, `normalize`, `projection`, `spec`, and `types` own the production layers;
 //! sibling `tests` owns envelope-wide contract and budget regression coverage.
 

@@ -161,7 +161,7 @@ fn git_status_content(status: &str, result: &Value) -> String {
     let snapshot_refs = git_status_snapshot_refs_content(result);
 
     format!(
-        "git_status {status}: {path} on {branch} {dirty} (staged {staged}, unstaged {unstaged}, untracked {untracked}, conflicted {conflicted}; porcelain {porcelain}; refs {refs}; truncated {truncated}){snapshot_refs}"
+        "git_status {status}: {path} on {branch} {dirty} (staged {staged}, unstaged {unstaged}, untracked {untracked}, conflicted {conflicted}; porcelain {porcelain}; durable resource refs {refs}; truncated {truncated}){snapshot_refs}"
     )
 }
 
@@ -198,7 +198,7 @@ fn git_status_snapshot_refs_content(result: &Value) -> String {
         .and_then(safe_compact_json)
         .unwrap_or_else(|| "none".to_owned());
     format!(
-        "; repository_tree_snapshot input: copy complete ref objects from details.git.repository.repositoryTreeSnapshotInput; repositoryRef={repository_ref_json}, rootRef={root_ref_json}, treeObjectRef={tree_object_ref}, headRef={head_ref_json}; do not pass only .id values"
+        "; content-free navigation input (not a durable resource; no resource was created): invoke repository_tree_snapshot by copying complete ref objects from details.git.repository.repositoryTreeSnapshotInput; repositoryRef={repository_ref_json}, rootRef={root_ref_json}, treeObjectRef={tree_object_ref}, headRef={head_ref_json}; do not pass only .id values"
     )
 }
 
@@ -294,8 +294,11 @@ mod tests {
         assert!(text.contains("git_status ok: . on main clean"));
         assert!(text.contains("staged 0, unstaged 0, untracked 0, conflicted 0"));
         assert!(text.contains("porcelain empty"));
+        assert!(text.contains("durable resource refs 0"));
         assert!(text.contains("truncated false"));
-        assert!(text.contains("repository_tree_snapshot input"));
+        assert!(text.contains(
+            "content-free navigation input (not a durable resource; no resource was created)"
+        ));
         assert!(text.contains(
             r#"repositoryRef={"id":"git_repository:repo","kind":"git_repository","role":"repository"}"#
         ));

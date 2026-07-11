@@ -54,6 +54,22 @@ async fn status_reports_clean_repo() {
         value["repository"]["treeObjectRef"]
     );
     assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["referenceClass"],
+        "content_free_navigation_input"
+    );
+    assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["durableResource"],
+        false
+    );
+    assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["resourceCreationPerformed"],
+        false
+    );
+    assert_eq!(
+        value["repository"]["repositoryTreeSnapshotInput"]["consumerOperation"],
+        "repository_tree_snapshot"
+    );
+    assert_eq!(
         value["repository"]["repositoryTreeSnapshotInput"]["contentFree"],
         true
     );
