@@ -110,11 +110,10 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         &[
             "fetchServerSessions",
             "serverSessionIds",
+            "eventDB.sessions.getAll()",
             "mergeSessionData",
             "serverSessionToCached",
-            "getByOrigin(serverOrigin)",
-            "deleteBySession(local.id)",
-            "sessions.delete(local.id)",
+            "reconcileServerSnapshot",
             "loadSessions()",
             "seedProcessingStateFromSessions()",
         ],
@@ -124,6 +123,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "session.rootEventId = existing.rootEventId",
         "session.headEventId = existing.headEventId",
         "session.serverOrigin = serverOrigin",
+        "existingOrigin != serverOrigin",
     ] {
         assert!(
             event_store_sync.contains(required),
@@ -153,7 +153,6 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "fetchMissingAncestors",
         "engineClient.eventSync.getAncestors(parentId)",
         "insertIgnoringDuplicates",
-        "sessionHasDifferentOrigin",
     ] {
         assert!(
             synchronizer.contains(required),
@@ -265,7 +264,6 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         read_repo_file("packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift");
     for required in [
         "iOS-local source of truth for paired servers and active selection.",
-        "There is intentionally no migration from the removed server-side pairing",
         "fresh store starts empty",
         "serversKey",
         "activeIdKey",

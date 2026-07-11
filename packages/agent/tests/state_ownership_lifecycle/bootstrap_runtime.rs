@@ -23,7 +23,7 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "init_services",
             "build_server_runtime_context",
             "TronServer::new",
-            "register_server_domains_for_context",
+            "register_server_domains_for_runtime_context",
             "EngineStreamEventPump::new",
             "EngineRuntimeServices::start",
             "spawn_background_tasks",
