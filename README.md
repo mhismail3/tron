@@ -2843,10 +2843,11 @@ boundary, and emits a terminal live `agent.compaction` event with
 `success=false` so connected clients can retire any in-progress compaction
 indicator without reconstructing a false boundary. Manual compact and clear
 boundaries also correlate the capability invocation that created them;
-reconstruction removes the matching completion after the boundary removes its
-call, keeping resumed provider histories free of orphaned function outputs.
-Historical boundaries apply the same suppression only to an immediately
-adjacent matching completion.
+that correlation remains durable audit evidence. Reconstruction independently
+enforces the provider protocol: it emits a capability result only when the
+matching invocation survives in the immediately preceding assistant message.
+Compact and clear boundaries therefore cannot leave orphaned function outputs
+in resumed provider history.
 
 Compaction is internal prompt-loop infrastructure. It is observable through
 session events and primitive trace records, not through public `context::*`

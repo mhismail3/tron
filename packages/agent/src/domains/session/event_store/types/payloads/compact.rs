@@ -53,9 +53,9 @@ pub struct CompactBoundaryPayload {
     /// available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_control_snapshot_resource_id: Option<String>,
-    /// Internal capability invocation whose result is superseded by this
-    /// boundary. Automatic compactions have no provider invocation and omit
-    /// this field.
+    /// Internal capability invocation that caused this boundary, retained as
+    /// durable audit correlation. Reconstruction derives provider-valid result
+    /// pairing from the surviving assistant invocation blocks instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boundary_invocation_id: Option<String>,
 }

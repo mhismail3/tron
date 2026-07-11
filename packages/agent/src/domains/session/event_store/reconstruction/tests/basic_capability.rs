@@ -159,7 +159,7 @@ fn capability_result_reconstruction_uses_model_context_content() {
 }
 
 #[test]
-fn context_clear_suppresses_its_post_boundary_capability_result() {
+fn context_clear_drops_results_without_a_remaining_invocation() {
     let events = vec![
         session_start(),
         ev(
@@ -189,8 +189,7 @@ fn context_clear_suppresses_its_post_boundary_capability_result() {
             serde_json::json!({
                 "tokensBefore": 100,
                 "tokensAfter": 0,
-                "reason": "test",
-                "boundaryInvocationId": "call_clear"
+                "reason": "test"
             }),
         ),
         ev(
@@ -227,7 +226,7 @@ fn context_clear_suppresses_its_post_boundary_capability_result() {
 }
 
 #[test]
-fn legacy_compact_boundary_suppresses_adjacent_matching_result_only() {
+fn compact_boundary_drops_results_without_a_remaining_invocation() {
     let events = vec![
         session_start(),
         ev(
