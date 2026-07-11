@@ -40,7 +40,9 @@
 //! first. Interrupted action/epoch finalization is repairable through the same
 //! idempotency key, while the invocation that committed or recovered the
 //! boundary still ends its active turn. A replay of an already-finalized action
-//! does not stop an unrelated later turn.
+//! does not stop an unrelated later turn. Explicit payload action keys take
+//! precedence over the invocation-specific outer-ledger key so separate model
+//! calls address the same durable domain action.
 //! Automatic compaction similarly prepares its action first; a later automatic
 //! compaction reconciles any requested runtime action whose boundary already
 //! committed before creating another boundary.

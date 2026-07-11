@@ -10,11 +10,14 @@ pub(super) fn idempotency_key(
     payload: &Value,
     operation: &str,
 ) -> Result<String, CapabilityError> {
-    if let Some(key) = invocation.causal_context.idempotency_key.as_deref() {
-        return bounded_token("idempotencyKey", key);
+    if let Some(key) = optional_str(payload, "idempotencyKey")? {
+        return bounded_token_value(key);
     }
-    optional_str(payload, "idempotencyKey")?
-        .map(bounded_token_value)
+    invocation
+        .causal_context
+        .idempotency_key
+        .as_deref()
+        .map(|key| bounded_token("idempotencyKey", key))
         .transpose()?
         .ok_or_else(|| invalid(format!("{operation} requires an idempotencyKey")))
 }

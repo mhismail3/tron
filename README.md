@@ -2862,7 +2862,9 @@ and the next run reconstructs from the committed summary
 or empty epoch instead of issuing another provider request from stale context.
 The generic engine idempotency ledger intentionally re-enters context control
 for compact/clear caller-key replays so the domain can repair requested actions
-and avoid replaying an old turn-stop decision. Up-front invocation start rows
+and avoid replaying an old turn-stop decision. The explicit payload action key
+remains the stable domain identity across those invocation-specific outer-ledger
+entries. Up-front invocation start rows
 for later waves receive terminal `skipped` completion evidence without running
 their handlers. A later automatic compaction reconciles any requested runtime
 action whose boundary committed before action finalization.

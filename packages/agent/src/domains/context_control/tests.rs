@@ -328,11 +328,20 @@ async fn clear_creates_durable_action_epoch_and_provider_safe_action_projection(
         cleared["projection"]["result"]["currentAgentRunMustStop"],
         json!(true)
     );
-    let replay = clear_value_at(&fixture.deps, &clear_invocation, &payload, operation_at())
+    let replay_invocation = fixture.write_invocation(
+        "different-outer-call",
+        "context_control_clear",
+        payload.clone(),
+    );
+    let replay = clear_value_at(&fixture.deps, &replay_invocation, &payload, operation_at())
         .await
         .expect("clear context replay");
     assert_eq!(replay["idempotentReplay"], json!(true));
     assert_eq!(replay["boundaryCommittedThisInvocation"], json!(false));
+    assert_eq!(
+        replay["contextControlActionResourceId"],
+        cleared["contextControlActionResourceId"]
+    );
 
     let action_id = cleared["contextControlActionResourceId"]
         .as_str()
