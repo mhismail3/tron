@@ -1854,10 +1854,12 @@ fetched-at time, status, captured-byte SHA-256, bounded body metadata, parser
 version, matched user-agent, allow/deny decision, relevant matched rule,
 sitemap refs as metadata only, authority refs, trace/replay refs, redacted
 display URLs, an exact canonical target URL fingerprint, and idempotency/cache
-refs. The model-facing `web_robots_check` result names the copy-ready
-`webRobotsPolicyResourceId` and `webRobotsPolicyVersionId`; callers use the
-version as `expectedWebRobotsPolicyVersionId` when a later `web_fetch` must be
-robots-gated. The model-facing web schemas do not ask the agent for
+refs. Fresh and idempotently replayed model-facing `web_robots_check` results
+name the explicit allow/deny decision and reason, bounded body and redirect
+facts, sanitized target URL, and copy-ready `webRobotsPolicyResourceId` and
+`webRobotsPolicyVersionId`; callers use the version as
+`expectedWebRobotsPolicyVersionId` when a later `web_fetch` must be robots-gated.
+The model-facing web schemas do not ask the agent for
 `idempotencyKey`; web replay/idempotency is supplied by trusted runtime context
 and stored as bounded evidence. The accepted Slice 8F foundation lets callers
 supply robots evidence when they need policy-bound fetch proof, and when
@@ -1870,9 +1872,11 @@ construction. Robots-linked fetch grants add only the needed `web.read`,
 `resource.read`, and `kind:web_robots_policy` authority when both robots fields
 are non-empty strings; `web_fetch` and `web_robots_check` reject wildcard,
 `state.*`, or `agent_state`-inherited grants at the kernel authorization
-boundary. Source payloads, `web_source_list`, and
-`web_source_inspect` expose bounded `robotsPolicyRefs` without robots body,
-target fingerprints, or sitemap content. It fetches only `robots.txt`; sitemap
+boundary. Source payloads, `web_source_list`, and `web_source_inspect` expose
+sanitized requested/final URLs, content type, bounded snippet and byte counts,
+truncation/extraction/redirect facts, and bounded `robotsPolicyRefs` without
+captured hashes, raw bodies, cache keys, target fingerprints, authority,
+idempotency evidence, or sitemap content. It fetches only `robots.txt`; sitemap
 traversal, search providers, browser automation, crawling, login/cookies,
 credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
 side channels, native iOS web UI, and public `/engine` web API expansion remain

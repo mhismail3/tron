@@ -34,6 +34,15 @@ async fn web_robots_check_fetches_only_origin_robots_and_records_allow_evidence(
         .await;
     let web = &value["details"]["web"];
     assert_eq!(web["operation"], json!("web_robots_check"));
+    assert_eq!(web["policy"]["decision"], json!("allow"));
+    assert_eq!(web["policy"]["reason"], json!("matched_robots_rule"));
+    assert_eq!(web["bodyEvidence"]["robotsBytesTruncated"], json!(false));
+    assert_eq!(web["redirects"]["observedRedirects"], json!(0));
+    assert!(
+        web["targetUrl"]
+            .as_str()
+            .is_some_and(|url| !url.contains("hide-me"))
+    );
     let resource_id = web["webRobotsPolicyResourceId"]
         .as_str()
         .expect("resource id");
@@ -482,6 +491,10 @@ async fn web_robots_check_replays_idempotently_without_duplicate_resource() {
     );
     assert_eq!(second["cache"]["hit"], json!(true));
     assert_eq!(second["streamCursor"], json!(0));
+    assert_eq!(first["policy"]["decision"], json!("allow"));
+    assert_eq!(second["policy"], first["policy"]);
+    assert_eq!(second["bodyEvidence"], first["bodyEvidence"]);
+    assert_eq!(second["redirects"], first["redirects"]);
     let resources = ctx
         .engine_host
         .list_resources(ListResources {

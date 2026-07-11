@@ -24,9 +24,9 @@ mod parser;
 mod request;
 
 use evidence::{
-    bounded_utf8, existing_robots_check, origin_string, publish_robots_event,
-    read_bounded_response, replay_refs, robots_resource_id, robots_result, robots_url_for,
-    sanitize_url_for_evidence, session_resource_scope, sha256_hex, target_path,
+    bounded_utf8, existing_robots_check, origin_string, provider_safe_robots_result_extra,
+    publish_robots_event, read_bounded_response, replay_refs, robots_resource_id, robots_result,
+    robots_url_for, sanitize_url_for_evidence, session_resource_scope, sha256_hex, target_path,
     target_url_fingerprint, trace_refs,
 };
 use parser::{decision_for_status, parse_robots};
@@ -179,6 +179,7 @@ pub(crate) async fn web_robots_check_value(
         },
         "revision": 1
     });
+    let provider_safe_extra = provider_safe_robots_result_extra(&record);
     let resource = deps
         .engine_host
         .create_resource(CreateResource {
@@ -204,7 +205,12 @@ pub(crate) async fn web_robots_check_value(
         .await
         .map_err(engine_error)?;
     let cursor = publish_robots_event(deps, invocation, &resource).await?;
-    Ok(robots_result(&resource, cursor.0, false, None))
+    Ok(robots_result(
+        &resource,
+        cursor.0,
+        false,
+        provider_safe_extra,
+    ))
 }
 
 async fn inspect_robots_grant(

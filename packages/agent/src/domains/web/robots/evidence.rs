@@ -40,7 +40,41 @@ pub(super) async fn existing_robots_check(
             "web_robots_check idempotency resource is outside the current session scope",
         ));
     }
-    Ok(Some(robots_result(&inspection.resource, 0, true, None)))
+    let extra = current_payload(&inspection).and_then(provider_safe_robots_result_extra);
+    Ok(Some(robots_result(&inspection.resource, 0, true, extra)))
+}
+
+fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Option<&Value> {
+    let current = inspection.resource.current_version_id.as_deref()?;
+    inspection
+        .versions
+        .iter()
+        .find(|version| version.version_id == current)
+        .map(|version| &version.payload)
+}
+
+pub(super) fn provider_safe_robots_result_extra(record: &Value) -> Option<Value> {
+    let target_url = record.get("targetUrl")?.as_str()?;
+    Some(json!({
+        "targetUrl": target_url,
+        "httpStatus": record.get("status").cloned().unwrap_or(Value::Null),
+        "missing": record.get("missing").cloned().unwrap_or(Value::Null),
+        "policy": {
+            "decision": record.pointer("/policy/decision").cloned().unwrap_or(Value::Null),
+            "reason": record.pointer("/policy/reason").cloned().unwrap_or(Value::Null)
+        },
+        "bodyEvidence": {
+            "capturedBytes": record.pointer("/bodyEvidence/capturedBytes").cloned().unwrap_or(Value::Null),
+            "maxRobotsBytes": record.pointer("/bodyEvidence/maxRobotsBytes").cloned().unwrap_or(Value::Null),
+            "robotsBytesTruncated": record.pointer("/bodyEvidence/robotsBytesTruncated").cloned().unwrap_or(Value::Null),
+            "malformedUtf8": record.pointer("/bodyEvidence/malformedUtf8").cloned().unwrap_or(Value::Null)
+        },
+        "redirects": {
+            "maxRedirects": record.pointer("/redirects/maxRedirects").cloned().unwrap_or(Value::Null),
+            "observedRedirects": record.pointer("/redirects/observedRedirects").cloned().unwrap_or(Value::Null),
+            "finalUrlChanged": record.pointer("/redirects/finalUrlChanged").cloned().unwrap_or(Value::Null)
+        }
+    }))
 }
 
 pub(super) struct BoundedBody {

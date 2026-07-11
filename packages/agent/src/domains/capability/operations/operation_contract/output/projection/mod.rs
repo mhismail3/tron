@@ -105,11 +105,11 @@ pub(super) fn project_evidence(
             OutputProfile::Governance if operation == "capability_binding_cockpit_overview" => {
                 project_capability_cockpit_evidence(details)
             }
+            OutputProfile::Web => project_web_evidence(operation, details),
             OutputProfile::Summary
             | OutputProfile::Filesystem
             | OutputProfile::Runtime
-            | OutputProfile::Governance
-            | OutputProfile::Web => project_metadata_operation_evidence(operation, details),
+            | OutputProfile::Governance => project_metadata_operation_evidence(operation, details),
         }?
     };
     if let (Value::Object(projected), Some(outcome)) =
@@ -118,6 +118,296 @@ pub(super) fn project_evidence(
         projected.insert("engineOutcome".to_owned(), project_engine_outcome(outcome));
     }
     Some(projected)
+}
+
+fn project_web_evidence(operation: &str, details: &Value) -> Option<Value> {
+    let web = details.get("web")?;
+    let mut projected = Map::new();
+    copy_key(&mut projected, details, "primitiveOperation");
+    copy_key(&mut projected, details, "status");
+    projected.insert("operation".to_owned(), json!(operation));
+
+    let mut web_projected = Map::new();
+    for key in ["schemaVersion", "operation"] {
+        copy_key(&mut web_projected, web, key);
+    }
+    match operation {
+        "web_robots_check" => {
+            for key in [
+                "targetUrl",
+                "httpStatus",
+                "missing",
+                "webRobotsPolicyResourceId",
+                "webRobotsPolicyVersionId",
+            ] {
+                copy_key(&mut web_projected, web, key);
+            }
+            copy_web_object(&mut web_projected, web, "policy", &["decision", "reason"]);
+            copy_web_object(
+                &mut web_projected,
+                web,
+                "bodyEvidence",
+                &[
+                    "capturedBytes",
+                    "maxRobotsBytes",
+                    "robotsBytesTruncated",
+                    "malformedUtf8",
+                ],
+            );
+            copy_web_object(
+                &mut web_projected,
+                web,
+                "redirects",
+                &["maxRedirects", "observedRedirects", "finalUrlChanged"],
+            );
+            copy_web_object(&mut web_projected, web, "cache", &["hit", "resourceId"]);
+            copy_web_collection(
+                &mut web_projected,
+                web,
+                "resourceRefs",
+                project_web_reference,
+            );
+        }
+        "web_fetch" | "web_source_archive" => {
+            for key in [
+                "webSourceResourceId",
+                "webSourceVersionId",
+                "webRobotsPolicyResourceId",
+                "webRobotsPolicyVersionId",
+            ] {
+                copy_key(&mut web_projected, web, key);
+            }
+            copy_web_object(&mut web_projected, web, "cache", &["hit", "resourceId"]);
+            copy_web_collection(
+                &mut web_projected,
+                web,
+                "resourceRefs",
+                project_web_reference,
+            );
+            copy_web_collection(
+                &mut web_projected,
+                web,
+                "robotsPolicyRefs",
+                project_web_reference,
+            );
+        }
+        "web_source_inspect" => {
+            if let Some(source) = web.get("source") {
+                web_projected.insert("source".to_owned(), project_web_source(source));
+            }
+            copy_web_object(
+                &mut web_projected,
+                web,
+                "network",
+                &["performed", "requiredPolicy"],
+            );
+        }
+        "web_source_list" => {
+            if let Some(sources) = web.get("sources").and_then(Value::as_array) {
+                web_projected.insert(
+                    "sources".to_owned(),
+                    bounded_web_collection(sources, project_web_source),
+                );
+            }
+            copy_key(&mut web_projected, web, "limits");
+            copy_web_object(
+                &mut web_projected,
+                web,
+                "network",
+                &["performed", "requiredPolicy"],
+            );
+        }
+        _ => return project_metadata_operation_evidence(operation, details),
+    }
+    projected.insert("web".to_owned(), Value::Object(web_projected));
+    Some(Value::Object(projected))
+}
+
+fn project_web_source(source: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "requestedUrl",
+        "finalUrl",
+        "state",
+        "fetchedAt",
+        "status",
+        "contentType",
+        "title",
+        "capturedBytes",
+        "outputTextBytes",
+        "snippet",
+    ] {
+        copy_key(&mut projected, source, key);
+    }
+    copy_web_object(
+        &mut projected,
+        source,
+        "byteEvidence",
+        &[
+            "capturedBytes",
+            "maxResponseBytes",
+            "responseBytesTruncated",
+        ],
+    );
+    copy_web_object(
+        &mut projected,
+        source,
+        "textEvidence",
+        &[
+            "snippet",
+            "snippetBytes",
+            "maxSnippetBytes",
+            "snippetTruncated",
+            "storedTextBytes",
+            "storedMaxOutputBytes",
+            "storedOutputTextTruncated",
+            "extractedTextBytes",
+            "extractedTextTruncated",
+            "binaryBodyOmitted",
+        ],
+    );
+    copy_web_object(
+        &mut projected,
+        source,
+        "extraction",
+        &[
+            "mode",
+            "extractorId",
+            "extractorVersion",
+            "title",
+            "titleBytes",
+            "maxTitleBytes",
+            "titleTruncated",
+            "extractedTextBytes",
+            "extractedTextTruncated",
+        ],
+    );
+    copy_web_object(
+        &mut projected,
+        source,
+        "truncation",
+        &[
+            "responseBytesTruncated",
+            "maxResponseBytes",
+            "storedOutputTextTruncated",
+            "storedMaxOutputBytes",
+            "binaryBodyOmitted",
+            "snippetBytes",
+            "maxPreviewBytes",
+            "snippetTruncated",
+        ],
+    );
+    copy_web_object(
+        &mut projected,
+        source,
+        "redaction",
+        &["applied", "replacementCount", "policy"],
+    );
+    copy_web_object(
+        &mut projected,
+        source,
+        "redirects",
+        &["maxRedirects", "observedRedirects", "finalUrlChanged"],
+    );
+    copy_web_object(
+        &mut projected,
+        source,
+        "archive",
+        &["state", "reason", "archivedAt"],
+    );
+    for key in [
+        "traceRefs",
+        "replayRefs",
+        "robotsPolicyRefs",
+        "resourceRefs",
+    ] {
+        copy_web_collection(&mut projected, source, key, project_web_reference);
+    }
+    if let Some(reference) = source.pointer("/resourceRefs/0") {
+        if let Some(resource_id) = reference.get("resourceId") {
+            projected.insert(
+                "webSourceResourceId".to_owned(),
+                bounded_model_context_value(resource_id),
+            );
+        }
+        if let Some(version_id) = reference.get("versionId") {
+            projected.insert(
+                "webSourceVersionId".to_owned(),
+                bounded_model_context_value(version_id),
+            );
+        }
+        if let (Some(resource_id), Some(version_id)) = (
+            reference.get("resourceId").and_then(Value::as_str),
+            reference.get("versionId").and_then(Value::as_str),
+        ) {
+            projected.insert(
+                "inspectArguments".to_owned(),
+                json!({
+                    "operation": "web_source_inspect",
+                    "webSourceResourceId": resource_id,
+                    "webSourceVersionId": version_id
+                }),
+            );
+        }
+    }
+    Value::Object(projected)
+}
+
+fn copy_web_object(target: &mut Map<String, Value>, source: &Value, key: &str, fields: &[&str]) {
+    let Some(object) = source.get(key) else {
+        return;
+    };
+    let mut projected = Map::new();
+    for field in fields {
+        copy_key(&mut projected, object, field);
+    }
+    if !projected.is_empty() {
+        target.insert(key.to_owned(), Value::Object(projected));
+    }
+}
+
+fn project_web_reference(reference: &Value) -> Value {
+    let mut projected = Map::new();
+    for key in [
+        "role",
+        "kind",
+        "resourceId",
+        "versionId",
+        "schemaId",
+        "lifecycle",
+        "traceId",
+        "invocationId",
+        "functionId",
+    ] {
+        copy_key(&mut projected, reference, key);
+    }
+    Value::Object(projected)
+}
+
+fn copy_web_collection(
+    target: &mut Map<String, Value>,
+    source: &Value,
+    key: &str,
+    project: fn(&Value) -> Value,
+) {
+    if let Some(items) = source.get(key).and_then(Value::as_array) {
+        target.insert(key.to_owned(), bounded_web_collection(items, project));
+    }
+}
+
+fn bounded_web_collection(items: &[Value], project: fn(&Value) -> Value) -> Value {
+    let projected = items
+        .iter()
+        .take(MODEL_CONTEXT_ARRAY_MAX_ITEMS)
+        .map(project)
+        .collect::<Vec<_>>();
+    json!({
+        "total": items.len(),
+        "returned": projected.len(),
+        "truncated": items.len() > MODEL_CONTEXT_ARRAY_MAX_ITEMS,
+        "omitted": items.len().saturating_sub(MODEL_CONTEXT_ARRAY_MAX_ITEMS),
+        "items": projected
+    })
 }
 
 fn project_engine_outcome(outcome: &Value) -> Value {

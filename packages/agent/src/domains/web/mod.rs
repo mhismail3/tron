@@ -50,6 +50,12 @@
 //! target fingerprint for exact fetch linkage, records sitemap lines as
 //! metadata only, and must not become search, crawl, browser, or login
 //! behavior.
+//! Provider output is model-first and explicit: fresh and replayed robots checks
+//! return the same allow/deny reason and bounded byte/redirect facts, while
+//! source inspection returns only sanitized URLs, bounded citation text,
+//! content type, truncation, extraction, and custody refs. Stored hashes, body
+//! previews, cache keys, authority, and idempotency evidence never cross that
+//! projection boundary.
 //! The adapter seam for future module replacement is exact network authority
 //! plus robots/source parity: a replacement must preserve source and
 //! robots-policy evidence, provider-safe refs, replay/idempotency evidence,

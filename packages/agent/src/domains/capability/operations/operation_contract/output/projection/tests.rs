@@ -1967,7 +1967,7 @@ fn extract_result_content_projects_safe_job_terminal_evidence() {
 }
 
 #[test]
-fn extract_result_content_projects_canonical_metadata_without_an_operation_allowlist() {
+fn extract_result_content_projects_bounded_web_source_list_contract() {
     let exec = make_exec_result_with_details(
         CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             "Listed 1 web source record.",
@@ -1975,13 +1975,26 @@ fn extract_result_content_projects_canonical_metadata_without_an_operation_allow
         Some(json!({
             "primitiveOperation": "web_source_list",
             "status": "ok",
-            "sources": [{
-                "kind": "web_source_record",
-                "status": "active",
-                "summary": "Provider-safe source evidence",
-                "absolutePath": "/Users/example/private/source.html",
-                "authorityGrantId": "grant_secret"
-            }]
+            "web": {
+                "schemaVersion": "tron.web_source.v1",
+                "operation": "web_source_list",
+                "sources": [{
+                    "requestedUrl": "https://example.com/start",
+                    "finalUrl": "https://example.com/final",
+                    "status": 200,
+                    "contentType": "text/plain",
+                    "snippet": "Provider-safe source evidence",
+                    "resourceRefs": [{
+                        "kind": "web_source",
+                        "resourceId": "web_source:test",
+                        "versionId": "ver_test"
+                    }],
+                    "absolutePath": "/Users/example/private/source.html",
+                    "authorityGrantId": "grant_secret"
+                }],
+                "limits": {"returned": 1, "truncated": false},
+                "network": {"performed": false, "requiredPolicy": "none"}
+            }
         })),
     );
 
@@ -1990,9 +2003,129 @@ fn extract_result_content_projects_canonical_metadata_without_an_operation_allow
     };
     assert!(text.contains("web_source_list"));
     assert!(text.contains("Provider-safe source evidence"));
-    assert!(text.contains("web_source_record"));
+    assert!(text.contains("web_source:test"));
+    assert!(text.contains("https://example.com/final"));
     assert!(!text.contains("/Users/example/private/source.html"));
     assert!(!text.contains("grant_secret"));
+}
+
+#[test]
+fn extract_result_content_projects_explicit_robots_decision_without_private_evidence() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text("Checked robots policy")]),
+        Some(json!({
+            "primitiveOperation": "web_robots_check",
+            "status": "ok",
+            "web": {
+                "schemaVersion": "tron.web_robots_policy.v1",
+                "operation": "web_robots_check",
+                "targetUrl": "https://example.com/articles?token=[REDACTED]",
+                "httpStatus": 200,
+                "missing": false,
+                "policy": {"decision": "allow", "reason": "no_matching_disallow_rule"},
+                "bodyEvidence": {
+                    "capturedBytes": 128,
+                    "maxRobotsBytes": 65536,
+                    "robotsBytesTruncated": false,
+                    "malformedUtf8": false,
+                    "sha256": "private-hash"
+                },
+                "redirects": {"maxRedirects": 3, "observedRedirects": 0, "finalUrlChanged": false},
+                "webRobotsPolicyResourceId": "web_robots_policy:test",
+                "webRobotsPolicyVersionId": "ver_test",
+                "resourceRefs": [{
+                    "kind": "web_robots_policy",
+                    "resourceId": "web_robots_policy:test",
+                    "versionId": "ver_test",
+                    "role": "robots_policy"
+                }],
+                "authority": {"authorityGrantId": "grant_secret"},
+                "boundedBody": {"preview": "private robots body"},
+                "idempotency": {"key": "secret-key"}
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "web.policy.decision"), "allow");
+    assert_eq!(
+        fact(&envelope, "web.policy.reason"),
+        "no_matching_disallow_rule"
+    );
+    assert_eq!(fact(&envelope, "web.bodyEvidence.capturedBytes"), 128);
+    assert_eq!(
+        fact(&envelope, "web.bodyEvidence.robotsBytesTruncated"),
+        false
+    );
+    let text = envelope_text(&envelope);
+    assert!(text.contains("https://example.com/articles?token=[REDACTED]"));
+    assert!(!text.contains("private-hash"));
+    assert!(!text.contains("grant_secret"));
+    assert!(!text.contains("private robots body"));
+    assert!(!text.contains("secret-key"));
+}
+
+#[test]
+fn extract_result_content_projects_bounded_web_source_custody_facts() {
+    let exec = make_exec_result_with_details(
+        CapabilityResultBody::Blocks(vec![CapabilityResultContent::text("Inspected web source")]),
+        Some(json!({
+            "primitiveOperation": "web_source_inspect",
+            "status": "ok",
+            "web": {
+                "operation": "web_source_inspect",
+                "source": {
+                    "requestedUrl": "https://example.com/start",
+                    "finalUrl": "https://example.com/final",
+                    "status": 200,
+                    "contentType": "text/plain",
+                    "byteEvidence": {
+                        "capturedBytes": 128,
+                        "maxResponseBytes": 128,
+                        "responseBytesTruncated": true,
+                        "sha256": "private-hash"
+                    },
+                    "textEvidence": {
+                        "snippet": "bounded provider-safe citation",
+                        "snippetBytes": 30,
+                        "maxSnippetBytes": 4000,
+                        "snippetTruncated": false,
+                        "storedOutputTextTruncated": true
+                    },
+                    "redirects": {"maxRedirects": 3, "observedRedirects": 1, "finalUrlChanged": true},
+                    "resourceRefs": [{"kind": "web_source", "resourceId": "web_source:test", "versionId": "ver_test"}],
+                    "cache": {"cacheKey": "private-cache-key"},
+                    "authority": {"authorityGrantId": "grant_secret"},
+                    "boundedBody": {"preview": "raw page body"}
+                },
+                "network": {"performed": false, "requiredPolicy": "none"}
+            }
+        })),
+    );
+
+    let envelope = provider_envelope(&exec);
+    assert_eq!(fact(&envelope, "web.source.status"), 200);
+    assert_eq!(fact(&envelope, "web.source.contentType"), "text/plain");
+    assert_eq!(
+        fact(&envelope, "web.source.byteEvidence.capturedBytes"),
+        128
+    );
+    assert_eq!(
+        fact(&envelope, "web.source.byteEvidence.responseBytesTruncated"),
+        true
+    );
+    assert_eq!(
+        fact(&envelope, "web.source.textEvidence.snippet"),
+        "bounded provider-safe citation"
+    );
+    assert_eq!(fact(&envelope, "web.source.redirects.observedRedirects"), 1);
+    let text = envelope_text(&envelope);
+    assert!(text.contains("https://example.com/final"));
+    assert!(text.contains("web_source:test"));
+    assert!(!text.contains("private-hash"));
+    assert!(!text.contains("private-cache-key"));
+    assert!(!text.contains("grant_secret"));
+    assert!(!text.contains("raw page body"));
 }
 
 #[test]
