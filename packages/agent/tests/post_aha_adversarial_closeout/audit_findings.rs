@@ -312,7 +312,7 @@ fn ios_transport_and_chat_tests_mirror_production_owners() {
 
 #[test]
 fn rust_progressive_docs_and_loc_split_plans_are_current() {
-    let scorecard = read_repo_file(SCORECARD_PATH);
+    let budget_scorecard = read_repo_file(HRA_SCORECARD_PATH);
     let mut hits = Vec::new();
     for file in [
         "packages/agent/src/app/mod.rs",
@@ -347,8 +347,9 @@ fn rust_progressive_docs_and_loc_split_plans_are_current() {
             }
             let loc = source_line_count(&file);
             if loc >= 890
-                && !(scorecard.contains(&format!("| `{file}` | {loc} |"))
-                    && scorecard.contains("concrete split plan"))
+                && !budget_scorecard.lines().any(|line| {
+                    line.contains(&format!("| `{file}` |")) && line.contains("| accepted_budget |")
+                })
             {
                 hits.push(format!(
                     "{file}: {loc} LOC lacks current concrete split plan row"

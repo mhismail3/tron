@@ -329,8 +329,10 @@ fn paths_from_invocation(invocation: &Invocation) -> Result<Vec<PathBuf>> {
     .map(|raw| resolve_invocation_path(invocation, raw))
     .collect::<Result<Vec<_>>>()?;
 
-    if is_capability_execute(invocation) {
-        paths.push(capability_working_directory(invocation)?);
+    if is_capability_execute(invocation)
+        && let Some(working_directory) = capability_working_directory_if_present(invocation)?
+    {
+        paths.push(working_directory);
     }
     Ok(paths)
 }
@@ -353,6 +355,18 @@ fn capability_working_directory(invocation: &Invocation) -> Result<PathBuf> {
             )
         })?;
     crate::shared::foundation::paths::normalize_working_directory(raw)
+        .map_err(EngineError::PolicyViolation)
+}
+
+fn capability_working_directory_if_present(invocation: &Invocation) -> Result<Option<PathBuf>> {
+    let Some(raw) = invocation
+        .causal_context
+        .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
+    else {
+        return Ok(None);
+    };
+    crate::shared::foundation::paths::normalize_working_directory(raw)
+        .map(Some)
         .map_err(EngineError::PolicyViolation)
 }
 

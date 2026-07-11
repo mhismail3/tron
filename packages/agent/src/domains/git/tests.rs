@@ -23,7 +23,6 @@ use super::branch_start::{
     create_branch_and_move_head_with_runner,
 };
 use super::service::{self, diff_value, status_value};
-use crate::domains::capability::contract;
 use crate::engine::{
     GIT_BRANCH_START_KIND, GIT_BRANCH_START_SCHEMA_ID, GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID,
     GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID, builtin_resource_type_definitions,
@@ -622,9 +621,8 @@ async fn execute_git_branch_inventory_uses_single_provider_tool_boundary() {
 }
 
 #[test]
-fn model_schema_exposes_index_only_git_operations() {
-    let metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
-    let schema_text = metadata["capabilitySchema"]["parameters"].to_string();
+fn canonical_host_schema_exposes_index_only_git_operations() {
+    let schema_text = crate::domains::capability::operation_host_request_schema().to_string();
     assert!(schema_text.contains("git_status"));
     assert!(schema_text.contains("git_diff"));
     assert!(schema_text.contains("git_branch_inventory"));
@@ -687,8 +685,7 @@ fn git_commit_is_execute_only_not_direct_git_domain_contract() {
         "Slice 6E git_branch_inventory must be exposed only through capability::execute"
     );
 
-    let execute_metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
-    let execute_schema = execute_metadata["capabilitySchema"]["parameters"].to_string();
+    let execute_schema = crate::domains::capability::operation_host_request_schema().to_string();
     assert!(execute_schema.contains("git_branch_inventory"));
     assert!(execute_schema.contains("git_commit"));
     assert!(execute_schema.contains("git_branch_start"));
@@ -1457,7 +1454,7 @@ async fn execute_git_branch_start_rejects_stale_head_existing_and_invalid_branch
     assert!(existing.contains("existing branch"));
 
     for (suffix, branch_name, needle) in [
-        ("empty", "", "branchName must not be empty"),
+        ("empty", "", "$.branchName: string shorter than minLength 1"),
         ("traversal", "../feature", "safe local branch name"),
         ("refs", "refs/heads/escape", "safe local branch name"),
         ("lock", "feature/name.lock", "invalid path component"),
@@ -1633,7 +1630,7 @@ async fn execute_git_branch_start_rejects_bad_context_and_missing_required_field
                 "reason": "",
                 "idempotencyKey": "git-branch-start-empty-reason"
             }),
-            "reason must not be empty",
+            "$.reason: string shorter than minLength 1",
         ),
         (
             "git-branch-start-missing-payload-idempotency",
@@ -1643,7 +1640,7 @@ async fn execute_git_branch_start_rejects_bad_context_and_missing_required_field
                 "expectedHead": head,
                 "reason": "test missing idempotency payload"
             }),
-            "missing idempotencyKey",
+            "$.idempotencyKey: required field is missing",
         ),
         (
             "git-branch-start-absolute",
@@ -1798,7 +1795,7 @@ async fn execute_git_stage_and_unstage_reject_missing_and_empty_paths() {
     )
     .await;
     assert!(
-        missing_stage.contains("missing path"),
+        missing_stage.contains("$.path: required field is missing"),
         "unexpected missing stage path error: {missing_stage}"
     );
 
@@ -1843,7 +1840,7 @@ async fn execute_git_stage_and_unstage_reject_missing_and_empty_paths() {
     )
     .await;
     assert!(
-        missing_unstage.contains("missing path"),
+        missing_unstage.contains("$.path: required field is missing"),
         "unexpected missing unstage path error: {missing_unstage}"
     );
 
@@ -1861,7 +1858,7 @@ async fn execute_git_stage_and_unstage_reject_missing_and_empty_paths() {
     )
     .await;
     assert!(
-        empty_unstage.contains("path must not be empty"),
+        empty_unstage.contains("$.path: string shorter than minLength 1"),
         "unexpected empty unstage path error: {empty_unstage}"
     );
     assert_eq!(
@@ -2414,7 +2411,7 @@ async fn execute_git_commit_rejects_bad_context_path_message_and_reason() {
                 "reason": "test empty message",
                 "idempotencyKey": "git-commit-empty-message"
             }),
-            "message must not be empty",
+            "$.message: string shorter than minLength 1",
         ),
         (
             "git-commit-empty-reason",
@@ -2426,7 +2423,7 @@ async fn execute_git_commit_rejects_bad_context_path_message_and_reason() {
                 "reason": "",
                 "idempotencyKey": "git-commit-empty-reason"
             }),
-            "reason must not be empty",
+            "$.reason: string shorter than minLength 1",
         ),
     ] {
         let error = execute_git_error(&ctx, repo.path(), key, payload).await;

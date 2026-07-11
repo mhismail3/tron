@@ -79,7 +79,8 @@ async fn state_runtime_grants_are_explicit_state_only() {
                 "operation": operation,
                 "namespace": "runtime-grant",
                 "key": "item",
-                "value": {"ok": true}
+                "value": {"ok": true},
+                "idempotencyKey": "state-set-runtime-grant"
             }),
             "state_list" => json!({
                 "operation": operation,
@@ -985,7 +986,11 @@ async fn canonical_exact_contracts_reach_runtime_grant_derivation() {
             "jobResourceId": "job_process:test",
             "idempotencyKey": "canonical-job-cancel"
         }),
-        json!({"operation": "process_run", "command": "printf test"}),
+        json!({
+            "operation": "process_run",
+            "command": "printf test",
+            "idempotencyKey": "canonical-process-run"
+        }),
         json!({"operation": "trace_list"}),
         json!({"operation": "trace_get", "traceRecordId": "trace_record:test"}),
     ];

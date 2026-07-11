@@ -24,7 +24,7 @@ fn replay_manifest_builder_and_hashing_are_wired() {
         "session::replay_manifest",
         "session_replay_manifest_value",
         "\"replay_manifest\" => |invocation, deps|",
-        "operation == \"replay_manifest\"",
+        "operation_id == OperationId::ReplayManifest",
         "replay_manifest must not mutate trace records",
     ] {
         assert!(

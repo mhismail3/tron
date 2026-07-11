@@ -33,6 +33,9 @@
 //! INVARIANT: a child grant may carry empty resource-kind and selector lists
 //! when its capability needs no resource authority. Empty lists mean no
 //! resource access; the engine never invents a placeholder kind or wildcard.
+//! INVARIANT: pathless execute operations do not require working-directory
+//! metadata. When metadata or a relative path is present, authorization
+//! normalizes it and enforces canonical file-root containment before dispatch.
 
 use std::collections::BTreeMap;
 use std::path::Path;

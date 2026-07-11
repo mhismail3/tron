@@ -164,7 +164,7 @@ fn procedural_operations_are_read_only_execute_schema_values_without_activation_
     let metadata = crate::domains::capability::contract::model_metadata(
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
     );
-    let schema_text = metadata["capabilitySchema"]["parameters"].to_string();
+    let schema_text = crate::domains::capability::operation_host_request_schema().to_string();
     assert!(schema_text.contains("procedural_state_list"));
     assert!(schema_text.contains("procedural_state_inspect"));
     assert!(schema_text.contains("proceduralKind"));

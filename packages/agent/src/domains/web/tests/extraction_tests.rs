@@ -127,8 +127,7 @@ async fn web_fetch_bounds_and_redacts_html_titles_before_source_exposure() {
     let inspected = read
         .invoke_ok(json!({
             "operation": "web_source_inspect",
-            "webSourceResourceId": resource_id,
-            "idempotencyKey": "web-fetch-html-title-safe-inspect"
+            "webSourceResourceId": resource_id
         }))
         .await;
     let inspected_json = serde_json::to_string(&inspected).expect("inspect json");
@@ -140,8 +139,7 @@ async fn web_fetch_bounds_and_redacts_html_titles_before_source_exposure() {
 
     let listed = read
         .invoke_ok(json!({
-            "operation": "web_source_list",
-            "idempotencyKey": "web-fetch-html-title-safe-list"
+            "operation": "web_source_list"
         }))
         .await;
     let listed_json = serde_json::to_string(&listed).expect("list json");

@@ -2,8 +2,9 @@ use serde_json::{Value, json};
 
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, DeriveGrant,
-    EngineResourceScope, FunctionId, Invocation, InvocationResult, RiskLevel, StreamActorScope,
-    StreamCursor, TraceId, VisibilityScope, WorkerId,
+    EngineResourceScope, FunctionId, Invocation, InvocationResult,
+    RUNTIME_METADATA_WORKING_DIRECTORY, RiskLevel, StreamActorScope, StreamCursor, TraceId,
+    VisibilityScope, WorkerId,
 };
 use crate::shared::protocol::memory::MEMORY_SCHEMA_VERSION;
 use crate::shared::server::context::ServerRuntimeContext;
@@ -1765,6 +1766,7 @@ fn agent_context(trace_id: &str, grant_id: AuthorityGrantId) -> CausalContext {
     )
     .with_session_id("memory-session")
     .with_workspace_id("memory-workspace")
+    .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/private/tmp")
 }
 
 fn workspace_context(trace_id: &str) -> CausalContext {

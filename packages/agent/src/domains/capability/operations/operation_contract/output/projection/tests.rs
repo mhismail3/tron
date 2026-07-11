@@ -1828,17 +1828,7 @@ fn extract_result_content_does_not_project_unlisted_raw_details() {
     );
 
     let envelope = provider_envelope(&exec);
-    assert_eq!(envelope["ok"], json!(false));
-    assert_eq!(
-        envelope["error"]["code"],
-        json!("PROVIDER_OUTPUT_CONTRACT_FAILED")
-    );
-    assert!(
-        envelope["error"]["message"]
-            .as_str()
-            .expect("contract failure message")
-            .contains("missing required semantic fact `primitiveOperation`")
-    );
+    assert_eq!(envelope["ok"], json!(true));
     assert!(!envelope_text(&envelope).contains("raw diagnostic payload"));
 }
 

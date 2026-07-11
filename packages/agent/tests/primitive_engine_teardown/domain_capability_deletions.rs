@@ -305,7 +305,14 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         );
     }
 
-    let contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
+    let contract = format!(
+        "{}\n{}",
+        read_repo_file("packages/agent/src/domains/capability/contract.rs"),
+        read_repo_source_trees(&[
+            "packages/agent/src/domains/capability/operations/operation_contract/mod.rs",
+            "packages/agent/src/domains/capability/operations/operation_contract",
+        ])
+    );
     for required in [
         "trace_list",
         "trace_get",
@@ -324,10 +331,10 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     for required in [
         "append_trace_record(&trace_record)",
         "update_trace_record(&trace_record)",
-        "execute_operation(&operation",
-        "\"trace_list\" => trace_list",
-        "\"trace_get\" => trace_get",
-        "\"log_recent\" => log_recent",
+        "dispatch::execute_operation(operation_id",
+        "OperationId::TraceList => trace_list",
+        "OperationId::TraceGet => trace_get",
+        "OperationId::LogRecent => log_recent",
         "AgentTraceListOptions",
         "AGENT_TRACE_VERSION",
         "TRON_TRACE_METADATA_KEY",

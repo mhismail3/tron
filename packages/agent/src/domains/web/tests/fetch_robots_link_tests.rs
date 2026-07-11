@@ -130,8 +130,7 @@ async fn web_fetch_links_allow_robots_policy_and_source_reads_expose_bounded_ref
     let read = WebFixture::new(&ctx, "web-fetch-robots-linked", "none").await;
     let listed = read
         .invoke_ok(json!({
-            "operation": "web_source_list",
-            "idempotencyKey": "web-fetch-robots-linked-list"
+            "operation": "web_source_list"
         }))
         .await;
     let listed_ref = &listed["details"]["web"]["sources"][0]["robotsPolicyRefs"][0];
@@ -143,8 +142,7 @@ async fn web_fetch_links_allow_robots_policy_and_source_reads_expose_bounded_ref
         .invoke_ok(json!({
             "operation": "web_source_inspect",
             "webSourceResourceId": source_id,
-            "webSourceVersionId": source_version_id,
-            "idempotencyKey": "web-fetch-robots-linked-inspect"
+            "webSourceVersionId": source_version_id
         }))
         .await;
     let inspected_ref = &inspected["details"]["web"]["source"]["robotsPolicyRefs"][0];
@@ -336,7 +334,12 @@ async fn web_fetch_robots_policy_rejects_invalid_evidence_before_target_network_
         &ctx,
         "web-fetch-robots-invalid",
         "declared",
-        &["capability.execute", "web.write", "resource.write"],
+        &[
+            "capability.execute",
+            "web.read",
+            "web.write",
+            "resource.write",
+        ],
         &["web_source", "web_robots_policy"],
         &["kind:web_source", "kind:web_robots_policy"],
     )
@@ -350,7 +353,10 @@ async fn web_fetch_robots_policy_rejects_invalid_evidence_before_target_network_
             "idempotencyKey": "web-fetch-robots-invalid-missing-read"
         }))
         .await;
-    assert!(missing_read.contains("resource.read"));
+    assert!(
+        missing_read.contains("resource.read"),
+        "unexpected missing-read error: {missing_read}"
+    );
 
     let target_mismatch = fetch
         .invoke_error(json!({

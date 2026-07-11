@@ -113,7 +113,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
     assert!(instructions.contains("Remember the teardown scorecard."));
     assert!(instructions.contains("Server: localhost:9847"));
     assert!(instructions.contains("Current working directory: /workspace"));
-    assert!(instructions.contains("Use ONLY this model-facing tool"));
+    assert!(instructions.contains("Use only `capability::execute`"));
     assert!(instructions.contains("execute"));
 
     assert_eq!(request.input.len(), 1);

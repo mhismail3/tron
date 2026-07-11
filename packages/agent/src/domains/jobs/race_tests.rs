@@ -22,7 +22,7 @@ async fn cancel_request_version_conflict_does_not_drop_runtime_terminal_output()
     super::support::clear_finalize_race_hook();
     let _hook_guard = FinalizeRaceHookGuard;
 
-    let fixture = ExecuteFixture::new(&ctx, root.path()).await;
+    let mut fixture = ExecuteFixture::new(&ctx, root.path()).await;
     let marker = root.path().join("started");
     let start = fixture
         .invoke_ok(json!({
@@ -35,6 +35,7 @@ async fn cancel_request_version_conflict_does_not_drop_runtime_terminal_output()
         .await;
     let job_resource_id = job_resource_id(&start);
     wait_for_path(&marker).await;
+    fixture.scope_to_job(&job_resource_id).await;
     let hook = super::support::install_finalize_race_hook(job_resource_id.clone());
 
     let ctx_for_cancel = ctx.clone();
@@ -91,7 +92,7 @@ impl<'a> ExecuteFixture<'a> {
     async fn new(ctx: &'a ServerRuntimeContext, root: &'a Path) -> Self {
         let trace_id = TraceId::new("jobs-finalize-cancel-race").unwrap();
         let actor_id = ActorId::new("agent:jobs-finalize-cancel-race-session").unwrap();
-        let grant_id = derive_execute_grant(ctx, &actor_id, trace_id.clone(), root).await;
+        let grant_id = derive_execute_grant(ctx, &actor_id, trace_id.clone(), root, None).await;
         Self {
             ctx,
             actor_id,
@@ -107,6 +108,17 @@ impl<'a> ExecuteFixture<'a> {
             .and_then(Value::as_str)
             .map(str::to_owned);
         invoke_ok(self.ctx, payload, self.execute_context(key.as_deref())).await
+    }
+
+    async fn scope_to_job(&mut self, job_resource_id: &str) {
+        self.grant_id = derive_execute_grant(
+            self.ctx,
+            &self.actor_id,
+            self.trace_id.clone(),
+            self.root,
+            Some(job_resource_id),
+        )
+        .await;
     }
 
     async fn wait_for_state(&self, job_resource_id: &str, state: &str) -> Value {
@@ -183,7 +195,20 @@ async fn derive_execute_grant(
     actor_id: &ActorId,
     trace_id: TraceId,
     root: &Path,
+    job_resource_id: Option<&str>,
 ) -> AuthorityGrantId {
+    let mut resource_selectors = vec![
+        "kind:agent_state".to_owned(),
+        "kind:job_process".to_owned(),
+        "kind:execution_output".to_owned(),
+    ];
+    if let Some(job_resource_id) = job_resource_id {
+        resource_selectors.push(format!("resource:{job_resource_id}"));
+    }
+    let derive_key = match job_resource_id {
+        Some(job_resource_id) => format!("derive-jobs-finalize-cancel-race:{job_resource_id}"),
+        None => "derive-jobs-finalize-cancel-race:create".to_owned(),
+    };
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -201,11 +226,7 @@ async fn derive_execute_grant(
                     "resource.write"
                 ],
                 "allowedResourceKinds": ["agent_state", "job_process", "execution_output"],
-                "resourceSelectors": [
-                    "kind:agent_state",
-                    "kind:job_process",
-                    "kind:execution_output"
-                ],
+                "resourceSelectors": resource_selectors,
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
                 "maxRisk": "medium",
@@ -221,7 +242,7 @@ async fn derive_execute_grant(
             )
             .with_scope("grant.write")
             .with_session_id("jobs-finalize-cancel-race-session")
-            .with_idempotency_key("derive-jobs-finalize-cancel-race"),
+            .with_idempotency_key(derive_key),
         ))
         .await;
     assert_eq!(

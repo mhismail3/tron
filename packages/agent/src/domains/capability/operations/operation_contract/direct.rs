@@ -278,7 +278,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
         "web_source_inspect" => (
             vec!["operation", "webSourceResourceId"],
             vec![
-                ("webSourceResourceId", nonempty_string_schema()),
+                ("webSourceResourceId", resource_id_schema("web_source")),
                 ("webSourceVersionId", nullable_string_schema()),
                 ("maxSnippetBytes", bounded_integer(1, 20_000)),
             ],
@@ -292,7 +292,7 @@ pub(super) fn input_schema(operation: &str) -> Option<Value> {
                 "idempotencyKey",
             ],
             vec![
-                ("webSourceResourceId", nonempty_string_schema()),
+                ("webSourceResourceId", resource_id_schema("web_source")),
                 ("expectedWebSourceVersionId", nonempty_string_schema()),
                 ("reason", nonempty_string_schema()),
                 ("idempotencyKey", idempotency_schema()),
@@ -684,6 +684,15 @@ fn nonempty_string_schema() -> Value {
 
 fn described_nonempty_string_schema(description: &str) -> Value {
     json!({"type": "string", "minLength": 1, "description": description})
+}
+
+fn resource_id_schema(kind: &str) -> Value {
+    json!({
+        "type": "string",
+        "minLength": kind.len() + 2,
+        "pattern": format!("^{kind}:.+$"),
+        "description": format!("Exact {kind} resource id returned by a prior operation.")
+    })
 }
 
 fn url_schema() -> Value {

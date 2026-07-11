@@ -44,7 +44,7 @@ Total weight: **100**
 | AHA-3 | CI and static-gate parity | 12 | passed_after_fix | CI owner | GitHub CI now has an Ubuntu `rust-static-gates` job for docs/templates/iOS/Mac/script/CI changes, runs PET/PCC/HRA/AHA invariant targets, and the full Rust job invokes `scripts/tron ci test` so serial integration and trace targets match the local harness. `tron ci clippy` docs/help now describe the Cargo lint policy instead of a blanket `-D warnings` contract. | Closed; later phases may add more static gates but workflow parity is established. |
 | AHA-4 | Xcode project drift and Mac test execution | 8 | passed_after_fix | Apple CI owner | CI and release workflows fail on tracked iOS Xcode project drift after `xcodegen generate`; Mac workflows verify the ignored generated project exists and then build/test from it. Mac CI keeps `build-for-testing` and adds focused `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests` execution. | Closed; final closeout still reruns iOS XcodeGen drift checks, Mac generation/build checks, and focused Mac tests. |
 | AHA-5 | Rust module ownership cleanup | 10 | passed_after_fix | Rust architecture owner | Production `#[path]` aliases and module-inception allowances are removed. Provider shared helpers live under `providers::shared`, settings loader paths use `profile::storage::loader`, OpenAI provider tests use a normal folder module, and the orchestrator coordinator lives under `orchestrator::core`. | Closed; AHA-6 owns documentation and near-budget watch rows for the new ownership roots. |
-| AHA-6 | Rust progressive docs and near-budget guard | 6 | passed_after_fix | Rust docs/tests owner | Ownership-critical Rust roots touched by AHA-5 now carry progressive docs. Current Rust files at or above the 850 LOC warning band have explicit watch rows below without reviving HRA temporary-budget language, and the HRA/PCC inventories cover the moved Rust ownership paths. | Closed; final closeout still reruns the full Rust static targets. |
+| AHA-6 | Rust progressive docs and near-budget guard | 6 | passed_after_fix | Rust docs/tests owner | Ownership-critical Rust roots touched by AHA-5 carry progressive docs. Current Rust files at or above the 850 LOC warning band must have an accepted owner and decomposition row in the canonical HRA budget ledger, and the HRA/PCC inventories cover moved Rust ownership paths. | Closed; final closeout still reruns the full Rust static targets. |
 | AHA-7 | iOS transport/domain residue | 10 | passed_after_fix | iOS engine owner | `MiscClient` is deleted. `EngineClientProtocol` and call sites use concrete `system`, `message`, and `logs` clients; stale Git workflow error/comment residue and `Sub-Managers` terminology are removed. | Closed; no `misc` compatibility facade remains. |
 | AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix | iOS architecture owner | SourceGuard now enforces deep hierarchy/count/budget gates for Engine clients, shared capability UI, settings shell, shared components, and Session/Chat tests. Swift files at or above the 590 LOC warning band have explicit watch rows, iOS resource docs are current, and redundant iOS 26 availability annotations are removed. | Closed; final closeout reruns XcodeGen drift and focused iOS tests. |
 | AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix | inventory/provenance owner | HRA live maps are renamed current ownership maps, the completed-HRA inventory gate rejects open row statuses, and HRA provenance now points at the in-repo plan summary. | Closed; no current inventory or ownership-map row remains open. |
@@ -78,42 +78,13 @@ The Rust integration target
 - No AHA implementation rows remain open. The evidence manifest records the
   final closeout proof, adversarial audit findings, and implementation hashes.
 
-## Rust Near-Budget Watchlist
+## Canonical Rust Budget Ledger
 
-The hard HRA Rust source/test limit remains 900 LOC. AHA-6 adds an explicit
-850 LOC warning band so ownership-critical files cannot quietly cross into the
-hard limit without review. Each warning-band action is the concrete split plan
-for the current file before future behavior grows there.
-
-| Path | Current LOC | Owner | Warning-band action | Status |
-|------|-------------|-------|---------------------|--------|
-| `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs` | 1577 | capability runtime grant owner | Split per-domain grant policy helpers before adding more execute-resource families. | watch |
-| `packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_tests.rs` | 1334 | capability runtime grant test owner | Split resource-family, memory, and delegated subagent fixtures before adding more execute-resource families. | watch |
-| `packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs` | 871 | agent loop orchestrator owner | Split journal projection, trace persistence, or replay formatting helpers before adding more streaming-journal behavior. | watch |
-| `packages/agent/src/domains/capability/contract.rs` | 1107 | capability contract owner | Split execute operation schema guidance, primitive capability catalog definitions, and provider-facing contract helpers before adding more execute-backed domain operations. | watch |
-| `packages/agent/src/domains/capability/operations/module_program_execution_tests.rs` | 1210 | capability execute test owner | Split module-program-execution lifecycle tests from delegated module-pack fixtures before expanding coverage. | watch |
-| `packages/agent/src/domains/capability_binding/cockpit_visibility.rs` | 1293 | capability binding cockpit visibility owner | Split operation fact aggregation, action derivation, and DTO row formatting into focused cockpit projection helpers before adding more visibility fields. | watch |
-| `packages/agent/src/domains/capability_binding/shadow_trial.rs` | 1654 | capability binding shadow-trial owner | Split shadow-trial validation, projection, and event-record helpers before adding more replacement-trial semantics. | watch |
-| `packages/agent/src/domains/capability_binding/tests.rs` | 1943 | capability binding test owner | Split binding policy, shadow-trial, and cockpit-visibility regression batches into focused test modules before adding more coverage. | watch |
-| `packages/agent/src/domains/git/service.rs` | 1517 | git domain owner | Split read-only status/diff helpers, staged-index tree evidence, bounded command helpers, and ref command helpers before adding more source-control operations. | watch |
-| `packages/agent/src/domains/git/tests.rs` | 3054 | git test owner | Split read-only Git status/diff tests from mutation, commit evidence, branch-start evidence, resource/schema, provider-static, and replay tests before adding more source-control coverage. | watch |
-| `packages/agent/src/domains/jobs/service.rs` | 1175 | jobs owner | At the hard-limit edge; move new reconciliation, finalization, cleanup, or output-retention behavior into jobs service helper modules before adding behavior here. | watch |
-| `packages/agent/src/domains/jobs/tests.rs` | 996 | jobs test owner | At the hard-limit edge; move new lifecycle, output, timeout, reconciliation, or fail-closed regression batches into focused jobs test modules. | watch |
-| `packages/agent/src/domains/memory/tests.rs` | 1784 | memory test owner | Split retrieval, prompt-inclusion, retention-policy, provider-safe projection, query/decision evidence, and older memory lifecycle fixtures into focused sibling test modules before adding more memory coverage. | watch |
-| `packages/agent/src/domains/module_registry/tests.rs` | 1640 | module registry test owner | Split seed-manifest projection cases into sibling test modules before adding another module-pack manifest. | watch |
-| `packages/agent/src/domains/procedural/service.rs` | 1976 | procedural domain owner | Split definition, activation request, activation decision, list/inspect projection, and shared validation helpers into owner modules before expanding procedural module-pack behavior. | watch |
-| `packages/agent/src/domains/procedural/tests.rs` | 1399 | procedural domain test owner | Split procedural definition, activation request/decision, authorization denial, and projection redaction fixtures into focused modules before adding more procedural coverage. | watch |
-| `packages/agent/src/domains/subagents/execution.rs` | 1172 | subagents owner | Split launch planning, follow-up inspection/cancel/result projection, and authority-selector helpers before expanding subagent behavior. | watch |
-| `packages/agent/src/domains/worker_lifecycle/tests/mod.rs` | 973 | worker lifecycle test owner | At the hard-limit edge; keep common fixtures here and move new manifest/package, inspection, or launch/reconciliation regression batches into focused worker lifecycle test modules. | watch |
-| `packages/agent/src/engine/authority/grants/authorization.rs` | 3767 | engine authority owner | Split operation/resource selector extraction and per-domain explicit-grant scanners before adding more execute-resource families. | watch |
-| `packages/agent/src/domains/model/providers/factory.rs` | 878 | model providers owner | Watch provider selection/auth construction; split provider-specific builders before adding new provider branches. | watch |
-| `packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs` | 973 | OpenAI stream handler test owner | Split stream delta, tool-call, usage, and error cases into focused sibling tests before adding more OpenAI streaming coverage. | watch |
-| `packages/agent/src/engine/catalog/registry/mod.rs` | 895 | engine catalog owner | At the hard-limit edge; new catalog mutation or query behavior must move into `catalog_changes`, `invocation`, or a new registry helper module first. | watch |
-| `packages/agent/src/engine/durability/ledger/mod.rs` | 862 | engine durability owner | Keep ledger contracts in root; move new SQLite/raw-row behavior into `sqlite_codec` or dedicated helpers. | watch |
-| `packages/agent/src/engine/durability/queue/mod.rs` | 861 | engine durability owner | Keep queue contracts in root; move new drain/runtime or SQLite behavior into owned helper modules. | watch |
-| `packages/agent/src/engine/invocation/host/mod.rs` | 880 | engine invocation owner | Keep host type boundary in root; move new catalog/substrate/invocation/meta behavior into existing host helper modules. | watch |
-| `packages/agent/src/engine/runtime/external_workers/mod.rs` | 855 | engine runtime owner | Move new proxy, lifecycle, or protocol-specific behavior out before it approaches the 900 LOC hard limit. | watch |
-| `packages/agent/src/transport/engine/socket/mod.rs` | 873 | engine transport owner | Keep WebSocket session boundary in root; move new wire/projection/outbound behavior into existing socket helper modules. | watch |
+AHA-6 keeps the earlier 850 LOC warning trigger, but current ownership and
+decomposition plans live only in
+`packages/agent/docs/hierarchical-rearchitecture-scorecard.md`. The AHA gate
+checks that every warning-band file has an accepted row there instead of
+maintaining a second line-count snapshot.
 
 ## Swift Near-Budget Watchlist
 

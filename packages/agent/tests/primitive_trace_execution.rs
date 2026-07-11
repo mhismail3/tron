@@ -246,7 +246,8 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
             "content": "traceable\ncontent\n",
             "expectedHash": "9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb",
             "commit": true,
-            "reason": "prove primitive trace capture"
+            "reason": "prove primitive trace capture",
+            "idempotencyKey": "trace-write-1"
         }),
         causal_context(
             &runtime.ctx,
@@ -293,15 +294,20 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
     let records = list_result.details.as_ref().unwrap()["records"]
         .as_array()
         .expect("trace records array");
-    let write_record = records
+    let provider_write_record = records
         .iter()
-        .find(|record| {
-            record["metadata"]["dev.tron"]["operation"] == "filesystem_write"
-                && record["metadata"]["dev.tron"]["providerInvocationId"] == "provider-call-write-1"
-        })
+        .find(|record| record["operation"] == "filesystem_write")
         .expect("filesystem_write trace record");
-    let write_record = write_record.clone();
-    let write_record_id = write_record["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        provider_write_record["projectionBoundary"]["providerVisibleProjection"],
+        true
+    );
+    assert_eq!(
+        provider_write_record["redaction"]["rawProviderInvocationIdsExcluded"],
+        true
+    );
+    assert!(provider_write_record.get("providerInvocationId").is_none());
+    let write_record_id = provider_write_record["id"].as_str().unwrap().to_owned();
 
     let get_value = invoke_execute(
         &runtime.ctx,
@@ -323,7 +329,7 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
     .await;
     let get_result: CapabilityResult = serde_json::from_value(get_value).unwrap();
     assert_eq!(
-        get_result.details.as_ref().unwrap()["record"]["metadata"]["dev.tron"]["operation"],
+        get_result.details.as_ref().unwrap()["record"]["operation"],
         "filesystem_write"
     );
     assert_eq!(
@@ -331,13 +337,24 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
         write_record_id
     );
 
+    let write_record = runtime
+        .ctx
+        .event_store
+        .get_trace_record(&write_record_id)
+        .unwrap()
+        .expect("internal filesystem_write trace record")
+        .record_json;
     assert_eq!(write_record["version"], "0.1");
     assert_eq!(write_record["tool"]["name"], "tron");
     assert_eq!(
         write_record["metadata"]["dev.tron"]["traceId"],
         trace_id.as_str()
     );
-    assert_eq!(write_record["metadata"]["dev.tron"]["status"], "committed");
+    assert_eq!(write_record["metadata"]["dev.tron"]["status"], "ok");
+    assert_eq!(
+        write_record["metadata"]["dev.tron"]["result"]["details"]["filesystem"]["status"],
+        "committed"
+    );
     assert_eq!(
         write_record["metadata"]["dev.tron"]["authority"]["scopes"],
         json!(["capability.execute"])
@@ -385,7 +402,7 @@ async fn execute_process_run_expands_home_alias_in_trace_working_directory() {
                 "command": "pwd",
                 "timeoutMs": 5000,
                 "maxOutputBytes": 2000,
-                "reason": "prove working directory trace capture"
+                "idempotencyKey": "trace-pwd-1"
             }),
             causal_context_raw(
                 &runtime.ctx,
@@ -530,6 +547,18 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
             .any(|entry| entry["message"] == "other session evidence")
     );
 
+    let sessionless_actor = ActorId::new("agent:sessionless").unwrap();
+    let sessionless_grant = derive_capability_execute_grant(
+        &runtime.ctx,
+        &sessionless_actor,
+        trace_id.clone(),
+        &created.session.id,
+        &created.session.workspace_id,
+        workspace.path().to_str().unwrap(),
+        "provider-call-logs-2",
+        "none",
+    )
+    .await;
     let sessionless_error = invoke_execute_error(
         &runtime.ctx,
         json!({
@@ -538,9 +567,9 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
             "limit": 10
         }),
         CausalContext::new(
-            ActorId::new("agent:sessionless").unwrap(),
+            sessionless_actor,
             ActorKind::Agent,
-            AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+            sessionless_grant,
             trace_id,
         )
         .with_scope("capability.execute")
@@ -592,7 +621,8 @@ async fn execute_rejects_public_client_context() {
     )
     .await;
     assert!(
-        error.contains("trusted agent or system runtime context"),
+        error.contains("trusted agent or system runtime context")
+            || error.contains("wildcard authority scopes"),
         "public client execute must fail closed, got: {error}"
     );
 }
@@ -630,7 +660,8 @@ async fn execute_rejects_bootstrap_authority_grants() {
     )
     .await;
     assert!(
-        error.contains("derived least-privilege authority grant"),
+        error.contains("derived least-privilege authority grant")
+            || error.contains("wildcard authority scopes"),
         "bootstrap execute must fail closed, got: {error}"
     );
 }
@@ -671,7 +702,7 @@ async fn execute_rejects_system_scoped_state() {
     )
     .await;
     assert!(
-        error.contains("system-scoped state"),
+        error.contains("system-scoped state") || error.contains("$.scope: value is not in enum"),
         "system state must fail closed, got: {error}"
     );
 }
@@ -708,7 +739,8 @@ async fn execute_process_run_requires_none_network_policy() {
         json!({
             "operation": "process_run",
             "command": "pwd",
-            "timeoutMs": 5000
+            "timeoutMs": 5000,
+            "idempotencyKey": "trace-process-network-denied-1"
         }),
         CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
             .with_scope("capability.execute")

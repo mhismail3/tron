@@ -1,4 +1,5 @@
 use super::*;
+use crate::engine::RUNTIME_METADATA_WORKING_DIRECTORY;
 #[tokio::test]
 async fn resource_backed_primitive_outputs_have_trace_identity() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -35,6 +36,28 @@ async fn resource_backed_primitive_outputs_have_trace_identity() {
             false,
         )
         .unwrap();
+    let grant_id = "capability-materialized-output-grant";
+    let derived = crate::engine::tests::authority::derive_bootstrap_grant(
+        &handle,
+        grant_id,
+        json!({
+            "allowedCapabilities": ["capability::execute"],
+            "allowedNamespaces": ["capability"],
+            "allowedAuthorityScopes": ["capability.execute"],
+            "allowedResourceKinds": ["materialized_file"],
+            "resourceSelectors": [
+                "kind:materialized_file",
+                "resource:materialized_file:test"
+            ],
+            "fileRoots": ["/private/tmp"],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "budget": {"remainingInvocations": 2},
+            "provenance": {"source": "resource-wrapper-test"}
+        }),
+    )
+    .await;
+    assert_eq!(derived.error, None);
     let result = handle
         .invoke(host_invocation(
             "capability::execute",
@@ -43,9 +66,17 @@ async fn resource_backed_primitive_outputs_have_trace_identity() {
                 "path": "/tmp/tron-materialized-output.txt",
                 "content": "draft"
             }),
-            mutating_causal("capability-materialized-output")
-                .with_scope("capability.execute")
-                .with_idempotency_key("capability-materialized-output"),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant(grant_id),
+                trace("capability-materialized-output"),
+            )
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a")
+            .with_scope("capability.execute")
+            .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/private/tmp")
+            .with_idempotency_key("capability-materialized-output"),
         ))
         .await;
     assert_eq!(result.error, None);

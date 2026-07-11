@@ -96,8 +96,7 @@ async fn web_source_archive_preserves_source_evidence_and_filters_list_by_defaul
 
     let listed_default = archive
         .invoke_ok(json!({
-            "operation": "web_source_list",
-            "idempotencyKey": "web-source-archive-list-default"
+            "operation": "web_source_list"
         }))
         .await;
     assert_eq!(
@@ -112,8 +111,7 @@ async fn web_source_archive_preserves_source_evidence_and_filters_list_by_defaul
     let listed_archived = archive
         .invoke_ok(json!({
             "operation": "web_source_list",
-            "includeArchived": true,
-            "idempotencyKey": "web-source-archive-list-archived"
+            "includeArchived": true
         }))
         .await;
     let archived_source = &listed_archived["details"]["web"]["sources"][0];
@@ -131,8 +129,7 @@ async fn web_source_archive_preserves_source_evidence_and_filters_list_by_defaul
         .invoke_ok(json!({
             "operation": "web_source_inspect",
             "webSourceResourceId": resource_id,
-            "webSourceVersionId": archived_web["webSourceVersionId"],
-            "idempotencyKey": "web-source-archive-inspect"
+            "webSourceVersionId": archived_web["webSourceVersionId"]
         }))
         .await;
     let inspected_source = &inspected["details"]["web"]["source"];
@@ -356,13 +353,14 @@ async fn web_source_archive_replays_same_idempotency_key_without_duplicate_versi
         "idempotencyKey": "web-source-archive-replay-key"
     });
     let first = archive.invoke_ok(payload.clone()).await;
+    let replay_grant = archive.grant_for_payload(&payload).await;
     let second_result = archive
         .ctx
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("capability::execute").expect("function id"),
             payload,
-            archive.context("web-source-archive-replay-context-key"),
+            archive.context_with_grant("web-source-archive-replay-context-key", replay_grant),
         ))
         .await;
     assert_eq!(

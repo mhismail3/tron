@@ -6,7 +6,7 @@ Current score: **100/100**
 
 The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now executes through the supervised module-runtime provider-safe adapter projection boundary; broader operation coverage stays governed by the dynamic replacement scorecard.
 
-Source of truth: `packages/agent/src/domains/capability/operations/operation_contract.rs`
+Source of truth: `packages/agent/src/domains/capability/operations/operation_contract/mod.rs`
 
 Provider-visible surface: one tool, `capability::execute`
 

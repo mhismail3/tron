@@ -15,10 +15,10 @@ autonomous self-update across every operation.
 
 | Area | File |
 |---|---|
-| Operation registry | `packages/agent/src/domains/capability/operations/operation_contract.rs` |
+| Operation registry | `packages/agent/src/domains/capability/operations/operation_contract/mod.rs` |
 | Operation dispatcher | `packages/agent/src/domains/capability/operations/dispatch.rs` |
 | Git route seam | `packages/agent/src/domains/capability/operations/git.rs` |
-| Provider schema fields | `packages/agent/src/domains/capability/operations/operation_contract.rs` |
+| Provider schema fields | `packages/agent/src/domains/capability/operations/operation_contract/mod.rs` |
 | Capability contract guidance | `packages/agent/src/domains/capability/contract.rs` |
 | Route service | `packages/agent/src/domains/capability_binding/route.rs` |
 | Module runtime projection boundary | `packages/agent/src/domains/module_runtime/service.rs` |

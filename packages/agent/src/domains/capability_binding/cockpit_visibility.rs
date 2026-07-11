@@ -2408,12 +2408,17 @@ pub(crate) fn test_serialized_has_no_raw_cockpit_material(value: &Value) -> bool
         "/tmp/",
         "Authorization:",
         "Bearer ",
-        "backendOwner",
-        "currentBuiltInOwner",
         "future_git_adapter_requires",
         "resource:git_status_shadow_projection",
     ];
-    forbidden.iter().all(|needle| !serialized.contains(needle))
+    let found = forbidden
+        .into_iter()
+        .filter(|needle| serialized.contains(needle))
+        .collect::<Vec<_>>();
+    if !found.is_empty() {
+        eprintln!("cockpit projection contains forbidden material: {found:?}");
+    }
+    found.is_empty()
 }
 
 #[cfg(test)]

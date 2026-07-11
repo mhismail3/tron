@@ -1215,6 +1215,8 @@ fn copy_error_detail_keys(projected: &mut Map<String, Value>, value: &Value) {
 fn project_metadata_operation_evidence(operation: &str, details: &Value) -> Option<Value> {
     let mut projected = Map::new();
     let mut has_substantive_evidence = false;
+    let has_common_evidence =
+        details.get("primitiveOperation").is_some() || details.get("status").is_some();
     copy_key(&mut projected, details, "primitiveOperation");
     copy_key(&mut projected, details, "status");
     projected.insert("operation".to_owned(), json!(operation));
@@ -1230,7 +1232,7 @@ fn project_metadata_operation_evidence(operation: &str, details: &Value) -> Opti
             break;
         }
     }
-    has_substantive_evidence.then_some(Value::Object(projected))
+    (has_common_evidence || has_substantive_evidence).then_some(Value::Object(projected))
 }
 
 fn project_goal_question_evidence(operation: &str, details: &Value) -> Option<Value> {

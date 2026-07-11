@@ -570,12 +570,9 @@ impl ShadowFixture {
             context = context.with_scope(scope.clone());
         }
         let mut payload = payload_with_operation(operation, &source.payload);
-        if matches!(
-            operation,
-            "capability_shadow_trial_request_record"
-                | "capability_shadow_trial_decision_record"
-                | "capability_shadow_trial_run_record"
-        ) && payload.get("idempotencyKey").is_none()
+        if crate::domains::capability::operation_required_payload_fields(operation)
+            .is_some_and(|fields| fields.iter().any(|field| field == "idempotencyKey"))
+            && payload.get("idempotencyKey").is_none()
         {
             payload["idempotencyKey"] = Value::String(format!("idempotency-{key}"));
         }
@@ -1558,9 +1555,16 @@ impl RouteFixture {
         operation: &str,
         source: &Invocation,
     ) -> Value {
+        let mut payload = payload_with_operation(operation, &source.payload);
+        if crate::domains::capability::operation_required_payload_fields(operation)
+            .is_some_and(|fields| fields.iter().any(|field| field == "idempotencyKey"))
+            && payload.get("idempotencyKey").is_none()
+        {
+            payload["idempotencyKey"] = Value::String(format!("idempotency-{key}"));
+        }
         self.execute_capability_with_grant(
             key,
-            payload_with_operation(operation, &source.payload),
+            payload,
             source.causal_context.authority_grant_id.clone(),
             &source.causal_context.authority_scopes,
         )

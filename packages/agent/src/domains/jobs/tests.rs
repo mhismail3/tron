@@ -34,6 +34,7 @@ async fn job_start_requires_network_policy_none() {
         root.path(),
         "loopback",
         4,
+        None,
     )
     .await;
 
@@ -75,6 +76,7 @@ async fn job_start_requires_idempotency_at_execute_boundary() {
         root.path(),
         "none",
         4,
+        None,
     )
     .await;
 
@@ -95,7 +97,7 @@ async fn job_start_requires_idempotency_at_execute_boundary() {
         ),
     )
     .await;
-    assert!(error.contains("requires an idempotencyKey"));
+    assert!(error.contains("idempotencyKey") && error.contains("required"));
 }
 
 #[tokio::test]
@@ -260,12 +262,7 @@ async fn stale_running_reconciliation_scans_past_newer_non_reconcilable_rows() {
         .await;
     let status_job = &jobs_details(&status)["job"];
     assert_eq!(status_job["state"], json!("failed"));
-    assert!(
-        status_job["terminal"]["error"]
-            .as_str()
-            .unwrap()
-            .contains("ownership unknown after jobs domain restart")
-    );
+    assert_eq!(status_job["terminal"]["errorRedacted"], json!(true));
 
     let log = fixture
         .invoke_ok(json!({
@@ -678,6 +675,7 @@ impl<'a> ExecuteFixture<'a> {
             root,
             "none",
             40,
+            None,
         )
         .await;
         Self {
@@ -696,12 +694,13 @@ impl<'a> ExecuteFixture<'a> {
             .get("idempotencyKey")
             .and_then(Value::as_str)
             .map(str::to_owned);
+        let grant_id = self.grant_for_payload(&payload).await;
         invoke_ok(
             self.ctx,
             payload,
             execute_context(
                 self.actor_id.clone(),
-                self.grant_id.clone(),
+                grant_id,
                 self.trace_id.clone(),
                 &self.session_id,
                 &self.workspace_id,
@@ -717,18 +716,37 @@ impl<'a> ExecuteFixture<'a> {
             .get("idempotencyKey")
             .and_then(Value::as_str)
             .map(str::to_owned);
+        let grant_id = self.grant_for_payload(&payload).await;
         invoke_error(
             self.ctx,
             payload,
             execute_context(
                 self.actor_id.clone(),
-                self.grant_id.clone(),
+                grant_id,
                 self.trace_id.clone(),
                 &self.session_id,
                 &self.workspace_id,
                 self.root,
                 idempotency_key.as_deref(),
             ),
+        )
+        .await
+    }
+
+    async fn grant_for_payload(&self, payload: &Value) -> AuthorityGrantId {
+        let Some(job_resource_id) = payload.get("jobResourceId").and_then(Value::as_str) else {
+            return self.grant_id.clone();
+        };
+        derive_execute_grant(
+            self.ctx,
+            &self.actor_id,
+            self.trace_id.clone(),
+            &self.session_id,
+            &self.workspace_id,
+            self.root,
+            "none",
+            40,
+            Some(job_resource_id),
         )
         .await
     }
@@ -854,7 +872,17 @@ async fn derive_execute_grant(
     root: &Path,
     network_policy: &str,
     remaining_invocations: u64,
+    job_resource_id: Option<&str>,
 ) -> AuthorityGrantId {
+    let mut resource_selectors = vec![
+        "kind:agent_state".to_owned(),
+        "kind:job_process".to_owned(),
+        "kind:execution_output".to_owned(),
+    ];
+    if let Some(job_resource_id) = job_resource_id {
+        resource_selectors.push(format!("resource:{job_resource_id}"));
+    }
+    let selector_key = job_resource_id.unwrap_or("create");
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -872,11 +900,7 @@ async fn derive_execute_grant(
                     "resource.write"
                 ],
                 "allowedResourceKinds": ["agent_state", "job_process", "execution_output"],
-                "resourceSelectors": [
-                    "kind:agent_state",
-                    "kind:job_process",
-                    "kind:execution_output"
-                ],
+                "resourceSelectors": resource_selectors,
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": network_policy,
                 "maxRisk": "medium",
@@ -892,7 +916,9 @@ async fn derive_execute_grant(
             )
             .with_scope("grant.write")
             .with_session_id(session_id)
-            .with_idempotency_key(format!("derive-{workspace_id}-{network_policy}")),
+            .with_idempotency_key(format!(
+                "derive-{workspace_id}-{network_policy}-{selector_key}"
+            )),
         ))
         .await;
     assert_eq!(

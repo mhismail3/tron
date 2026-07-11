@@ -1053,7 +1053,7 @@ packages/agent/src/domains/filesystem/service.rs	rust	implementation	agent:files
 packages/ios-app/Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol-shaped DTOs; callers should translate before domain or UI logic
 packages/ios-app/Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/domains/capability/operations/catalog.rs	rust	implementation	agent:capability	owner-private; callers enter through capability operation registry
+packages/agent/src/domains/capability/operations/catalog/mod.rs	rust	implementation	agent:capability	owner-private; callers enter through capability operation registry
 packages/agent/src/domains/catalog_discovery/mod.rs	rust	facade	agent:catalog-discovery	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/catalog_discovery/contract.rs	rust	contract	agent:catalog-discovery	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/domains/catalog_discovery/errors.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
@@ -1421,13 +1421,13 @@ packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitPresentation.swift	
 packages/ios-app/Sources/UI/AgentBriefing/AgentBriefingViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift	swift	implementation	ios:settings-ui	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/domains/capability/operations/operation_contract.rs	rust	contract	capability:execute	canonical typed registry and structural contract owner for every provider-visible execute operation
+packages/agent/src/domains/capability/operations/operation_contract/mod.rs	rust	contract	capability:execute	canonical typed registry and structural contract owner for every provider-visible execute operation
 packages/agent/src/domains/capability/operations/operation_contract/authority.rs	rust	implementation	capability:execute	owner-private exact least-privilege authority policy definitions
 packages/agent/src/domains/capability/operations/operation_contract/capability_binding.rs	rust	implementation	capability:execute	owner-private replacement and binding structural schemas
 packages/agent/src/domains/capability/operations/operation_contract/direct.rs	rust	implementation	capability:execute	owner-private direct operation structural schemas
 packages/agent/src/domains/capability/operations/operation_contract/governance.rs	rust	implementation	capability:execute	owner-private governance operation structural schemas
 packages/agent/src/domains/capability/operations/operation_contract/metadata.rs	rust	implementation	capability:execute	owner-private operation ownership and evolution metadata
-packages/agent/src/domains/capability/operations/operation_contract/output.rs	rust	implementation	capability:execute	owner-private provider-safe result schemas
+packages/agent/src/domains/capability/operations/operation_contract/output/mod.rs	rust	implementation	capability:execute	owner-private provider-safe result schemas
 packages/agent/src/domains/capability/operations/operation_contract/policy.rs	rust	implementation	capability:execute	owner-private effect, scope, and idempotency policy
 packages/agent/src/domains/capability/operations/operation_contract/records.rs	rust	implementation	capability:execute	owner-private durable record-plane structural schemas
 packages/agent/src/domains/capability/pool.rs	rust	implementation	rust:domain-capability	owner-private agent-facing operation and catalog classification projection

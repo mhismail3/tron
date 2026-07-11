@@ -606,6 +606,27 @@ mod tests {
     }
 
     #[test]
+    fn common_only_summary_evidence_remains_semantically_complete() {
+        let result = result(
+            "Observation recorded.",
+            false,
+            json!({
+                "primitiveOperation": "observe",
+                "status": "ok"
+            }),
+        );
+        let rendered = render_provider_output("observe", &result).expect("provider output");
+        let value: Value = serde_json::from_str(&rendered).expect("valid provider JSON");
+
+        assert_eq!(value["ok"], true);
+        assert!(value["evidence"]["facts"].as_array().is_some_and(|facts| {
+            facts
+                .iter()
+                .any(|fact| fact["field"] == "primitiveOperation" && fact["value"] == "observe")
+        }));
+    }
+
+    #[test]
     fn raw_content_is_sanitized_at_the_provider_boundary() {
         let result = result(
             "authority grant grant_123456789 at /private/example; providerInvocationId=call_123456789; token sk-example-secret-value",

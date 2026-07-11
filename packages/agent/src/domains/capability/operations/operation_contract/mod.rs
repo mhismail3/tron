@@ -4,7 +4,9 @@
 //! projection and runtime validation consume the same closed input schema,
 //! provider output profile, semantic evidence requirements, summary policy,
 //! and safety exclusions. Domain services retain lifecycle, stale-version, and
-//! runtime resource validation after this structural gate.
+//! runtime resource validation after this structural gate. Typed resource-ref
+//! fields encode their required kind prefix here so provider preflight rejects
+//! malformed identities before an invocation reaches domain policy.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;

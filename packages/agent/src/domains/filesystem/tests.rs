@@ -492,7 +492,8 @@ async fn execute_filesystem_write_requires_idempotency_at_provider_boundary() {
             .with_runtime_metadata(RUNTIME_METADATA_TURN, "1"),
     )
     .await;
-    assert!(error.contains("requires an idempotencyKey"));
+    assert!(error.contains("$.idempotencyKey"), "{error}");
+    assert!(error.contains("required field is missing"), "{error}");
 }
 
 #[tokio::test]
@@ -511,10 +512,9 @@ async fn execute_rejects_unsupported_file_write_operation() {
         execute_context(&ctx, root.path(), "unsupported-file-write-rejected", true).await,
     )
     .await;
-    assert!(error.contains("Unsupported primitive execute operation 'file_write'"));
-    assert!(error.contains("Do not retry this operation"));
-    assert!(error.contains("catalog_search"));
-    assert!(error.contains("catalog_inspect"));
+    assert!(error.contains("request schema violation"), "{error}");
+    assert!(error.contains("$.operation"), "{error}");
+    assert!(error.contains("value is not in enum"), "{error}");
     assert!(
         !error.contains("filesystem_read, filesystem_list"),
         "unsupported operation errors must not dump the full registry"
@@ -538,12 +538,13 @@ async fn execute_filesystem_write_commit_refuses_truncated_existing_hash() {
             "path": "large.txt",
             "content": "replacement\n",
             "expectedHash": "missing",
-            "commit": true
+            "commit": true,
+            "idempotencyKey": "execute-large-write-refused"
         }),
         execute_context(&ctx, root.path(), "execute-large-write-refused", true).await,
     )
     .await;
-    assert!(error.contains("hash is unavailable"));
+    assert!(error.contains("hash is unavailable"), "{error}");
     assert_eq!(fs::read_to_string(&target).unwrap(), large);
 }
 
@@ -563,12 +564,13 @@ async fn execute_filesystem_apply_patch_refuses_truncated_preview() {
             "path": "large.txt",
             "oldText": "needle",
             "newText": "changed",
-            "commit": true
+            "commit": true,
+            "idempotencyKey": "execute-large-patch-refused"
         }),
         execute_context(&ctx, root.path(), "execute-large-patch-refused", true).await,
     )
     .await;
-    assert!(error.contains("refuses files larger"));
+    assert!(error.contains("refuses files larger"), "{error}");
     assert_eq!(fs::read_to_string(&target).unwrap(), large);
 }
 

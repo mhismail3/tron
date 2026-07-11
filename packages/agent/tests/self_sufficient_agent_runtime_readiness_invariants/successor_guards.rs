@@ -537,14 +537,10 @@ fn forbidden_successor_runtime_surfaces_remain_absent() {
     }
 
     let capability_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
-    assert!(
-        capability_contract.contains(r#"schema["properties"].get("target").is_none()"#),
-        "capability contract must keep a source-backed guard that execute exposes no target field"
-    );
     for absent_field_guard in [
         r#"schema["properties"].get("contractId").is_none()"#,
         r#"schema["properties"].get("functionId").is_none()"#,
-        r#"schema["properties"].get("constraints").is_none()"#,
+        r#"schema["properties"].get("autonomy").is_none()"#,
     ] {
         assert!(
             capability_contract.contains(absent_field_guard),

@@ -3,8 +3,8 @@ use serde_json::json;
 
 use crate::engine::{
     AcquireResourceLease, ActorId, ActorKind, AuthorityGrantId, CausalContext,
-    EngineResourceVersioningMode, FunctionId, Invocation, ListResources, RegisterResourceType,
-    TraceId, WorkerId,
+    EngineResourceVersioningMode, FunctionId, Invocation, ListResources,
+    RUNTIME_METADATA_WORKING_DIRECTORY, RegisterResourceType, TraceId, WorkerId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -284,7 +284,6 @@ async fn active_question_answer_lease_blocks_answer_without_orphan_resource() {
 #[tokio::test]
 async fn execute_question_answer_replays_same_idempotency_key_without_double_answer() {
     let ctx = test_context().await;
-    let grant_id = derive_execute_grant(&ctx, "answer-replay-grant").await;
     let question_invocation = invocation(
         "answer-replay-question",
         QUESTION_CREATE_FUNCTION,
@@ -299,6 +298,7 @@ async fn execute_question_answer_replays_same_idempotency_key_without_double_ans
     .expect("create question");
     let question_id = question["questionResourceId"].as_str().unwrap();
     let question_version = question["questionVersionId"].as_str().unwrap();
+    let grant_id = derive_execute_grant(&ctx, "answer-replay-grant", question_id).await;
     let payload = json!({
         "operation": "question_answer",
         "questionResourceId": question_id,
@@ -559,7 +559,12 @@ fn past_time() -> String {
     (Utc::now() - Duration::minutes(5)).to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-async fn derive_execute_grant(ctx: &ServerRuntimeContext, key: &str) -> AuthorityGrantId {
+async fn derive_execute_grant(
+    ctx: &ServerRuntimeContext,
+    key: &str,
+    question_resource_id: &str,
+) -> AuthorityGrantId {
+    let file_root = std::env::temp_dir().display().to_string();
     let grant = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -571,8 +576,13 @@ async fn derive_execute_grant(ctx: &ServerRuntimeContext, key: &str) -> Authorit
                 "allowedNamespaces": ["__no_namespace_authority__"],
                 "allowedAuthorityScopes": ["capability.execute", "goals.read", super::WRITE_SCOPE],
                 "allowedResourceKinds": ["goal", super::USER_QUESTION_KIND, super::GOAL_ANSWER_KIND],
-                "resourceSelectors": ["*"],
-                "fileRoots": ["*"],
+                "resourceSelectors": [
+                    "kind:goal",
+                    "kind:user_question",
+                    "kind:goal_answer",
+                    format!("resource:{question_resource_id}")
+                ],
+                "fileRoots": [file_root],
                 "networkPolicy": "none",
                 "maxRisk": "medium",
                 "budget": {"remainingInvocations": 10},
@@ -623,6 +633,10 @@ fn execute_invocation(
         .with_workspace_id("workspace-goals")
         .with_scope("capability.execute")
         .with_scope(super::WRITE_SCOPE)
+        .with_runtime_metadata(
+            RUNTIME_METADATA_WORKING_DIRECTORY,
+            std::env::temp_dir().display().to_string(),
+        )
         .with_idempotency_key(idempotency_key),
     )
 }

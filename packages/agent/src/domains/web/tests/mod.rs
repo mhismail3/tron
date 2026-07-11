@@ -459,6 +459,10 @@ struct WebFixture<'a> {
     session_id: String,
     workspace_id: String,
     root: tempfile::TempDir,
+    network_policy: String,
+    allowed_authority_scopes: Vec<String>,
+    allowed_resource_kinds: Vec<String>,
+    resource_selectors: Vec<String>,
 }
 
 impl<'a> WebFixture<'a> {
@@ -554,6 +558,19 @@ impl<'a> WebFixture<'a> {
             session_id: session_id.to_owned(),
             workspace_id,
             root,
+            network_policy: network_policy.to_owned(),
+            allowed_authority_scopes: allowed_authority_scopes
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            allowed_resource_kinds: allowed_resource_kinds
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            resource_selectors: resource_selectors
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
         }
     }
 
@@ -561,15 +578,15 @@ impl<'a> WebFixture<'a> {
         let idempotency_key = payload
             .get("idempotencyKey")
             .and_then(Value::as_str)
-            .unwrap_or("web-fixture-context-key")
-            .to_owned();
+            .map(str::to_owned);
+        let grant_id = self.grant_for_payload(&payload).await;
         let result = self
             .ctx
             .engine_host
             .invoke(Invocation::new_sync(
                 FunctionId::new("capability::execute").expect("function id"),
                 payload,
-                self.context(&idempotency_key),
+                self.context_with_optional_grant(idempotency_key.as_deref(), grant_id),
             ))
             .await;
         assert_eq!(result.error, None, "execute failed: {:?}", result.error);
@@ -582,15 +599,15 @@ impl<'a> WebFixture<'a> {
         let idempotency_key = payload
             .get("idempotencyKey")
             .and_then(Value::as_str)
-            .unwrap_or("web-fixture-context-key")
-            .to_owned();
+            .map(str::to_owned);
+        let grant_id = self.grant_for_payload(&payload).await;
         let result = self
             .ctx
             .engine_host
             .invoke(Invocation::new_sync(
                 FunctionId::new("capability::execute").expect("function id"),
                 payload,
-                self.context(&idempotency_key),
+                self.context_with_optional_grant(idempotency_key.as_deref(), grant_id),
             ))
             .await;
         result.error.expect("execute should fail").to_string()
@@ -649,10 +666,26 @@ impl<'a> WebFixture<'a> {
     }
 
     fn context(&self, idempotency_key: &str) -> CausalContext {
-        CausalContext::new(
+        self.context_with_grant(idempotency_key, self.grant_id.clone())
+    }
+
+    fn context_with_grant(
+        &self,
+        idempotency_key: &str,
+        grant_id: AuthorityGrantId,
+    ) -> CausalContext {
+        self.context_with_optional_grant(Some(idempotency_key), grant_id)
+    }
+
+    fn context_with_optional_grant(
+        &self,
+        idempotency_key: Option<&str>,
+        grant_id: AuthorityGrantId,
+    ) -> CausalContext {
+        let mut context = CausalContext::new(
             self.actor_id.clone(),
             ActorKind::Agent,
-            self.grant_id.clone(),
+            grant_id,
             TraceId::generate(),
         )
         .with_scope("capability.execute")
@@ -662,7 +695,6 @@ impl<'a> WebFixture<'a> {
         .with_scope("resource.write")
         .with_session_id(self.session_id.clone())
         .with_workspace_id(self.workspace_id.clone())
-        .with_idempotency_key(idempotency_key.to_owned())
         .with_runtime_metadata(
             RUNTIME_METADATA_WORKING_DIRECTORY,
             self.root.path().display().to_string(),
@@ -670,7 +702,59 @@ impl<'a> WebFixture<'a> {
         .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_INVOCATION_ID, "provider-web-test")
         .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
         .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
-        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
+        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1");
+        if let Some(idempotency_key) = idempotency_key {
+            context = context.with_idempotency_key(idempotency_key.to_owned());
+        }
+        context
+    }
+
+    async fn grant_for_payload(&self, payload: &Value) -> AuthorityGrantId {
+        let mut selectors = self.resource_selectors.clone();
+        for resource_id in payload
+            .as_object()
+            .into_iter()
+            .flat_map(|object| object.iter())
+            .filter(|(field, _)| field.ends_with("ResourceId"))
+            .filter_map(|(_, value)| value.as_str())
+        {
+            let kind = resource_id.split(':').next().unwrap_or_default();
+            if self
+                .allowed_resource_kinds
+                .iter()
+                .any(|allowed| allowed == kind)
+            {
+                selectors.push(format!("resource:{resource_id}"));
+            }
+        }
+        selectors.sort();
+        selectors.dedup();
+        if selectors == self.resource_selectors {
+            return self.grant_id.clone();
+        }
+        let authority_scopes = self
+            .allowed_authority_scopes
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let resource_kinds = self
+            .allowed_resource_kinds
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        derive_execute_grant(
+            self.ctx,
+            &self.actor_id,
+            &self.session_id,
+            &self.workspace_id,
+            self.root.path().to_str().expect("root path"),
+            &self.network_policy,
+            &authority_scopes,
+            &resource_kinds,
+            &selector_refs,
+        )
+        .await
     }
 }
 

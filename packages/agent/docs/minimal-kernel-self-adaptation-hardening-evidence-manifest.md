@@ -11,7 +11,7 @@ runtime behavior.
 
 | Area | File |
 |---|---|
-| Capability registry and operation ownership | `packages/agent/src/domains/capability/operations/operation_contract.rs` |
+| Capability registry and operation ownership | `packages/agent/src/domains/capability/operations/operation_contract/mod.rs` |
 | Capability dispatcher | `packages/agent/src/domains/capability/operations/dispatch.rs` |
 | First route seam | `packages/agent/src/domains/capability/operations/git.rs` |
 | Capability binding domain docs | `packages/agent/src/domains/capability_binding/mod.rs` |
@@ -29,7 +29,7 @@ runtime behavior.
 | Session event log | `packages/agent/src/domains/session/event_store/mod.rs` |
 | Redaction | `packages/agent/src/shared/foundation/redaction.rs` |
 | Catalog discovery | `packages/agent/src/domains/catalog_discovery/mod.rs` |
-| Capability catalog projections | `packages/agent/src/domains/capability/operations/catalog.rs` |
+| Capability catalog projections | `packages/agent/src/domains/capability/operations/catalog/mod.rs` |
 | Model capability runtime grants | `packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs` |
 | Provider request composition boundary | `packages/agent/src/domains/model/responder/mod.rs`; `packages/agent/src/domains/model/providers/shared/provider.rs`; `packages/agent/src/domains/model/providers/openai/provider/mod.rs`; `packages/agent/src/domains/model/providers/kimi/provider.rs` |
 | Memory prompt context projection | `packages/agent/src/domains/memory/prompt_trace.rs` |

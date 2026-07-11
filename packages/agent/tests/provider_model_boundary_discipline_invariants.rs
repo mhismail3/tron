@@ -379,7 +379,7 @@ fn provider_family_stream_and_catalog_tests_remain_present() {
 #[test]
 fn provider_capability_result_transport_does_not_rewrite_canonical_output() {
     let output_owner = read_repo_file(
-        "packages/agent/src/domains/capability/operations/operation_contract/output.rs",
+        "packages/agent/src/domains/capability/operations/operation_contract/output/mod.rs",
     );
     assert!(output_owner.contains("PROVIDER_OUTPUT_MAX_BYTES"));
     assert!(output_owner.contains("fit_output_budget"));

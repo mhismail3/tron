@@ -6,6 +6,8 @@ use std::process::Command;
 
 pub(super) const SCORECARD_PATH: &str =
     "packages/agent/docs/post-aha-adversarial-closeout-scorecard.md";
+pub(super) const HRA_SCORECARD_PATH: &str =
+    "packages/agent/docs/hierarchical-rearchitecture-scorecard.md";
 pub(super) const EVIDENCE_PATH: &str =
     "packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md";
 pub(super) const INVARIANT_TEST_PATH: &str =

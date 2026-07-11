@@ -241,14 +241,18 @@ fn rust_provider_shared_and_settings_loader_use_physical_owners() {
 
 #[test]
 fn rust_near_budget_files_have_explicit_warning_rows() {
-    let scorecard = read_repo_file(SCORECARD_PATH);
+    let budget_scorecard = read_repo_file(HRA_SCORECARD_PATH);
     let mut hits = Vec::new();
     for file in list_tracked_files_with_extension("rs") {
         if !file.starts_with("packages/agent/src/") {
             continue;
         }
         let loc = source_line_count(&file);
-        if loc >= 850 && !scorecard.contains(&file) {
+        if loc >= 850
+            && !budget_scorecard.lines().any(|line| {
+                line.contains(&format!("| `{file}` |")) && line.contains("| accepted_budget |")
+            })
+        {
             hits.push(format!("{file}: {loc} LOC"));
         }
     }

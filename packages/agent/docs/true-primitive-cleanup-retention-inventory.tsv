@@ -1685,7 +1685,7 @@ packages/agent/src/domains/jobs/race_tests.rs	test	test_harness	Phase2-Slice5A	J
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+CameraCaptureLifecycle.swift	test	test_harness	Phase1-closeout	Camera capture lifecycle source guard retained to prove captured-photo preview stops the live camera session.
 packages/ios-app/Tests/Session/Chat/MessagingCoordinatorAuditRegressionTests.swift	test	test_harness	Phase1-closeout	Messaging coordinator audit regression tests retained for local chat error affordance behavior.
 packages/ios-app/Tests/Session/Chat/MessagingCoordinatorDraftTests.swift	test	test_harness	Phase1-closeout	Messaging coordinator draft tests retained for recent-input and pending-share persistence behavior.
-packages/agent/src/domains/capability/operations/catalog.rs	implementation	capability	Phase2-Slice1	Catalog discovery execute operation retained as an inspect/conformance adapter behind the singular execute primitive.
+packages/agent/src/domains/capability/operations/catalog/mod.rs	implementation	capability	Phase2-Slice1	Catalog discovery execute operation retained as an inspect/conformance adapter behind the singular execute primitive.
 packages/agent/src/domains/catalog_discovery/mod.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery domain facade retained for native inspect/search/conformance surfaces.
 packages/agent/src/domains/catalog_discovery/contract.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery contracts retained for schemas, metadata, and durable conformance evidence.
 packages/agent/src/domains/catalog_discovery/errors.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery errors retained for protected-target and malformed-request failure semantics.
@@ -2109,15 +2109,15 @@ packages/agent/docs/minimal-kernel-self-adaptation-hardening-inventory.tsv	docs	
 packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md	docs	docs/static gates	TPC-10	durable kernel hardening scorecard
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_catalog_tests.rs	test	test_harness	TPC-10	canonical catalog grant derivation regression coverage
 packages/agent/src/domains/capability/operations/catalog/tests.rs	test	test_harness	TPC-10	canonical capability discovery and inspection regression coverage
-packages/agent/src/domains/capability/operations/operation_contract.rs	implementation	agent_runtime	TPC-10	canonical operation contract owner
+packages/agent/src/domains/capability/operations/operation_contract/mod.rs	implementation	agent_runtime	TPC-10	canonical operation contract owner
 packages/agent/src/domains/capability/operations/operation_contract/authority.rs	implementation	agent_runtime	TPC-10	canonical operation authority policy owner
 packages/agent/src/domains/capability/operations/operation_contract/capability_binding.rs	implementation	agent_runtime	TPC-10	canonical binding operation input contract owner
 packages/agent/src/domains/capability/operations/operation_contract/direct.rs	implementation	agent_runtime	TPC-10	canonical direct operation input contract owner
 packages/agent/src/domains/capability/operations/operation_contract/governance.rs	implementation	agent_runtime	TPC-10	canonical governance operation input contract owner
 packages/agent/src/domains/capability/operations/operation_contract/metadata.rs	implementation	agent_runtime	TPC-10	canonical operation metadata contract owner
-packages/agent/src/domains/capability/operations/operation_contract/output.rs	implementation	agent_runtime	TPC-10	canonical provider operation output owner
+packages/agent/src/domains/capability/operations/operation_contract/output/mod.rs	implementation	agent_runtime	TPC-10	canonical provider operation output owner
 packages/agent/src/domains/capability/operations/operation_contract/output/normalize.rs	implementation	agent_runtime	TPC-10	canonical provider output normalization owner
-packages/agent/src/domains/capability/operations/operation_contract/output/projection.rs	implementation	agent_runtime	TPC-10	canonical provider evidence projection owner
+packages/agent/src/domains/capability/operations/operation_contract/output/projection/mod.rs	implementation	agent_runtime	TPC-10	canonical provider evidence projection owner
 packages/agent/src/domains/capability/operations/operation_contract/output/projection/tests.rs	test	test_harness	TPC-10	canonical provider evidence projection regression coverage
 packages/agent/src/domains/capability/operations/operation_contract/output/spec.rs	implementation	agent_runtime	TPC-10	canonical per-operation output specification owner
 packages/agent/src/domains/capability/operations/operation_contract/output/types.rs	implementation	agent_runtime	TPC-10	canonical provider output type owner

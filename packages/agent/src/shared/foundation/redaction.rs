@@ -3,7 +3,8 @@
 //! Provider errors, client logs, and durable event payloads can all carry
 //! provider-auth fragments when an upstream service returns a raw request,
 //! header, or debug string. This helper is intentionally conservative: it masks
-//! common credential shapes while leaving ordinary short status codes intact.
+//! common credential shapes and OAuth debug-wrapper codes while leaving
+//! ordinary engine status/error codes intact.
 
 use std::sync::LazyLock;
 
@@ -23,6 +24,14 @@ pub fn redact_sensitive_content(text: &str) -> String {
                     r#"(?i)("(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code)"\s*:\s*")([^"]{8,})(")"#,
                 )
                 .unwrap(),
+                "${1}****${3}",
+            ),
+            // OAuth debug wrappers commonly shorten `authorizationCode` to
+            // `code`; retain generic engine error-code fields while masking
+            // that context-specific credential.
+            (
+                Regex::new(r#"(?i)(\boauth\s*\(\s*code\s*:\s*")([^"]{8,})(")"#)
+                    .unwrap(),
                 "${1}****${3}",
             ),
             // Swift/Rust debug-description fields like `apiKey: "..."`.

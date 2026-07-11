@@ -14,7 +14,7 @@ const INVENTORY_PATH: &str = "packages/agent/docs/capability-dynamic-replacement
 const EVIDENCE_PATH: &str =
     "packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md";
 const REGISTRY_PATH: &str =
-    "packages/agent/src/domains/capability/operations/operation_contract.rs";
+    "packages/agent/src/domains/capability/operations/operation_contract/mod.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
 const METADATA_PATH: &str =
     "packages/agent/src/domains/capability/operations/operation_contract/metadata.rs";

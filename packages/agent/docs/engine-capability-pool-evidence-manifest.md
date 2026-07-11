@@ -6,8 +6,8 @@ Status: **passed**
 
 | Area | Source |
 |---|---|
-| Execute operation registry | `packages/agent/src/domains/capability/operations/operation_contract.rs` |
-| Execute catalog bridge | `packages/agent/src/domains/capability/operations/catalog.rs` |
+| Execute operation registry | `packages/agent/src/domains/capability/operations/operation_contract/mod.rs` |
+| Execute catalog bridge | `packages/agent/src/domains/capability/operations/catalog/mod.rs` |
 | Capability-pool classification | `packages/agent/src/domains/capability/pool.rs` |
 | Domain worker startup registration | `packages/agent/src/domains/registration/mod.rs` |
 | Primitive worker startup registration | `packages/agent/src/engine/primitives/workers.rs` |

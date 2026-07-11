@@ -18,7 +18,7 @@ const MODULARITY_INVENTORY_PATH: &str = "packages/agent/docs/capability-modulari
 const DYNAMIC_SCORECARD_PATH: &str =
     "packages/agent/docs/capability-dynamic-replacement-scorecard.md";
 const REGISTRY_PATH: &str =
-    "packages/agent/src/domains/capability/operations/operation_contract.rs";
+    "packages/agent/src/domains/capability/operations/operation_contract/mod.rs";
 const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs";
 const CONTEXT_CONTROL_PATH: &str = "packages/agent/src/domains/context_control/mod.rs";
 const CONTEXT_CONTROL_TESTS_PATH: &str = "packages/agent/src/domains/context_control/tests.rs";

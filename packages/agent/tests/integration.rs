@@ -250,12 +250,16 @@ async fn session_create_reconstruct_and_public_execute_fails_closed() {
         rejected["ok"], true,
         "engine invoke wrapper failed: {rejected}"
     );
-    let child_error = rejected
-        .pointer("/result/child/error/details/message")
+    let child = rejected.pointer("/result/child").unwrap_or(&Value::Null);
+    let child_error = child
+        .pointer("/error/details/message")
         .and_then(Value::as_str)
         .unwrap_or_default();
     assert!(
-        child_error.contains("trusted agent or system runtime context"),
+        child["value"].is_null()
+            && child["error"]["kind"] == "policy_violation"
+            && (child_error.contains("wildcard authority scopes")
+                || child_error.contains("trusted agent or system runtime context")),
         "public capability::execute must fail closed, got: {rejected}"
     );
 

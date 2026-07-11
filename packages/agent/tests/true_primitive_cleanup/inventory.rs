@@ -90,7 +90,7 @@ fn tracked_source_inventory_is_formalized() {
             "test",
         ),
         (
-            "packages/agent/src/domains/capability/operations/operation_contract.rs",
+            "packages/agent/src/domains/capability/operations/operation_contract/mod.rs",
             "implementation",
         ),
         (

@@ -120,7 +120,14 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         "retained observability settings surface",
     );
 
-    let execute_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
+    let execute_contract = format!(
+        "{}\n{}",
+        read_repo_file("packages/agent/src/domains/capability/contract.rs"),
+        read_repo_source_trees(&[
+            "packages/agent/src/domains/capability/operations/operation_contract/mod.rs",
+            "packages/agent/src/domains/capability/operations/operation_contract",
+        ])
+    );
     let execute_ops = read_repo_source_trees(&["packages/agent/src/domains/capability/operations"]);
     let trace_proof = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
     for (source, label) in [

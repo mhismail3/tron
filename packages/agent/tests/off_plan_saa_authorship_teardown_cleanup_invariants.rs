@@ -407,26 +407,30 @@ fn provider_visible_execute_surface_is_renarrowed() {
     let operations_root = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
     let operations_dispatch =
         read_repo_file("packages/agent/src/domains/capability/operations/dispatch.rs");
-    let operations_registry =
-        read_repo_file("packages/agent/src/domains/capability/operations/operation_contract.rs");
+    let operations_registry = read_repo_file(
+        "packages/agent/src/domains/capability/operations/operation_contract/mod.rs",
+    );
 
     assert!(
-        contract.contains("operation_list_text()"),
-        "execute schema must derive provider-visible operations from the registry-backed operation list"
+        contract.contains("operation_host_request_schema()")
+            && operations_registry.contains("\"enum\": supported_operation_names()")
+            && operations_registry.contains("operation_list_text()"),
+        "execute schema must delegate to the canonical registry-backed operation contract"
     );
     assert!(
         openai.contains("operation_list = operation_list_text()"),
         "OpenAI guidance must derive provider-visible operations from the registry-backed operation list"
+    );
+    assert!(
+        operations_dispatch.contains("match operation")
+            && operations_dispatch.contains("OperationId::Observe"),
+        "execute dispatcher must use the typed canonical operation id"
     );
 
     for retained in RETAINED_EXECUTE_OPS {
         assert!(
             operations_registry.contains(&format!("\"{retained}\"")),
             "execute registry missing retained operation {retained}"
-        );
-        assert!(
-            operations_dispatch.contains(&format!("\"{retained}\"")),
-            "execute dispatcher missing retained operation {retained}"
         );
     }
 
@@ -471,6 +475,9 @@ fn memory_rule_runtime_substrate_is_removed_from_active_sources() {
     let grants = read_repo_file(
         "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
     );
+    let authority = read_repo_file(
+        "packages/agent/src/domains/capability/operations/operation_contract/authority.rs",
+    );
     let contracts =
         read_repo_file("packages/agent/src/engine/tests/durability/resource_contracts.rs");
 
@@ -499,9 +506,14 @@ fn memory_rule_runtime_substrate_is_removed_from_active_sources() {
     }
     assert!(!grants.contains("self_adapting_resource_kinds"));
     assert!(!grants.contains("\"resource::create\""));
-    assert!(!grants.contains("\"*\""));
     assert!(
-        grants.contains("\"memory.read\"") && !grants.contains("\"memory.write\""),
+        grants.contains("selector == \"*\"") && grants.contains("selector.ends_with(\":*\")"),
+        "runtime grant derivation must explicitly reject wildcard resource selectors"
+    );
+    assert!(
+        authority
+            .contains("| \"memory_decision_inspect\" => &[\"memory.read\", \"resource.read\"]")
+            && !authority.contains("\"memory.write\""),
         "current memory inspection grants must remain read-only and module-scoped"
     );
 }

@@ -331,7 +331,7 @@ fn cockpit_decodes_live_catalog_resources_and_runtime_surfaces() {
     );
     assert_contains_all(
         "packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitPresentation.swift",
-        &["Catalog Degraded", "Capabilities Need Review"],
+        &["Catalog Degraded", "Operations Need Review"],
     );
 
     assert_contains_all(

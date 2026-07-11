@@ -219,8 +219,7 @@ async fn web_source_inspect_handles_pre_extraction_web_source_records() {
         .invoke_ok(json!({
             "operation": "web_source_inspect",
             "webSourceResourceId": resource.resource_id,
-            "maxSnippetBytes": 8,
-            "idempotencyKey": "web-source-old-record-inspect"
+            "maxSnippetBytes": 8
         }))
         .await;
     let source = &inspected["details"]["web"]["source"];
@@ -262,11 +261,13 @@ async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
     let malformed = read
         .invoke_error(json!({
             "operation": "web_source_inspect",
-            "webSourceResourceId": "not a source id",
-            "idempotencyKey": "web-source-rejects-malformed"
+            "webSourceResourceId": "not a source id"
         }))
         .await;
-    assert!(malformed.contains("must start with web_source:"));
+    assert!(
+        malformed.contains("requires exact selector") && malformed.contains("webSourceResourceId"),
+        "unexpected malformed-id error: {malformed}"
+    );
 
     let goal = ctx
         .engine_host
@@ -289,8 +290,7 @@ async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
     let wrong_kind = read
         .invoke_error(json!({
             "operation": "web_source_inspect",
-            "webSourceResourceId": goal.resource_id,
-            "idempotencyKey": "web-source-rejects-wrong-kind"
+            "webSourceResourceId": goal.resource_id
         }))
         .await;
     assert!(
@@ -302,8 +302,7 @@ async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
         .invoke_error(json!({
             "operation": "web_source_inspect",
             "webSourceResourceId": resource_id,
-            "webSourceVersionId": "rver_missing",
-            "idempotencyKey": "web-source-rejects-missing-version"
+            "webSourceVersionId": "rver_missing"
         }))
         .await;
     assert!(missing_version.contains("webSourceVersionId was not found"));
@@ -333,8 +332,7 @@ async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
         .invoke_error(json!({
             "operation": "web_source_inspect",
             "webSourceResourceId": resource_id,
-            "webSourceVersionId": version_id,
-            "idempotencyKey": "web-source-rejects-stale-version"
+            "webSourceVersionId": version_id
         }))
         .await;
     assert!(stale_version.contains("webSourceVersionId is stale"));
@@ -343,8 +341,7 @@ async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
     let cross_session_error = cross_session
         .invoke_error(json!({
             "operation": "web_source_inspect",
-            "webSourceResourceId": resource_id,
-            "idempotencyKey": "web-source-rejects-cross-session"
+            "webSourceResourceId": resource_id
         }))
         .await;
     assert!(cross_session_error.contains("outside the current session scope"));
@@ -360,8 +357,7 @@ async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
     .await;
     let authority_error = no_read
         .invoke_error(json!({
-            "operation": "web_source_list",
-            "idempotencyKey": "web-source-rejects-authority"
+            "operation": "web_source_list"
         }))
         .await;
     assert!(authority_error.contains("web.read") || authority_error.contains("resource.read"));
