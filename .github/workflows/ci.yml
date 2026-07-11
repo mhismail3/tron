@@ -105,6 +105,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Several closeout invariants verify accepted baseline ancestry.
+          fetch-depth: 0
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:

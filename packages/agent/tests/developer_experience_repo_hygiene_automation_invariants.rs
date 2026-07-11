@@ -387,6 +387,15 @@ fn local_and_github_static_gate_targets_match_exactly() {
         !workflow.contains("continue-on-error:") && !workflow.contains("rust-static-gates:"),
         "CI must not retain advisory or duplicate Rust gates"
     );
+    let rust_job = workflow
+        .split_once("\n  rust:\n")
+        .and_then(|(_, rest)| rest.split_once("\n  ios:\n"))
+        .map(|(job, _)| job)
+        .expect("CI must define rust before ios");
+    assert!(
+        rust_job.contains("fetch-depth: 0"),
+        "Rust CI needs full history for baseline-lineage invariants"
+    );
     assert!(
         local_targets.contains(&TARGET_NAME.to_owned()),
         "DXRHA target must be in the closeout set"

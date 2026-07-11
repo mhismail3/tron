@@ -121,7 +121,9 @@ closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
 database-path, and serial integration targets; the workflow does not duplicate
 that list. iOS and Mac jobs only run for their package paths, relevant labels,
 or full validation on `main` and manual dispatch (macOS minutes are ~10× the
-cost of Linux minutes). `CI summary` is the required mainline check.
+cost of Linux minutes). The Rust job checks out full history because accepted
+baseline invariants verify commit ancestry. `CI summary` is the required
+mainline check.
 
 ## Commits
 
