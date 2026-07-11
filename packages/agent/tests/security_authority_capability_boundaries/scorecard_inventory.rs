@@ -120,13 +120,13 @@ fn sacb_scorecard_weights_sum_to_100_and_current_score_matches_closed_rows() {
 #[test]
 fn sacb_invariant_target_is_in_closeout_ci_lists() {
     let target = "security_authority_capability_boundaries_invariants";
-    for path in ["scripts/tron.d/quality.sh", ".github/workflows/ci.yml"] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(target),
-            "{path} must list the SACB invariant target in closeout CI documentation"
-        );
-    }
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    assert!(
+        quality.contains(target),
+        "local CI must own the SACB target"
+    );
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    assert!(workflow.contains("run: scripts/tron ci test"));
 
     let readme = read_repo_file("README.md");
     assert!(

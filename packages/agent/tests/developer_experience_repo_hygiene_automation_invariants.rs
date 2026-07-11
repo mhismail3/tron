@@ -134,35 +134,16 @@ fn parse_quality_closeout_targets() -> Vec<String> {
     targets
 }
 
-fn parse_github_static_gate_targets() -> Vec<String> {
+fn assert_github_delegates_to_local_ci_test() {
     let ci = read_repo_file(".github/workflows/ci.yml");
-    let mut targets = Vec::new();
-    let mut in_block = false;
-    for line in ci.lines() {
-        if line.contains("Run Rust-owned closeout target set") {
-            in_block = true;
-            continue;
-        }
-        if in_block && line.trim_start().starts_with("- name:") && !targets.is_empty() {
-            break;
-        }
-        if !in_block {
-            continue;
-        }
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("cargo test --test ") {
-            let target = rest
-                .split_whitespace()
-                .next()
-                .expect("cargo test target should have a name");
-            targets.push(target.to_owned());
-        }
-    }
     assert!(
-        !targets.is_empty(),
-        "GitHub static-gates target block not found"
+        ci.contains("run: scripts/tron ci test"),
+        "GitHub Rust quality must delegate to the local test owner"
     );
-    targets
+    assert!(
+        !ci.contains("Run Rust-owned closeout target set") && !ci.contains("cargo test --test "),
+        "GitHub CI must not duplicate the local closeout target list"
+    );
 }
 
 fn assert_order(source: &str, before: &str, after: &str, context: &str) {
@@ -205,13 +186,17 @@ fn dxrha_artifacts_and_static_gate_wiring_exist() {
         );
     }
 
-    for path in ["scripts/tron.d/quality.sh", ".github/workflows/ci.yml"] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(TARGET_NAME),
-            "{path} must run the DXRHA invariant target"
-        );
-    }
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    assert!(
+        quality.contains(TARGET_NAME),
+        "scripts/tron.d/quality.sh must own the DXRHA invariant target"
+    );
+
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    assert!(
+        workflow.contains("run: scripts/tron ci test"),
+        ".github/workflows/ci.yml must delegate Rust tests to scripts/tron ci test"
+    );
 }
 
 #[test]
@@ -384,10 +369,32 @@ fn dxrha_inventory_is_structured_and_covers_required_workflow_surfaces() {
 #[test]
 fn local_and_github_static_gate_targets_match_exactly() {
     let local_targets = parse_quality_closeout_targets();
-    let github_targets = parse_github_static_gate_targets();
-    assert_eq!(
-        local_targets, github_targets,
-        "scripts/tron ci test and GitHub rust-static-gates must run the same closeout target set in the same order"
+    assert_github_delegates_to_local_ci_test();
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    for required in [
+        "-D warnings",
+        "workflow_dispatch:",
+        "docker://rhysd/actionlint:1.7.12",
+        "toolchain: 1.94.1",
+    ] {
+        assert!(
+            quality.contains(required) || workflow.contains(required),
+            "CI hardening contract missing {required}"
+        );
+    }
+    assert!(
+        !workflow.contains("continue-on-error:") && !workflow.contains("rust-static-gates:"),
+        "CI must not retain advisory or duplicate Rust gates"
+    );
+    let rust_job = workflow
+        .split_once("\n  rust:\n")
+        .and_then(|(_, rest)| rest.split_once("\n  ios:\n"))
+        .map(|(job, _)| job)
+        .expect("CI must define rust before ios");
+    assert!(
+        rust_job.contains("fetch-depth: 0"),
+        "Rust CI needs full history for baseline-lineage invariants"
     );
     assert!(
         local_targets.contains(&TARGET_NAME.to_owned()),

@@ -159,13 +159,13 @@ fn riurd_artifacts_and_static_gate_wiring_exist() {
         );
     }
 
-    for path in ["scripts/tron.d/quality.sh", ".github/workflows/ci.yml"] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(TARGET_NAME),
-            "{path} must run RIURD invariant target"
-        );
-    }
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    assert!(
+        quality.contains(TARGET_NAME),
+        "local CI must own RIURD target"
+    );
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    assert!(workflow.contains("run: scripts/tron ci test"));
 }
 
 #[test]
@@ -569,6 +569,7 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
         "working-directory: packages/mac-app",
         "git check-ignore -q packages/mac-app/TronMac.xcodeproj",
         "Dry-run DMG assembly",
+        "ENABLE_DEBUG_DYLIB=NO",
     ] {
         assert!(ci.contains(required), "CI missing {required}");
     }

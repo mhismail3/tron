@@ -1766,7 +1766,7 @@ fn agent_context(trace_id: &str, grant_id: AuthorityGrantId) -> CausalContext {
     )
     .with_session_id("memory-session")
     .with_workspace_id("memory-workspace")
-    .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/private/tmp")
+    .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp")
 }
 
 fn workspace_context(trace_id: &str) -> CausalContext {

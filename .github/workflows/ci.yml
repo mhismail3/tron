@@ -3,24 +3,21 @@
 # Six workloads, two cost tiers:
 #   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
 #   - version-drift:       ubuntu, ~10s, validates VERSION.env mirrors.
-#   - rust-static-gates:   ubuntu (1x), runs the same named closeout target
-#                          set as `scripts/tron ci test` for docs/templates,
-#                          iOS, Mac, agent, script, and CI changes.
-#   - rust:                ubuntu (1x), runs when packages/agent/** changes,
-#                          on every push to main, or when labeled `rust`.
+#   - workflow-lint:       ubuntu, validates every Actions workflow.
+#   - rust:                ubuntu (1x), runs the canonical `scripts/tron ci`
+#                          checks for every repository change.
 #   - ios:                 macos (10x), runs when packages/ios-app/** changes,
-#                          on every push to main, or when labeled `ios`.
+#                          or for every non-PR full validation.
 #   - mac:                 macos (10x), runs when packages/mac-app/** or
 #                          packages/agent/** changes (the Rust binary is
-#                          embedded in the Mac app bundle), on every push to
-#                          main, or when labeled `mac`. Also exercises a
+#                          embedded in the Mac app bundle), or for every
+#                          non-PR full validation. Also exercises a
 #                          dry-run DMG assembly on PR to catch release-mac.yml
 #                          drift before tag push.
 #
-# Path-gating happens via `dorny/paths-filter` for static Rust gates, Rust,
-# iOS, and Mac so PRs that only touch docs or the other platform don't burn
-# macOS minutes. The guard jobs always run. Pushes to main always run
-# everything to catch cross-cutting regressions.
+# Rust is intentionally unconditional because its invariant targets inspect
+# Rust, docs, scripts, workflows, and client source. Only macOS workloads are
+# path-gated on PRs. Pushes to main and manual dispatch run the full matrix.
 #
 # Concurrency: in-flight runs for the same PR are cancelled on new pushes
 # (cheap on push to main — only one run can be in flight there anyway).
@@ -38,6 +35,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel previous in-flight runs for the same PR to avoid macOS minute waste.
 # Pushes to main never cancel — full-history validation is the goal there.
@@ -53,39 +51,20 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-latest
     outputs:
-      rust: ${{ steps.filter.outputs.rust }}
-      static_gates: ${{ steps.filter.outputs.static_gates }}
       ios: ${{ steps.filter.outputs.ios }}
       mac: ${{ steps.filter.outputs.mac }}
-      scripts: ${{ steps.filter.outputs.scripts }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
-            rust:
-              - 'packages/agent/**'
-              - '.github/workflows/ci.yml'
-            static_gates:
-              - '.github/pull_request_template.md'
-              - '.github/ISSUE_TEMPLATE/**'
-              - '.github/workflows/ci.yml'
-              - 'README.md'
-              - 'CONTRIBUTING.md'
-              - 'AGENTS.md'
-              - 'packages/agent/docs/**'
-              - 'packages/ios-app/**'
-              - 'packages/mac-app/**'
-              - 'scripts/**'
             ios:
               - 'packages/ios-app/**'
               - '.github/workflows/ci.yml'
             mac:
+              - 'packages/agent/**'
               - 'packages/mac-app/**'
-              - '.github/workflows/ci.yml'
-            scripts:
-              - 'scripts/**'
               - '.github/workflows/ci.yml'
 
   personal-info-guard:
@@ -111,77 +90,32 @@ jobs:
       - name: Run release notes helper tests
         run: ./scripts/tron-release-notes --test
 
-  rust-static-gates:
-    name: Rust static gates
+  workflow-lint:
+    name: Workflow lint
     runs-on: ubuntu-latest
-    needs: changes
-    if: |
-      github.event_name == 'push' ||
-      needs.changes.outputs.static_gates == 'true' ||
-      needs.changes.outputs.rust == 'true' ||
-      needs.changes.outputs.scripts == 'true' ||
-      contains(github.event.pull_request.labels.*.name, 'rust')
-    defaults:
-      run:
-        working-directory: packages/agent
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache-workspaces: packages/agent
-
-      - name: Run Rust-owned closeout target set
-        run: |
-          cargo test --test db_path_guard -- --quiet
-          cargo test --test primitive_engine_teardown_plan_invariants -- --quiet
-          cargo test --test determinism_replayability_invariants -- --quiet
-          cargo test --test primitive_code_cleanup_invariants -- --quiet
-          cargo test --test hierarchical_rearchitecture_invariants -- --quiet
-          cargo test --test post_hra_adversarial_hardening_invariants -- --quiet
-          cargo test --test post_aha_adversarial_closeout_invariants -- --quiet
-          cargo test --test concurrency_scheduling_discipline_invariants -- --quiet
-          cargo test --test security_authority_capability_boundaries_invariants -- --quiet
-          cargo test --test observability_diagnostics_auditability_invariants -- --quiet
-          cargo test --test off_plan_saa_authorship_teardown_cleanup_invariants -- --quiet
-          cargo test --test data_integrity_storage_evolution_migration_discipline_invariants -- --quiet
-          cargo test --test public_protocol_api_contract_discipline_invariants -- --quiet
-          cargo test --test provider_model_boundary_discipline_invariants -- --quiet
-          cargo test --test performance_resource_governance_invariants -- --quiet
-          cargo test --test configuration_profile_environment_discipline_invariants -- --quiet
-          cargo test --test release_install_upgrade_rollback_discipline_invariants -- --quiet
-          cargo test --test ios_thin_client_generic_runtime_shell_invariants -- --quiet
-          cargo test --test developer_experience_repo_hygiene_automation_invariants -- --quiet
-          cargo test --test documentation_evidence_scorecard_integrity_invariants -- --quiet
-          cargo test --test self_sufficient_agent_runtime_readiness_invariants -- --quiet
-          cargo test --test primitive_minimality_closure_invariants -- --quiet
-          cargo test --test baseline_pre_restoration_closure_invariants -- --quiet
-          cargo test --test self_updating_worker_runtime_foundation_invariants -- --quiet
-          cargo test --test ios_self_adapting_agent_cockpit_baseline_invariants -- --quiet
-          cargo test --test ios_affordance_restoration_map_invariants -- --quiet
-          cargo test --test primitive_trace_execution -- --quiet
-          cargo test --test integration -- --test-threads=1 --quiet
+      - name: Validate GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
 
   rust:
-    name: Rust (fmt + clippy + test)
+    name: Rust quality
     runs-on: ubuntu-latest
-    needs: changes
-    if: |
-      github.event_name == 'push' ||
-      needs.changes.outputs.rust == 'true' ||
-      needs.changes.outputs.scripts == 'true' ||
-      contains(github.event.pull_request.labels.*.name, 'rust')
-    defaults:
-      run:
-        working-directory: packages/agent
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Several closeout invariants verify accepted baseline ancestry.
+          fetch-depth: 0
 
-      # `actions-rust-lang/setup-rust-toolchain` reads packages/agent/rust-toolchain.toml
-      # automatically, so it picks up the pinned channel + components (rustfmt, clippy).
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: 1.94.1
+          components: rustfmt, clippy
           cache-workspaces: packages/agent
+          # `scripts/tron ci` owns the explicit warning policy.
+          rustflags: ""
 
       - name: Toolchain info
         run: |
@@ -190,30 +124,13 @@ jobs:
           cargo fmt --version
           cargo clippy --version
 
-      # fmt + clippy are ADVISORY: the tree has ~2k fmt diffs and ~1k clippy
-      # warnings predating this CI pipeline. They surface in PR checks as ⚠️
-      # but do NOT block merge. Promoting either to enforcing requires a
-      # workspace-wide cleanup commit first (a `cargo fmt` baseline + a
-      # clippy-warning triage pass). Until then, removing `continue-on-error`
-      # would red-line every PR — keep advisory state.
-      #
-      # Tracked as an out-of-scope follow-up; do not edit `continue-on-error`
-      # without first running the workspace cleanup.
-      - name: cargo fmt --check (advisory)
-        continue-on-error: true
-        run: cargo fmt --check
-
-      - name: cargo clippy (advisory)
-        continue-on-error: true
-        run: cargo clippy --all-targets
-
-      - name: cargo check
-        run: cargo check
-
-      # Match the local `scripts/tron ci test` harness exactly, including
-      # serial integration execution for `--test integration`.
-      - name: scripts/tron ci test
-        working-directory: ${{ github.workspace }}
+      - name: Formatting
+        run: scripts/tron ci fmt
+      - name: Compile check
+        run: scripts/tron ci check
+      - name: Clippy
+        run: scripts/tron ci clippy
+      - name: Tests
         run: scripts/tron ci test
 
   ios:
@@ -221,7 +138,7 @@ jobs:
     runs-on: macos-15
     needs: changes
     if: |
-      github.event_name == 'push' ||
+      github.event_name != 'pull_request' ||
       needs.changes.outputs.ios == 'true' ||
       contains(github.event.pull_request.labels.*.name, 'ios')
     defaults:
@@ -281,9 +198,8 @@ jobs:
     runs-on: macos-15
     needs: changes
     if: |
-      github.event_name == 'push' ||
+      github.event_name != 'pull_request' ||
       needs.changes.outputs.mac == 'true' ||
-      needs.changes.outputs.rust == 'true' ||
       contains(github.event.pull_request.labels.*.name, 'mac')
     defaults:
       run:
@@ -301,7 +217,9 @@ jobs:
       # (release-mac.yml) rebuilds it in `--release` with signing.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: 1.94.1
           cache-workspaces: packages/agent
+          rustflags: "-D warnings"
 
       - name: Build agent helper (debug, for embedding)
         working-directory: packages/agent
@@ -378,12 +296,15 @@ jobs:
           set -euo pipefail
           brew install create-dmg
           mkdir -p build
+          # Xcode 26 adds an unsigned __preview.dylib to generic Debug builds;
+          # packaging validation does not need previews and re-signs the app.
           xcodebuild \
             -project TronMac.xcodeproj \
             -scheme TronMac \
             -configuration Debug \
             -derivedDataPath build/dd \
             -destination 'generic/platform=macOS' \
+            ENABLE_DEBUG_DYLIB=NO \
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
             -quiet build
           APP_PATH="$(find build/dd -name 'TronMac.app' -print -quit)"
@@ -399,19 +320,19 @@ jobs:
             || echo "::warning::create-dmg returned non-zero in dry-run — acceptable without signing"
           ls -la dist/ || true
 
-  # Aggregate gate — branch protection points at this single check.
+  # Aggregate gate — the main ruleset points at this single check.
   # Adding a new required job? List it under `needs:` here too AND add a
   # corresponding line in the script body (skipped jobs from path-gating
   # count as success).
   ci:
     name: CI summary
     runs-on: ubuntu-latest
-    needs: [personal-info-guard, version-drift, rust-static-gates, rust, ios, mac]
+    needs: [personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
     if: always()
     env:
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
       RESULT_VERSION: ${{ needs.version-drift.result }}
-      RESULT_STATIC_GATES: ${{ needs.rust-static-gates.result }}
+      RESULT_WORKFLOW_LINT: ${{ needs.workflow-lint.result }}
       RESULT_RUST: ${{ needs.rust.result }}
       RESULT_IOS: ${{ needs.ios.result }}
       RESULT_MAC: ${{ needs.mac.result }}
@@ -426,8 +347,14 @@ jobs:
           if [[ "$RESULT_VERSION" != "success" ]]; then
             echo "::error::version-drift: $RESULT_VERSION"; fail=1
           fi
-          # Static gates, rust, ios, and mac may be `skipped` by the path filter — treat as success.
-          for name in STATIC_GATES RUST IOS MAC; do
+          if [[ "$RESULT_WORKFLOW_LINT" != "success" ]]; then
+            echo "::error::workflow-lint: $RESULT_WORKFLOW_LINT"; fail=1
+          fi
+          if [[ "$RESULT_RUST" != "success" ]]; then
+            echo "::error::rust: $RESULT_RUST"; fail=1
+          fi
+          # iOS and Mac may be `skipped` by the PR path filter.
+          for name in IOS MAC; do
             var="RESULT_$name"
             result="${!var}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then

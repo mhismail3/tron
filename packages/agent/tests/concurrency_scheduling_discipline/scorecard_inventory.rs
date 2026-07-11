@@ -100,16 +100,10 @@ fn csd_scorecard_weights_sum_to_100() {
 #[test]
 fn csd_invariant_target_is_in_closeout_ci_lists() {
     let target = "concurrency_scheduling_discipline_invariants";
-    for (path, required) in [
-        ("scripts/tron.d/quality.sh", target),
-        (".github/workflows/ci.yml", target),
-    ] {
-        let source = read_repo_file(path);
-        assert!(
-            source.contains(required),
-            "{path} must list the CSD invariant target in closeout CI documentation"
-        );
-    }
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    assert!(quality.contains(target), "local CI must own the CSD target");
+    let workflow = read_repo_file(".github/workflows/ci.yml");
+    assert!(workflow.contains("run: scripts/tron ci test"));
 
     let readme = read_repo_file("README.md");
     for required in [

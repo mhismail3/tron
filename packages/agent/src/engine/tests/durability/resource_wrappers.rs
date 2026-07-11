@@ -49,7 +49,7 @@ async fn resource_backed_primitive_outputs_have_trace_identity() {
                 "kind:materialized_file",
                 "resource:materialized_file:test"
             ],
-            "fileRoots": ["/private/tmp"],
+            "fileRoots": ["/tmp"],
             "networkPolicy": "none",
             "maxRisk": "medium",
             "budget": {"remainingInvocations": 2},
@@ -75,7 +75,7 @@ async fn resource_backed_primitive_outputs_have_trace_identity() {
             .with_session_id("session-a")
             .with_workspace_id("workspace-a")
             .with_scope("capability.execute")
-            .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/private/tmp")
+            .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp")
             .with_idempotency_key("capability-materialized-output"),
         ))
         .await;

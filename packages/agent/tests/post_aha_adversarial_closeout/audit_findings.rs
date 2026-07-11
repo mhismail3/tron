@@ -382,15 +382,12 @@ fn local_and_github_ci_run_the_same_static_closeout_targets() {
                 "scripts/tron ci test target array missing `{target}`"
             ));
         }
-        let ci_command = match target {
-            "integration" => {
-                "cargo test --test integration -- --test-threads=1 --quiet".to_string()
-            }
-            _ => format!("cargo test --test {target} -- --quiet"),
-        };
-        if !ci.contains(&ci_command) {
-            hits.push(format!("GitHub CI missing command `{ci_command}`"));
-        }
+    }
+    if !ci.contains("run: scripts/tron ci test") {
+        hits.push("GitHub CI must delegate to `scripts/tron ci test`".to_string());
+    }
+    if ci.contains("Run Rust-owned closeout target set") || ci.contains("cargo test --test ") {
+        hits.push("GitHub CI must not duplicate the local closeout target list".to_string());
     }
     assert_no_hits(
         "Local and GitHub CI must run the same closeout target set",
