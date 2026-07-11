@@ -4,6 +4,7 @@ final class SessionBriefingUITests: XCTestCase {
     @MainActor
     func testAgentBriefingAndSessionBriefingValidationPath() throws {
         let app = XCUIApplication()
+        app.launchArguments.append("--tron-ui-test-onboarding-complete")
         app.launch()
 
         let briefingBand = app.buttons["agent-briefing-dashboard-band"]

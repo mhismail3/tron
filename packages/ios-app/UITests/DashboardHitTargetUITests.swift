@@ -41,7 +41,7 @@ final class DashboardHitTargetUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Activity"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Core"].exists)
         XCTAssertFalse(app.buttons["Discovery"].exists)
-        XCTAssertTrue(app.staticTexts["Capabilities verified"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Operations verified"].waitForExistence(timeout: 10))
         XCTAssertTrue(
             app.staticTexts
                 .matching(NSPredicate(format: "label CONTAINS %@", "Built-in engine operations can be invoked directly"))

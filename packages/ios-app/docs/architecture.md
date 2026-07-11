@@ -465,7 +465,9 @@ for workspace and model selection.
 Server settings shown in the iOS settings UI are snapshots from
 `settings::get`/`settings::reset`; local state exists only to render the active
 server and roll back a failed in-flight edit to the last loaded snapshot.
-Pairing is device-local `UserDefaults` state, bearer tokens are per-server
+Pairing is device-local `UserDefaults` state, injected at the production
+composition root so tests use isolated persistence domains and cannot alter the
+installed app's active server. Bearer tokens are per-server
 Keychain secrets, drafts and input history are local workflow state, pending
 share content is App Group handoff state cleared after consumption, and
 MetricKit payloads are bounded Application Support diagnostics buffers.

@@ -2,26 +2,31 @@ import XCTest
 
 final class OnboardingSheetDetentUITests: XCTestCase {
     @MainActor
-    func testOnboardingGrabberExpandsMediumSheetToLarge() throws {
+    func testOnboardingSheetHidesGrabberAndSupportsNativeExpansionGesture() throws {
         let app = XCUIApplication()
         app.launchArguments.append("--tron-ui-test-onboarding-incomplete")
         app.launch()
 
-        let grabber = app.buttons["Sheet Grabber"].firstMatch
+        let title = app.staticTexts["Welcome to Tron"]
         XCTAssertTrue(
-            grabber.waitForExistence(timeout: 20),
-            "The onboarding sheet should expose the native grabber at the medium detent"
+            title.waitForExistence(timeout: 20),
+            "Onboarding should launch at its medium detent"
         )
-        XCTAssertEqual(
-            grabber.value as? String,
-            "Half screen",
-            "Onboarding should launch at the medium detent"
+        XCTAssertFalse(
+            app.buttons["Sheet Grabber"].exists,
+            "Tron sheets intentionally hide the system drag handle"
         )
 
-        grabber.doubleTap()
+        let initialTitleY = title.frame.minY
+        app.swipeUp()
 
-        let expanded = NSPredicate(format: "value == %@", "Expanded")
-        expectation(for: expanded, evaluatedWith: grabber)
+        let expanded = NSPredicate(
+            block: { element, _ in
+                guard let title = element as? XCUIElement else { return false }
+                return title.frame.minY < initialTitleY - 100
+            }
+        )
+        expectation(for: expanded, evaluatedWith: title)
         waitForExpectations(timeout: 5)
     }
 }

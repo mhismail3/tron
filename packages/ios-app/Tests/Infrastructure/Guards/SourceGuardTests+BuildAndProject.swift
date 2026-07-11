@@ -174,9 +174,10 @@ extension SourceGuardTests {
         #expect(keychainItem.contains("kSecAttrAccessibleAfterFirstUnlock"))
         #expect(keychainItem.contains("**Access group:** intentionally unset"))
 
-        #expect(dependencyContainer.contains("Self.resolveBearerToken(tokenStore: tokenStore)"))
-        #expect(dependencyContainer.contains("UserDefaults.standard.string(forKey: PairedServerStore.activeIdKey)"))
-        #expect(dependencyContainer.contains("UserDefaults.standard.data(forKey: PairedServerStore.serversKey)"))
+        #expect(dependencyContainer.contains("pairedServerStore = PairedServerStore(defaults: pairedServerDefaults)"))
+        #expect(dependencyContainer.contains("Self.resolveBearerToken("))
+        #expect(dependencyContainer.contains("defaults.string(forKey: PairedServerStore.activeIdKey)"))
+        #expect(dependencyContainer.contains("defaults.data(forKey: PairedServerStore.serversKey)"))
         #expect(dependencyContainer.contains("return tokenStore.token(forServerId: activeId)"))
         #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "bearer"#))
         #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "token"#))

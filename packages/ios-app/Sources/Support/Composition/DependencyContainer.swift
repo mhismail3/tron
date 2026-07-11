@@ -51,7 +51,13 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     /// iOS-local paired server list and active selection.
     @ObservationIgnored
-    let pairedServerStore = PairedServerStore()
+    let pairedServerStore: PairedServerStore
+
+    /// Persistence domain used by the paired-server store and bearer resolver.
+    /// Production uses `.standard`; tests inject an isolated suite so exercising
+    /// the composition root cannot alter the installed app's pairing state.
+    @ObservationIgnored
+    private let pairedServerDefaults: UserDefaults
 
     /// Per-server bearer-token storage backed by Keychain. Owned here because
     /// the bearer-token resolver closure captures a reference; same instance
@@ -178,7 +184,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Initialization
 
-    init() {
+    init(pairedServerDefaults: UserDefaults = .standard) {
+        self.pairedServerDefaults = pairedServerDefaults
+        pairedServerStore = PairedServerStore(defaults: pairedServerDefaults)
+
         // Initialize core services that persist across server changes.
         guard let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
@@ -208,7 +217,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         let tokenStore = pairedServerTokenStore
         let client = EngineClient(
             serverURL: url,
-            bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
+            bearerTokenProvider: {
+                Self.resolveBearerToken(
+                    tokenStore: tokenStore,
+                    defaults: pairedServerDefaults
+                )
+            }
         )
         engineClient = client
         clientLogIngestionService = ClientLogIngestionService(
@@ -466,9 +480,15 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             Self.buildServerURL(host: $0.host, port: String($0.port))
         } ?? Self.placeholderServerURL
         let tokenStore = pairedServerTokenStore
+        let defaults = pairedServerDefaults
         let newClient = EngineClient(
             serverURL: url,
-            bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
+            bearerTokenProvider: {
+                Self.resolveBearerToken(
+                    tokenStore: tokenStore,
+                    defaults: defaults
+                )
+            }
         )
         engineClient = newClient
         clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))
@@ -506,9 +526,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// returns 401, `EngineConnection` parks in `.unauthorized`, and the user
     /// re-pairs via the connection status CTA.
     @MainActor
-    private static func resolveBearerToken(tokenStore: PairedServerTokenStore) -> String? {
-        guard let activeId = UserDefaults.standard.string(forKey: PairedServerStore.activeIdKey),
-              let data = UserDefaults.standard.data(forKey: PairedServerStore.serversKey),
+    private static func resolveBearerToken(
+        tokenStore: PairedServerTokenStore,
+        defaults: UserDefaults
+    ) -> String? {
+        guard let activeId = defaults.string(forKey: PairedServerStore.activeIdKey),
+              let data = defaults.data(forKey: PairedServerStore.serversKey),
               let servers = try? JSONDecoder().decode([PairedServer].self, from: data),
               servers.contains(where: { $0.id == activeId })
         else {
