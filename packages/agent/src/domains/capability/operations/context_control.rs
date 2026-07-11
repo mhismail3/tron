@@ -62,7 +62,7 @@ pub(super) async fn context_control_compact(
         operation_at,
     )
     .await?;
-    Ok(result(
+    Ok(context_boundary_result(
         "Context compaction action recorded.",
         "context_control_compact",
         details,
@@ -86,7 +86,7 @@ pub(super) async fn context_control_clear(
         operation_at,
     )
     .await?;
-    Ok(result(
+    Ok(context_boundary_result(
         "Context clear action recorded.",
         "context_control_clear",
         details,
@@ -436,11 +436,27 @@ fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
     )
 }
 
+fn context_boundary_result(text: &str, operation: &str, details: Value) -> CapabilityResult {
+    let mut result = result(text, operation, details);
+    if result
+        .details
+        .as_ref()
+        .and_then(|details| {
+            details.pointer("/contextControl/projection/result/timelineEventWritten")
+        })
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        result.stop_turn = Some(true);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::context_status_content;
+    use super::{context_boundary_result, context_status_content};
 
     #[test]
     fn context_status_content_surfaces_agent_needed_context_facts() {
@@ -496,5 +512,33 @@ mod tests {
         assert!(content.contains("providerSafe=true"));
         assert!(content.contains("networkPolicy=none"));
         assert!(!content.contains("sessionId"));
+    }
+
+    #[test]
+    fn compact_and_clear_results_end_the_active_agent_run() {
+        for operation in ["context_control_compact", "context_control_clear"] {
+            let result = context_boundary_result(
+                "recorded",
+                operation,
+                json!({
+                    "status": "ok",
+                    "projection": {"result": {"timelineEventWritten": true}}
+                }),
+            );
+            assert_eq!(result.stop_turn, Some(true));
+        }
+    }
+
+    #[test]
+    fn skipped_compaction_does_not_end_the_active_agent_run() {
+        let result = context_boundary_result(
+            "skipped",
+            "context_control_compact",
+            json!({
+                "status": "skipped",
+                "projection": {"result": {"timelineEventWritten": false}}
+            }),
+        );
+        assert_eq!(result.stop_turn, None);
     }
 }

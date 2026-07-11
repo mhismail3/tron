@@ -318,6 +318,14 @@ async fn clear_creates_durable_action_epoch_and_provider_safe_action_projection(
         cleared["projection"]["result"]["historyStillInspectable"],
         json!(true)
     );
+    assert_eq!(
+        cleared["projection"]["result"]["providerContextAppliesOnNextAgentRun"],
+        json!(true)
+    );
+    assert_eq!(
+        cleared["projection"]["result"]["currentAgentRunMustStop"],
+        json!(true)
+    );
 
     let action_id = cleared["contextControlActionResourceId"]
         .as_str()
@@ -498,6 +506,19 @@ async fn session_briefing_ui_wrappers_accept_first_party_client_context() {
         "reason": "Manual Session Briefing compact from iOS",
         "idempotencyKey": "ui-compact-1"
     });
+    fixture
+        .deps
+        .event_store
+        .append(&AppendOptions {
+            session_id: &fixture.session_id,
+            event_type: EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Context composition inspected safely."}]
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .expect("seed assistant context before compact");
     let client_compact = client_invocation(
         "ui-compact-1",
         "context_control::ui_compact",
@@ -519,6 +540,14 @@ async fn session_briefing_ui_wrappers_accept_first_party_client_context() {
     );
     assert_eq!(
         compact["projection"]["proof"]["rawGrantIdsExcluded"],
+        json!(true)
+    );
+    assert_eq!(
+        compact["projection"]["result"]["providerContextAppliesOnNextAgentRun"],
+        json!(true)
+    );
+    assert_eq!(
+        compact["projection"]["result"]["currentAgentRunMustStop"],
         json!(true)
     );
 

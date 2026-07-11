@@ -552,7 +552,9 @@ pub(crate) async fn compact_value_at(
                 "tokensAfter": tokens_after,
                 "timelineEventWritten": true,
                 "timelineEvent": event_ref(&event.id, event.sequence, "compact.boundary"),
-                "providerContextReplacedBySafeSummary": true,
+                "providerContextBoundaryCommitted": true,
+                "providerContextAppliesOnNextAgentRun": true,
+                "currentAgentRunMustStop": true,
                 "historyStillInspectable": true
             }),
             vec![
@@ -572,7 +574,7 @@ pub(crate) async fn compact_value_at(
         session_id: &session_id,
         snapshot_resource: &snapshot_resource,
         snapshot_version: &snapshot_version,
-        expected_effect: "replace provider context with a bounded safe summary boundary",
+        expected_effect: "commit a bounded safe summary boundary for the next agent run",
         result,
         audit_refs,
         created_at: &now,
@@ -707,7 +709,7 @@ pub(crate) async fn clear_value_at(
         session_id: &session_id,
         snapshot_resource: &snapshot_resource,
         snapshot_version: &snapshot_version,
-        expected_effect: "create a new context epoch while keeping history/resources/traces inspectable",
+        expected_effect: "commit a new context epoch for the next agent run while keeping history/resources/traces inspectable",
         result: json!({
             "status": "succeeded",
             "tokensBefore": estimated_tokens,
@@ -716,7 +718,10 @@ pub(crate) async fn clear_value_at(
             "timelineEvent": event_ref(&event.id, event.sequence, "context.cleared"),
             "newEpoch": version_ref(&epoch_resource, &epoch_version, "created_epoch"),
             "historyStillInspectable": true,
-            "priorTurnsExcludedFromProviderContext": true
+            "priorTurnsExcludedFromProviderContext": true,
+            "providerContextBoundaryCommitted": true,
+            "providerContextAppliesOnNextAgentRun": true,
+            "currentAgentRunMustStop": true
         }),
         audit_refs: vec![
             version_ref(&snapshot_resource, &snapshot_version, "preflight_snapshot"),

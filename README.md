@@ -2847,7 +2847,10 @@ that correlation remains durable audit evidence. Reconstruction independently
 enforces the provider protocol: it emits a capability result only when the
 matching invocation survives in the immediately preceding assistant message.
 Compact and clear boundaries therefore cannot leave orphaned function outputs
-in resumed provider history.
+in resumed provider history. Manual compact and clear operations are active-run
+boundaries: their durable action result is visible in session evidence, the
+current agent run ends, and the next run reconstructs from the committed summary
+or empty epoch instead of issuing another provider request from stale context.
 
 Compaction is internal prompt-loop infrastructure. It is observable through
 session events and primitive trace records, not through public `context::*`

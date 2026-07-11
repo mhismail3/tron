@@ -63,7 +63,9 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
             Some(WRITE_SCOPE),
         )
-        .description("Compact the current session context into a durable safe summary boundary")
+        .description(
+            "Compact the current session context into a durable safe summary boundary and end the active agent run; the next run resumes from that boundary",
+        )
         .tags(vec!["context", "compact", "epoch", "audit"])
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
@@ -77,7 +79,9 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some(WRITE_SCOPE),
         )
-        .description("Clear provider context into a new durable session epoch")
+        .description(
+            "Clear provider context into a new durable session epoch and end the active agent run; the next run starts in that epoch",
+        )
         .tags(vec!["context", "clear", "epoch", "audit"])
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .compensation(CompensationContract::new(
