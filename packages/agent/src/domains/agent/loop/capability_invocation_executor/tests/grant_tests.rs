@@ -1283,6 +1283,40 @@ fn unsupported_subagent_task_operation_is_rejected_before_grant_derivation() {
     assert!(error.to_string().contains("catalog_search"));
 }
 
+#[tokio::test]
+async fn unsupported_operation_runtime_grant_is_rejection_only() {
+    let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+    let runtime_grant = derive_capability_runtime_grant(
+        &engine_host,
+        &ActorId::new("agent:rejected-operation").expect("actor id"),
+        &FunctionId::new("capability::execute").expect("function id"),
+        &["capability.execute".to_owned()],
+        "rejected-operation-session",
+        None,
+        "/tmp",
+        &TraceId::new("trace-rejected-operation").expect("trace id"),
+        "provider-call-rejected-operation",
+        "execute",
+        1,
+        Some("run-rejected-operation"),
+        &json!({"operation": "definitely_not_a_real_operation"}),
+    )
+    .await
+    .expect("derive rejection-only grant");
+    let grant = engine_host
+        .inspect_authority_grant(&runtime_grant.grant_id)
+        .await
+        .expect("inspect grant")
+        .expect("derived grant");
+
+    assert_eq!(grant.allowed_capabilities, vec!["capability::execute"]);
+    assert_eq!(grant.allowed_authority_scopes, vec!["capability.execute"]);
+    assert!(grant.allowed_resource_kinds.is_empty());
+    assert!(grant.resource_selectors.is_empty());
+    assert_eq!(grant.network_policy, "none");
+    assert!(!grant.can_delegate);
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum DelegatedSubagentAccess {
     Read,

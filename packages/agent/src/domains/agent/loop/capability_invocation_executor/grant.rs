@@ -69,30 +69,7 @@ pub(super) async fn derive_capability_runtime_grant(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| *invalid_authority_request("unknown", "operation is required"))?;
-    let policy = authority_policy(operation).ok_or_else(|| {
-        FailureEnvelope::new(
-            ENGINE_POLICY_VIOLATION,
-            FailureCategory::Engine,
-            "Capability runtime authority has no canonical policy for the requested operation",
-            false,
-            false,
-            FailureOrigin::Engine,
-        )
-    })?;
-    let operation_risk = operation_risk(operation).ok_or_else(|| {
-        FailureEnvelope::new(
-            ENGINE_POLICY_VIOLATION,
-            FailureCategory::Engine,
-            "Capability runtime authority has no canonical risk for the requested operation",
-            false,
-            false,
-            FailureOrigin::Engine,
-        )
-    })?;
-    let grant_max_risk = match operation_risk {
-        "high" | "critical" => operation_risk,
-        _ => "medium",
-    };
+    let policy = authority_policy(operation);
     let resolution_context = RuntimeResolutionContext {
         engine_host,
         session_id,
@@ -104,15 +81,39 @@ pub(super) async fn derive_capability_runtime_grant(
         run_id,
         args: effective_args,
     };
-    let resolved = resolve_runtime_authority(
-        policy,
-        operation,
-        target_function_id,
-        target_authority_scopes,
-        &resolution_context,
-    )
-    .await
-    .map_err(|failure| *failure)?;
+    let (resolved, operation_risk) = match policy {
+        Some(policy) => {
+            let operation_risk = operation_risk(operation).ok_or_else(|| {
+                FailureEnvelope::new(
+                    ENGINE_POLICY_VIOLATION,
+                    FailureCategory::Engine,
+                    "Capability runtime authority has no canonical risk for the requested operation",
+                    false,
+                    false,
+                    FailureOrigin::Engine,
+                )
+            })?;
+            let resolved = resolve_runtime_authority(
+                policy,
+                operation,
+                target_function_id,
+                target_authority_scopes,
+                &resolution_context,
+            )
+            .await
+            .map_err(|failure| *failure)?;
+            (resolved, operation_risk)
+        }
+        None => (
+            rejected_operation_authority(target_function_id, target_authority_scopes)
+                .map_err(|failure| *failure)?,
+            "low",
+        ),
+    };
+    let grant_max_risk = match operation_risk {
+        "high" | "critical" => operation_risk,
+        _ => "medium",
+    };
 
     let idempotency_material = json!({
         "version": 1,
@@ -212,6 +213,31 @@ pub(super) async fn derive_capability_runtime_grant(
     Ok(CapabilityRuntimeGrant {
         grant_id,
         authority_scopes: resolved.allowed_authority_scopes,
+    })
+}
+
+fn rejected_operation_authority(
+    target_function_id: &FunctionId,
+    target_authority_scopes: &[String],
+) -> AuthorityResult<ResolvedRuntimeAuthority> {
+    if target_function_id.as_str() != "capability::execute"
+        || target_authority_scopes != ["capability.execute"]
+    {
+        return Err(Box::new(FailureEnvelope::new(
+            ENGINE_POLICY_VIOLATION,
+            FailureCategory::Engine,
+            "Unsupported operations can only receive the rejection-only capability execute authority",
+            false,
+            false,
+            FailureOrigin::Engine,
+        )));
+    }
+    Ok(ResolvedRuntimeAuthority {
+        allowed_capabilities: vec!["capability::execute".to_owned()],
+        allowed_authority_scopes: vec!["capability.execute".to_owned()],
+        allowed_resource_kinds: Vec::new(),
+        resource_selectors: Vec::new(),
+        network_policy: "none",
     })
 }
 

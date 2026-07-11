@@ -18,6 +18,11 @@
 //! scratch-state read/write delegation. Scratch-state authority is explicit and
 //! isolated to the `state_get`, `state_set`, and `state_list` execute
 //! operations; non-state operations never receive implicit state capabilities.
+//! Unsupported operation names receive only a rejection-only child grant with
+//! `capability::execute`, no resource selectors, and `networkPolicy none`. That
+//! grant exists solely so the canonical operation validator can return
+//! structured recovery guidance and persist a redacted failed trace; it cannot
+//! authorize domain behavior.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the
@@ -427,7 +432,12 @@ async fn execute_capability_primitive_via_engine(
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
-    if model_primitive_name == "execute"
+    let is_supported_execute_operation = model_primitive_name == "execute"
+        && effective_args
+            .get("operation")
+            .and_then(Value::as_str)
+            .is_some_and(is_supported_operation);
+    if is_supported_execute_operation
         && let Err(error) = validate_operation_payload(&effective_args)
     {
         return capability_failure_result(

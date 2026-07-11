@@ -290,6 +290,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
     .join("\n");
     for required in [
         "derive_capability_runtime_grant",
+        "rejected_operation_authority",
         "FunctionId::new(\"grant::derive\")",
         "\"parentGrantId\": \"agent-capability-runtime\"",
         "target.function_id.clone()",
@@ -305,6 +306,8 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "normalize_working_directory(working_directory)",
         "with_agent_working_directory_metadata(",
         "RUNTIME_METADATA_WORKING_DIRECTORY",
+        "allowed_resource_kinds: Vec::new()",
+        "resource_selectors: Vec::new()",
     ] {
         assert!(
             executor.contains(required),
@@ -317,8 +320,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         read_repo_file("packages/agent/src/domains/capability/operations/context.rs");
     let operation_guards = format!("{operations}\n{operations_context}");
     assert!(
-        operations
-            .contains(".and_then(|()| validate_execute_context(invocation, &attempted_operation))"),
+        operations.contains("validate_execute_context(invocation, &attempted_operation)?"),
         "capability execute dispatch root must validate trusted context before dispatch"
     );
     for required in [
