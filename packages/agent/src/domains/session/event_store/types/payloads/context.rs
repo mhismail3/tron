@@ -16,6 +16,10 @@ pub struct ContextClearedPayload {
     /// available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_control_action_resource_id: Option<String>,
+    /// Prepared action version that already existed when this boundary
+    /// committed. Historical boundaries may omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_control_action_version_id: Option<String>,
     /// Context-control preflight snapshot resource backing this clear boundary,
     /// when available.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -5,6 +5,9 @@
 //! capability result message. The capability domain owns the bounded,
 //! schema-validated model envelope so raw execution details stay available to
 //! audit/UI persistence without entering provider context.
+//! A committed context boundary is also an execution-wave boundary: later
+//! serialized waves from the same provider response are not started after a
+//! capability result requests the active turn to stop.
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled.
@@ -448,6 +451,7 @@ pub(super) async fn execute_capability_invocation_phase(
         for (idx, result) in futures::future::join_all(futures).await {
             results[idx] = Some(result);
         }
+        let wave_requested_turn_stop = wave_requests_turn_stop(wave, &results);
         debug!(
             component = "agent.capability",
             agent_event = "capability_wave_completed",
@@ -459,9 +463,33 @@ pub(super) async fn execute_capability_invocation_phase(
             wave_size = wave.len(),
             "capability execution wave completed"
         );
+        if wave_requested_turn_stop {
+            info!(
+                component = "agent.capability",
+                agent_event = "capability_waves_stopped_at_context_boundary",
+                session_id = params.session_id,
+                run_id = params.run_id.unwrap_or("none"),
+                trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+                turn = params.turn,
+                wave_index,
+                "later capability waves skipped after a committed context boundary"
+            );
+            break;
+        }
     }
 
     process_capability_results(results, params).await
+}
+
+fn wave_requests_turn_stop(
+    wave: &[usize],
+    results: &[Option<ExecutedCapabilityInvocation>],
+) -> bool {
+    wave.iter().any(|&idx| {
+        results[idx]
+            .as_ref()
+            .is_some_and(|executed| executed.result.stops_turn)
+    })
 }
 
 async fn process_capability_results(

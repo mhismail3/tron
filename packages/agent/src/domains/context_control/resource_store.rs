@@ -54,6 +54,36 @@ pub(super) async fn create_action_resource(
     Ok((resource, version.clone(), payload.clone()))
 }
 
+pub(super) async fn update_action_resource(
+    deps: &Deps,
+    invocation: &Invocation,
+    resource_id: &str,
+    expected_current_version_id: String,
+    lifecycle: &str,
+    record: Value,
+) -> Result<(EngineResource, EngineResourceVersion, Value), CapabilityError> {
+    deps.engine_host
+        .update_resource(UpdateResource {
+            resource_id: resource_id.to_owned(),
+            expected_current_version_id: Some(expected_current_version_id),
+            lifecycle: Some(lifecycle.to_owned()),
+            payload: record,
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })
+        .await
+        .map_err(engine_error)?;
+    let inspection = inspect_resource_required(deps, resource_id, "context control action").await?;
+    let (version, payload) = current_payload(&inspection, "context_control_action updated")?;
+    Ok((
+        inspection.resource.clone(),
+        version.clone(),
+        payload.clone(),
+    ))
+}
+
 pub(super) async fn create_epoch_resource(
     deps: &Deps,
     invocation: &Invocation,

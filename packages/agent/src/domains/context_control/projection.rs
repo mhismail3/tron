@@ -28,11 +28,17 @@ pub(super) fn action_response(
     payload: &Value,
     replay: bool,
 ) -> Value {
+    let boundary_committed_this_invocation = !replay
+        && payload
+            .pointer("/result/timelineEventWritten")
+            .and_then(Value::as_bool)
+            == Some(true);
     json!({
         "schemaVersion": ACTION_SCHEMA_VERSION,
         "operation": operation,
         "status": resource.lifecycle,
         "idempotentReplay": replay,
+        "boundaryCommittedThisInvocation": boundary_committed_this_invocation,
         "contextControlActionResourceId": resource.resource_id,
         "contextControlActionVersionId": version.version_id,
         "projection": action_projection(resource, version, payload)

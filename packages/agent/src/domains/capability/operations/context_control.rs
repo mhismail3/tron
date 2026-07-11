@@ -441,9 +441,7 @@ fn context_boundary_result(text: &str, operation: &str, details: Value) -> Capab
     if result
         .details
         .as_ref()
-        .and_then(|details| {
-            details.pointer("/contextControl/projection/result/timelineEventWritten")
-        })
+        .and_then(|details| details.pointer("/contextControl/boundaryCommittedThisInvocation"))
         .and_then(Value::as_bool)
         == Some(true)
     {
@@ -522,6 +520,7 @@ mod tests {
                 operation,
                 json!({
                     "status": "ok",
+                    "boundaryCommittedThisInvocation": true,
                     "projection": {"result": {"timelineEventWritten": true}}
                 }),
             );
@@ -536,7 +535,23 @@ mod tests {
             "context_control_compact",
             json!({
                 "status": "skipped",
+                "boundaryCommittedThisInvocation": false,
                 "projection": {"result": {"timelineEventWritten": false}}
+            }),
+        );
+        assert_eq!(result.stop_turn, None);
+    }
+
+    #[test]
+    fn idempotent_boundary_replay_does_not_end_a_new_agent_run() {
+        let result = context_boundary_result(
+            "replayed",
+            "context_control_clear",
+            json!({
+                "status": "succeeded",
+                "idempotentReplay": true,
+                "boundaryCommittedThisInvocation": false,
+                "projection": {"result": {"timelineEventWritten": true}}
             }),
         );
         assert_eq!(result.stop_turn, None);

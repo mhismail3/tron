@@ -309,6 +309,7 @@ async fn clear_creates_durable_action_epoch_and_provider_safe_action_projection(
         .await
         .expect("clear context");
     assert_eq!(cleared["operation"], json!("context_control_clear"));
+    assert_eq!(cleared["boundaryCommittedThisInvocation"], json!(true));
     assert_eq!(cleared["projection"]["action"]["kind"], json!("clear"));
     assert_eq!(
         cleared["projection"]["result"]["priorTurnsExcludedFromProviderContext"],
@@ -326,6 +327,11 @@ async fn clear_creates_durable_action_epoch_and_provider_safe_action_projection(
         cleared["projection"]["result"]["currentAgentRunMustStop"],
         json!(true)
     );
+    let replay = clear_value_at(&fixture.deps, &clear_invocation, &payload, operation_at())
+        .await
+        .expect("clear context replay");
+    assert_eq!(replay["idempotentReplay"], json!(true));
+    assert_eq!(replay["boundaryCommittedThisInvocation"], json!(false));
 
     let action_id = cleared["contextControlActionResourceId"]
         .as_str()
@@ -451,6 +457,16 @@ async fn runtime_compaction_records_action_refs_on_durable_boundary() {
         .await
         .expect("inspect action resource")
         .expect("action resource exists");
+    let prepared_version_id = payload["contextControlActionVersionId"]
+        .as_str()
+        .expect("prepared action version id");
+    assert!(
+        action.versions.iter().any(|version| {
+            version.version_id == prepared_version_id
+                && version.payload["state"] == json!("requested")
+        }),
+        "the boundary must reference an already durable requested action version"
+    );
     let current = action
         .resource
         .current_version_id
@@ -534,6 +550,7 @@ async fn session_briefing_ui_wrappers_accept_first_party_client_context() {
     .await
     .expect("ui compact");
     assert_eq!(compact["operation"], json!("context_control_compact"));
+    assert_eq!(compact["boundaryCommittedThisInvocation"], json!(true));
     assert_eq!(
         compact["projection"]["action"]["actorKind"],
         json!("system")

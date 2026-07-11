@@ -13,8 +13,10 @@ use serde::{Deserialize, Serialize};
 /// Runtime compactions commit through context-control action and preflight
 /// snapshot resources. The action/snapshot refs remain optional at the wire
 /// type so historical/imported boundaries can still decode, but new runtime
-/// compactions fail closed before appending a boundary if those refs cannot be
-/// recorded.
+/// compactions durably prepare the referenced action version before appending
+/// the boundary. Action finalization is replay-repairable, so a committed
+/// boundary never points at a missing action resource and remains turn-stopping
+/// even if secondary audit publication is interrupted.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompactBoundaryPayload {
@@ -49,6 +51,10 @@ pub struct CompactBoundaryPayload {
     /// Context-control action resource backing this boundary, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_control_action_resource_id: Option<String>,
+    /// Prepared action version that already existed when this boundary
+    /// committed. Historical boundaries may omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_control_action_version_id: Option<String>,
     /// Context-control preflight snapshot resource backing this boundary, when
     /// available.
     #[serde(skip_serializing_if = "Option::is_none")]

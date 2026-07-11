@@ -44,6 +44,23 @@ fn make_exec_result_with_details(
 }
 
 #[test]
+fn execution_waves_stop_after_a_context_boundary_result() {
+    let mut stopping = make_exec_result(CapabilityResultBody::Text("boundary committed".into()));
+    stopping.stops_turn = true;
+    stopping.result.stop_turn = Some(true);
+    let results = vec![
+        Some(ExecutedCapabilityInvocation {
+            result: stopping,
+            provider_text: "boundary committed".to_owned(),
+        }),
+        None,
+    ];
+
+    assert!(wave_requests_turn_stop(&[0], &results));
+    assert!(!wave_requests_turn_stop(&[1], &results));
+}
+
+#[test]
 fn primitive_identity_canonicalizes_only_supported_operation_payloads() {
     let mut args = Map::new();
     args.insert("operationName".to_owned(), json!("file_read"));

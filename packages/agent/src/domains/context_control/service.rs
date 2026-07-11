@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::registration::bindings::operation_bindings;
-use crate::domains::session::event_store::{AppendOptions, EventType};
+use crate::domains::session::event_store::{AppendOptions, EventRow, EventType};
 use crate::engine::{
     CreateResource, EngineResource, EngineResourceLocation, EngineResourceScope,
     EngineResourceVersion, Invocation, ListResources,
@@ -30,7 +30,7 @@ use super::resource_store::{
     create_action_resource, create_epoch_resource, create_policy_resource, current_payload,
     ensure_context_action, ensure_context_exclusion, ensure_context_policy_snapshot,
     ensure_context_snapshot, ensure_context_survivor, ensure_scope, inspect_resource_required,
-    publish_lifecycle_event, update_policy_resource,
+    publish_lifecycle_event, update_action_resource, update_policy_resource,
 };
 use super::snapshot::{build_snapshot_record, status_projection};
 use super::validation::{
@@ -276,6 +276,76 @@ fn ui_session_id(
     Ok(session_id.to_owned())
 }
 
+fn action_is_requested(record: &Value) -> bool {
+    record.get("state").and_then(Value::as_str) == Some("requested")
+}
+
+async fn find_boundary_event(
+    deps: &Deps,
+    session_id: &str,
+    event_type: EventType,
+    action_resource_id: &str,
+) -> Result<Option<EventRow>, CapabilityError> {
+    let rows = deps
+        .event_store
+        .get_events_by_type(session_id, &[event_type.as_str()], None)
+        .map_err(store_error)?;
+    let payloads = deps
+        .event_store
+        .resolve_event_payloads(&rows)
+        .map_err(store_error)?;
+    Ok(rows.into_iter().zip(payloads).find_map(|(row, payload)| {
+        (payload
+            .get("contextControlActionResourceId")
+            .and_then(Value::as_str)
+            == Some(action_resource_id))
+        .then_some(row)
+    }))
+}
+
+fn boundary_committed_pending_response(
+    operation: &str,
+    resource: &EngineResource,
+    version: &EngineResourceVersion,
+    record: &Value,
+    event: &EventRow,
+    relation: &str,
+) -> Value {
+    let mut response = action_response(operation, resource, version, record, false);
+    response["status"] = json!("boundary_committed_finalization_pending");
+    response["boundaryCommittedThisInvocation"] = json!(true);
+    response["projection"]["result"] = json!({
+        "status": "boundary_committed_finalization_pending",
+        "timelineEventWritten": true,
+        "timelineEvent": event_ref(&event.id, event.sequence, relation),
+        "providerContextBoundaryCommitted": true,
+        "providerContextAppliesOnNextAgentRun": true,
+        "currentAgentRunMustStop": true,
+        "auditFinalizationPending": true,
+        "historyStillInspectable": true
+    });
+    response
+}
+
+async fn publish_action_lifecycle_best_effort(
+    deps: &Deps,
+    invocation: &Invocation,
+    event_type: &str,
+    resource: &EngineResource,
+    payload: Value,
+) {
+    if let Err(error) =
+        publish_lifecycle_event(deps, invocation, event_type, resource, payload).await
+    {
+        tracing::warn!(
+            operation = event_type,
+            resource_id = resource.resource_id,
+            error = %error,
+            "context-control action committed without secondary lifecycle publication"
+        );
+    }
+}
+
 pub(crate) async fn record_runtime_compaction_action(
     deps: &Deps,
     input: RuntimeCompactionInput<'_>,
@@ -299,49 +369,126 @@ pub(crate) async fn record_runtime_compaction_action(
         }),
     )?;
     let action_resource_id = action_resource_id(input.session_id, "compact", &idempotency_key);
-    if deps
+    let existing = deps
         .engine_host
         .inspect_resource(&action_resource_id)
         .await
-        .map_err(engine_error)?
-        .is_some()
-    {
-        return Ok(());
-    }
-
-    let snapshot_id = format!("runtime-compact-preflight-{idempotency_key}");
-    let (snapshot_resource, snapshot_version, _, _) = record_snapshot(
-        deps,
-        &invocation,
-        input.session_id,
-        &scope,
-        &snapshot_id,
-        operation_at,
-    )
-    .await?;
+        .map_err(engine_error)?;
     let reason = bounded_text("reason", input.reason, MAX_REASON_BYTES)?;
-    let safe_summary = bounded_text("summary", input.summary, 4_000)?;
-    let event = input
-        .persister
-        .append_with_runtime_sequence(
-            input.session_id,
-            EventType::CompactBoundary,
-            json!({
-                "originalTokens": input.tokens_before,
-                "compactedTokens": input.tokens_after,
-                "compressionRatio": input.compression_ratio,
-                "reason": reason,
-                "summary": safe_summary,
-                "estimatedContextTokens": input.tokens_after,
-                "contextControlActionResourceId": &action_resource_id,
-                "contextControlSnapshotResourceId": &snapshot_resource.resource_id
-            }),
-            input.sequence_counter,
-        )
-        .await
-        .map_err(runtime_error)?;
-
     let now = operation_at.to_rfc3339();
+    let (action_resource, action_version, snapshot_resource, snapshot_version) =
+        if let Some(existing) = existing {
+            let (version, record) =
+                current_payload(&existing, "context_control runtime compact replay")?;
+            if !action_is_requested(record) {
+                return Ok(());
+            }
+            let snapshot_resource_id = record
+                .pointer("/preflight/snapshot/resourceId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: "prepared runtime compaction is missing its snapshot ref".to_owned(),
+                })?;
+            let snapshot = inspect_resource_required(
+                deps,
+                snapshot_resource_id,
+                "runtime compaction snapshot",
+            )
+            .await?;
+            let (snapshot_version, _) =
+                current_payload(&snapshot, "runtime compaction snapshot replay")?;
+            (
+                existing.resource.clone(),
+                version.clone(),
+                snapshot.resource.clone(),
+                snapshot_version.clone(),
+            )
+        } else {
+            let snapshot_id = format!("runtime-compact-preflight-{idempotency_key}");
+            let (snapshot_resource, snapshot_version, _, _) = record_snapshot(
+                deps,
+                &invocation,
+                input.session_id,
+                &scope,
+                &snapshot_id,
+                operation_at,
+            )
+            .await?;
+            let record = action_record(ActionInput {
+                action_id: "runtime-compact",
+                state: "requested",
+                action_kind: "compact",
+                reason: &reason,
+                actor_kind: actor_kind(&invocation),
+                scope: &scope,
+                session_id: input.session_id,
+                snapshot_resource: &snapshot_resource,
+                snapshot_version: &snapshot_version,
+                expected_effect: "replace provider context with a bounded safe summary boundary",
+                result: json!({
+                    "status": "requested",
+                    "timelineEventWritten": false,
+                    "boundaryPreparationDurable": true
+                }),
+                audit_refs: vec![version_ref(
+                    &snapshot_resource,
+                    &snapshot_version,
+                    "preflight_snapshot",
+                )],
+                created_at: &now,
+                updated_at: &now,
+                invocation: &invocation,
+                idempotency_key: &idempotency_key,
+            });
+            let (action_resource, action_version, _) = create_action_resource(
+                deps,
+                &invocation,
+                &action_resource_id,
+                "requested",
+                record,
+                "context-control-action:runtime-compact",
+            )
+            .await?;
+            (
+                action_resource,
+                action_version,
+                snapshot_resource,
+                snapshot_version,
+            )
+        };
+    let safe_summary = bounded_text("summary", input.summary, 4_000)?;
+    let event = if let Some(event) = find_boundary_event(
+        deps,
+        input.session_id,
+        EventType::CompactBoundary,
+        &action_resource_id,
+    )
+    .await?
+    {
+        event
+    } else {
+        input
+            .persister
+            .append_with_runtime_sequence(
+                input.session_id,
+                EventType::CompactBoundary,
+                json!({
+                    "originalTokens": input.tokens_before,
+                    "compactedTokens": input.tokens_after,
+                    "compressionRatio": input.compression_ratio,
+                    "reason": reason,
+                    "summary": safe_summary,
+                    "estimatedContextTokens": input.tokens_after,
+                    "contextControlActionResourceId": &action_resource_id,
+                    "contextControlActionVersionId": &action_version.version_id,
+                    "contextControlSnapshotResourceId": &snapshot_resource.resource_id
+                }),
+                input.sequence_counter,
+            )
+            .await
+            .map_err(runtime_error)?
+    };
+    deps.session_manager.invalidate_session(input.session_id);
     let record = action_record(ActionInput {
         action_id: "runtime-compact",
         state: "succeeded",
@@ -371,24 +518,31 @@ pub(crate) async fn record_runtime_compaction_action(
         invocation: &invocation,
         idempotency_key: &idempotency_key,
     });
-    let (resource, _, _) = create_action_resource(
+    let finalized = update_action_resource(
         deps,
         &invocation,
         &action_resource_id,
+        action_version.version_id,
         "succeeded",
         record,
-        "context-control-action:runtime-compact",
     )
-    .await?;
-    publish_lifecycle_event(
+    .await;
+    let Ok((resource, _, _)) = finalized else {
+        tracing::warn!(
+            resource_id = action_resource.resource_id,
+            event_id = event.id,
+            "runtime compaction boundary committed with requested action finalization pending"
+        );
+        return Ok(());
+    };
+    publish_action_lifecycle_best_effort(
         deps,
         &invocation,
         "context_control.runtime_compact_recorded",
         &resource,
         json!({"metadataOnly": true, "networkPolicy": "none"}),
     )
-    .await?;
-    deps.session_manager.invalidate_session(input.session_id);
+    .await;
     Ok(())
 }
 
@@ -456,37 +610,117 @@ pub(crate) async fn compact_value_at(
     .await?;
     let idempotency_key = idempotency_key(invocation, payload, "context_control_compact")?;
     let action_resource_id = action_resource_id(&session_id, "compact", &idempotency_key);
-    if let Some(existing) = deps
+    let existing = deps
         .engine_host
         .inspect_resource(&action_resource_id)
         .await
-        .map_err(engine_error)?
-    {
-        let (version, record) = current_payload(&existing, "context_control_compact replay")?;
-        return Ok(action_response(
-            "context_control_compact",
-            &existing.resource,
-            version,
-            record,
-            true,
-        ));
-    }
-
-    let reason = reason(
+        .map_err(engine_error)?;
+    let requested_reason = reason(
         payload,
         "Manual context compaction requested",
         MAX_REASON_BYTES,
     )?;
-    let snapshot_id = format!("compact-preflight-{idempotency_key}");
-    let (snapshot_resource, snapshot_version, snapshot_payload, _) = record_snapshot(
-        deps,
-        invocation,
-        &session_id,
-        &scope,
-        &snapshot_id,
-        operation_at,
-    )
-    .await?;
+    let now = operation_at.to_rfc3339();
+    let (
+        action_resource,
+        action_version,
+        action_payload,
+        snapshot_resource,
+        snapshot_version,
+        snapshot_payload,
+        reason,
+    ) = if let Some(existing) = existing {
+        let (version, record) = current_payload(&existing, "context_control_compact replay")?;
+        if !action_is_requested(record) {
+            return Ok(action_response(
+                "context_control_compact",
+                &existing.resource,
+                version,
+                record,
+                true,
+            ));
+        }
+        let snapshot_resource_id = record
+            .pointer("/preflight/snapshot/resourceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CapabilityError::InvalidParams {
+                message: "prepared context compaction is missing its snapshot ref".to_owned(),
+            })?;
+        let snapshot =
+            inspect_resource_required(deps, snapshot_resource_id, "compact preflight snapshot")
+                .await?;
+        let (snapshot_version, snapshot_payload) =
+            current_payload(&snapshot, "compact preflight snapshot replay")?;
+        let stored_reason = record
+            .pointer("/action/reason")
+            .and_then(Value::as_str)
+            .unwrap_or(&requested_reason)
+            .to_owned();
+        (
+            existing.resource.clone(),
+            version.clone(),
+            record.clone(),
+            snapshot.resource.clone(),
+            snapshot_version.clone(),
+            snapshot_payload.clone(),
+            stored_reason,
+        )
+    } else {
+        let snapshot_id = format!("compact-preflight-{idempotency_key}");
+        let (snapshot_resource, snapshot_version, snapshot_payload, _) = record_snapshot(
+            deps,
+            invocation,
+            &session_id,
+            &scope,
+            &snapshot_id,
+            operation_at,
+        )
+        .await?;
+        let record = action_record(ActionInput {
+            action_id: &format!("compact-{idempotency_key}"),
+            state: "requested",
+            action_kind: "compact",
+            reason: &requested_reason,
+            actor_kind: actor_kind(invocation),
+            scope: &scope,
+            session_id: &session_id,
+            snapshot_resource: &snapshot_resource,
+            snapshot_version: &snapshot_version,
+            expected_effect: "commit a bounded safe summary boundary for the next agent run",
+            result: json!({
+                "status": "requested",
+                "timelineEventWritten": false,
+                "boundaryPreparationDurable": true
+            }),
+            audit_refs: vec![version_ref(
+                &snapshot_resource,
+                &snapshot_version,
+                "preflight_snapshot",
+            )],
+            created_at: &now,
+            updated_at: &now,
+            invocation,
+            idempotency_key: &idempotency_key,
+        });
+        let (action_resource, action_version, action_payload) = create_action_resource(
+            deps,
+            invocation,
+            &action_resource_id,
+            "requested",
+            record,
+            "context-control-action:compact",
+        )
+        .await?;
+        (
+            action_resource,
+            action_version,
+            action_payload,
+            snapshot_resource,
+            snapshot_version,
+            snapshot_payload,
+            requested_reason,
+        )
+    };
     let estimated_tokens = snapshot_payload
         .pointer("/session/estimatedTokens")
         .and_then(Value::as_u64)
@@ -496,7 +730,6 @@ pub(crate) async fn compact_value_at(
         .and_then(Value::as_u64)
         .unwrap_or_default();
 
-    let now = operation_at.to_rfc3339();
     let (state, result, audit_refs) = if message_count < 2 || estimated_tokens == 0 {
         (
             "skipped",
@@ -516,33 +749,44 @@ pub(crate) async fn compact_value_at(
     } else {
         let tokens_after = safe_compacted_token_estimate(message_count);
         let summary = safe_compaction_summary(&session_id, message_count, estimated_tokens);
-        let event = deps
-            .event_store
-            .append(&AppendOptions {
-                session_id: &session_id,
-                event_type: EventType::CompactBoundary,
-                payload: json!({
-                    "originalTokens": estimated_tokens,
-                    "compactedTokens": tokens_after,
-                    "compressionRatio": if estimated_tokens > 0 {
-                        tokens_after as f64 / estimated_tokens as f64
-                    } else {
-                        1.0
-                    },
-                    "reason": "manual",
-                    "summary": summary,
-                    "estimatedContextTokens": tokens_after,
-                    "preservedTurns": 0,
-                    "summarizedTurns": message_count,
-                    "preservedMessages": 0,
-                    "contextControlActionResourceId": &action_resource_id,
-                    "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
-                    "boundaryInvocationId": invocation.id.as_str()
-                }),
-                parent_id: None,
-                sequence: None,
-            })
-            .map_err(store_error)?;
+        let event = if let Some(event) = find_boundary_event(
+            deps,
+            &session_id,
+            EventType::CompactBoundary,
+            &action_resource_id,
+        )
+        .await?
+        {
+            event
+        } else {
+            deps.event_store
+                .append(&AppendOptions {
+                    session_id: &session_id,
+                    event_type: EventType::CompactBoundary,
+                    payload: json!({
+                        "originalTokens": estimated_tokens,
+                        "compactedTokens": tokens_after,
+                        "compressionRatio": if estimated_tokens > 0 {
+                            tokens_after as f64 / estimated_tokens as f64
+                        } else {
+                            1.0
+                        },
+                        "reason": "manual",
+                        "summary": summary,
+                        "estimatedContextTokens": tokens_after,
+                        "preservedTurns": 0,
+                        "summarizedTurns": message_count,
+                        "preservedMessages": 0,
+                        "contextControlActionResourceId": &action_resource_id,
+                        "contextControlActionVersionId": &action_version.version_id,
+                        "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
+                        "boundaryInvocationId": invocation.id.as_str()
+                    }),
+                    parent_id: None,
+                    sequence: None,
+                })
+                .map_err(store_error)?
+        };
         deps.session_manager.invalidate_session(&session_id);
         (
             "succeeded",
@@ -582,23 +826,52 @@ pub(crate) async fn compact_value_at(
         invocation,
         idempotency_key: &idempotency_key,
     });
-    let (resource, version, payload) = create_action_resource(
+    let finalized = update_action_resource(
         deps,
         invocation,
         &action_resource_id,
+        action_version.version_id.clone(),
         state,
         record,
-        "context-control-action:compact",
     )
-    .await?;
-    publish_lifecycle_event(
+    .await;
+    let (resource, version, payload) = match finalized {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            if let Some(event) = find_boundary_event(
+                deps,
+                &session_id,
+                EventType::CompactBoundary,
+                &action_resource_id,
+            )
+            .await?
+            {
+                tracing::warn!(
+                    resource_id = action_resource.resource_id,
+                    event_id = event.id,
+                    error = %error,
+                    "manual compaction boundary committed with action finalization pending"
+                );
+                return Ok(boundary_committed_pending_response(
+                    "context_control_compact",
+                    &action_resource,
+                    &action_version,
+                    &action_payload,
+                    &event,
+                    "compact.boundary",
+                ));
+            }
+            return Err(error);
+        }
+    };
+    publish_action_lifecycle_best_effort(
         deps,
         invocation,
         "context_control.compact_recorded",
         &resource,
         json!({"metadataOnly": true, "networkPolicy": "none"}),
     )
-    .await?;
+    .await;
     Ok(action_response(
         "context_control_compact",
         &resource,
@@ -630,75 +903,195 @@ pub(crate) async fn clear_value_at(
     .await?;
     let idempotency_key = idempotency_key(invocation, payload, "context_control_clear")?;
     let action_resource_id = action_resource_id(&session_id, "clear", &idempotency_key);
-    if let Some(existing) = deps
+    let existing = deps
         .engine_host
         .inspect_resource(&action_resource_id)
         .await
-        .map_err(engine_error)?
-    {
+        .map_err(engine_error)?;
+    let requested_reason = reason(payload, "Manual context clear requested", MAX_REASON_BYTES)?;
+    let now = operation_at.to_rfc3339();
+    let (
+        action_resource,
+        action_version,
+        action_payload,
+        snapshot_resource,
+        snapshot_version,
+        snapshot_payload,
+        reason,
+    ) = if let Some(existing) = existing {
         let (version, record) = current_payload(&existing, "context_control_clear replay")?;
-        return Ok(action_response(
-            "context_control_clear",
-            &existing.resource,
-            version,
+        if !action_is_requested(record) {
+            return Ok(action_response(
+                "context_control_clear",
+                &existing.resource,
+                version,
+                record,
+                true,
+            ));
+        }
+        let snapshot_resource_id = record
+            .pointer("/preflight/snapshot/resourceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CapabilityError::InvalidParams {
+                message: "prepared context clear is missing its snapshot ref".to_owned(),
+            })?;
+        let snapshot =
+            inspect_resource_required(deps, snapshot_resource_id, "clear preflight snapshot")
+                .await?;
+        let (snapshot_version, snapshot_payload) =
+            current_payload(&snapshot, "clear preflight snapshot replay")?;
+        let stored_reason = record
+            .pointer("/action/reason")
+            .and_then(Value::as_str)
+            .unwrap_or(&requested_reason)
+            .to_owned();
+        (
+            existing.resource.clone(),
+            version.clone(),
+            record.clone(),
+            snapshot.resource.clone(),
+            snapshot_version.clone(),
+            snapshot_payload.clone(),
+            stored_reason,
+        )
+    } else {
+        let snapshot_id = format!("clear-preflight-{idempotency_key}");
+        let (snapshot_resource, snapshot_version, snapshot_payload, _) = record_snapshot(
+            deps,
+            invocation,
+            &session_id,
+            &scope,
+            &snapshot_id,
+            operation_at,
+        )
+        .await?;
+        let record = action_record(ActionInput {
+            action_id: &format!("clear-{idempotency_key}"),
+            state: "requested",
+            action_kind: "clear",
+            reason: &requested_reason,
+            actor_kind: actor_kind(invocation),
+            scope: &scope,
+            session_id: &session_id,
+            snapshot_resource: &snapshot_resource,
+            snapshot_version: &snapshot_version,
+            expected_effect: "commit a new context epoch for the next agent run while keeping history/resources/traces inspectable",
+            result: json!({
+                "status": "requested",
+                "timelineEventWritten": false,
+                "boundaryPreparationDurable": true
+            }),
+            audit_refs: vec![version_ref(
+                &snapshot_resource,
+                &snapshot_version,
+                "preflight_snapshot",
+            )],
+            created_at: &now,
+            updated_at: &now,
+            invocation,
+            idempotency_key: &idempotency_key,
+        });
+        let (action_resource, action_version, action_payload) = create_action_resource(
+            deps,
+            invocation,
+            &action_resource_id,
+            "requested",
             record,
-            true,
-        ));
-    }
-
-    let reason = reason(payload, "Manual context clear requested", MAX_REASON_BYTES)?;
-    let snapshot_id = format!("clear-preflight-{idempotency_key}");
-    let (snapshot_resource, snapshot_version, snapshot_payload, _) = record_snapshot(
-        deps,
-        invocation,
-        &session_id,
-        &scope,
-        &snapshot_id,
-        operation_at,
-    )
-    .await?;
+            "context-control-action:clear",
+        )
+        .await?;
+        (
+            action_resource,
+            action_version,
+            action_payload,
+            snapshot_resource,
+            snapshot_version,
+            snapshot_payload,
+            requested_reason,
+        )
+    };
     let estimated_tokens = snapshot_payload
         .pointer("/session/estimatedTokens")
         .and_then(Value::as_u64)
         .unwrap_or_default();
-    let event = deps
-        .event_store
-        .append(&AppendOptions {
-            session_id: &session_id,
-            event_type: EventType::ContextCleared,
-            payload: json!({
-                "tokensBefore": estimated_tokens,
-                "tokensAfter": 0,
-                "reason": reason.clone(),
-                "contextControlActionResourceId": &action_resource_id,
-                "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
-                "boundaryInvocationId": invocation.id.as_str()
-            }),
-            parent_id: None,
-            sequence: None,
-        })
-        .map_err(store_error)?;
+    let event = if let Some(event) = find_boundary_event(
+        deps,
+        &session_id,
+        EventType::ContextCleared,
+        &action_resource_id,
+    )
+    .await?
+    {
+        event
+    } else {
+        deps.event_store
+            .append(&AppendOptions {
+                session_id: &session_id,
+                event_type: EventType::ContextCleared,
+                payload: json!({
+                    "tokensBefore": estimated_tokens,
+                    "tokensAfter": 0,
+                    "reason": reason.clone(),
+                    "contextControlActionResourceId": &action_resource_id,
+                    "contextControlActionVersionId": &action_version.version_id,
+                    "contextControlSnapshotResourceId": &snapshot_resource.resource_id,
+                    "boundaryInvocationId": invocation.id.as_str()
+                }),
+                parent_id: None,
+                sequence: None,
+            })
+            .map_err(store_error)?
+    };
     deps.session_manager.invalidate_session(&session_id);
-    let now = operation_at.to_rfc3339();
     let epoch_id = format!("epoch-{}", event.sequence);
     let epoch_resource_id = epoch_resource_id(&session_id, &epoch_id);
-    let epoch_payload = epoch_record(EpochInput {
-        epoch_id: &epoch_id,
-        scope: &scope,
-        session_id: &session_id,
-        boundary_event_id: &event.id,
-        boundary_sequence: event.sequence,
-        action_resource: &action_resource_id,
-        created_at: &now,
-    });
-    let (epoch_resource, epoch_version, _) = create_epoch_resource(
-        deps,
-        invocation,
-        &epoch_resource_id,
-        epoch_payload,
-        &epoch_id,
-    )
-    .await?;
+    let epoch = if let Some(existing_epoch) = deps
+        .engine_host
+        .inspect_resource(&epoch_resource_id)
+        .await
+        .map_err(engine_error)?
+    {
+        let (version, _) = current_payload(&existing_epoch, "context clear epoch replay")?;
+        (existing_epoch.resource.clone(), version.clone())
+    } else {
+        let epoch_payload = epoch_record(EpochInput {
+            epoch_id: &epoch_id,
+            scope: &scope,
+            session_id: &session_id,
+            boundary_event_id: &event.id,
+            boundary_sequence: event.sequence,
+            action_resource: &action_resource_id,
+            created_at: &now,
+        });
+        match create_epoch_resource(
+            deps,
+            invocation,
+            &epoch_resource_id,
+            epoch_payload,
+            &epoch_id,
+        )
+        .await
+        {
+            Ok((resource, version, _)) => (resource, version),
+            Err(error) => {
+                tracing::warn!(
+                    resource_id = action_resource.resource_id,
+                    event_id = event.id,
+                    error = %error,
+                    "context clear boundary committed with epoch finalization pending"
+                );
+                return Ok(boundary_committed_pending_response(
+                    "context_control_clear",
+                    &action_resource,
+                    &action_version,
+                    &action_payload,
+                    &event,
+                    "context.cleared",
+                ));
+            }
+        }
+    };
+    let (epoch_resource, epoch_version) = epoch;
     let record = action_record(ActionInput {
         action_id: &format!("clear-{idempotency_key}"),
         state: "succeeded",
@@ -733,16 +1126,35 @@ pub(crate) async fn clear_value_at(
         invocation,
         idempotency_key: &idempotency_key,
     });
-    let (resource, version, payload) = create_action_resource(
+    let finalized = update_action_resource(
         deps,
         invocation,
         &action_resource_id,
+        action_version.version_id.clone(),
         "succeeded",
         record,
-        "context-control-action:clear",
     )
-    .await?;
-    publish_lifecycle_event(
+    .await;
+    let (resource, version, payload) = match finalized {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            tracing::warn!(
+                resource_id = action_resource.resource_id,
+                event_id = event.id,
+                error = %error,
+                "context clear boundary committed with action finalization pending"
+            );
+            return Ok(boundary_committed_pending_response(
+                "context_control_clear",
+                &action_resource,
+                &action_version,
+                &action_payload,
+                &event,
+                "context.cleared",
+            ));
+        }
+    };
+    publish_action_lifecycle_best_effort(
         deps,
         invocation,
         "context_control.clear_recorded",
@@ -753,7 +1165,7 @@ pub(crate) async fn clear_value_at(
             "epoch": version_ref(&epoch_resource, &epoch_version, "created_epoch")
         }),
     )
-    .await?;
+    .await;
     Ok(action_response(
         "context_control_clear",
         &resource,

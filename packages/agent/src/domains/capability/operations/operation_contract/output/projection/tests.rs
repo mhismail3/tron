@@ -448,6 +448,25 @@ fn extract_result_content_projects_git_status_evidence_for_agent() {
                     "statusLimitBytes": 20000,
                     "resourceRefs": []
                 }
+            },
+            "dynamicReplacement": {
+                "operation": "git_status",
+                "routeState": "active_route_accepted_shadow_projection",
+                "routeVersion": 7,
+                "candidateOwner": "module_candidate",
+                "candidateLabel": "Safe status projection",
+                "projectionBoundaryEvaluated": true,
+                "projectionBoundaryState": "accepted_shadow_projection_validated",
+                "acceptedProjectionReplayed": true,
+                "routeExecutionMode": "supervised_shadow_projection_replay",
+                "candidateProjectionSource": "accepted_shadow_trial_evidence",
+                "liveModuleCodeExecutionSupported": false,
+                "liveModuleCodeExecuted": false,
+                "builtInProjectionUsed": false,
+                "networkPolicy": "none",
+                "failClosed": false,
+                "routeRuntimeProof": {"resourceId": "must-not-enter-provider-context"},
+                "routeEvent": {"resourceId": "must-not-enter-provider-context"}
             }
         })),
     );
@@ -467,7 +486,32 @@ fn extract_result_content_projects_git_status_evidence_for_agent() {
         &json!(false)
     );
     assert_eq!(fact(&envelope, "git.relativePath"), ".");
-    assert!(!envelope_text(&envelope).contains("statusPorcelainV1Z"));
+    assert_eq!(
+        fact(&envelope, "dynamicReplacement.routeState"),
+        "active_route_accepted_shadow_projection"
+    );
+    assert_eq!(
+        fact(&envelope, "dynamicReplacement.routeExecutionMode"),
+        "supervised_shadow_projection_replay"
+    );
+    assert_eq!(
+        fact(&envelope, "dynamicReplacement.candidateProjectionSource"),
+        "accepted_shadow_trial_evidence"
+    );
+    assert_eq!(
+        fact(
+            &envelope,
+            "dynamicReplacement.liveModuleCodeExecutionSupported"
+        ),
+        &json!(false)
+    );
+    assert_eq!(
+        fact(&envelope, "dynamicReplacement.liveModuleCodeExecuted"),
+        &json!(false)
+    );
+    let rendered = envelope_text(&envelope);
+    assert!(!rendered.contains("statusPorcelainV1Z"));
+    assert!(!rendered.contains("must-not-enter-provider-context"));
 }
 
 #[test]

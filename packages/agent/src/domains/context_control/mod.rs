@@ -36,6 +36,11 @@
 //! after those boundaries. Manual boundaries carry their internal invocation
 //! correlation so reconstruction also excludes the matching post-boundary
 //! capability result instead of producing an orphaned provider function output.
+//! Every new boundary references an action version that was durably prepared
+//! first. Interrupted action/epoch finalization is repairable through the same
+//! idempotency key, while the invocation that committed or recovered the
+//! boundary still ends its active turn. A replay of an already-finalized action
+//! does not stop an unrelated later turn.
 //! The compaction adapter seam is the summarizer strategy only. Context-control
 //! snapshot/action/epoch and survivor/exclusion policy records, provider-safe
 //! projections, replay refs, and audit custody stay server-owned; a future

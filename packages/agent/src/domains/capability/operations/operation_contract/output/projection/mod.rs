@@ -23,6 +23,9 @@
 //! exact `targetOperation` cockpit calls keep the deep readiness, preflight,
 //! binding, shadow, route, rollback, and agent-path detail. This keeps the
 //! capability map discoverable without flooding the next provider turn.
+//! Routed Git projections preserve the bounded route mode/source and live-code
+//! execution facts needed to distinguish accepted-shadow replay from a built-in
+//! call, while route-event and runtime resource identifiers remain audit-only.
 
 use std::sync::LazyLock;
 
@@ -735,6 +738,35 @@ fn project_git_evidence(details: &Value) -> Option<Value> {
         }
         if !evidence_projected.is_empty() {
             git_projected.insert("evidence".to_owned(), Value::Object(evidence_projected));
+        }
+    }
+    if let Some(dynamic_replacement) = details.get("dynamicReplacement") {
+        let mut replacement_projected = Map::new();
+        for key in [
+            "operation",
+            "routeState",
+            "routeVersion",
+            "candidateOwner",
+            "candidateLabel",
+            "projectionBoundaryEvaluated",
+            "projectionBoundaryState",
+            "acceptedProjectionReplayed",
+            "routeExecutionMode",
+            "candidateProjectionSource",
+            "liveModuleCodeExecutionSupported",
+            "liveModuleCodeExecuted",
+            "builtInProjectionUsed",
+            "networkPolicy",
+            "failClosed",
+            "failureKind",
+        ] {
+            copy_key(&mut replacement_projected, dynamic_replacement, key);
+        }
+        if !replacement_projected.is_empty() {
+            projected.insert(
+                "dynamicReplacement".to_owned(),
+                Value::Object(replacement_projected),
+            );
         }
     }
     projected.insert("git".to_owned(), Value::Object(git_projected));

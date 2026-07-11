@@ -767,7 +767,8 @@ inheritance. Snapshots expose bounded composition metadata, token estimates,
 memory/resource/execution refs, redaction proof, truncation proof, and epoch
 freshness without raw prompt bodies, hidden chain-of-thought, secrets, env
 values, local paths, commands, logs, grant ids, or authority ids. Compact and
-clear write durable preflight/action/timeline evidence; clear creates a new
+clear durably prepare their action record before committing timeline evidence,
+then finalize the action through a replay-repairable version update; clear creates a new
 context epoch while keeping chat history, resources, traces, and durable refs
 inspectable. Survivor and exclusion records let users or agents mark bounded
 refs that future compaction/replacement summarizers must preserve or omit, and
@@ -1296,7 +1297,10 @@ shadow-projection boundary used at invocation. The dispatcher seam resolves an
 active scoped `git_status` route, verifies accepted shadow evidence plus
 lifecycle/runtime refs, revalidates and replays the accepted provider-safe shadow
 projection, and emits route events. This route mode does not execute live module
-code. If the replacement runtime
+code. The routed `git_status` provider projection explicitly reports route state,
+execution mode, accepted-shadow source, and the fact that live module code was
+not executed, while keeping route-event and runtime resource identifiers out of
+model context. If the replacement runtime
 envelope, lifecycle authorization, version refs, scope, network policy, or
 projection shape are unsafe, candidate recording or routing fails closed and does
 not substitute a built-in success projection for the unsafe route.
@@ -2835,7 +2839,7 @@ before the next provider call:
 
 1. **Summarize**: The loop handler invokes an explicit compaction summarizer strategy; the default primitive strategy is the deterministic keyword summarizer.
 2. **Prove**: the handler records a context-control action and preflight snapshot for the compact boundary. Survivor/exclusion policy snapshots remain server-owned proof inputs that a future replacement summarizer must consume before it can be routed.
-3. **Boundary**: a `compact.boundary` event commits the cutoff only after the context-control proof is durable; the boundary carries the summary and proof refs used by server-side reconstruction.
+3. **Boundary**: a `compact.boundary` event commits the cutoff only after the context-control snapshot and requested action version are durable; the boundary carries the summary and proof refs used by server-side reconstruction. Interrupted action finalization is repaired idempotently.
 4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
 5. **Preserve recent**: The most recent `preserveRecentCount` turns always survive the cut.
 
@@ -2853,7 +2857,8 @@ matching invocation survives in the immediately preceding assistant message.
 Compact and clear boundaries therefore cannot leave orphaned function outputs
 in resumed provider history. Manual compact and clear operations are active-run
 boundaries: their durable action result is visible in session evidence, the
-current agent run ends, and the next run reconstructs from the committed summary
+current agent run ends before any later serialized capability wave can begin,
+and the next run reconstructs from the committed summary
 or empty epoch instead of issuing another provider request from stale context.
 
 Compaction is internal prompt-loop infrastructure. It is observable through
