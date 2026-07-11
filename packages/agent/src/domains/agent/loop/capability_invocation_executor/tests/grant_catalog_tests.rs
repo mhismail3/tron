@@ -200,6 +200,40 @@ fn durable_operations_use_caller_key_not_provider_call_for_wrapper_replay() {
     assert_ne!(goal_first, first, "operation identity scopes caller keys");
 }
 
+#[test]
+fn context_boundaries_reenter_the_domain_for_caller_key_replay() {
+    for operation in ["context_control_compact", "context_control_clear"] {
+        let payload = json!({
+            "operation": operation,
+            "idempotencyKey": "same-domain-action"
+        });
+        let first = model_capability_invocation_idempotency_key(
+            Some("run-a"),
+            "session-a",
+            1,
+            "provider-call-a",
+            "execute",
+            "/workspace",
+            Some("workspace-a"),
+            &payload,
+        );
+        let replay = model_capability_invocation_idempotency_key(
+            Some("run-b"),
+            "session-a",
+            2,
+            "provider-call-b",
+            "execute",
+            "/workspace",
+            Some("workspace-a"),
+            &payload,
+        );
+        assert_ne!(
+            first, replay,
+            "the outer ledger must not bypass {operation}'s durable replay owner"
+        );
+    }
+}
+
 #[tokio::test]
 async fn catalog_conformance_replays_end_to_end_without_duplicate_evidence() {
     let server = crate::shared::server::test_support::make_test_context();

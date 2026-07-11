@@ -1,6 +1,6 @@
 use crate::domains::capability::{
     AuthorityPolicy, ConditionalAuthority, ResourceKindPolicy, SelectorAddition,
-    WorkerPackageKindSource, authority_policy, operation_risk,
+    WorkerPackageKindSource, authority_policy, operation_replays_through_handler, operation_risk,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
@@ -801,7 +801,8 @@ pub(super) fn model_capability_invocation_idempotency_key(
     if let (Some(operation), Some(caller_key)) = (
         effective_args.get("operation").and_then(Value::as_str),
         effective_args.get("idempotencyKey").and_then(Value::as_str),
-    ) {
+    ) && !operation_replays_through_handler(operation)
+    {
         let material = json!({
             "version": 1,
             "sessionId": session_id,

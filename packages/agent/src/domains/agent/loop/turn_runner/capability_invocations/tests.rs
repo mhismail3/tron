@@ -181,6 +181,7 @@ impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         let label = trace_id;
+        let stops_turn = label == "stop";
         serde_json::to_value(CapabilityResult {
             content: CapabilityResultBody::Text(format!("done-{label}")),
             details: Some(json!({
@@ -192,13 +193,15 @@ impl crate::engine::InProcessFunctionHandler for DelayedCapabilityHandler {
                 }
             })),
             is_error: Some(false),
-            stop_turn: None,
+            stop_turn: stops_turn.then_some(true),
         })
         .map_err(|error| crate::engine::EngineError::HandlerFailed(error.to_string()))
     }
 }
 
-async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) {
+async fn phase_engine_surface_with_mode(
+    execution_mode: ExecutionMode,
+) -> (EngineHostHandle, ResolvedPrimitiveSurface) {
     let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
     engine_host
         .register_worker(
@@ -241,7 +244,7 @@ async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) 
             function_id,
             function,
             stops_turn: false,
-            execution_mode: ExecutionMode::Parallel,
+            execution_mode,
         },
     );
     (
@@ -252,6 +255,10 @@ async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) 
             turn_stopping_capabilities: HashSet::new(),
         },
     )
+}
+
+async fn phase_engine_surface() -> (EngineHostHandle, ResolvedPrimitiveSurface) {
+    phase_engine_surface_with_mode(ExecutionMode::Parallel).await
 }
 
 fn context_manager_for_workdir(working_directory: &str) -> ContextManager {
@@ -586,6 +593,84 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
     assert_eq!(completed.0.as_ref().unwrap().is_error, Some(false));
     assert_eq!(completed.1.operation_name.as_deref(), Some("log_recent"));
     assert_eq!(completed.1.theme_color.as_deref(), Some("#10B981"));
+}
+
+#[tokio::test]
+async fn context_boundary_terminalizes_later_started_invocations_without_executing_them() {
+    let h = phase_persistence_harness().await;
+    let (engine_host, surface) =
+        phase_engine_surface_with_mode(ExecutionMode::Serialized("capability-execute".to_owned()))
+            .await;
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
+    let mut context_manager = context_manager_for_workdir(working_directory);
+    let cancel = CancellationToken::new();
+    let stream_result = stream_result_with_invocations(vec![
+        CapabilityInvocationDraft::new("call-stop", "execute", {
+            let mut args = Map::new();
+            args.insert("operation".to_owned(), json!("log_recent"));
+            args.insert("traceId".to_owned(), json!("stop"));
+            args
+        }),
+        CapabilityInvocationDraft::new("call-later", "execute", {
+            let mut args = Map::new();
+            args.insert("operation".to_owned(), json!("log_recent"));
+            args.insert("traceId".to_owned(), json!("later"));
+            args
+        }),
+    ]);
+
+    let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
+        turn: 8,
+        stream_result: &stream_result,
+        context_manager: &mut context_manager,
+        primitive_surface: &surface,
+        session_id: &h.session_id,
+        emitter: &h.emitter,
+        cancel: &cancel,
+        workspace_id: None,
+        persister: Some(&h.persister),
+        sequence_counter: Some(&h.counter),
+        invocation_abort_registry: None,
+        engine_host: Some(&engine_host),
+        run_id: Some("run-boundary"),
+        provider_type: "openai",
+        trace_id: None,
+        parent_invocation_id: None,
+    })
+    .await;
+
+    assert_eq!(outcome.capability_invocations_executed, 1);
+    assert!(outcome.stop_turn_requested);
+    h.persister.flush().await.expect("flush lifecycle rows");
+    let starts = persisted_rows(&h.store, &h.session_id, "capability.invocation.started");
+    let completions = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
+    assert_eq!(starts.len(), 2);
+    assert_eq!(completions.len(), 2);
+    let payloads = h
+        .store
+        .resolve_event_payloads(&completions)
+        .expect("resolve completion payloads");
+    let skipped = payloads
+        .iter()
+        .find(|payload| payload["invocationId"] == json!("call-later"))
+        .expect("later invocation terminal completion");
+    assert_eq!(skipped["details"]["status"], json!("skipped"));
+    assert_eq!(skipped["details"]["executed"], json!(false));
+    assert_eq!(
+        skipped["details"]["skipReason"],
+        json!("context_boundary_committed")
+    );
+    assert_eq!(skipped["details"]["providerContextResultWritten"], false);
+    assert!(
+        payloads.iter().all(|payload| {
+            payload["invocationId"] != json!("call-later")
+                || !payload["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("done-later"))
+        }),
+        "the skipped handler must never execute"
+    );
 }
 
 #[tokio::test]

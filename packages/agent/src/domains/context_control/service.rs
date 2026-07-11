@@ -346,6 +346,86 @@ async fn publish_action_lifecycle_best_effort(
     }
 }
 
+async fn repair_pending_runtime_compaction_actions(
+    deps: &Deps,
+    invocation: &Invocation,
+    session_id: &str,
+) -> Result<(), CapabilityError> {
+    let rows = deps
+        .event_store
+        .get_events_by_type(session_id, &[EventType::CompactBoundary.as_str()], None)
+        .map_err(store_error)?;
+    let payloads = deps
+        .event_store
+        .resolve_event_payloads(&rows)
+        .map_err(store_error)?;
+    for (event, boundary) in rows.into_iter().zip(payloads) {
+        let Some(action_resource_id) = boundary
+            .get("contextControlActionResourceId")
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let Some(action) = deps
+            .engine_host
+            .inspect_resource(action_resource_id)
+            .await
+            .map_err(engine_error)?
+        else {
+            continue;
+        };
+        let (version, prepared) =
+            current_payload(&action, "runtime compaction action reconciliation")?;
+        if !action_is_requested(prepared)
+            || prepared.get("actionId").and_then(Value::as_str) != Some("runtime-compact")
+        {
+            continue;
+        }
+
+        let mut finalized = prepared.clone();
+        finalized["state"] = json!("succeeded");
+        finalized["result"] = json!({
+            "status": "succeeded",
+            "tokensBefore": boundary.get("originalTokens").cloned().unwrap_or(Value::Null),
+            "tokensAfter": boundary.get("compactedTokens").cloned().unwrap_or(Value::Null),
+            "timelineEventWritten": true,
+            "timelineEvent": event_ref(&event.id, event.sequence, "compact.boundary"),
+            "providerContextReplacedBySafeSummary": true,
+            "historyStillInspectable": true,
+            "recoveredFinalization": true
+        });
+        if let Some(audit_refs) = finalized.get_mut("auditRefs").and_then(Value::as_array_mut) {
+            audit_refs.push(event_ref(&event.id, event.sequence, "compact.boundary"));
+        }
+        finalized["updatedAt"] = json!(event.timestamp);
+        finalized["revision"] = json!(
+            prepared
+                .get("revision")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .saturating_add(1)
+        );
+        let (resource, _, _) = update_action_resource(
+            deps,
+            invocation,
+            action_resource_id,
+            version.version_id.clone(),
+            "succeeded",
+            finalized,
+        )
+        .await?;
+        publish_action_lifecycle_best_effort(
+            deps,
+            invocation,
+            "context_control.runtime_compact_reconciled",
+            &resource,
+            json!({"metadataOnly": true, "networkPolicy": "none"}),
+        )
+        .await;
+    }
+    Ok(())
+}
+
 pub(crate) async fn record_runtime_compaction_action(
     deps: &Deps,
     input: RuntimeCompactionInput<'_>,
@@ -368,6 +448,7 @@ pub(crate) async fn record_runtime_compaction_action(
             "reason": input.reason
         }),
     )?;
+    repair_pending_runtime_compaction_actions(deps, &invocation, input.session_id).await?;
     let action_resource_id = action_resource_id(input.session_id, "compact", &idempotency_key);
     let existing = deps
         .engine_host
@@ -730,7 +811,8 @@ pub(crate) async fn compact_value_at(
         .and_then(Value::as_u64)
         .unwrap_or_default();
 
-    let (state, result, audit_refs) = if message_count < 2 || estimated_tokens == 0 {
+    let (state, result, audit_refs, boundary_event) = if message_count < 2 || estimated_tokens == 0
+    {
         (
             "skipped",
             json!({
@@ -745,6 +827,7 @@ pub(crate) async fn compact_value_at(
                 &snapshot_version,
                 "preflight_snapshot",
             )],
+            None,
         )
     } else {
         let tokens_after = safe_compacted_token_estimate(message_count);
@@ -805,6 +888,7 @@ pub(crate) async fn compact_value_at(
                 version_ref(&snapshot_resource, &snapshot_version, "preflight_snapshot"),
                 event_ref(&event.id, event.sequence, "compact.boundary"),
             ],
+            Some(event),
         )
     };
 
@@ -838,14 +922,7 @@ pub(crate) async fn compact_value_at(
     let (resource, version, payload) = match finalized {
         Ok(finalized) => finalized,
         Err(error) => {
-            if let Some(event) = find_boundary_event(
-                deps,
-                &session_id,
-                EventType::CompactBoundary,
-                &action_resource_id,
-            )
-            .await?
-            {
+            if let Some(event) = boundary_event {
                 tracing::warn!(
                     resource_id = action_resource.resource_id,
                     event_id = event.id,

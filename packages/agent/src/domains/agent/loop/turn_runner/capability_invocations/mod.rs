@@ -7,7 +7,9 @@
 //! audit/UI persistence without entering provider context.
 //! A committed context boundary is also an execution-wave boundary: later
 //! serialized waves from the same provider response are not started after a
-//! capability result requests the active turn to stop.
+//! capability result requests the active turn to stop. Because start rows are
+//! published up front for immediate UI visibility, every skipped later wave is
+//! closed by a terminal non-executed completion row.
 //! Live `capability.invocation.started` and `completed` broadcasts are emitted
 //! from persisted rows with persisted row sequences; a requested batch's start
 //! rows are all broadcast before any child execution future is polled.
@@ -292,6 +294,19 @@ pub(super) async fn execute_capability_invocation_phase(
 
     for (wave_index, wave) in waves.iter().enumerate() {
         if params.cancel.is_cancelled() {
+            let skipped = waves
+                .iter()
+                .skip(wave_index)
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+            persist_skipped_invocations(
+                &skipped,
+                &params,
+                "agent_run_cancelled",
+                "CAPABILITY_INVOCATION_CANCELLED",
+            )
+            .await;
             break;
         }
         debug!(
@@ -474,6 +489,19 @@ pub(super) async fn execute_capability_invocation_phase(
                 wave_index,
                 "later capability waves skipped after a committed context boundary"
             );
+            let skipped = waves
+                .iter()
+                .skip(wave_index + 1)
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+            persist_skipped_invocations(
+                &skipped,
+                &params,
+                "context_boundary_committed",
+                "CAPABILITY_INVOCATION_SKIPPED_AFTER_CONTEXT_BOUNDARY",
+            )
+            .await;
             break;
         }
     }
@@ -490,6 +518,72 @@ fn wave_requests_turn_stop(
             .as_ref()
             .is_some_and(|executed| executed.result.stops_turn)
     })
+}
+
+async fn persist_skipped_invocations(
+    indices: &[usize],
+    params: &CapabilityInvocationPhaseParams<'_>,
+    reason: &str,
+    code: &str,
+) {
+    let Some(persister) = params.persister else {
+        return;
+    };
+    for &idx in indices {
+        let invocation = &params.stream_result.capability_invocations[idx];
+        let mut payload = json!({
+            "invocationId": invocation.id,
+            "name": invocation.name,
+            "content": "Capability invocation was not executed because the active turn ended.",
+            "isError": true,
+            "duration": 0,
+            "details": {
+                "status": "skipped",
+                "executed": false,
+                "skipReason": reason,
+                "code": code,
+                "providerContextResultWritten": false
+            },
+            "runId": params.run_id,
+            "traceId": params.trace_id.map(|id| id.as_str()),
+            "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
+        });
+        if let (Some(payload), Some(identity)) = (
+            payload.as_object_mut(),
+            primitive_identity_json(
+                &invocation.name,
+                &invocation.arguments,
+                params.trace_id,
+                params.parent_invocation_id,
+            )
+            .as_object()
+            .cloned(),
+        ) {
+            payload.extend(identity);
+        }
+        match persister
+            .append_with_runtime_sequence(
+                params.session_id,
+                EventType::CapabilityInvocationCompleted,
+                payload.clone(),
+                params.sequence_counter,
+            )
+            .await
+        {
+            Ok(row) => super::persistence::emit_persisted_capability_invocation_completed(
+                params.emitter,
+                &row,
+                &payload,
+            ),
+            Err(error) => error!(
+                session_id = params.session_id,
+                invocation_id = %invocation.id,
+                skip_reason = reason,
+                error = %error,
+                "failed to persist terminal skipped capability invocation"
+            ),
+        }
+    }
 }
 
 async fn process_capability_results(

@@ -13,6 +13,9 @@
 //! short `content` string returned by each operation is model-facing navigation
 //! guidance: it must expose the decisive next action and point to structured
 //! evidence fields instead of acting as a UI-only prose summary.
+//! Context compact/clear caller-key replay deliberately re-enters this domain
+//! instead of returning the generic engine-ledger outcome: context control owns
+//! durable requested/finalized action repair and per-invocation stop semantics.
 
 use std::time::Instant;
 
@@ -86,6 +89,15 @@ pub(crate) use operation_contract::{
     operation_list_text, required_payload_fields as operation_required_payload_fields,
     risk as operation_risk, supported_operation_names,
 };
+
+/// Operations whose durable domain record, not the generic engine ledger,
+/// owns caller-key replay and interrupted-finalization repair.
+pub(crate) fn operation_replays_through_handler(operation: &str) -> bool {
+    matches!(
+        OperationId::parse(operation),
+        Some(OperationId::ContextControlCompact | OperationId::ContextControlClear)
+    )
+}
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,

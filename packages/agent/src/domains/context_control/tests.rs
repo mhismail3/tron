@@ -22,7 +22,8 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::session::event_store::{AppendOptions, EventType};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, ListResources, RiskLevel, TraceId, builtin_resource_type_definitions,
+    InvocationId, ListResources, RiskLevel, TraceId, UpdateResource,
+    builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -487,6 +488,128 @@ async fn runtime_compaction_records_action_refs_on_durable_boundary() {
     assert_eq!(
         payload["preflight"]["policyProof"]["networkPolicy"],
         json!("none")
+    );
+}
+
+#[tokio::test]
+async fn later_runtime_compaction_repairs_a_requested_action_with_a_committed_boundary() {
+    let fixture = Fixture::new("context-control-runtime-reconcile").await;
+    let persister = Arc::new(EventPersister::new(Arc::clone(&fixture.deps.event_store)));
+    record_runtime_compaction_action(
+        &fixture.deps,
+        RuntimeCompactionInput {
+            session_id: &fixture.session_id,
+            reason: "threshold_exceeded",
+            summary: "First bounded summary.",
+            tokens_before: 8_000,
+            tokens_after: 900,
+            compression_ratio: 0.1125,
+            persister: &persister,
+            sequence_counter: None,
+            operation_at: operation_at(),
+        },
+    )
+    .await
+    .expect("record first runtime compaction");
+    let boundary = fixture
+        .deps
+        .event_store
+        .get_latest_event_by_type(&fixture.session_id, "compact.boundary")
+        .expect("latest compact boundary")
+        .expect("compact boundary exists");
+    let boundary_payload = fixture
+        .deps
+        .event_store
+        .resolve_event_payloads(std::slice::from_ref(&boundary))
+        .expect("resolve compact boundary")
+        .remove(0);
+    let action_id = boundary_payload["contextControlActionResourceId"]
+        .as_str()
+        .expect("action resource id")
+        .to_owned();
+    let action = fixture
+        .deps
+        .engine_host
+        .inspect_resource(&action_id)
+        .await
+        .expect("inspect action")
+        .expect("action exists");
+    let current = action
+        .resource
+        .current_version_id
+        .clone()
+        .expect("current action version");
+    let mut requested = action
+        .versions
+        .iter()
+        .find(|version| version.version_id == current)
+        .expect("current action payload")
+        .payload
+        .clone();
+    requested["state"] = json!("requested");
+    requested["result"] = json!({
+        "status": "requested",
+        "timelineEventWritten": false,
+        "boundaryPreparationDurable": true
+    });
+    fixture
+        .deps
+        .engine_host
+        .update_resource(UpdateResource {
+            resource_id: action_id.clone(),
+            expected_current_version_id: Some(current),
+            lifecycle: Some("requested".to_owned()),
+            payload: requested,
+            state: None,
+            locations: Vec::new(),
+            trace_id: TraceId::new("runtime-reconcile-test").expect("trace id"),
+            invocation_id: Some(
+                InvocationId::new("runtime-reconcile-test").expect("invocation id"),
+            ),
+        })
+        .await
+        .expect("simulate interrupted finalization");
+
+    record_runtime_compaction_action(
+        &fixture.deps,
+        RuntimeCompactionInput {
+            session_id: &fixture.session_id,
+            reason: "threshold_exceeded",
+            summary: "Second bounded summary.",
+            tokens_before: 7_000,
+            tokens_after: 800,
+            compression_ratio: 0.114,
+            persister: &persister,
+            sequence_counter: None,
+            operation_at: operation_at() + chrono::Duration::seconds(1),
+        },
+    )
+    .await
+    .expect("record second runtime compaction and reconcile first");
+
+    let repaired = fixture
+        .deps
+        .engine_host
+        .inspect_resource(&action_id)
+        .await
+        .expect("inspect repaired action")
+        .expect("repaired action exists");
+    let current = repaired
+        .resource
+        .current_version_id
+        .as_deref()
+        .expect("repaired current version");
+    let payload = &repaired
+        .versions
+        .iter()
+        .find(|version| version.version_id == current)
+        .expect("repaired payload")
+        .payload;
+    assert_eq!(payload["state"], json!("succeeded"));
+    assert_eq!(payload["result"]["recoveredFinalization"], json!(true));
+    assert_eq!(
+        payload["result"]["timelineEvent"]["eventId"],
+        json!(boundary.id)
     );
 }
 

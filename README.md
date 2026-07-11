@@ -2860,6 +2860,12 @@ boundaries: their durable action result is visible in session evidence, the
 current agent run ends before any later serialized capability wave can begin,
 and the next run reconstructs from the committed summary
 or empty epoch instead of issuing another provider request from stale context.
+The generic engine idempotency ledger intentionally re-enters context control
+for compact/clear caller-key replays so the domain can repair requested actions
+and avoid replaying an old turn-stop decision. Up-front invocation start rows
+for later waves receive terminal `skipped` completion evidence without running
+their handlers. A later automatic compaction reconciles any requested runtime
+action whose boundary committed before action finalization.
 
 Compaction is internal prompt-loop infrastructure. It is observable through
 session events and primitive trace records, not through public `context::*`
