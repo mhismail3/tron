@@ -3,7 +3,7 @@
 ## Rules
 
 1. **Code, tests, and docs ship together.** Every change must include updated tests and updated documentation in the same commit. Outdated docs and missing tests are bugs.
-2. **Keep `README.md` accurate.** The root `README.md` is the project's canonical reference and is wired up to drift quickly. Treat it like a load-bearing source file: see [README maintenance](#readme-maintenance) below for the specific cases that require an edit.
+2. **Keep the documentation hierarchy accurate.** The root `README.md` is the concise project front door. Detailed, source-backed behavior belongs in the technical reference and concern-owned docs: see [Documentation maintenance](#documentation-maintenance) below.
 3. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
 4. **Use `@self-inspect` skill** to investigate issues. Query `~/.tron/internal/database/` directly — don't guess.
 5. **Follow established patterns.** Read the relevant module's `mod.rs` docs before implementing new features.
@@ -80,23 +80,38 @@ After completing work in any area, update the progressive disclosure docs for th
 
 This is a standing task on every session, not a one-time effort. The goal is that the docs ratchet forward — every session leaves the area slightly better documented than it was found.
 
-## README maintenance
+## Documentation maintenance
 
-The root `README.md` is the canonical project reference. Several sections are mechanically derived from code and **drift the moment you change the underlying source**. Whenever you touch any of the following, audit the matching README section in the same commit:
+Documentation follows progressive disclosure:
 
-| You changed... | Update README section | Source-of-truth file |
-|----------------|-----------------------|----------------------|
-| `packages/agent/src/lib.rs` (top-level modules) | "Rust Modules" — both the tree and the table | `packages/agent/src/lib.rs` |
-| `scripts/tron` dispatch table or any `cmd_*` function | "CLI Reference" | `scripts/tron` |
-| `packages/agent/src/domains/capability/contract.rs` or any domain `contract.rs` capability definition | "Engine Capabilities" and relevant domain docs | `packages/agent/src/domains/capability/contract.rs`, `packages/agent/src/domains/*/contract.rs` |
-| `shared/protocol/events/` or session event payload modules | "Event System" — category and payload notes | `packages/agent/src/shared/protocol/events/`, `packages/agent/src/domains/session/event_store/types/` |
-| `domains/settings/profile/types/*.rs` (any field add/rename/default change) | "Settings" — `Key Configuration` JSON example | `packages/agent/src/domains/settings/profile/types/` |
-| `domains/auth/credentials/` or `domains/model/providers/` | "Authentication" — provider table and precedence rules | `packages/agent/src/domains/auth/credentials/`, `packages/agent/src/domains/model/providers/` |
-| `domains/session/event_store/sqlite/migrations/*.sql` (new migration, table add/drop) | "Database Schema" — tables list | `packages/agent/src/domains/session/event_store/sqlite/migrations/` |
-| `shared/foundation/paths/` (any new `dirs::*` constant or path helper) | "Install Directory" tree under Deployment | `packages/agent/src/shared/foundation/paths/` |
-| `cmd_deploy` in `scripts/tron` | "Deployment → Deploy Pipeline" steps | `scripts/tron::cmd_deploy` |
-| Adding/removing/renaming an iOS top-level `Sources/` directory | "iOS App → Architecture" tree | `packages/ios-app/Sources/` |
+1. `README.md` is the short GitHub front door: product purpose, system shape,
+   quick start, primary validation, and links onward. Keep it under 250 lines.
+2. `packages/agent/docs/project-reference.md` is the detailed cross-cutting
+   reference for CLI, capabilities, protocol, events, settings, auth, storage,
+   installation, and release behavior.
+3. Rust `mod.rs` docs, iOS/Mac architecture docs, source contracts, migrations,
+   and tests are the implementation-level truth.
+4. Scorecards and evidence manifests record completed audits; they are not
+   copied into the root README.
 
-**Verification before commit**: when in doubt, grep the README for the symbol/path/method you changed and confirm every hit still matches reality. If a feature is being removed, also remove its README mention — do not leave aspirational or "planned" sections; they are indistinguishable from working code to a reader. The README's intro paragraph spells this out for the reader, and that promise is only true if every contributor honors it.
+Whenever you touch a source-backed surface, update its owning docs in the same
+commit:
 
-The current README was rewritten from scratch on 2026-04-09 to remove a substantial backlog of stale claims (a fictional 12-crate workspace, fictional embeddings/PARA/Memory subsystems, retired API method tables, and incorrect tool/CLI/event/setting/DB tables). Don't let it drift again.
+| You changed... | Update... |
+|----------------|-----------|
+| Product purpose, supported clients, setup, or primary developer workflow | `README.md` |
+| Rust module ownership | the nearest `mod.rs`; update `project-reference.md` only if the cross-cutting architecture changed |
+| CLI commands | `scripts/tron --help`, command-owning docs/comments, `CONTRIBUTING.md` when contributor workflow changes, and `project-reference.md` |
+| Capability contracts or provider-visible operations | domain contract docs, capability scorecard/inventory, and `project-reference.md` when the public model surface changes |
+| Events, settings, auth, database schema, paths, installation, or release behavior | the source-owning docs/tests and the matching `project-reference.md` section |
+| iOS or Mac top-level architecture | the package architecture docs; update the root README only when the product-level map changes |
+
+Canonical source roots include
+`packages/agent/src/domains/settings/profile/types/`,
+`packages/agent/src/domains/auth/credentials/`,
+`packages/agent/src/shared/protocol/events/`, and
+`packages/agent/src/shared/foundation/paths/`.
+
+Do not turn the root README back into generated API documentation, a file tree,
+an audit ledger, or a release runbook. Link to the durable owner instead. If a
+feature is removed, remove its active documentation in the same commit.

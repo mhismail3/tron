@@ -106,7 +106,7 @@ fn perf_artifacts_and_static_gate_wiring_exist() {
     assert!(scorecard.contains("codex/performance-resource-governance-current"));
     assert!(scorecard.contains("c99a5439d9538dfc88de2883bf6b4383c8e1c037"));
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,

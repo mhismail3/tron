@@ -171,7 +171,7 @@ fn dxrha_artifacts_and_static_gate_wiring_exist() {
         assert!(repo_path(path).exists(), "missing DXRHA artifact: {path}");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -417,7 +417,7 @@ fn local_and_github_static_gate_targets_match_exactly() {
 fn scripts_tron_dispatch_help_and_docs_stay_in_sync_without_hidden_deploy() {
     let script = read_repo_file("scripts/tron");
     let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let contributing = read_repo_file("CONTRIBUTING.md");
     let pr_template = read_repo_file(".github/pull_request_template.md");
 
@@ -545,7 +545,7 @@ fn generated_and_ignored_artifact_policy_is_source_guarded() {
 
 #[test]
 fn setup_dev_runtime_state_and_version_helpers_are_documented_and_guarded() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
     let dev = read_repo_file("scripts/tron.d/dev.sh");
     let version = read_repo_file("scripts/tron-version");

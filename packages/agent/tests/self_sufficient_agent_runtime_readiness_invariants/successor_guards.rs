@@ -102,7 +102,7 @@ fn ssarr_artifacts_lineage_branch_and_readme_wiring_exist() {
         assert!(scorecard.contains(required), "scorecard missing {required}");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -546,7 +546,7 @@ fn forbidden_successor_runtime_surfaces_remain_absent() {
         );
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert!(
         readme.contains("Public `promote` is a user-owned `engine::promote` path, not a client-side catalog edit"),
         "README must distinguish public promote from tool synthesis/catalog authoring"

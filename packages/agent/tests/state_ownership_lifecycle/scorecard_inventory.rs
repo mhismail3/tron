@@ -7,7 +7,7 @@ fn sol_campaign_harness_exists() {
     let evidence = read_repo_file(EVIDENCE_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
     let tsv = read_repo_file(INVENTORY_TSV_PATH);
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# State Ownership And Lifecycle Scorecard",

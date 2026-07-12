@@ -415,7 +415,7 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
             );
         }
     }
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert!(
         readme.contains("provider-visible model tool remains `execute`"),
         "README must state provider-visible execute minimality after SUWRF"
@@ -424,7 +424,7 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
 
 #[test]
 fn readme_and_evidence_record_current_behavior_and_commands() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,

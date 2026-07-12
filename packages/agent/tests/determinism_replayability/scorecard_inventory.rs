@@ -4,7 +4,7 @@ use super::support::*;
 fn drc_scorecard_and_evidence_are_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Determinism Replayability Scorecard",

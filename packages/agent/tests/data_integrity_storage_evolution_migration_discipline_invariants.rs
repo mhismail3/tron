@@ -268,7 +268,7 @@ fn dsemd_inventory_is_structured_and_covers_required_surfaces() {
 
 #[test]
 fn dsemd_readme_and_ci_wiring_are_present() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -437,7 +437,7 @@ fn extract_sqlite_table_names(source: &str) -> BTreeSet<String> {
 }
 
 fn readme_database_table_names() -> BTreeSet<String> {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let mut in_table_section = false;
     let mut saw_table_row = false;
     let mut names = BTreeSet::new();

@@ -244,7 +244,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         );
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert_absent(
         &readme,
         &[

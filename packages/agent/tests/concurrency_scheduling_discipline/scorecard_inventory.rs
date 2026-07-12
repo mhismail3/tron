@@ -11,7 +11,7 @@ fn csd_campaign_harness_is_linked_and_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Concurrency Scheduling Discipline Scorecard",
@@ -105,7 +105,7 @@ fn csd_invariant_target_is_in_closeout_ci_lists() {
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(workflow.contains("run: scripts/tron ci test"));
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         "primitive_engine_teardown_plan_invariants",
         "determinism_replayability_invariants",

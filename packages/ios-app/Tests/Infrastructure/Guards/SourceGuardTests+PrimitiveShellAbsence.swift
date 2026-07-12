@@ -225,7 +225,7 @@ extension SourceGuardTests {
             contentsOf: iosRoot
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("README.md"),
+                .appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
 

@@ -71,7 +71,7 @@ extension SourceGuardTests {
             contentsOf: iosRoot
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("README.md"),
+                .appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
 
@@ -327,7 +327,7 @@ extension SourceGuardTests {
             contentsOf: iosRoot
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("README.md"),
+                .appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
 
@@ -372,7 +372,7 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let rootReadme = try String(
-            contentsOf: repoRoot.appendingPathComponent("README.md"),
+            contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
 

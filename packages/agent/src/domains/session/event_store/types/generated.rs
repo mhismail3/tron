@@ -139,7 +139,7 @@ mod tests {
             "event_store/types module docs must point at the generated count guard"
         );
 
-        let readme = read_repo_file("README.md");
+        let readme = read_repo_file("packages/agent/docs/project-reference.md");
         assert!(
             readme.contains(&format!("**{expected_count} typed event variants**")),
             "README Event System section must name the generated event count"

@@ -20,6 +20,8 @@ const PHASE_THREE_INVENTORY_TSV_PATH: &str =
 const TARGET_PATH: &str =
     "packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs";
 const TARGET_NAME: &str = "documentation_evidence_scorecard_integrity_invariants";
+const README_PATH: &str = "README.md";
+const PROJECT_REFERENCE_PATH: &str = "packages/agent/docs/project-reference.md";
 const BASE_COMMIT: &str = "687dc1e1f4b51701452f2ba25c92f34bc018a950";
 const STALE_BRANCH_HEAD: &str = "f931c3126a2ee62940f42512278715c9c65c2079";
 
@@ -116,6 +118,52 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| line.split('\t').map(str::to_owned).collect::<Vec<_>>())
         .collect()
+}
+
+#[test]
+fn root_readme_stays_a_concise_progressive_disclosure_front_door() {
+    let readme = read_repo_file(README_PATH);
+    assert!(
+        readme.lines().count() <= 250,
+        "root README must stay under 250 lines; move detailed reference material to its owner"
+    );
+    for required in [
+        "# Tron",
+        "## Why Tron",
+        "## System Shape",
+        "## Install",
+        "## Develop",
+        "## Validate",
+        "## Documentation",
+        PROJECT_REFERENCE_PATH,
+        "CONTRIBUTING.md",
+        "packages/agent/src/lib.rs",
+        "packages/ios-app/docs/architecture.md",
+        "packages/mac-app/docs/architecture.md",
+    ] {
+        assert!(
+            readme.contains(required),
+            "root README front door is missing {required}"
+        );
+    }
+    for displaced_catalog in [
+        "## Rust Modules",
+        "## CLI Reference",
+        "## Engine Protocol API",
+        "### Key Configuration",
+        "### Tables",
+        "### Wizard Steps",
+        "## Core Invariants",
+    ] {
+        assert!(
+            !readme.contains(displaced_catalog),
+            "root README must link to, not embed, detailed catalog {displaced_catalog}"
+        );
+    }
+    assert!(
+        repo_path(PROJECT_REFERENCE_PATH).exists(),
+        "the linked technical project reference must exist"
+    );
 }
 
 fn parse_phase_three_inventory_rows() -> Vec<BTreeMap<String, String>> {
@@ -264,7 +312,7 @@ fn desi_artifacts_branch_lineage_and_readme_wiring_exist() {
         assert!(scorecard.contains(required), "scorecard missing {required}");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -609,7 +657,7 @@ fn active_docs_use_present_tense_and_reject_open_loop_residue() {
         }
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let normalized_readme = readme.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         readme.contains("The iOS app is a thin chat and generic runtime shell"),

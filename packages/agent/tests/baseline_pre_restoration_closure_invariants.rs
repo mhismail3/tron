@@ -265,7 +265,7 @@ fn bprc_artifacts_lineage_and_readme_wiring_exist() {
         assert!(scorecard.contains(required), "scorecard missing {required}");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -1018,7 +1018,7 @@ fn worker_function_trigger_alignment_and_provider_minimality_hold() {
 
 #[test]
 fn active_docs_state_current_baseline_not_in_progress_teardown() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert!(
         readme.contains("current primitive baseline"),
         "README must describe current primitive baseline"

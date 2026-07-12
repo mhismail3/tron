@@ -5,7 +5,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let manifest = read_repo_file(EVIDENCE_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",

@@ -104,7 +104,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         ),
         read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift"),
         read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
-        read_repo_file("README.md"),
+        read_repo_file("packages/agent/docs/project-reference.md"),
     ]
     .join("\n");
     assert_absent(
@@ -294,7 +294,7 @@ fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
 #[test]
 fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
     let retained_invocation_surface = [
-        read_repo_file("README.md"),
+        read_repo_file("packages/agent/docs/project-reference.md"),
         read_repo_file("packages/agent/src/engine/invocation/host/mod.rs"),
         read_repo_file("packages/agent/src/engine/invocation/host/meta.rs"),
         read_repo_file("packages/agent/src/engine/invocation/model.rs"),

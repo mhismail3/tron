@@ -4,7 +4,7 @@ use super::support::*;
 fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let manifest = read_repo_file(EVIDENCE_PATH);
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Post-HRA Adversarial Hardening Scorecard",

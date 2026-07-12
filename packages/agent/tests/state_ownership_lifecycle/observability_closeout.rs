@@ -387,7 +387,7 @@ fn final_closeout_is_complete() {
     let evidence = read_repo_file(EVIDENCE_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
     let tsv = read_repo_file(INVENTORY_TSV_PATH);
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "Current score: **100/100**",

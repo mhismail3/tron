@@ -6,7 +6,7 @@ const INVENTORY_TSV: &str = "packages/agent/docs/true-primitive-cleanup-retentio
 #[test]
 fn tracked_source_inventory_is_formalized() {
     let scorecard = read_repo_file("packages/agent/docs/true-primitive-cleanup-scorecard.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let inventory = read_repo_file(INVENTORY_MD);
     let tsv = read_repo_file(INVENTORY_TSV);
 

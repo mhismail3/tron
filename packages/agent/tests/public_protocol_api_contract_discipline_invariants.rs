@@ -258,7 +258,7 @@ fn ppacd_inventory_is_structured_and_covers_required_surfaces() {
 
 #[test]
 fn ppacd_wiring_is_present_in_readme_local_ci_and_github_ci() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,

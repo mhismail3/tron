@@ -315,7 +315,10 @@ fn active_saa_docs_tests_and_static_targets_are_absent() {
         );
     }
 
-    for path in ["scripts/tron.d/quality.sh", "README.md"] {
+    for path in [
+        "scripts/tron.d/quality.sh",
+        "packages/agent/docs/project-reference.md",
+    ] {
         let source = read_repo_file(path);
         assert!(
             source.contains(INVARIANT_TARGET),
@@ -677,6 +680,7 @@ fn is_post_ppacd_audited_text_surface(path: &str) -> bool {
 fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
     match path {
         "README.md"
+        | "packages/agent/docs/project-reference.md"
         | "packages/agent/docs/restoration-retrospective-audit-status.md"
         | "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
