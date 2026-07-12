@@ -43,7 +43,7 @@ final class MessagingCoordinatorDraftTests: XCTestCase {
         await db.close()
     }
 
-    func testSendMessageClearsDraftEvenOnServerError() async {
+    func testSendMessagePreservesDraftOnPreAcceptServerError() async {
         let db = EventDatabase()!
         try! await db.initialize()
         try! await db.clearAll()
@@ -61,7 +61,8 @@ final class MessagingCoordinatorDraftTests: XCTestCase {
 
         let afterState = InputBarState()
         let hasDraftAfter = await store.loadDraft(sessionId: "test-session", into: afterState)
-        XCTAssertFalse(hasDraftAfter)
+        XCTAssertTrue(hasDraftAfter)
+        XCTAssertEqual(afterState.text, "draft")
 
         store.removeAllDraftFiles()
         try? await db.clearAll()

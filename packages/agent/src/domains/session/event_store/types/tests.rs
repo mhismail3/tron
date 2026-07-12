@@ -181,7 +181,7 @@ mod session_event_tests {
                     },
                     "refs": {
                         "providerAuditEventType": "model.provider_request",
-                        "providerAuditFormat": "tron.model_provider_request.v1",
+                        "providerAuditFormat": "tron.model_provider_request.v2",
                         "traceId": "trace-17a",
                         "parentInvocationId": "invoke-17a",
                         "replaySource": "session_event_log"
@@ -255,7 +255,7 @@ mod session_event_tests {
         let event = make_event(
             EventType::ModelProviderRequest,
             json!({
-                "format": "tron.model_provider_request.v1",
+                "format": "tron.model_provider_request.v2",
                 "providerType": "openai",
                 "providerName": "openai",
                 "model": "gpt-5.5-codex",
@@ -279,7 +279,7 @@ mod session_event_tests {
         let payload = event.typed_payload().unwrap();
         match payload {
             SessionEventPayload::ModelProviderRequest(p) => {
-                assert_eq!(p.format, "tron.model_provider_request.v1");
+                assert_eq!(p.format, "tron.model_provider_request.v2");
                 assert_eq!(
                     p.provider_type,
                     crate::shared::protocol::messages::Provider::OpenAi
@@ -291,6 +291,37 @@ mod session_event_tests {
                     p.provider_request.kind,
                     crate::shared::protocol::model_audit::ProviderAuditPayloadKind::ExactProviderEnvelope
                 );
+            }
+            other => panic!("expected ModelProviderRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_payload_model_provider_request_accepts_v1_history() {
+        let event = make_event(
+            EventType::ModelProviderRequest,
+            json!({
+                "format": "tron.model_provider_request.v1",
+                "providerType": "openai",
+                "providerName": "openai",
+                "model": "gpt-5.5-codex",
+                "contextWindow": 272000,
+                "sessionId": "sess-history",
+                "messageCount": 1,
+                "capabilityCount": 0,
+                "streamOptions": {},
+                "providerRequest": {
+                    "kind": "exact_provider_envelope",
+                    "body": {"model": "gpt-5.5-codex"}
+                }
+            }),
+        );
+
+        let payload = event.typed_payload().unwrap();
+        match payload {
+            SessionEventPayload::ModelProviderRequest(payload) => {
+                assert_eq!(payload.format, "tron.model_provider_request.v1");
+                assert_eq!(payload.session_id, "sess-history");
             }
             other => panic!("expected ModelProviderRequest, got {other:?}"),
         }

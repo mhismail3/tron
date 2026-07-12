@@ -137,6 +137,11 @@ extension EngineConnection {
 
     // MARK: - Pending Request Cleanup
 
+    func failPendingRequest(id: String, error: Error) {
+        timeoutTasks.removeValue(forKey: id)?.cancel()
+        pendingRequests.removeValue(forKey: id)?.resume(throwing: error)
+    }
+
     /// Fail all pending engine requests and cancel their timeout tasks.
     func failPendingRequests(error: Error) {
         let pendingCount = pendingRequests.count

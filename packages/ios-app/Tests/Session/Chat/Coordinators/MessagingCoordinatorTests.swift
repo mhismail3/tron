@@ -418,6 +418,7 @@ final class MockMessagingContext: MessagingContext {
     var lastSentAttachments: [FileAttachment]?
     var lastSentReasoningLevel: String?
     var appendedMessages: [ChatMessage] = []
+    var removedMessageIds: [UUID] = []
     var appendedInterruptedMessage = false
     var streamingManagerResetCalled = false
     var setSessionProcessingCalled = false
@@ -478,6 +479,11 @@ final class MockMessagingContext: MessagingContext {
 
     func appendMessage(_ message: ChatMessage) {
         appendedMessages.append(message)
+    }
+
+    func removeMessage(id: UUID) {
+        removedMessageIds.append(id)
+        appendedMessages.removeAll { $0.id == id }
     }
 
     func clearLocalNotifications() {

@@ -4,7 +4,8 @@
 //! opens model streams, applies provider retry policy, maps provider errors, and
 //! records provider health. It also builds provider request audit payloads from
 //! the same stream options used to open the provider stream, redacts and bounds
-//! those payloads before persistence, attaches metadata-only reasoning/status
+//! those payloads before persistence, projects bulk inline values without
+//! changing the provider request, attaches metadata-only reasoning/status
 //! evidence, and redacts provider-derived failure text. Provider requests never
 //! receive session-derived cache keys or other server-owned correlation ids.
 //! Agent loop code depends on this boundary instead of provider factories,

@@ -5,6 +5,10 @@ import PhotosUI
 
 extension ChatViewModel: MessagingContext {
 
+    func removeMessage(id: UUID) {
+        removeFromMessages { $0.id == id }
+    }
+
     func sendPromptToServer(
         text: String,
         attachments: [FileAttachment]?,

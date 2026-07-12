@@ -7,6 +7,7 @@ extension EngineConnection {
     func handleDisconnect() async {
         logger.warning("Handling disconnect...", category: .websocket)
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         if !isDeployRestarting {
             connectionState = isInBackground
                 ? .disconnected

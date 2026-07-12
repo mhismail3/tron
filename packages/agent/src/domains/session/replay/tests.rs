@@ -82,7 +82,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
                 session_id: &session_id,
                 event_type: EventType::ModelProviderRequest,
                 payload: json!({
-                    "format": "tron.model_provider_request.v1",
+                    "format": "tron.model_provider_request.v2",
                     "provider": "openai",
                     "model": "gpt-4o",
                     "request": {"messages": [{"role": "user", "content": "hi"}]},

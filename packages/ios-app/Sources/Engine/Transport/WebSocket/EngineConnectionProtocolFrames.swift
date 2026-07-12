@@ -18,6 +18,7 @@ struct EngineHelloResult: Decodable, Equatable, Sendable {
     let protocolVersion: UInt64
     let minimumSupportedVersion: UInt64
     let serverId: String
+    let maxMessageSize: Int
 }
 
 struct EngineFunctionCallFrame<P: Encodable>: Encodable {

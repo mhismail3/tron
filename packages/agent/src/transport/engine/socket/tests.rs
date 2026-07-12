@@ -8,6 +8,12 @@ use crate::shared::server::test_support::make_test_context;
 use serde_json::json;
 
 fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {
+    test_session_with_frame_limit(150 * 1024 * 1024)
+}
+
+fn test_session_with_frame_limit(
+    max_frame_bytes: usize,
+) -> (EngineWsSession, mpsc::Receiver<String>) {
     let ctx = Arc::new(make_test_context());
     let (tx, rx) = mpsc::channel(OUTBOUND_QUEUE_CAPACITY);
     (
@@ -17,6 +23,7 @@ fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {
             tx,
             Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             CancellationToken::new(),
+            max_frame_bytes,
         ),
         rx,
     )
@@ -24,7 +31,7 @@ fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {
 
 #[tokio::test]
 async fn hello_sets_defaults() {
-    let (mut session, _rx) = test_session();
+    let (mut session, mut rx) = test_session_with_frame_limit(4096);
     assert!(
         session
             .handle_text(r#"{"type":"hello","id":"h1","protocolVersion":1,"sessionId":"s1"}"#)
@@ -33,6 +40,58 @@ async fn hello_sets_defaults() {
     assert_eq!(
         session.hello.as_ref().unwrap().session_id.as_deref(),
         Some("s1")
+    );
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(
+        response.get("maxMessageSize").and_then(Value::as_u64),
+        Some(4096)
+    );
+}
+
+#[tokio::test]
+async fn oversized_frame_returns_a_correlated_error() {
+    let (mut session, mut rx) = test_session_with_frame_limit(64);
+    let message = json!({
+        "type": "hello",
+        "id": "oversized-1",
+        "protocolVersion": 1,
+        "padding": "x".repeat(128),
+    })
+    .to_string();
+
+    assert!(session.handle_text(&message).await);
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(
+        response.get("id").and_then(Value::as_str),
+        Some("oversized-1")
+    );
+    assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+    assert!(
+        response
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("exceeds maximum size"))
+    );
+}
+
+#[tokio::test]
+async fn configured_budget_accepts_frames_above_the_removed_fixed_limit() {
+    let (mut session, mut rx) = test_session_with_frame_limit(2 * 1024 * 1024);
+    let message = json!({
+        "type": "hello",
+        "id": "large-1",
+        "protocolVersion": 1,
+        "clientName": "x".repeat(1_100_000),
+    })
+    .to_string();
+    assert!(message.len() > 1024 * 1024);
+
+    assert!(session.handle_text(&message).await);
+    let response: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(response.get("id").and_then(Value::as_str), Some("large-1"));
+    assert_eq!(
+        response.get("type").and_then(Value::as_str),
+        Some("hello.ok")
     );
 }
 
@@ -357,6 +416,7 @@ async fn ack_response_applies_backpressure_instead_of_closing_socket() {
             },
         )]))),
         CancellationToken::new(),
+        150 * 1024 * 1024,
     );
     let ack_task = tokio::spawn(async move {
         session

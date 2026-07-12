@@ -14,6 +14,8 @@ final class EngineConnection {
     let serverURL: URL
     var isConnectedFlag = false
     var reconnectAttempts = 0
+    /// Exact outbound frame budget negotiated through `hello.ok`.
+    var negotiatedMaxMessageSize: Int?
 
     /// Retry while foreground so dev rebuilds and Mac restarts recover centrally.
     let reconnectPolicy = ReconnectProbePolicy()
@@ -84,6 +86,7 @@ final class EngineConnection {
         deployRestartExpectedMs = 0
 
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()
         openTimeoutTask = nil
@@ -129,6 +132,7 @@ final class EngineConnection {
 
         isConnectionInProgress = true
         defer { isConnectionInProgress = false }
+        negotiatedMaxMessageSize = nil
 
         connectionState = stateOnStart
         logger.logWebSocketState("Connecting", details: serverURL.absoluteString)
@@ -188,7 +192,8 @@ final class EngineConnection {
         logger.verbose("Receive loop started", category: .websocket)
 
         do {
-            try await hello()
+            let helloResult = try await hello()
+            negotiatedMaxMessageSize = helloResult.maxMessageSize
         } catch {
             logger.warning("Engine hello failed: \(error.localizedDescription)", category: .websocket)
             cleanupDeadConnection(error: error, stateAfterCleanup: stateOnFailure)
@@ -253,6 +258,7 @@ final class EngineConnection {
         logger.logWebSocketState("Disconnecting")
         logger.info("Disconnecting from server", category: .websocket)
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         isDeployRestarting = false
         deployRestartExpectedMs = 0
         openedWebSocketTask = nil
@@ -380,6 +386,7 @@ final class EngineConnection {
         stateAfterCleanup: ConnectionState = .disconnected
     ) {
         isConnectedFlag = false
+        negotiatedMaxMessageSize = nil
         connectionState = stateAfterCleanup
         openedWebSocketTask = nil
         openTimeoutTask?.cancel()

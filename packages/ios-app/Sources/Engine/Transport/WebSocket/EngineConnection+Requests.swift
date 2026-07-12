@@ -177,25 +177,14 @@ extension EngineConnection {
             logger.error("Failed to encode engine message for \(operation)", category: .websocket)
             throw EngineConnectionError.encodingError
         }
+        try Self.validateOutboundMessageSize(
+            actualBytes: data.count,
+            maxBytes: negotiatedMaxMessageSize
+        )
 
         #if DEBUG || BETA
         logger.logWebSocketMessage(direction: "→ SEND", type: operation, size: data.count, preview: String(data: data, encoding: .utf8))
         #endif
-
-        let socketMessage = Self.engineTextMessage(from: data)
-        do {
-            try await task.send(socketMessage)
-            logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
-        } catch {
-            logger.error("Failed to send message for \(operation): \(error.localizedDescription)", category: .websocket)
-            if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
-                await handleSendTransportFailure(error, operation: operation)
-                throw EngineConnectionError.connectionFailed(error.localizedDescription)
-            }
-            throw error
-        }
-
-        logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             pendingRequests[requestId] = continuation
@@ -218,7 +207,40 @@ extension EngineConnection {
                 }
             }
             timeoutTasks[requestId] = timeoutTask
+
+            // Register correlation before sending so an immediate server
+            // response can never arrive ahead of its continuation.
+            let socketMessage = Self.engineTextMessage(from: data)
+            Task { @MainActor [self] in
+                do {
+                    try await task.send(socketMessage)
+                    logger.verbose("Message sent successfully for \(operation) id=\(requestId)", category: .websocket)
+                    logger.verbose("Waiting for response to \(operation) id=\(requestId)...", category: .websocket)
+                } catch {
+                    logger.error("Failed to send message for \(operation): \(error.localizedDescription)", category: .websocket)
+                    if ConnectionErrorClassifier.requiresConnectionRecovery(error) {
+                        self.failPendingRequest(
+                            id: requestId,
+                            error: EngineConnectionError.connectionFailed(error.localizedDescription)
+                        )
+                        await self.handleSendTransportFailure(error, operation: operation)
+                    } else {
+                        self.failPendingRequest(id: requestId, error: error)
+                    }
+                }
+            }
         }
+    }
+
+    nonisolated static func validateOutboundMessageSize(
+        actualBytes: Int,
+        maxBytes: Int?
+    ) throws {
+        guard let maxBytes, maxBytes > 0, actualBytes > maxBytes else { return }
+        throw EngineConnectionError.messageTooLarge(
+            actualBytes: actualBytes,
+            maxBytes: maxBytes
+        )
     }
 
     nonisolated static func engineTextMessage(from data: Data) -> URLSessionWebSocketTask.Message {

@@ -220,7 +220,7 @@ async fn engine_upgrade_handler(
     Ok(ws
         .max_message_size(max_message_size)
         .on_upgrade(move |socket| async move {
-            run_engine_ws_session(socket, client_id, ctx, clients).await;
+            run_engine_ws_session(socket, client_id, ctx, clients, max_message_size).await;
         }))
 }
 

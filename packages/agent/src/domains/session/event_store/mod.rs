@@ -10,7 +10,8 @@
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Event factory**: Scoped event creation with auto-generated IDs and timestamps
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
-//! - **Provider request audits**: `model.provider_request` events persisted before model streams
+//! - **Provider request audits**: bounded `model.provider_request` structure and
+//!   digest evidence persisted before model streams without duplicating bulk media
 //! - **Logs and traces**: bounded log queries plus Agent Trace-style records
 //!   keyed by session, workspace, trace, invocation, and provider identifiers
 //! - **Event chain builder**: Automates `parent_id` threading across sequential events
@@ -51,6 +52,8 @@
 //! - SQLite row shape and migrations stay under the SQLite owner.
 //! - Reconstruction is deterministic over persisted event order.
 //! - `model.provider_request` is written before any provider stream opens.
+//! - Provider audit events project bulk strings to byte-count and digest
+//!   evidence; provider request bytes remain owned by the model boundary.
 //! - Log query filters are applied in the storage owner so diagnostics callers
 //!   cannot silently broaden session/workspace/trace scope.
 //! - Replay/import paths use explicit identities instead of ambient time or

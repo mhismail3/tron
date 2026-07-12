@@ -97,6 +97,27 @@ struct WebSocketAuthTests {
         }
     }
 
+    @Test("hello advertises the canonical outbound frame budget")
+    func helloDecodesFrameBudget() throws {
+        let data = Data(#"{"type":"hello.ok","id":"h1","protocolVersion":1,"minimumSupportedVersion":1,"serverId":"tron-engine","maxMessageSize":157286400}"#.utf8)
+
+        let result = try JSONDecoder().decode(EngineHelloResult.self, from: data)
+
+        #expect(result.maxMessageSize == 150 * 1024 * 1024)
+    }
+
+    @Test("outbound requests fail before transport when they exceed the negotiated budget")
+    func outboundFrameBudgetIsEnforced() throws {
+        try EngineConnection.validateOutboundMessageSize(actualBytes: 64, maxBytes: 64)
+
+        do {
+            try EngineConnection.validateOutboundMessageSize(actualBytes: 65, maxBytes: 64)
+            Issue.record("expected an oversized message error")
+        } catch let error as EngineConnectionError {
+            #expect(error == .messageTooLarge(actualBytes: 65, maxBytes: 64))
+        }
+    }
+
     @Test("URLSession WebSocket delegate exposes the open and close selectors")
     func webSocketDelegateSelectorsMatchURLSession() {
         let ws = EngineConnection(serverURL: makeURL())

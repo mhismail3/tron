@@ -38,9 +38,10 @@
 //!
 //! - Transport owns framing, authentication gates, method existence, depth
 //!   limits, timeout policy, metrics, cursor state, and sanitized wire errors.
-//! - Inbound WebSocket JSON frames are capped before parsing at the socket
-//!   owner boundary; outbound queues and worker sends remain bounded by their
-//!   owning socket/session loops.
+//! - The runtime server configuration owns one inbound `/engine` frame budget.
+//!   The WebSocket upgrade enforces it, the socket session advertises it during
+//!   hello, and correlated validation errors retain the request id. Outbound
+//!   queues and worker sends remain bounded by their owning loops.
 //! - Transport must not implement domain behavior or call handler-shaped
 //!   shortcuts; it dispatches canonical engine requests only.
 //! - `/engine/workers` is loopback/local external-worker transport; registration

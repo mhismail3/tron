@@ -94,9 +94,13 @@ Machine-readable inventory:
 - `model.provider_request` is now a typed session event.
 - The shared `ModelProviderRequestAudit` payload records format, provider,
   model, context window, session id, reasoning level, provider-visible message
-  and capability counts, stream options, and provider request body.
-- Provider-backed responders mark exact provider envelopes explicitly; custom
-  responders receive a provider-independent snapshot through the trait default.
+  and capability counts, stream options, and a bounded provider request body
+  projection.
+- Provider-backed responders mark exact provider envelopes explicitly when they
+  fit the audit boundary. Bulk inline strings become deterministic byte-count
+  and digest projections, with a whole-envelope digest fallback for oversized
+  structure; custom responders receive a provider-independent snapshot through
+  the trait default.
 - `execute_turn` persists the audit before `responder.respond(model_request)`;
   persistence failure returns a turn error without opening the model stream.
 

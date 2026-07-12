@@ -55,6 +55,8 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)
+    /// Remove one optimistic message when the server rejects it before acceptance.
+    func removeMessage(id: UUID)
     /// Clear temporary local notifications after a new user action supersedes them.
     func clearLocalNotifications()
 
@@ -117,42 +119,35 @@ final class MessagingCoordinator {
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
         guard await preparePromptSend(context: context, lastUserPrompt: nil) else { return }
 
-        // Reset browser dismissal for new prompt - browser can auto-open again
-
-        // Create user message with attachments displayed above text
-        let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments
+        let pendingInput = context.inputText
+        let pendingAttachments = context.attachments
+        let pendingSelectedImages = context.selectedImages
+        let fileAttachments = pendingAttachments.map { FileAttachment(attachment: $0) }
+        let attachmentsToShow = pendingAttachments.isEmpty ? nil : pendingAttachments
+        let optimisticMessage: ChatMessage
+        let incrementsTurn: Bool
 
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow)
-            context.appendMessage(userMessage)
-            context.logDebug("Added user text message with \(context.attachments.count) attachments")
+            optimisticMessage = ChatMessage.user(text, attachments: attachmentsToShow)
+            incrementsTurn = true
+            context.appendMessage(optimisticMessage)
+            context.logDebug("Added user text message with \(pendingAttachments.count) attachments")
             context.currentTurn += 1
-        } else if !context.attachments.isEmpty {
-            // If only attachments (no text), still show them in chat
-            let attachmentMessage = ChatMessage(role: .user, content: .attachments(context.attachments), attachments: context.attachments)
-            context.appendMessage(attachmentMessage)
-            context.logDebug("Added attachment-only message with \(context.attachments.count) attachments")
+        } else {
+            optimisticMessage = ChatMessage(
+                role: .user,
+                content: .attachments(pendingAttachments),
+                attachments: pendingAttachments
+            )
+            incrementsTurn = false
+            context.appendMessage(optimisticMessage)
+            context.logDebug("Added attachment-only message with \(pendingAttachments.count) attachments")
         }
 
         context.inputText = ""
-        context.isProcessing = true
-
-        // Update session list processing state
-        context.setSessionProcessing(true)
-        context.updateSessionActivitySummary(lastUserPrompt: text, lastAssistantResponse: nil)
-
-        // Reset streaming state before new message
-        context.resetStreamingManager()
-
-        // Prepare file attachments for sending
-        let fileAttachments = context.attachments.map { FileAttachment(attachment: $0) }
         context.attachments = []
         context.selectedImages = []
 
-        // Clear persisted draft now that input state is consumed
-        await context.draftStore?.clearDraft(sessionId: context.sessionId)
-
-        // Send to server
         do {
             context.logDebug("Calling sendPromptToServer with \(fileAttachments.count) attachments...")
             try await context.sendPromptToServer(
@@ -162,11 +157,20 @@ final class MessagingCoordinator {
                 idempotencyKey: .userAction("agent.prompt")
             )
             context.logInfo("Prompt sent successfully")
+            context.updateSessionActivitySummary(lastUserPrompt: text, lastAssistantResponse: nil)
+            await context.draftStore?.clearDraft(sessionId: context.sessionId)
             if !text.isEmpty {
                 onPromptSent?(text)
             }
         } catch {
             context.logError("Failed to send prompt: \(error.localizedDescription)")
+            context.removeMessage(id: optimisticMessage.id)
+            if incrementsTurn {
+                context.currentTurn = max(0, context.currentTurn - 1)
+            }
+            context.inputText = pendingInput
+            context.attachments = pendingAttachments
+            context.selectedImages = pendingSelectedImages
             handlePreAcceptPromptFailure(
                 context: context,
                 dedupKey: "agent.prompt.send.failed",

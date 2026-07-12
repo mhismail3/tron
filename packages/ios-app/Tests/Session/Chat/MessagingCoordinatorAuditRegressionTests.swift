@@ -35,6 +35,15 @@ final class MessagingCoordinatorAuditRegressionTests: XCTestCase {
 
     func testSendMessageFailureClearsProcessingFlagsAndShowsLocalNotification() async {
         mockContext.inputText = "Prompt that fails before server acceptance"
+        let attachment = Attachment(
+            type: .image,
+            data: Data([0x01, 0x02]),
+            mimeType: "image/jpeg",
+            fileName: "retry.jpg",
+            originalSize: 2
+        )
+        mockContext.attachments = [attachment]
+        mockContext.currentTurn = 4
         mockContext.sendPromptShouldFail = true
 
         await coordinator.sendMessage(context: mockContext)
@@ -45,6 +54,11 @@ final class MessagingCoordinatorAuditRegressionTests: XCTestCase {
         XCTAssertTrue(mockContext.appendLocalErrorCalled)
         XCTAssertTrue(mockContext.localErrorDedupKeys.contains("agent.prompt.send.failed"))
         XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not send message")
+        XCTAssertEqual(mockContext.inputText, "Prompt that fails before server acceptance")
+        XCTAssertEqual(mockContext.attachments, [attachment])
+        XCTAssertEqual(mockContext.currentTurn, 4)
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
+        XCTAssertEqual(mockContext.removedMessageIds.count, 1)
     }
 
     func testRetryMessageDoesNotSendWhenLiveEventSubscriptionFails() async {

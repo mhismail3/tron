@@ -265,7 +265,7 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
 
     let audit = responder.request_audit(&request).unwrap();
 
-    assert_eq!(audit.format, "tron.model_provider_request.v1");
+    assert_eq!(audit.format, "tron.model_provider_request.v2");
     assert_eq!(
         audit.provider_type,
         crate::shared::protocol::messages::Provider::OpenAi
@@ -322,5 +322,59 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     assert_eq!(
         audit.provider_request.body["authorization"],
         serde_json::json!("Bearer ****")
+    );
+}
+
+#[test]
+fn provider_request_audit_projects_bulk_media_without_blocking_model_request() {
+    let responder = ProviderBackedModelResponder {
+        provider: Arc::new(AuditProvider),
+        health: Arc::new(ModelResponderHealth::new()),
+    };
+    let request = ModelResponseRequest {
+        context: Context::default(),
+        session_id: "sess-media".to_owned(),
+        reasoning_level: None,
+        trace_id: Some("trace-media".to_owned()),
+        parent_invocation_id: None,
+        cancel: CancellationToken::new(),
+        retry_config: None,
+    };
+    let info = responder.info();
+    let provider_request = ProviderAuditPayload::exact_provider_envelope(serde_json::json!({
+        "model": "gpt-5.5-codex",
+        "input": [{
+            "role": "user",
+            "content": [{
+                "type": "input_image",
+                "image_url": format!(
+                    "data:image/jpeg;base64,{}",
+                    "a".repeat(
+                        crate::shared::protocol::model_audit::MAX_PROVIDER_AUDIT_PAYLOAD_BYTES
+                    )
+                )
+            }]
+        }]
+    }));
+
+    let audit = build_request_audit(
+        info,
+        &request,
+        ProviderStreamOptions::default(),
+        provider_request,
+    )
+    .expect("bulk media must become bounded audit evidence");
+
+    assert_eq!(
+        audit.provider_request.kind,
+        ProviderAuditPayloadKind::ProviderEnvelopeProjection
+    );
+    assert_eq!(
+        audit.provider_request.body["input"][0]["content"][0]["image_url"]["$tronAuditProjection"],
+        "bulk_string.v1"
+    );
+    assert!(
+        serde_json::to_vec(&audit.provider_request).unwrap().len()
+            < crate::shared::protocol::model_audit::MAX_PROVIDER_AUDIT_PAYLOAD_BYTES
     );
 }

@@ -380,6 +380,9 @@ pub trait Provider: Send + Sync {
     /// Provider request envelope for Constitution audit/replay.
     ///
     /// Providers override this when they can expose their exact wire payload.
+    /// The responder audit boundary projects bulk inline values before durable
+    /// persistence; the request sent by [`stream`](Provider::stream) is not
+    /// modified.
     /// The default is a provider-independent request-input snapshot so custom
     /// providers still produce an audit record instead of disappearing.
     fn audit_payload(

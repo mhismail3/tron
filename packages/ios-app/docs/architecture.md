@@ -150,7 +150,7 @@ icon catalog, or fork-row state model.
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
-Attach:  model.list attachmentPolicy -> camera/photo/file data -> ImageAttachmentPreparer -> Attachment -> agent::prompt policy validation
+Attach:  model.list attachmentPolicy -> camera/photo/file data -> ImageAttachmentPreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> cancellable transcription::audio -> InputBar
 Push:    AppDelegate token -> PushNotificationService -> system device::register -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
@@ -165,6 +165,15 @@ Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_
 Transient composer failures use the shared one-line local notification pill.
 The timeline keeps the notice compact while its tap-through detail and
 accessibility label retain the complete title and message.
+
+Prompt submission is transactional at the composer boundary. Text,
+attachments, selected-photo state, the optimistic user row, and the persisted
+draft are committed only after `/engine` accepts `agent::prompt`; a pre-accept
+encoding, size, transport, or protocol failure removes the optimistic row and
+restores the exact composer state. `hello.ok` supplies the server's canonical
+frame budget, and `EngineConnection` checks the final encoded JSON byte count
+before sending so an oversized attachment cannot force a disconnect or erase a
+retryable prompt.
 
 `ContextControlSheet` presents Session Briefing as a mobile-first progressive
 disclosure surface. The top level is narrative plus compact metric strips; the

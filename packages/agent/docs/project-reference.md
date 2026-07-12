@@ -2754,12 +2754,18 @@ OAuth refresh is owned by `domains/auth/credentials/`: Anthropic, OpenAI, and Go
 
 Provider-derived errors, retry events, client logs, and provider request audit
 payloads share the same server redaction policy. Audit payloads are body-only,
-versioned as `tron.model_provider_request.v1`, classified as exact provider
-envelopes or provider-independent snapshots, redacted recursively, and rejected
-if they exceed the provider-audit payload bound before the provider stream
-opens. Raw provider reasoning payload fields are omitted from audit storage,
-and secret/token-like strings plus unsafe or absolute path-like debug strings
-are redacted before persistence.
+versioned as `tron.model_provider_request.v2`, and classified as exact provider
+envelopes, bounded provider-envelope projections, or provider-independent
+snapshots. Bulk inline strings such as media data are replaced in audit evidence
+with their byte count and SHA-256 digest; the exact request bytes still go to the
+provider unchanged. If the remaining request structure is still too large, the
+audit stores a whole-envelope byte count and digest. The resulting audit is
+recursively redacted and stays within the provider-audit payload bound before
+the provider stream opens. Raw provider reasoning payload fields are omitted
+from audit storage, and secret/token-like strings plus unsafe or absolute
+path-like debug strings are redacted before persistence.
+Historical `tron.model_provider_request.v1` events remain readable; v2 is used
+for newly persisted audits.
 
 OpenAI credential selection is owned by auth credentials through `OpenAIAuthPath`: ChatGPT OAuth accounts route model metadata and requests to the Codex backend, while OpenAI API keys route to Platform metadata and `/v1/responses`.
 
@@ -2792,6 +2798,14 @@ Clients may resize or transcode images to satisfy the contract, but provider
 names and limits are not duplicated in client code. PDF support and text-file
 extraction remain explicit policy fields, and malformed, unsupported, or
 oversized attachments fail before provider invocation.
+
+The `/engine` WebSocket transport has one runtime-owned message budget:
+`ServerConfig.max_message_size`. The upgrade enforces it and `hello.ok`
+advertises the same `maxMessageSize` value so clients can reject an encoded
+prompt locally before transmission. This transport budget is intentionally
+larger than provider attachment budgets; provider policy remains the owner of
+which media reaches a model, while transport only bounds the complete request
+envelope.
 
 ### Auth Precedence
 

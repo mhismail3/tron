@@ -353,8 +353,16 @@ fn source_bounds_stay_at_owner_boundaries() {
     }
 
     let engine_ws = read_repo_file("packages/agent/src/transport/engine/socket/mod.rs");
-    assert!(engine_ws.contains("MAX_ENGINE_WS_FRAME_BYTES"));
+    assert!(engine_ws.contains("max_frame_bytes"));
     assert!(engine_ws.contains("engine WebSocket frame exceeds maximum size"));
+    assert!(engine_ws.contains("\"maxMessageSize\": self.max_frame_bytes"));
+
+    let engine_server = read_repo_file("packages/agent/src/app/bootstrap/server.rs");
+    assert!(engine_server.contains(".max_message_size(max_message_size)"));
+    assert!(
+        engine_server
+            .contains("run_engine_ws_session(socket, client_id, ctx, clients, max_message_size)")
+    );
 
     let worker_ws = read_repo_file("packages/agent/src/transport/runtime/external_workers.rs");
     assert!(worker_ws.contains("MAX_EXTERNAL_WORKER_FRAME_BYTES"));

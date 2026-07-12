@@ -33,7 +33,6 @@ use crate::transport::engine::{
 
 const PROTOCOL_VERSION: u64 = 1;
 const MIN_PROTOCOL_VERSION: u64 = 1;
-pub(crate) const MAX_ENGINE_WS_FRAME_BYTES: usize = 1024 * 1024;
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
@@ -89,6 +88,7 @@ pub async fn run_engine_ws_session(
     client_id: String,
     ctx: Arc<ServerRuntimeContext>,
     clients: Arc<EngineClientRegistry>,
+    max_frame_bytes: usize,
 ) {
     clients.add();
     counter!("engine_ws_connections_total").increment(1);
@@ -110,7 +110,14 @@ pub async fn run_engine_ws_session(
         subscriptions.clone(),
         cancel.clone(),
     ));
-    let mut session = EngineWsSession::new(client_id, ctx, out_tx, subscriptions, cancel.clone());
+    let mut session = EngineWsSession::new(
+        client_id,
+        ctx,
+        out_tx,
+        subscriptions,
+        cancel.clone(),
+        max_frame_bytes,
+    );
     while let Some(frame) = ws_rx.next().await {
         match frame {
             Ok(Message::Text(text)) => {
@@ -140,6 +147,7 @@ struct EngineWsSession {
     out_tx: mpsc::Sender<String>,
     subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
     cancel: CancellationToken,
+    max_frame_bytes: usize,
     hello: Option<HelloState>,
 }
 
@@ -156,6 +164,7 @@ impl EngineWsSession {
         out_tx: mpsc::Sender<String>,
         subscriptions: Arc<tokio::sync::Mutex<BTreeMap<String, SubscriptionState>>>,
         cancel: CancellationToken,
+        max_frame_bytes: usize,
     ) -> Self {
         Self {
             client_id,
@@ -163,25 +172,12 @@ impl EngineWsSession {
             out_tx,
             subscriptions,
             cancel,
+            max_frame_bytes,
             hello: None,
         }
     }
 
     async fn handle_text(&mut self, text: &str) -> bool {
-        if text.len() > MAX_ENGINE_WS_FRAME_BYTES {
-            return self.send_error(
-                None,
-                protocol_error(
-                    INVALID_PARAMS,
-                    format!(
-                        "engine WebSocket frame exceeds maximum size ({} > {} bytes)",
-                        text.len(),
-                        MAX_ENGINE_WS_FRAME_BYTES
-                    ),
-                    None,
-                ),
-            );
-        }
         let value = match serde_json::from_str::<Value>(text) {
             Ok(value) => value,
             Err(error) => {
@@ -191,9 +187,6 @@ impl EngineWsSession {
                 );
             }
         };
-        if let Err(error) = validate_json_depth(&value, MAX_JSON_DEPTH) {
-            return self.send_error(None, error);
-        }
         let Some(object) = value.as_object() else {
             return self.send_error(
                 None,
@@ -204,6 +197,23 @@ impl EngineWsSession {
             Ok(id) => id,
             Err(error) => return self.send_error(None, error),
         };
+        if text.len() > self.max_frame_bytes {
+            return self.send_error(
+                id,
+                protocol_error(
+                    INVALID_PARAMS,
+                    format!(
+                        "engine WebSocket frame exceeds maximum size ({} > {} bytes)",
+                        text.len(),
+                        self.max_frame_bytes
+                    ),
+                    None,
+                ),
+            );
+        }
+        if let Err(error) = validate_json_depth(&value, MAX_JSON_DEPTH) {
+            return self.send_error(id, error);
+        }
         let message_type = match object.get("type").and_then(Value::as_str) {
             Some(value) if !value.trim().is_empty() => value,
             _ => {
@@ -280,6 +290,7 @@ impl EngineWsSession {
             "protocolVersion": PROTOCOL_VERSION,
             "minimumSupportedVersion": MIN_PROTOCOL_VERSION,
             "serverId": "tron-engine",
+            "maxMessageSize": self.max_frame_bytes,
         }))
     }
 

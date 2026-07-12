@@ -15,13 +15,14 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::messages::{Provider, TokenUsage};
 use crate::shared::foundation::redaction::redact_sensitive_content;
 
 /// Canonical format marker for provider request audit events.
-pub const MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v1";
+pub const MODEL_PROVIDER_REQUEST_AUDIT_FORMAT: &str = "tron.model_provider_request.v2";
 /// Canonical format marker for provider reasoning/status evidence.
 pub const MODEL_PROVIDER_REASONING_STATUS_EVIDENCE_FORMAT: &str =
     "tron.model_provider_reasoning_status_evidence.v1";
@@ -32,9 +33,18 @@ pub const MODEL_PROVIDER_REASONING_REPLAY_SOURCE: &str = "session_event_log";
 /// Maximum serialized JSON size accepted for a single provider request audit body.
 ///
 /// Provider audit rows are durable replay inputs, but they are not a bulk blob
-/// transport. Oversized request envelopes should fail before the provider stream
-/// opens so replay never has a response without the matching request.
+/// transport. Oversized request envelopes are projected to deterministic digest
+/// evidence before the provider stream opens so every response retains matching
+/// bounded request evidence.
 pub const MAX_PROVIDER_AUDIT_PAYLOAD_BYTES: usize = 1_048_576;
+/// Maximum string value retained inline in provider request audit evidence.
+///
+/// Provider wire requests may legitimately contain inline media or other bulk
+/// values. The provider receives those bytes unchanged, while durable audit
+/// evidence records a deterministic projection rather than duplicating bulk
+/// content into the session event log. If the remaining request structure is
+/// itself too large, the audit retains a whole-envelope byte count and digest.
+pub const MAX_PROVIDER_AUDIT_INLINE_STRING_BYTES: usize = 16_384;
 /// Maximum provider-supplied status label length stored in evidence metadata.
 pub const MAX_REASONING_STATUS_LABEL_CHARS: usize = 128;
 
@@ -56,14 +66,20 @@ pub enum ProviderAuditPayloadError {
     Serialize(String),
 }
 
-/// Whether an audit body is an exact provider request or a provider-neutral snapshot.
+/// Whether an audit body is exact, bulk-projected, or provider-neutral.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderAuditPayloadKind {
     /// The body matches the provider's request envelope before the HTTP stream opens.
     ExactProviderEnvelope,
+    /// The body preserves the provider envelope structure while projecting
+    /// bulk string values to bounded byte-count and digest evidence.
+    ProviderEnvelopeProjection,
     /// The body is a provider-independent snapshot for providers without an exact envelope.
     ProviderIndependentSnapshot,
+    /// A provider-independent snapshot whose bulk content or total structure
+    /// required bounded projection.
+    ProviderIndependentProjection,
 }
 
 /// Provider request body captured for replay/audit.
@@ -95,21 +111,42 @@ impl ProviderAuditPayload {
         }
     }
 
-    /// Return a redacted payload if its serialized size stays within the audit
-    /// boundary.
+    /// Return a redacted, bounded request audit projection.
     ///
     /// Provider audit payloads must never be the first place a raw secret is
     /// durably persisted. Providers should avoid including headers/auth fields
     /// in request bodies, and this method is the boundary backstop before the
     /// event store writes `model.provider_request`.
     pub fn redacted_and_bounded(self) -> Result<Self, ProviderAuditPayloadError> {
-        let payload = Self {
-            kind: self.kind,
-            body: redact_sensitive_json(self.body),
+        let original_bytes = serde_json::to_vec(&self)
+            .map_err(|error| ProviderAuditPayloadError::Serialize(error.to_string()))?;
+        let original_size = original_bytes.len();
+        let Self { kind, body } = self;
+        let mut projected_bulk_value = false;
+        let body = if original_size > MAX_PROVIDER_AUDIT_PAYLOAD_BYTES {
+            project_bulk_strings(body, &mut projected_bulk_value)
+        } else {
+            body
         };
-        let actual_bytes = serde_json::to_vec(&payload)
+        let kind = if projected_bulk_value {
+            projected_payload_kind(kind)
+        } else {
+            kind
+        };
+        let mut payload = Self {
+            kind,
+            body: redact_sensitive_json(body),
+        };
+        let mut actual_bytes = serde_json::to_vec(&payload)
             .map_err(|error| ProviderAuditPayloadError::Serialize(error.to_string()))?
             .len();
+        if actual_bytes > MAX_PROVIDER_AUDIT_PAYLOAD_BYTES {
+            payload.kind = projected_payload_kind(payload.kind);
+            payload.body = request_envelope_projection(&original_bytes);
+            actual_bytes = serde_json::to_vec(&payload)
+                .map_err(|error| ProviderAuditPayloadError::Serialize(error.to_string()))?
+                .len();
+        }
         if actual_bytes > MAX_PROVIDER_AUDIT_PAYLOAD_BYTES {
             return Err(ProviderAuditPayloadError::TooLarge {
                 actual_bytes,
@@ -118,6 +155,74 @@ impl ProviderAuditPayload {
         }
         Ok(payload)
     }
+}
+
+fn projected_payload_kind(kind: ProviderAuditPayloadKind) -> ProviderAuditPayloadKind {
+    match kind {
+        ProviderAuditPayloadKind::ExactProviderEnvelope
+        | ProviderAuditPayloadKind::ProviderEnvelopeProjection => {
+            ProviderAuditPayloadKind::ProviderEnvelopeProjection
+        }
+        ProviderAuditPayloadKind::ProviderIndependentSnapshot
+        | ProviderAuditPayloadKind::ProviderIndependentProjection => {
+            ProviderAuditPayloadKind::ProviderIndependentProjection
+        }
+    }
+}
+
+fn project_bulk_strings(value: Value, projected: &mut bool) -> Value {
+    match value {
+        Value::String(text) if text.len() > MAX_PROVIDER_AUDIT_INLINE_STRING_BYTES => {
+            *projected = true;
+            bulk_string_projection(&text)
+        }
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| project_bulk_strings(value, projected))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, project_bulk_strings(value, projected)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn bulk_string_projection(text: &str) -> Value {
+    let (encoding, mime_type, payload_bytes) = data_uri_metadata(text)
+        .map_or(("utf8", None, text.len()), |(mime_type, payload)| {
+            ("base64", Some(mime_type), payload.len())
+        });
+    let digest = Sha256::digest(text.as_bytes());
+    let mut projection = serde_json::json!({
+        "$tronAuditProjection": "bulk_string.v1",
+        "encoding": encoding,
+        "encodedBytes": text.len(),
+        "payloadBytes": payload_bytes,
+        "sha256": format!("sha256:{}", hex::encode(digest)),
+    });
+    if let Some(mime_type) = mime_type {
+        projection["mimeType"] = Value::String(mime_type.to_owned());
+    }
+    projection
+}
+
+fn request_envelope_projection(original_bytes: &[u8]) -> Value {
+    let digest = Sha256::digest(original_bytes);
+    serde_json::json!({
+        "$tronAuditProjection": "request_envelope.v1",
+        "encodedBytes": original_bytes.len(),
+        "sha256": format!("sha256:{}", hex::encode(digest)),
+    })
+}
+
+fn data_uri_metadata(text: &str) -> Option<(&str, &str)> {
+    let data = text.strip_prefix("data:")?;
+    let (mime_type, payload) = data.split_once(";base64,")?;
+    (!mime_type.is_empty() && !payload.is_empty()).then_some((mime_type, payload))
 }
 
 /// Provider/reasoning response phase represented by metadata-only evidence.
@@ -505,7 +610,8 @@ pub struct ModelProviderRequestAudit {
     pub capability_count: usize,
     /// Provider stream options produced by the model responder boundary.
     pub stream_options: Value,
-    /// Provider request envelope or provider-independent request-input snapshot.
+    /// Provider request envelope, bounded envelope projection, or
+    /// provider-independent request-input snapshot.
     pub provider_request: ProviderAuditPayload,
     /// Metadata-only reasoning/status evidence for this request audit.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -625,21 +731,79 @@ mod tests {
     }
 
     #[test]
-    fn provider_audit_payload_rejects_oversized_body() {
-        let payload =
-            ProviderAuditPayload::provider_independent_snapshot(json!({"body": "x".repeat(
-                MAX_PROVIDER_AUDIT_PAYLOAD_BYTES + 1
-            )}));
+    fn provider_audit_payload_projects_bulk_inline_media() {
+        let image_data = "a".repeat(MAX_PROVIDER_AUDIT_PAYLOAD_BYTES + 1);
+        let payload = ProviderAuditPayload::exact_provider_envelope(json!({
+            "input": [{
+                "role": "user",
+                "content": [{
+                    "type": "input_image",
+                    "image_url": format!("data:image/jpeg;base64,{image_data}")
+                }]
+            }]
+        }));
 
-        let error = payload.redacted_and_bounded().unwrap_err();
+        let bounded = payload.redacted_and_bounded().unwrap();
+        let projection = &bounded.body["input"][0]["content"][0]["image_url"];
 
-        assert!(matches!(
-            error,
-            ProviderAuditPayloadError::TooLarge {
-                max_bytes: MAX_PROVIDER_AUDIT_PAYLOAD_BYTES,
-                ..
-            }
-        ));
+        assert_eq!(
+            bounded.kind,
+            ProviderAuditPayloadKind::ProviderEnvelopeProjection
+        );
+        assert_eq!(projection["$tronAuditProjection"], "bulk_string.v1");
+        assert_eq!(projection["encoding"], "base64");
+        assert_eq!(projection["mimeType"], "image/jpeg");
+        assert_eq!(
+            projection["payloadBytes"],
+            serde_json::json!(image_data.len())
+        );
+        assert!(
+            projection["sha256"]
+                .as_str()
+                .is_some_and(|value| value.starts_with("sha256:"))
+        );
+        assert!(serde_json::to_vec(&bounded).unwrap().len() < MAX_PROVIDER_AUDIT_PAYLOAD_BYTES);
+        assert!(!bounded.body.to_string().contains(&image_data));
+    }
+
+    #[test]
+    fn provider_audit_payload_keeps_fitting_long_text_exact() {
+        let payload = ProviderAuditPayload::exact_provider_envelope(json!({
+            "input": "x".repeat(MAX_PROVIDER_AUDIT_INLINE_STRING_BYTES + 1)
+        }));
+
+        let bounded = payload.redacted_and_bounded().unwrap();
+
+        assert_eq!(
+            bounded.kind,
+            ProviderAuditPayloadKind::ExactProviderEnvelope
+        );
+        assert_eq!(
+            bounded.body["input"].as_str().map(str::len),
+            Some(MAX_PROVIDER_AUDIT_INLINE_STRING_BYTES + 1)
+        );
+    }
+
+    #[test]
+    fn provider_audit_payload_summarizes_oversized_structure_after_bulk_projection() {
+        let values = (0..70_000)
+            .map(|index| format!("small-audit-value-{index:05}"))
+            .collect::<Vec<_>>();
+        let payload = ProviderAuditPayload::provider_independent_snapshot(json!({
+            "values": values
+        }));
+
+        let bounded = payload.redacted_and_bounded().unwrap();
+
+        assert_eq!(
+            bounded.kind,
+            ProviderAuditPayloadKind::ProviderIndependentProjection
+        );
+        assert_eq!(bounded.body["$tronAuditProjection"], "request_envelope.v1");
+        assert!(bounded.body["encodedBytes"].as_u64().is_some_and(|size| {
+            usize::try_from(size).is_ok_and(|size| size > MAX_PROVIDER_AUDIT_PAYLOAD_BYTES)
+        }));
+        assert!(serde_json::to_vec(&bounded).unwrap().len() < MAX_PROVIDER_AUDIT_PAYLOAD_BYTES);
     }
 }
 
