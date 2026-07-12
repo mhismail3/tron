@@ -46,6 +46,18 @@ extension SourceGuardTests {
         #expect(!source.contains(#""(\(compressionPercent)%)""#))
     }
 
+    @Test("Local timeline notifications stay single-line with full accessible detail")
+    func testLocalTimelineNotificationsStaySingleLine() throws {
+        let source = try String(
+            contentsOf: iosAppRoot().appendingPathComponent("Sources/UI/Chat/Messages/NotificationViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("Text(\"\\u{2022}\")"))
+        #expect(source.contains(".lineLimit(1)"))
+        #expect(source.contains(".accessibilityLabel(notification.textContent)"))
+    }
+
     @Test("Chat conversation does not mount passive engine cockpit")
     func testChatConversationDoesNotMountPassiveEngineCockpit() throws {
         let iosRoot = iosAppRoot()
@@ -135,6 +147,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentBriefing/AgentBriefingViews.swift"),
             encoding: .utf8
         )
+        let theme = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Theme/TronColors.swift"),
+            encoding: .utf8
+        )
 
         #expect(sidebar.contains("AgentBriefingDashboardBand("))
         #expect(sidebar.contains("AgentBriefingSheet("))
@@ -148,6 +164,7 @@ extension SourceGuardTests {
         #expect(sidebar.contains(".task(id: cockpitRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
+        #expect(theme.contains(".glassEffect(\n                        .regular.tint(color.opacity(glassOpacity)).interactive(),\n                        in: shape\n                    )\n                    .contentShape(shape)"))
         #expect(!sidebar.contains("Dash" + "board" + "V2"))
         #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
         #expect(!briefingViews.contains(#"Image(systemName: "chevron.right")"#))

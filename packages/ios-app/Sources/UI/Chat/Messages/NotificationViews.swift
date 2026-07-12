@@ -43,19 +43,24 @@ struct LocalChatNotificationView: View {
                     .font(TronTypography.codeSM)
                     .foregroundStyle(tint)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(notification.title)
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(tint.opacity(0.92))
+                Text(notification.title)
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(tint.opacity(0.92))
 
-                    if let message = notification.message {
-                        Text(message)
-                            .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextSecondary)
-                            .lineLimit(2)
-                    }
+                if let message = notification.message {
+                    Text("\u{2022}")
+                        .font(TronTypography.badge)
+                        .foregroundStyle(tint.opacity(0.5))
+
+                    Text(message)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextSecondary)
                 }
             }
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(notification.textContent)
         }
     }
 

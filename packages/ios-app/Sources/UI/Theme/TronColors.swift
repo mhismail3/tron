@@ -276,6 +276,7 @@ private struct SectionFillModifier: ViewModifier {
                         .regular.tint(color.opacity(glassOpacity)).interactive(),
                         in: shape
                     )
+                    .contentShape(shape)
             } else {
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -290,6 +291,7 @@ private struct SectionFillModifier: ViewModifier {
                 .background {
                     shape.fill(color.opacity(opacity))
                 }
+                .contentShape(shape)
         }
     }
 }

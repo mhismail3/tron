@@ -160,6 +160,10 @@ Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent
 Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
+Transient composer failures use the shared one-line local notification pill.
+The timeline keeps the notice compact while its tap-through detail and
+accessibility label retain the complete title and message.
+
 `ContextControlSheet` presents Session Briefing as a mobile-first progressive
 disclosure surface. The top level is narrative plus compact metric strips; the
 same server-owned snapshot, memory refs, context actions, and audit details are
