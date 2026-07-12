@@ -2137,3 +2137,4 @@ packages/ios-app/Tests/Engine/Persistence/Sync/SessionListPageLoaderTests.swift	
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationBriefPresentationTests.swift	test	test_harness	TPC-10	capability invocation presentation regression coverage
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationGroupingTests.swift	test	test_harness	TPC-10	capability invocation grouping regression coverage
 packages/ios-app/Tests/UI/Chat/SessionListExpansionAccessibilityTests.swift	test	test_harness	TPC-10	session list expansion accessibility coverage
+packages/agent/docs/project-reference.md	docs	docs/static gates	TPC-10	detailed cross-cutting reference behind the concise project front door

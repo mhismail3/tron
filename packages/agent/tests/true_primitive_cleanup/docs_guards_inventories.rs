@@ -5,7 +5,7 @@ fn docs_guards_and_inventories_are_current() {
     let scorecard = read_repo_file("packages/agent/docs/true-primitive-cleanup-scorecard.md");
     let manifest =
         read_repo_file("packages/agent/docs/true-primitive-cleanup-evidence-manifest.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "Current score: **100/100**",

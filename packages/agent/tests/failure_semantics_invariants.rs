@@ -45,7 +45,7 @@ fn failure_semantics_campaign_harness_exists() {
     let scorecard = read_repo_file("packages/agent/docs/failure-semantics-scorecard.md");
     let inventory = read_repo_file("packages/agent/docs/failure-semantics-inventory.md");
     let manifest = read_repo_file("packages/agent/docs/failure-semantics-evidence-manifest.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Failure Semantics Campaign Scorecard",

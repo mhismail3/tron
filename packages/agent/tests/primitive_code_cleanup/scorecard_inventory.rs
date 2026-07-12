@@ -5,7 +5,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
     let scorecard = read_repo_file("packages/agent/docs/primitive-code-cleanup-scorecard.md");
     let manifest =
         read_repo_file("packages/agent/docs/primitive-code-cleanup-evidence-manifest.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
@@ -72,7 +72,7 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
     let inventory = read_repo_file("packages/agent/docs/primitive-code-cleanup-inventory.md");
     let file_inventory =
         read_repo_file("packages/agent/docs/primitive-code-cleanup-file-inventory.tsv");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Primitive Code Cleanup Inventory",

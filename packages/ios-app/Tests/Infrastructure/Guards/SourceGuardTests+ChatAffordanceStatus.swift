@@ -174,7 +174,7 @@ extension SourceGuardTests {
         let retiredSurfaceName = "Agent " + "Control"
         let retiredIdentifierPrefix = "agent-" + "control"
         let readme = try String(
-            contentsOf: repoRoot.appendingPathComponent("README.md"),
+            contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
         let contextPill = try String(

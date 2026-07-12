@@ -28,10 +28,10 @@ packages/
 scripts/      Bash entrypoints — `tron`, `install-hooks.sh`, `personal-info-guard.sh`
 ```
 
-The root `README.md` is the canonical reference. Several sections are
-mechanically derived from code; if you change a derived source, update the
-matching README section in the same commit. The exhaustive list lives in
-the `README maintenance` section of `AGENTS.md`.
+The root `README.md` is the concise project front door. Detailed cross-cutting
+behavior lives in `packages/agent/docs/project-reference.md`, while module and
+client architecture lives beside its source. The maintenance map in `AGENTS.md`
+identifies the right owner for each kind of change.
 
 ## Development workflow
 
@@ -187,20 +187,23 @@ explain why in the same commit.
 
 ## Documentation
 
-Two layers, both required:
+Three layers, each with a distinct job:
 
-1. **Root `README.md`** — canonical reference. The README maintenance table in
-   `AGENTS.md` lists which README section to update for each kind of source
-   change. The PR template repeats this.
-2. **Progressive disclosure** — every Rust module has a `mod.rs` doc block
+1. **Root `README.md`** — concise product and developer entry point. It should
+   not contain generated catalogs, source trees, audit histories, or release
+   runbooks.
+2. **Technical reference and client docs** —
+   `packages/agent/docs/project-reference.md` owns cross-cutting server details;
+   package architecture guides own iOS and Mac details.
+3. **Progressive disclosure** — every Rust module has a `mod.rs` doc block
    with a submodule table and key invariants. Every meaningful change should
    leave the surrounding module's `mod.rs` slightly better documented than
    you found it. iOS uses the architecture and development docs under
    `packages/ios-app/docs/` for the same pattern.
 
-Drift is the enemy. If you renamed a method, removed a setting, or shifted
-responsibility between modules, audit the README + `mod.rs` files in the
-same commit.
+Drift is the enemy. Update the narrowest owning document; only change the root
+README when the product-level story, supported setup, or primary workflow
+changes.
 
 ## Releasing
 

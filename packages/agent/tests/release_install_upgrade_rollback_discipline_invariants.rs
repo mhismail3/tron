@@ -144,7 +144,7 @@ fn riurd_artifacts_and_static_gate_wiring_exist() {
         assert!(repo_path(path).exists(), "missing RIURD artifact: {path}");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,

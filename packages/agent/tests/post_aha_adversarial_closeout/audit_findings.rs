@@ -65,7 +65,10 @@ fn mac_generated_project_policy_is_truthful() {
 #[test]
 fn documented_source_truth_paths_exist_or_use_supported_globs() {
     let docs = [
-        ("README.md", read_repo_file("README.md")),
+        (
+            "README.md",
+            read_repo_file("packages/agent/docs/project-reference.md"),
+        ),
         ("AGENTS.md", read_repo_file("AGENTS.md")),
     ];
     let banned_paths = [
@@ -110,7 +113,7 @@ fn documented_source_truth_paths_exist_or_use_supported_globs() {
 
 #[test]
 fn startup_domains_and_database_inventory_match_runtime_truth() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let registration = read_repo_file("packages/agent/src/domains/registration/mod.rs");
 
     let expected_domains = [

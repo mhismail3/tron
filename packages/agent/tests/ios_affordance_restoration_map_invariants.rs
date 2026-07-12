@@ -12,7 +12,7 @@ const EVIDENCE_PATH: &str =
 const INVENTORY_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.md";
 const INVENTORY_TSV_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.tsv";
 const PROGRESS_PATH: &str = "packages/agent/docs/ios-affordance-restoration-progress.md";
-const README_PATH: &str = "README.md";
+const README_PATH: &str = "packages/agent/docs/project-reference.md";
 const PHASE2_SCORECARD_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md";
 const PHASE2_EVIDENCE_PATH: &str =
@@ -433,7 +433,7 @@ fn artifacts_lineage_and_docs_wiring_exist() {
         ],
     );
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -750,7 +750,7 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
         ],
     );
 
-    let readme = normalize_whitespace(&read_repo_file("README.md"));
+    let readme = normalize_whitespace(&read_repo_file("packages/agent/docs/project-reference.md"));
     for required in [
         "historical Phase 1",
         "original Phase 2 agent-execution anchor",

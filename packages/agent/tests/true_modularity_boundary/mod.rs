@@ -12,7 +12,7 @@ fn true_modularity_scorecard_stays_formalized() {
     let scorecard = read_repo_file("packages/agent/docs/true-modularity-boundary-scorecard.md");
     let manifest =
         read_repo_file("packages/agent/docs/true-modularity-boundary-evidence-manifest.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# True Modularity Boundary Scorecard",

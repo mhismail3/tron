@@ -182,7 +182,7 @@ fn pmc_artifacts_lineage_and_readme_wiring_exist() {
         assert!(scorecard.contains(required), "scorecard missing {required}");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,

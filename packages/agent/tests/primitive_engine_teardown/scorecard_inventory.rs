@@ -5,7 +5,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
     let scorecard = read_repo_file("packages/agent/docs/primitive-engine-teardown-scorecard.md");
     let manifest =
         read_repo_file("packages/agent/docs/primitive-engine-teardown-evidence-manifest.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
@@ -100,7 +100,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 #[test]
 fn primitive_engine_teardown_inventory_stays_exhaustive() {
     let inventory = read_repo_file("packages/agent/docs/primitive-engine-teardown-inventory.md");
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
 
     for required in [
         "# Primitive Engine Teardown Inventory",

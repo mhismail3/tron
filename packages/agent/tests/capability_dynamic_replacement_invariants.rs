@@ -27,7 +27,7 @@ const CAPABILITY_BINDING_TESTS_PATH: &str =
     "packages/agent/src/domains/capability_binding/tests.rs";
 const RESOURCE_DEFINITIONS_PATH: &str =
     "packages/agent/src/engine/durability/resources/capability_binding_definitions.rs";
-const README_PATH: &str = "README.md";
+const README_PATH: &str = "packages/agent/docs/project-reference.md";
 
 const ROUTE_OPERATIONS: [&str; 11] = [
     "capability_replacement_candidate_record",

@@ -2,7 +2,7 @@
 Thanks for the PR! A few things below help reviewers move fast.
 
 Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pairing step`,
-`fix(rpc): handle missing token gracefully`, `docs: refresh README RPC table`.
+`fix(rpc): handle missing token gracefully`, `docs: update protocol reference`.
 -->
 
 ## Summary
@@ -29,7 +29,7 @@ Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pa
 - [ ] Scorecard/evidence/inventory changes: companion artifacts include concrete command results, closed 100/100 rows, and predecessor inventory rows where static gates require them.
 - [ ] iOS changes: `xcodegen generate && xcodebuild test -scheme Tron …` is green locally.
 - [ ] `scripts/personal-info-guard.sh` is green (no leaked usernames, paths, or domains).
-- [ ] [README.md](../README.md) updated per the [README maintenance table](../AGENTS.md#readme-maintenance) for any of: new RPC method, new event, new setting, new tool, new CLI command, new module, new migration, new path constant, new iOS top-level directory.
+- [ ] Documentation updated at the narrowest owner per the [documentation maintenance map](../AGENTS.md#documentation-maintenance); the root README changed only when product-level setup or workflow changed.
 - [ ] Progressive disclosure docs updated (`mod.rs` submodule tables and package docs) for any module that gained or lost responsibilities.
 - [ ] Settings parity: any new server setting has a matching iOS UI control (per [project AGENTS.md "Settings Parity"](../AGENTS.md#settings-parity)).
 - [ ] No repo-managed first-party skill surface was added.

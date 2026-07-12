@@ -26,7 +26,7 @@ const CAPABILITY_BINDING_TESTS_PATH: &str =
     "packages/agent/src/domains/capability_binding/tests.rs";
 const COCKPIT_VISIBILITY_PATH: &str =
     "packages/agent/src/domains/capability_binding/cockpit_visibility.rs";
-const README_PATH: &str = "README.md";
+const README_PATH: &str = "packages/agent/docs/project-reference.md";
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

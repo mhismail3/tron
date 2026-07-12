@@ -44,7 +44,7 @@ fn script_runtime_helpers_are_split_and_manual_only() {
         "manual deploy module must use an explicit manual-deploy command owner"
     );
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert!(
         readme.contains("tron manual-deploy")
             && !readme.contains("| `tron deploy` |")

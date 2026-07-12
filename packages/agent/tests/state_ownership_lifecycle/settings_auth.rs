@@ -296,7 +296,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         );
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         "OAuth refresh is owned by `domains/auth/credentials/`",
         "process-local refresh mutex",

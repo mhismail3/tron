@@ -15,7 +15,7 @@ const EVIDENCE_PATH: &str = "packages/agent/docs/capability-modularity-evidence-
 const REGISTRY_PATH: &str =
     "packages/agent/src/domains/capability/operations/operation_contract/mod.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
-const README_PATH: &str = "README.md";
+const README_PATH: &str = "packages/agent/docs/project-reference.md";
 const EXPECTED_OPERATION_COUNT: usize = 188;
 
 const INVENTORY_HEADER: &str = "operation\tfamily\tcurrentOwner\townershipClass\treplacementTarget\tcontractScore\tauthorityScore\tevidenceScore\tproviderSafetyScore\treplayScore\tbindingScore\trollbackScore\tvisibilityScore\ttestScore\tnextAction";

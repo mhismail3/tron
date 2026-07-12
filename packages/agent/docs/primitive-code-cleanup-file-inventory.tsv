@@ -2183,3 +2183,4 @@ packages/ios-app/Tests/Engine/Persistence/Sync/SessionListPageLoaderTests.swift	
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationBriefPresentationTests.swift	retain	ios capability presentation test owner	PCC-10/capability-ui	Invocation briefing presentation regressions retained for deduplicated high-signal details.
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationGroupingTests.swift	retain	ios capability presentation test owner	PCC-10/capability-ui	Invocation grouping regressions retained for streaming and persisted transcript parity.
 packages/ios-app/Tests/UI/Chat/SessionListExpansionAccessibilityTests.swift	retain	ios dashboard test owner	PCC-10/dashboard-pagination	Project session expansion accessibility regressions retained for view-more and view-less behavior.
+packages/agent/docs/project-reference.md	retain	agent docs	PCC-10	Detailed cross-cutting reference moved behind the concise root README.

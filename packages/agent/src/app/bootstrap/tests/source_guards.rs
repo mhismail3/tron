@@ -58,7 +58,7 @@ fn readme_documents_engine_protocol() {
         .parent()
         .and_then(std::path::Path::parent)
         .expect("agent crate should live under packages/agent");
-    let readme_path = repo_root.join("README.md");
+    let readme_path = repo_root.join("packages/agent/docs/project-reference.md");
     let readme = std::fs::read_to_string(&readme_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
     assert!(

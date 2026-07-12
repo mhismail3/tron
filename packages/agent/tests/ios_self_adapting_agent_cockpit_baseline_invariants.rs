@@ -506,7 +506,7 @@ fn focused_swift_tests_cover_cockpit_protocol_state_surfaces_and_theme() {
 #[test]
 fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
     assert_contains_all(
-        "README.md",
+        "packages/agent/docs/project-reference.md",
         &[
             "ios-self-adapting-agent-cockpit-baseline-scorecard.md",
             "Agent cockpit",

@@ -2,7 +2,7 @@ use super::support::*;
 
 #[test]
 fn drc_docs_and_protocol_parity_are_current() {
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let ios_events = read_repo_file("packages/ios-app/docs/events.md");
     let ios_architecture = read_repo_file("packages/ios-app/docs/architecture.md");
     let protocol_mod = read_repo_file("packages/agent/src/shared/protocol/mod.rs");

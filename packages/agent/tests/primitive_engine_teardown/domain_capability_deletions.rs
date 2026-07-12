@@ -138,7 +138,7 @@ fn self_authored_worker_pack_primitives_are_not_registered_or_left_on_disk() {
         assert_repo_path_absent(path, "self-authored worker-pack substrate");
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert_absent(
         &readme,
         &[
@@ -209,7 +209,7 @@ fn capability_registry_recipe_and_conformance_scaffolding_is_deleted() {
         );
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     assert_absent(
         &readme,
         &[
@@ -433,7 +433,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         );
     }
 
-    let readme = read_repo_file("README.md");
+    let readme = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         "trace_list",
         "trace_get",
