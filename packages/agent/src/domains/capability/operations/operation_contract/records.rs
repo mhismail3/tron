@@ -7,6 +7,8 @@
 
 use serde_json::{Value, json};
 
+use crate::domains::notifications::contract::EVENT_FAMILIES;
+
 use super::closed_schema;
 
 #[cfg(test)]
@@ -802,22 +804,7 @@ fn device_list_fields() -> Vec<(&'static str, Value)> {
 fn notification_send_fields() -> Vec<(&'static str, Value)> {
     vec![
         ("notificationId", bounded_string(160)),
-        (
-            "family",
-            enum_string(&[
-                "approval",
-                "question",
-                "goal",
-                "schedule",
-                "web",
-                "git",
-                "job",
-                "subagent",
-                "memory",
-                "system",
-                "agent_attention",
-            ]),
-        ),
+        ("family", enum_string(EVENT_FAMILIES)),
         (
             "severity",
             enum_string(&["info", "warning", "action_required"]),

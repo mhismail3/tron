@@ -457,7 +457,7 @@ fn artifacts_lineage_and_docs_wiring_exist() {
             "functional-only",
             "does not restore deleted product panels",
             "Notification and inbox affordances remain deferred",
-            "server-owned APNs/device/capability resource",
+            "server-owned device, notification, and delivery resources",
             "Phase 2 agent-execution restoration plan",
         ],
     );
@@ -614,7 +614,7 @@ fn inventory_patterns_cover_every_deleted_or_renamed_old_ios_path() {
     let old_paths = old_deleted_or_renamed_ios_paths();
     assert_eq!(
         old_paths.len(),
-        848,
+        847,
         "old iOS deleted/renamed path count changed; refresh the IARM inventory"
     );
 
@@ -929,8 +929,6 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
         "NotificationInbox",
         "NotificationStore",
         "NotificationClient",
-        "PushNotificationService",
-        "APNsEnvironment",
         "NotificationDelivery",
         concat!("Session", "Dash", "board", "RowButtonStyle"),
         "SessionListRowButtonStyle",
@@ -960,7 +958,7 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
 }
 
 #[test]
-fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_foundation() {
+fn apns_transport_is_restored_without_fixed_notification_product_planes() {
     let forbidden_paths = [
         "packages/ios-app/Sources/Views/Notifications",
         "packages/ios-app/Sources/UI/Notifications",
@@ -969,7 +967,6 @@ fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_
         "packages/ios-app/Sources/Services/NotificationStore.swift",
         "packages/ios-app/Sources/Support/Storage/NotificationStore.swift",
         "packages/ios-app/Sources/Services/Notifications",
-        "packages/ios-app/Sources/Support/Notifications/PushNotificationService.swift",
         "packages/ios-app/Sources/Services/Infrastructure/APNsEnvironment.swift",
         "packages/ios-app/Sources/Support/Infrastructure/APNsEnvironment.swift",
         "packages/ios-app/Sources/Services/Network/Clients/NotificationClient.swift",
@@ -983,25 +980,47 @@ fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_
         "packages/ios-app/Tests/Services/NotificationStoreTests.swift",
         "packages/ios-app/Tests/Views/NotificationInboxFilterTests.swift",
         "packages/ios-app/Tests/Views/NotificationSheetPresentationTests.swift",
-        "packages/agent/src/platform/apns",
-        "packages/agent/src/platform/device_broker",
     ];
     for relative_path in forbidden_paths {
         assert!(
             !repo_path(relative_path).exists(),
-            "Slice 13 still defers native/APNs-client runtime plane: {relative_path}"
+            "restored APNs transport must not resurrect a fixed notification product plane: {relative_path}"
         );
     }
 
-    for entitlement in [
+    assert_contains_all(
+        "packages/agent/src/platform/apns/mod.rs",
+        &[
+            "Private APNs token custody",
+            "TRON_RELAY_URL",
+            "TRON_RELAY_SECRET",
+            "device_tokens.json",
+        ],
+    );
+    assert_contains_all(
+        "packages/agent/src/platform/apns/relay.rs",
+        &["HmacSha256", "X-Tron-Signature", "/v1/push"],
+    );
+    assert_contains_all(
+        "packages/agent/src/platform/apns/store.rs",
+        &["temporary_path", "0o700", "0o600"],
+    );
+    assert_contains_all(
+        "packages/ios-app/Sources/Support/Foundation/Notifications/PushNotificationService.swift",
+        &["registerAfterPairing", "registerForRemoteNotifications"],
+    );
+    assert_contains_all(
+        "packages/ios-app/Sources/Engine/Transport/Clients/SystemClient.swift",
+        &["registerDeviceToken", "device::register"],
+    );
+    assert_contains_all(
         "packages/ios-app/TronMobileBeta.entitlements",
+        &["aps-environment", "development"],
+    );
+    assert_contains_all(
         "packages/ios-app/TronMobileProd.entitlements",
-    ] {
-        assert!(
-            !read_repo_file(entitlement).contains("aps-environment"),
-            "{entitlement} must not restore APNs entitlement while Slice 13 keeps live APNs deferred"
-        );
-    }
+        &["aps-environment", "production"],
+    );
 
     let forbidden_tokens = [
         "NotificationBellButton",
@@ -1015,20 +1034,11 @@ fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_
         "NotificationDeliveryView",
         "ChatNotificationCoordinator",
         "GitNotificationRouter",
-        "PushNotificationService",
-        "APNsEnvironment",
-        "UNUserNotificationCenter",
-        "registerForRemoteNotifications",
-        "didRegisterForRemoteNotifications",
-        "registerPushIfAuthorized",
-        "registerDeviceToken",
         "DeviceTokenRegister",
         "notifications::send",
         "notifications::list",
         "notifications::mark_read",
         "notifications::mark_all_read",
-        "device::register",
-        "device::unregister",
     ];
     let mut source_files = Vec::new();
     for root in [
@@ -1058,7 +1068,7 @@ fn notification_inbox_apns_ios_client_planes_remain_absent_after_slice_thirteen_
         for token in forbidden_tokens {
             assert!(
                 !source.contains(token),
-                "Slice 13 client/APNs guard found forbidden notification/APNs token `{token}` in {}",
+                "restored APNs boundary found forbidden fixed notification product token `{token}` in {}",
                 path.display()
             );
         }

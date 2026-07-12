@@ -13,10 +13,7 @@ use super::contract::{
 use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE};
 use super::validation::*;
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
-
-const DEFAULT_EVENT_FAMILIES: &[&str] = &[
-    "approval", "question", "goal", "schedule", "web", "git", "job", "subagent", "memory", "system",
-];
+use crate::domains::notifications::contract::EVENT_FAMILIES;
 
 pub(super) struct RegistrationRecordInput<'a> {
     pub(super) state: &'a str,
@@ -85,7 +82,7 @@ pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
 
 pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityError> {
     let values = optional_string_array(payload, "eventFamilies")?.unwrap_or_else(|| {
-        DEFAULT_EVENT_FAMILIES
+        EVENT_FAMILIES
             .iter()
             .map(|value| (*value).to_owned())
             .collect()
@@ -93,10 +90,7 @@ pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityE
     let mut families = Vec::with_capacity(values.len());
     for value in values {
         let family = bounded_token("eventFamilies", &value, 64)?;
-        if !DEFAULT_EVENT_FAMILIES
-            .iter()
-            .any(|allowed| *allowed == family)
-        {
+        if !EVENT_FAMILIES.iter().any(|allowed| *allowed == family) {
             return Err(invalid(format!(
                 "unsupported notification event family {family}"
             )));

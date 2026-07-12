@@ -328,7 +328,7 @@ fn mac_bundle_script_has_no_push_relay_build_plane() {
 }
 
 #[test]
-fn tron_dev_has_no_push_relay_build_plane() {
+fn tron_dev_loads_only_private_push_relay_runtime_configuration() {
     let root = repo_root();
     let script_path = root.join("scripts/tron");
     let workspace_script_path = root.join("scripts/tron.d/workspace.sh");
@@ -340,8 +340,15 @@ fn tron_dev_has_no_push_relay_build_plane() {
     assert!(!script.contains("MAC_APP_LOCAL_ENV_FILE"));
     assert!(!workspace_script.contains("TRON_RELAY"));
     assert!(!workspace_script.contains("relay"));
-    assert!(!dev_script.contains("TRON_RELAY"));
-    assert!(!dev_script.contains("relay"));
+    assert!(dev_script.contains("packages/mac-app/.env.local"));
+    assert!(dev_script.contains("TRON_RELAY_URL|TRON_RELAY_SECRET"));
+    assert!(
+        dev_script.contains("TRON_RELAY_URL and TRON_RELAY_SECRET must be configured together")
+    );
+    assert!(dev_script.contains("chmod 600 \"$DEV_PLIST_PATH\""));
+    assert!(!dev_script.contains("TRON_APNS_KEY"));
+    assert!(!dev_script.contains("TRON_APNS_KEY_ID"));
+    assert!(!dev_script.contains("TRON_APNS_TEAM_ID"));
 }
 
 #[test]

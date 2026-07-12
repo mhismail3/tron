@@ -499,3 +499,11 @@ git ls-files | rg -n '(^|/)(\\.DS_Store|Thumbs\\.db|__pycache__|\\.pytest_cache|
 
 Result: `git diff --check` exited 0; tracked generated-junk scan exited 1 with
 no matches.
+
+## Provider Audit Warning-Band Refresh (2026-07-12)
+
+`packages/agent/src/shared/protocol/model_audit.rs` reached 855 lines while
+retaining one protocol owner for bounded provider-request projection and
+reasoning-status replay evidence. The canonical HRA budget ledger now records
+the 850-line warning row and requires projection helpers to split before a new
+provider audit evidence family is added. No provider behavior changed.

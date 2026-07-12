@@ -163,9 +163,8 @@ fn projected_delivery_policy(value: Option<&Value>) -> Value {
     };
     json!({
         "pushRequested": policy.get("pushRequested").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
-        "liveApnsEnabled": policy.get("liveApnsEnabled").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
         "defaultPushEnabled": policy.get("defaultPushEnabled").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
-        "deliveryEvidenceOnly": policy.get("deliveryEvidenceOnly").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value))
+        "deliveryEvidenceRequired": policy.get("deliveryEvidenceRequired").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value))
     })
 }
 

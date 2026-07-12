@@ -42,6 +42,7 @@ fn replay_critical_entropy_is_allow_listed() {
                 "packages/agent/src/domains/capability/operations/",
                 "packages/agent/src/domains/capability_binding/",
                 "packages/agent/src/domains/context_control/",
+                "packages/agent/src/domains/device/handlers.rs",
                 "packages/agent/src/domains/git/branch_start.rs",
                 "packages/agent/src/domains/git/commit.rs",
                 "packages/agent/src/domains/git/mutation.rs",
@@ -71,7 +72,10 @@ fn replay_critical_entropy_is_allow_listed() {
         EntropyPattern {
             label: "system wall-clock",
             needles: &["SystemTime::now"],
-            allowed_paths: &["packages/agent/src/domains/model/providers/"],
+            allowed_paths: &[
+                "packages/agent/src/domains/model/providers/",
+                "packages/agent/src/platform/apns/relay.rs",
+            ],
         },
         EntropyPattern {
             label: "duration clock",
@@ -106,6 +110,7 @@ fn replay_critical_entropy_is_allow_listed() {
                 "packages/agent/src/domains/session/event_store/sqlite/repositories/workspace.rs",
                 "packages/agent/src/domains/transcription/",
                 "packages/agent/src/engine/",
+                "packages/agent/src/platform/apns/store.rs",
                 "packages/agent/src/shared/foundation/ids.rs",
                 "packages/agent/src/shared/observability/",
                 "packages/agent/src/shared/storage/",

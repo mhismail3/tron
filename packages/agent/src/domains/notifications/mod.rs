@@ -10,7 +10,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `authority` | Explicit notification/device grant and selector checks |
-//! | `contract` | Worker id, stream topic, and authority scope constants |
+//! | `contract` | Worker id, event-family taxonomy, stream topic, and authority scope constants |
 //! | `delivery` | Policy-aware APNs dispatch and durable delivery evidence |
 //! | `projection` | Bounded redacted inbox and delivery projections |
 //! | `service` | Timestamp-injected send/list/inspect/mark-read/mark-all-read behavior |
@@ -27,6 +27,10 @@
 //! inbox, hidden worker, background loop, or public route. Notification and
 //! delivery timestamps are supplied by `capability::execute` or explicit test
 //! seams; this domain does not sample wall-clock time directly.
+//! Device registration and notification sends consume the same canonical
+//! event-family taxonomy. A successful notification record is distinct from
+//! APNs acceptance; model-facing results preserve accepted, partial, skipped,
+//! and failed delivery outcomes without exposing transport secrets.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

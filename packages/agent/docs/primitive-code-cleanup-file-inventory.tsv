@@ -260,6 +260,7 @@ packages/agent/src/domains/model/providers/shared/sse.rs	retain	rust agent	PCC-1
 packages/agent/src/domains/model/providers/shared/stream_common/mod.rs	retain	rust agent	PCC-10/AHA-9/PERF-10	Current tracked file retained after AHA-9 inventory provenance cleanup; PERF moved it to directory module layout.
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/catalog.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/routing/attachments.rs	retain	model routing owner	PCC-10/notification-media	Provider image-policy routing retained as the canonical server-owned attachment limit source.
 packages/agent/src/domains/model/routing/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/models/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/models/model_ids.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -513,6 +514,10 @@ packages/agent/src/lib.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file re
 packages/agent/src/main.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/platform/device_broker.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/platform/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/platform/apns/mod.rs	retain	APNs platform owner	PCC-10/notification-media	Private token custody and relay composition boundary retained for live push delivery.
+packages/agent/src/platform/apns/relay.rs	retain	APNs platform owner	PCC-10/notification-media	HMAC-authenticated relay adapter retained as the only live APNs network boundary.
+packages/agent/src/platform/apns/store.rs	retain	APNs platform owner	PCC-10/notification-media	Atomic private raw-token custody retained outside provider-visible resources.
+packages/agent/src/platform/apns/types.rs	retain	APNs platform owner	PCC-10/notification-media	Transport-neutral APNs request and result contracts retained for injected delivery tests.
 packages/agent/src/shared/foundation/constants.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/foundation/constitution.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/foundation/errors/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -824,6 +829,7 @@ packages/ios-app/Sources/Resources/IconLayers/foreground-emerald.png	asset	ios s
 packages/ios-app/Sources/Resources/IconLayers/foreground-gray.png	asset	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Session/Attachments/Attachment.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Session/Attachments/AttachmentCapability.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/Session/Attachments/AttachmentImagePreparer.swift	retain	ios attachment owner	PCC-10/notification-media	Canonical provider-policy image transform retained behind the unified Attachment primitive.
 packages/ios-app/Sources/Session/Chat/Coordinators/CapabilityInvocationContext.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Session/Chat/Coordinators/CapabilityInvocationCoordinator.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Session/Chat/Coordinators/CompactionCoordinator.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -909,6 +915,8 @@ packages/ios-app/Sources/Support/Foundation/Formatting/TaskFormatting.swift	reta
 packages/ios-app/Sources/Support/Foundation/Formatting/TokenFormatter.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Foundation/Formatting/VersionDisplay.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Foundation/Media/ImageProcessor.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/Support/Foundation/Notifications/APNsEnvironment.swift	retain	ios push support owner	PCC-10/notification-media	Bundle-derived APNs environment mapping retained for trusted device registration.
+packages/ios-app/Sources/Support/Foundation/Notifications/PushNotificationService.swift	retain	ios push support owner	PCC-10/notification-media	OS token lifecycle and trusted registration coordinator retained for live push delivery.
 packages/ios-app/Sources/Support/Foundation/Parsing/ContentLineParser.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Foundation/Parsing/DateParser.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1132,6 +1140,7 @@ packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+Support.swift	reta
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+VisualAndPrivacy.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Attachments/AttachmentTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Session/Attachments/AttachmentImagePreparerTests.swift	retain	ios attachment test owner	PCC-10/notification-media	Provider-policy compression and decode-bound regressions retained for the unified Attachment primitive.
 packages/ios-app/Tests/Session/Attachments/DraftMetadataTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Attachments/SharedContentTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/AgentPhaseTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1207,6 +1216,7 @@ packages/ios-app/Tests/Support/Foundation/Formatting/ModelNameFormatterThreadSaf
 packages/ios-app/Tests/Support/Foundation/Formatting/TaskFormattingTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Support/Foundation/Formatting/TokenFormatterTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Support/Foundation/Formatting/VersionDisplayTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Support/Foundation/Notifications/APNsEnvironmentTests.swift	retain	ios push test owner	PCC-10/notification-media	Bundle-to-APNs-environment mapping regressions retained for trusted registration.
 packages/ios-app/Tests/Support/Foundation/Parsing/ContentLineParserTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Support/Foundation/Parsing/DateParserTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Support/Foundation/SwiftUI/KeyboardObserverTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1264,6 +1274,7 @@ packages/ios-app/TronMobileBeta.entitlements	retain	ios app	PCC-10/AHA-9	Current
 packages/ios-app/TronMobileProd.entitlements	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/bun.lock	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/docs/architecture.md	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/docs/apns.md	retain	ios push docs owner	PCC-10/notification-media	APNs registration, custody, relay, and delivery evidence contract retained.
 packages/ios-app/docs/development.md	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/docs/events.md	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/docs/onboarding.md	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1271,6 +1282,7 @@ packages/ios-app/package.json	retain	ios app	PCC-10/AHA-9	Current tracked file r
 packages/ios-app/project.yml	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/scripts/generate-icons.mjs	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/mac-app/.gitignore	retain	mac wrapper	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/mac-app/.env.local.example	retain	mac server configuration owner	PCC-10/notification-media	Credential-free relay configuration template retained for local beta runtime setup.
 packages/mac-app/Configuration/Base.xcconfig	retain	mac wrapper	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/mac-app/Configuration/Debug.xcconfig	retain	mac wrapper	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/mac-app/Configuration/Release.xcconfig	retain	mac wrapper	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1682,6 +1694,7 @@ packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift	retain	
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitDiscoveryState.swift	retain	ios session state	P2AER-S1	Agent cockpit discovery projection state retained for catalog families, schema gaps, and report history.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift	retain	ios session state	IOSAC-3	Agent cockpit view model retained for refresh, confirmations, lifecycle mutations, and ui_surface decoding.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	retain	ios ui	IOSAC-5	Agent cockpit views retained as the user-facing worker lifecycle, module activity, and runtime surface shell.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift	retain	ios cockpit UI owner	PCC-10/capability-cockpit	Agent-facing capability, engine, and activity tab composition retained for progressive cockpit disclosure.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	retain	ios ui	PCC-10/P3MSA-S23H	Accepted Slice 23H module activity cockpit views retained as bounded UI rendering for the server-owned Runtime Cockpit activity projection.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	retain	ios ui	P2AER-S1	Agent cockpit discovery views retained for high-signal capability families and conformance report history.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift	retain	ios cockpit UI owner	TPC-hardening	Capability operation detail views retained as the drill-down owner split from the cockpit discovery summary surface.
@@ -1866,6 +1879,7 @@ packages/agent/src/domains/capability/operations/context.rs	retain	capability ex
 packages/agent/src/domains/capability/operations/device.rs	retain	capability execute owner	PCC-10/P2AER-S13	Device execute adapter retained for redacted durable registration projections.
 packages/agent/src/domains/capability/operations/notifications.rs	retain	capability execute owner	PCC-10/P2AER-S13	Notification execute adapter retained for durable inbox read state and delivery evidence.
 packages/agent/src/domains/device/contract.rs	retain	device owner	PCC-10/P2AER-S13	Device worker contract constants retained for explicit authority and stream ownership.
+packages/agent/src/domains/device/handlers.rs	retain	device owner	PCC-10/P2AER-S13	Transport-only device operation bindings retained with deterministic value-at service seams.
 packages/agent/src/domains/device/mod.rs	retain	device owner	PCC-10/P2AER-S13	Device domain facade and docs retained for server-owned APNs token custody foundation.
 packages/agent/src/domains/device/projection.rs	retain	device owner	PCC-10/P2AER-S13	Redacted device list and inspect projection retained.
 packages/agent/src/domains/device/service.rs	retain	device owner	PCC-10/P2AER-S13	Durable device register unregister list and inspect operation owner retained.

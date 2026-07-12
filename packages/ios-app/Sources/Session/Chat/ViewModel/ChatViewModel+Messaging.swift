@@ -174,7 +174,7 @@ extension ChatViewModel {
             let limits = await MainActor.run {
                 self.modelPickerState.currentModelInfo(current: self.currentModel)?.providerImageLimits ?? .default
             }
-            guard let attachment = await ImageAttachmentPreparer.prepare(
+            guard let attachment = await AttachmentImagePreparer.prepare(
                 data: data,
                 limits: limits
             ) else {

@@ -3,7 +3,7 @@ import Foundation
 /// Canonical image-to-attachment boundary shared by camera, Photos, and Files.
 /// The server catalog owns limits; this type only performs the required local
 /// transform and preserves source metadata for the timeline.
-struct ImageAttachmentPreparer {
+struct AttachmentImagePreparer {
     static func prepare(
         data: Data,
         declaredMimeType: String? = nil,

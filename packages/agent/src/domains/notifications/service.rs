@@ -13,7 +13,9 @@ use super::contract::{
     NOTIFICATION_LIFECYCLE_TOPIC, NOTIFICATION_SCHEMA_VERSION, READ_SCOPE, RESOURCE_READ_SCOPE,
     RESOURCE_WRITE_SCOPE, WORKER, WRITE_SCOPE,
 };
-use super::delivery::{create_delivery_evidence, delivery_summaries_for_notification};
+use super::delivery::{
+    aggregate_delivery, create_delivery_evidence, delivery_summaries_for_notification,
+};
 use super::projection::{inspected_notification, notification_summary};
 use super::validation::*;
 use super::{Deps, NOTIFICATION_DELIVERY_KIND, NOTIFICATION_KIND, NOTIFICATION_SCHEMA_ID};
@@ -56,7 +58,15 @@ pub(crate) async fn send_notification_value_at(
     {
         ensure_notification(&existing, "notification_send replay")?;
         ensure_scope(&existing, &scope, "notification_send replay")?;
-        let (version, _) = current_payload(&existing, "notification_send replay")?;
+        let (version, current) = current_payload(&existing, "notification_send replay")?;
+        let original_push_requested = current
+            .pointer("/deliveryPolicy/pushRequested")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let deliveries = delivery_summaries_for_notification(deps, &existing, 25).await?;
+        let mut delivery = aggregate_delivery(&deliveries, original_push_requested);
+        delivery["records"] = json!(deliveries);
+        delivery["idempotentReplay"] = json!(true);
         let badge_count = unread_badge_count(deps, &scope).await?;
         return Ok(json!({
             "schemaVersion": NOTIFICATION_SCHEMA_VERSION,
@@ -66,7 +76,7 @@ pub(crate) async fn send_notification_value_at(
             "notificationResourceId": resource_id,
             "notificationVersionId": version.version_id,
             "badgeCount": badge_count,
-            "delivery": {"idempotentReplay": true},
+            "delivery": delivery,
             "resourceRefs": [version_ref(&existing.resource, version, "notification")]
         }));
     }
@@ -127,13 +137,9 @@ pub(crate) async fn send_notification_value_at(
         &operation_at,
     )
     .await?;
-    let live_apns_attempted = deliveries.iter().any(|delivery| {
-        delivery
-            .get("push")
-            .and_then(|push| push.get("liveApnsAttempted"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-    });
+    let mut delivery = aggregate_delivery(&deliveries, push_requested);
+    delivery["records"] = json!(deliveries);
+    delivery["idempotentReplay"] = json!(false);
     publish_lifecycle_event(
         deps,
         invocation,
@@ -144,7 +150,11 @@ pub(crate) async fn send_notification_value_at(
             "family": family,
             "badgeCount": badge_count,
             "pushRequested": push_requested,
-            "deliveryCount": deliveries.len()
+            "deliveryStatus": delivery["status"],
+            "deliveryCount": delivery["total"],
+            "deliveredCount": delivery["deliveredCount"],
+            "failedCount": delivery["failedCount"],
+            "skippedCount": delivery["skippedCount"]
         }),
     )
     .await?;
@@ -156,11 +166,7 @@ pub(crate) async fn send_notification_value_at(
         "notificationResourceId": resource.resource_id,
         "notificationVersionId": resource.current_version_id,
         "badgeCount": badge_count,
-        "delivery": {
-            "records": deliveries,
-            "liveApnsAttempted": live_apns_attempted,
-            "deliveryEvidenceOnly": false
-        },
+        "delivery": delivery,
         "resourceRefs": [resource_ref(&resource, "notification")]
     }))
 }
@@ -513,8 +519,7 @@ fn notification_record(input: NotificationRecordInput<'_>) -> Value {
         "deliveryPolicy": {
             "pushRequested": input.push_requested,
             "defaultPushEnabled": false,
-            "liveApnsEnabled": false,
-            "deliveryEvidenceOnly": true
+            "deliveryEvidenceRequired": true
         },
         "retention": input.retention,
         "refs": {
@@ -652,11 +657,7 @@ async fn publish_lifecycle_event(
             payload: json!({
                 "event": event_type,
                 "resource": resource_ref(resource, "subject"),
-                "details": payload,
-                "push": {
-                    "liveApnsAttempted": false,
-                    "deliveryEvidenceOnly": true
-                }
+                "details": payload
             }),
             visibility: crate::engine::VisibilityScope::Session,
             session_id: invocation.causal_context.session_id.clone(),

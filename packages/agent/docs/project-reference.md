@@ -1733,9 +1733,16 @@ Provider-visible access is limited to `notification_send`,
 Push-requested sends record inbox-only, no-device, policy-disabled,
 family-opt-out, relay-disabled, delivered, or failed evidence. Eligible sends
 delegate to the injected HMAC APNs relay adapter; the notification domain does
-not own tokens or credentials. iOS owns permission and token lifecycle plus
-safe session deep-link handling. Public notification APIs, a native inbox,
-hidden background loops, and fake client-local inboxes remain absent.
+not own tokens or credentials. Device registration and notification sends use
+one canonical event-family taxonomy; the default `agent_attention` family is
+enabled by the default device policy. Send results distinguish durable inbox
+recording from APNs acceptance, partial delivery, policy/configuration skips,
+and transport failure, including on idempotent replay. iOS versions its token
+registration idempotency key when registration policy changes so an existing
+token can acquire the current policy without duplicate transport sends. iOS
+owns permission and token lifecycle plus safe session deep-link handling.
+Public notification APIs, a native inbox, hidden background loops, and fake
+client-local inboxes remain absent.
 Accepted Slice 14A adds `domains/media` as a narrow server-owned resource
 foundation for media artifacts and voice-note metadata behind the same single
 `capability::execute` primitive. Media records are

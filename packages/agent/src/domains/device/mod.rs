@@ -24,7 +24,9 @@
 //! and the private APNs transport. Resources, projections, lifecycle events,
 //! traces, and logs never return raw tokens, token fragments, or full token
 //! hashes. Registration and unregistration are deliberately not model-facing
-//! `capability::execute` operations.
+//! `capability::execute` operations. Device notification policy consumes the
+//! canonical event-family taxonomy owned by the notifications domain so the
+//! default send family is always eligible under the default device policy.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

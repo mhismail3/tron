@@ -185,3 +185,11 @@ and
 | `git diff --check` | exit 0 | SACB-POST-2 whitespace check passed. |
 | `git ls-files -ci --exclude-standard` | exit 0 | SACB-POST-2 ignored-file audit produced no tracked ignored files. |
 | `git status --short` | exit 0 | SACB-POST-2 pre-evidence status showed only the intended delegated budget-ordering remediation files. |
+
+## APNs And Attachment Boundary Refresh (2026-07-12)
+
+The SACB marker ledger now assigns the provider attachment policy, private APNs
+token store, HMAC relay, trusted iOS registration client, OS token lifecycle,
+source guard, and setup documentation to explicit owners. Raw tokens remain
+outside resources/logs/projections, relay credentials remain runtime-only, and
+transport or policy skips cannot be presented as successful delivery.

@@ -3,7 +3,7 @@ import XCTest
 @testable import TronMobile
 
 @MainActor
-final class ImageAttachmentPreparerTests: XCTestCase {
+final class AttachmentImagePreparerTests: XCTestCase {
     func testPreparerCompressesAndResizesToServerPolicy() async throws {
         let source = UIGraphicsImageRenderer(size: CGSize(width: 1_000, height: 600)).image { context in
             UIColor.systemBlue.setFill()
@@ -16,7 +16,7 @@ final class ImageAttachmentPreparerTests: XCTestCase {
             supportedFormats: ["image/jpeg"]
         )
 
-        let prepared = await ImageAttachmentPreparer.prepare(
+        let prepared = await AttachmentImagePreparer.prepare(
             data: sourceData,
             declaredMimeType: "image/png",
             fileName: "photo.png",
@@ -36,7 +36,7 @@ final class ImageAttachmentPreparerTests: XCTestCase {
 
     func testPreparerRejectsSourceAboveDecodeBound() async {
         let oversized = Data(repeating: 0, count: ImageProcessor.maximumSourceBytes + 1)
-        let attachment = await ImageAttachmentPreparer.prepare(
+        let attachment = await AttachmentImagePreparer.prepare(
             data: oversized,
             declaredMimeType: "image/jpeg",
             limits: .default

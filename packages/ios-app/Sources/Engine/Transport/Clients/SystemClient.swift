@@ -48,7 +48,7 @@ final class SystemClient: EngineDomainClient {
                 pushEnabled: true
             ),
             idempotencyKey: EngineIdempotencyKey(
-                rawValue: "ios:device-register:\(bundleId):\(environment):\(tokenDigest)"
+                rawValue: "ios:device-register:v2:\(bundleId):\(environment):\(tokenDigest)"
             )
         )
     }

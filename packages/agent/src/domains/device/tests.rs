@@ -42,6 +42,12 @@ async fn register_records_hash_only_token_and_redacted_projection() {
     assert_eq!(payload["apns"]["liveApnsEnabled"], json!(false));
     assert_ne!(payload["apns"]["tokenHash"], json!(APNS_TOKEN));
     assert!(payload["apns"].get("tokenPreview").is_none());
+    assert!(
+        payload["notificationPolicy"]["eventFamilies"]
+            .as_array()
+            .expect("event families")
+            .contains(&json!("agent_attention"))
+    );
     assert_no_token_fragments("stored device resource", &inspection, APNS_TOKEN);
     let token_hash = payload["apns"]["tokenHash"].as_str().unwrap().to_owned();
 

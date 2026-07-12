@@ -357,15 +357,23 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
             "SheetDismissButton(color: .tronEmerald)",
             "TronSegmentedControl(",
             ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)",
-            "GeneratedRuntimeSurfaceView(",
-            "resourceRef: runtimeSurface.resourceRef",
-            "observedVersionId: runtimeSurface.resourceRef.versionId",
             "confirmationDialog(",
         ],
     );
+    assert_contains_all(
+        "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift",
+        &[
+            "GeneratedRuntimeSurfaceView(",
+            "resourceRef: runtimeSurface.resourceRef",
+            "observedVersionId: runtimeSurface.resourceRef.versionId",
+        ],
+    );
 
-    let cockpit =
-        read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift");
+    let cockpit = format!(
+        "{}\n{}",
+        read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift"),
+        read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift")
+    );
     assert!(
         !cockpit.contains("AgentStatusCapsuleView"),
         "passive chat status capsule should remain removed from cockpit UI"
@@ -519,7 +527,7 @@ fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
     assert_contains_all(
         "packages/ios-app/docs/architecture.md",
         &[
-            "Agent cockpit",
+            "Engine Cockpit",
             "WorkerLifecycleRepository",
             "AgentCockpitProjection",
             "catalog decode degradation",

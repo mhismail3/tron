@@ -283,7 +283,7 @@ struct InputBar: View {
     private func addCameraImageAttachment(_ capturedImage: UIImage) {
         Task {
             let jpegData = capturedImage.jpegData(compressionQuality: 1.0) ?? Data()
-            guard let attachment = await ImageAttachmentPreparer.prepare(
+            guard let attachment = await AttachmentImagePreparer.prepare(
                 data: jpegData,
                 declaredMimeType: "image/jpeg",
                 limits: config.providerImageLimits
@@ -302,7 +302,7 @@ struct InputBar: View {
     private func addDocumentAttachment(data: Data, mimeType: String, fileName: String?) {
         if mimeType.hasPrefix("image/") {
             Task {
-                guard let attachment = await ImageAttachmentPreparer.prepare(
+                guard let attachment = await AttachmentImagePreparer.prepare(
                     data: data,
                     declaredMimeType: mimeType,
                     fileName: fileName,

@@ -48,7 +48,7 @@ struct SystemClientTests {
             #expect(registration.apnsToken == "0011aabb")
             #expect(registration.pushOptIn)
             #expect(registration.pushEnabled)
-            #expect(idempotencyKey.rawValue.contains("ios:device-register:"))
+            #expect(idempotencyKey.rawValue.hasPrefix("ios:device-register:v2:"))
             return DeviceRegistrationResult(
                 status: "active",
                 idempotentReplay: false,

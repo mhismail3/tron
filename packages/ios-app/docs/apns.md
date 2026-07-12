@@ -15,6 +15,13 @@ Registration is not a model-facing capability. Models can inspect redacted
 device and notification records, but cannot submit tokens or bypass opt-in,
 event-family, authority, or exact-selector policy.
 
+The notifications domain owns the canonical event-family taxonomy used by
+both trusted device registration and `notification_send`. The default family,
+`agent_attention`, is enabled in the default device policy. iOS includes a
+registration-policy version in its idempotency key; incrementing that version
+causes an existing token to be registered with a changed policy while normal
+reconnects remain idempotent.
+
 ## Local Development
 
 The relay is optional and fail-closed. Export both `TRON_RELAY_URL` and
@@ -37,5 +44,9 @@ live APNs is disabled. A push-requested notification records
 - Terminal APNs token rejection removes private token custody.
 - Notification resources remain the source of truth; push is only a delivery
   effect.
+- A successful notification record does not imply push delivery. The send
+  result reports `inbox_only`, `apns_accepted`, `partial`, `skipped`, or
+  `failed`, and preserves the original outcome on idempotent replay without
+  sending twice.
 - Physical-device validation requires a configured relay and a signed build
   with the matching `aps-environment` entitlement.

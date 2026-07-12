@@ -175,3 +175,11 @@ recorded in `ios-affordance-restoration-progress.md`. The cockpit sheet
 internals are covered by focused Swift state/view-model tests, source
 invariants, generated surface renderer tests, and the live `/engine`
 resource-read probe rather than an interactive screenshot.
+
+## Composed Cockpit Owner Refresh (2026-07-12)
+
+The static baseline now verifies the decomposed cockpit composition: sheet
+chrome remains in `AgentCockpitViews.swift`, capability/engine/activity tab
+content and generated runtime rendering live in `AgentCockpitTabViews.swift`,
+and architecture language consistently names the user-facing surface Engine
+Cockpit. No runtime or UI behavior changed in this guard refresh.

@@ -278,6 +278,16 @@ fn rust_dead_dependency_artifacts_stay_removed() {
         );
     }
 
+    let relay = read_repo_file("packages/agent/src/platform/apns/relay.rs");
+    let platform_docs = read_repo_file("packages/agent/src/platform/apns/mod.rs");
+    assert!(
+        direct_dependency_declared(&cargo_toml, "hmac")
+            && relay.contains("use hmac::{Hmac, Mac};")
+            && relay.contains("HmacSha256")
+            && platform_docs.contains("HMAC-authenticated HTTPS client for the APNs relay"),
+        "the retained hmac dependency must stay narrowly owned by the documented APNs relay adapter"
+    );
+
     let retired_asset = repo_path("packages/agent/assets/capability-search");
     assert!(
         !retired_asset.exists(),
@@ -294,7 +304,6 @@ fn speculative_dependency_restoration_requires_phase_three_module_policy() {
         "resvg",
         "chrono-tz",
         "ed25519-dalek",
-        "hmac",
         "enigo",
         "eventsource-stream",
         "fastembed",
@@ -321,7 +330,10 @@ fn speculative_dependency_restoration_requires_phase_three_module_policy() {
     assert!(
         feature_index.contains("Do not add dependencies speculatively")
             && feature_index.contains("Each dependency should enter with the")
-            && feature_index.contains("module that owns it"),
+            && feature_index.contains("module that owns it")
+            && feature_index.contains(
+                "HMAC remains a direct dependency only for the private APNs relay adapter"
+            ),
         "feature-index dependency policy must retain owner-first restoration guidance"
     );
 

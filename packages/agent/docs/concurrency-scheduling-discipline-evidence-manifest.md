@@ -61,3 +61,11 @@ and
 | Main-queue UI delays | Delayed scroll/copy feedback used `DispatchQueue.main.asyncAfter`. | Replaced with cancellation-aware Swift concurrency tasks and view/action scope. | CSD asyncAfter ban and focused UI compile/tests. |
 | `DecodedImageView` | Image decode used `Task.detached`. | Replaced detached work with a serial image decode worker. | CSD `Task.detached` ban and focused UI compile/tests. |
 | `KeyboardObserver` | Stored notification tasks had no visible cancellation path. | Added explicit `stopObserving` cancellation. | CSD stored-task cancellation guard. |
+
+## APNs And Cockpit Marker Refresh (2026-07-12)
+
+The marker inventory now names the OS-owned APNs delegate callback bridge and
+the user-scoped cockpit verification task. Neither introduces a queue or
+background loop: callbacks complete synchronously, navigation publication is
+main-queue scoped, and catalog verification is bounded by one explicit user
+action and its repository request.

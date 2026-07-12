@@ -844,7 +844,7 @@ Removed dependencies and likely feature implications:
 - `apns`: push notification delivery.
 - `bytemuck`, `image`, `resvg`: image/render/display helpers.
 - `chrono-tz`: time-zone-specific scheduling.
-- `ed25519-dalek`, `hmac`: package/source trust and signing helpers.
+- `ed25519-dalek`: package/source trust and signing helpers.
 - `enigo`: local computer-use/input control.
 - `eventsource-stream`: event-source streaming.
 - `fastembed`, `sqlite-vec`: local embedding/vector capability search.
@@ -854,6 +854,10 @@ Removed dependencies and likely feature implications:
 - `rquickjs`, `rquickjs-serde`: JavaScript program execution.
 - `unicode-normalization`, `urlencoding`: URL/text normalization helpers for
   product domains.
+
+HMAC remains a direct dependency only for the private APNs relay adapter. It
+authenticates relay requests, has no provider-visible surface, and must be
+removed with that adapter if relay delivery is retired.
 
 Reintroduction constraint:
 

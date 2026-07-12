@@ -1,5 +1,12 @@
 # iOS Affordance Restoration Map Evidence Manifest
 
+> APNs update (2026-07-12): the historical Phase 1 decision to defer a fixed
+> notification inbox remains intact, while the later server-owned device,
+> notification, private-token custody, HMAC relay, entitlement, and trusted iOS
+> registration planes are now active. The IARM static gate requires that narrow
+> lifecycle path and continues to reject a notification bell, local inbox
+> store, fixed delivery UI, or public notification transport facade.
+
 Branch: `codex/ios-affordance-restoration-map-current`
 
 Old reference: `ad5e484722c6f7abbe764126409494026216ad92`

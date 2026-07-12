@@ -2,6 +2,7 @@
 
 use serde_json::json;
 
+use crate::domains::notifications::contract::EVENT_FAMILIES;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{
@@ -43,7 +44,10 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "label": {"type": "string"},
                 "pushOptIn": {"type": "boolean"},
                 "pushEnabled": {"type": "boolean"},
-                "eventFamilies": {"type": "array", "items": {"type": "string"}},
+                "eventFamilies": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": EVENT_FAMILIES}
+                },
                 "maxAgeDays": {"type": "integer"},
                 "maxInboxRecords": {"type": "integer"},
                 "sessionId": {"type": "string"},

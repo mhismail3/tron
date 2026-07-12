@@ -931,3 +931,15 @@ Open loops after HRA-15:
 - HRA-16 still owns final adversarial review and closeout.
 
 Checkpoint commit: `363bcf110`.
+
+## APNs And Attachment Ownership Refresh (2026-07-12)
+
+- Added current HRA and iOS ownership rows for the private APNs platform
+  adapter, device operation binding, model-owned attachment limits, unified
+  iOS image preparation, push registration support, cockpit tab composition,
+  focused tests, and APNs setup docs.
+- Recorded the existing 710-line cockpit projection test owner as a narrow
+  accepted budget because its large server-fact fixtures are shared across the
+  projection cases; the next cockpit projection family must split action and
+  interaction cases into a sibling test file.
+- No runtime hierarchy or behavior changed in this ownership refresh.

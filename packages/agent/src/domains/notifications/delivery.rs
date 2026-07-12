@@ -144,6 +144,46 @@ pub(super) async fn delivery_summaries_for_notification(
     Ok(deliveries)
 }
 
+pub(super) fn aggregate_delivery(deliveries: &[Value], push_requested: bool) -> Value {
+    let delivered_count = count_state(deliveries, |state| state == "delivered");
+    let failed_count = count_state(deliveries, |state| state == "failed");
+    let skipped_count = count_state(deliveries, |state| state.starts_with("skipped_"));
+    let live_apns_attempted = deliveries.iter().any(|delivery| {
+        delivery
+            .pointer("/push/liveApnsAttempted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    });
+    let status = if !push_requested {
+        "inbox_only"
+    } else if delivered_count == deliveries.len() && delivered_count > 0 {
+        "apns_accepted"
+    } else if delivered_count > 0 {
+        "partial"
+    } else if failed_count > 0 {
+        "failed"
+    } else {
+        "skipped"
+    };
+    json!({
+        "status": status,
+        "pushRequested": push_requested,
+        "total": deliveries.len(),
+        "deliveredCount": delivered_count,
+        "failedCount": failed_count,
+        "skippedCount": skipped_count,
+        "liveApnsAttempted": live_apns_attempted
+    })
+}
+
+fn count_state(deliveries: &[Value], predicate: impl Fn(&str) -> bool) -> usize {
+    deliveries
+        .iter()
+        .filter_map(|delivery| delivery.get("state").and_then(Value::as_str))
+        .filter(|state| predicate(state))
+        .count()
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn create_delivery_resource(
     deps: &Deps,
@@ -540,7 +580,7 @@ fn resource_policy(kind: &str) -> Value {
         "authority": WRITE_SCOPE,
         "retention": "explicit",
         "badgePolicy": "unread_count",
-        "liveApnsTransport": "disabled"
+        "liveApnsTransport": "runtime_configured"
     })
 }
 

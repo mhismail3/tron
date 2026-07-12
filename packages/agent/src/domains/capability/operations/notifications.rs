@@ -24,11 +24,8 @@ pub(super) async fn notification_send(
         operation_at,
     )
     .await?;
-    Ok(result(
-        "Notification recorded.",
-        "notification_send",
-        details,
-    ))
+    let content = notification_send_content(&details);
+    Ok(result(&content, "notification_send", details))
 }
 
 pub(super) async fn notification_list(
@@ -124,12 +121,80 @@ pub(super) async fn notification_mark_all_read(
 }
 
 fn result(text: &str, operation: &str, details: Value) -> CapabilityResult {
+    let status = details
+        .pointer("/delivery/status")
+        .or_else(|| details.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("ok");
     ok_result(
         text.to_owned(),
         json!({
             "primitiveOperation": operation,
-            "status": details.get("status").and_then(Value::as_str).unwrap_or("ok"),
+            "status": status,
             "notifications": details
         }),
     )
+}
+
+fn notification_send_content(details: &Value) -> String {
+    let status = details
+        .pointer("/delivery/status")
+        .and_then(Value::as_str)
+        .unwrap_or("inbox_only");
+    let delivered = details
+        .pointer("/delivery/deliveredCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let not_delivered = details
+        .pointer("/delivery/failedCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .saturating_add(
+            details
+                .pointer("/delivery/skippedCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        );
+    match status {
+        "apns_accepted" => {
+            format!("Notification recorded; APNs accepted push for {delivered} device(s).")
+        }
+        "partial" => format!(
+            "Notification recorded; APNs accepted push for {delivered} device(s), while {not_delivered} delivery attempt(s) did not succeed. Inspect notifications.delivery.records before retrying."
+        ),
+        "failed" => format!(
+            "Notification recorded, but push delivery failed for {not_delivered} device(s). Inspect notifications.delivery.records before retrying."
+        ),
+        "skipped" => "Notification recorded, but push was not attempted. Inspect notifications.delivery.records for the policy or configuration reason.".to_owned(),
+        _ => "Notification recorded in the durable inbox; push was not requested.".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::notification_send_content;
+
+    #[test]
+    fn send_content_distinguishes_apns_acceptance_from_recording() {
+        assert_eq!(
+            notification_send_content(&json!({
+                "delivery": {"status": "apns_accepted", "deliveredCount": 1}
+            })),
+            "Notification recorded; APNs accepted push for 1 device(s)."
+        );
+        assert_eq!(
+            notification_send_content(&json!({
+                "delivery": {"status": "skipped", "skippedCount": 1}
+            })),
+            "Notification recorded, but push was not attempted. Inspect notifications.delivery.records for the policy or configuration reason."
+        );
+        assert_eq!(
+            notification_send_content(&json!({
+                "delivery": {"status": "failed", "failedCount": 1}
+            })),
+            "Notification recorded, but push delivery failed for 1 device(s). Inspect notifications.delivery.records before retrying."
+        );
+    }
 }

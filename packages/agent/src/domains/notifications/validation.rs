@@ -3,6 +3,8 @@ use serde_json::Value;
 use crate::engine::{EngineResourceScope, Invocation};
 use crate::shared::server::errors::CapabilityError;
 
+use super::contract::{DEFAULT_EVENT_FAMILY, EVENT_FAMILIES};
+
 pub(super) const LIST_LIMIT_DEFAULT: usize = 50;
 pub(super) const LIST_LIMIT_MAX: usize = 100;
 pub(super) const MARK_ALL_LIMIT_MAX: usize = 500;
@@ -15,20 +17,6 @@ pub(super) const DEFAULT_RETENTION_DAYS: u64 = 90;
 pub(super) const MAX_RETENTION_DAYS: u64 = 366;
 pub(super) const DEFAULT_MAX_INBOX_RECORDS: u64 = 500;
 pub(super) const MAX_INBOX_RECORDS: u64 = 5_000;
-
-pub(super) const ALLOWED_EVENT_FAMILIES: &[&str] = &[
-    "approval",
-    "question",
-    "goal",
-    "schedule",
-    "web",
-    "git",
-    "job",
-    "subagent",
-    "memory",
-    "system",
-    "agent_attention",
-];
 
 pub(super) fn required_string(payload: &Value, field: &str) -> Result<String, CapabilityError> {
     optional_string(payload, field)?.ok_or_else(|| invalid(format!("{field} is required")))
@@ -126,12 +114,9 @@ pub(super) fn bounded_token(
 }
 
 pub(super) fn parse_event_family(value: Option<String>) -> Result<String, CapabilityError> {
-    let family = value.unwrap_or_else(|| "agent_attention".to_owned());
+    let family = value.unwrap_or_else(|| DEFAULT_EVENT_FAMILY.to_owned());
     let family = bounded_token("family", &family, 64)?;
-    if !ALLOWED_EVENT_FAMILIES
-        .iter()
-        .any(|allowed| *allowed == family)
-    {
+    if !EVENT_FAMILIES.iter().any(|allowed| *allowed == family) {
         return Err(invalid(format!("unsupported notification family {family}")));
     }
     Ok(family)
