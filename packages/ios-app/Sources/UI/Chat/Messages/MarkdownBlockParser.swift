@@ -12,8 +12,7 @@ struct MarkdownBlock: Equatable, Identifiable {
         case paragraph(content: String)
         case codeBlock(language: String?, code: String)
         case blockquote(content: String)
-        case orderedList(items: [String])
-        case unorderedList(items: [String])
+        case list(items: [MarkdownListItem])
         case table(MarkdownTable)
         case horizontalRule
     }
@@ -28,7 +27,7 @@ struct MarkdownBlock: Equatable, Identifiable {
             contentHash = c.hashValue
         case .codeBlock(let lang, let code):
             contentHash = (lang ?? "").hashValue &+ code.hashValue
-        case .orderedList(let items), .unorderedList(let items):
+        case .list(let items):
             contentHash = items.hashValue
         case .table(let t):
             contentHash = t.hashValue
@@ -37,6 +36,17 @@ struct MarkdownBlock: Equatable, Identifiable {
         }
         self.id = "\(index)-\(contentHash)"
     }
+}
+
+struct MarkdownListItem: Equatable, Hashable {
+    enum Marker: Equatable, Hashable {
+        case unordered
+        case ordered(Int)
+    }
+
+    let depth: Int
+    let marker: Marker
+    var content: String
 }
 
 // MARK: - Block-Level Markdown Parser
@@ -126,49 +136,25 @@ enum MarkdownBlockParser {
                 continue
             }
 
-            // Unordered list (- or * or + prefix)
-            if isUnorderedListItem(trimmed) {
-                var items: [String] = []
+            // Preserve source indentation and marker type so nested and mixed
+            // lists retain hierarchy instead of flattening into top-level rows.
+            if parseListItem(line) != nil {
+                var items: [MarkdownListItem] = []
                 while i < lines.count {
-                    let ll = lines[i]
-                    let lt = ll.trimmingCharacters(in: .whitespaces)
-                    if lt.isEmpty { break }
-                    if isUnorderedListItem(lt) {
-                        items.append(stripListMarker(lt))
-                    } else if ll.hasPrefix("  ") || ll.hasPrefix("\t") {
-                        // Continuation of previous item
-                        if !items.isEmpty {
-                            items[items.count - 1] += " " + lt
-                        }
+                    let listLine = lines[i]
+                    let listTrimmed = listLine.trimmingCharacters(in: .whitespaces)
+                    if listTrimmed.isEmpty { break }
+                    if let item = parseListItem(listLine) {
+                        items.append(item)
+                    } else if !items.isEmpty,
+                              leadingIndentColumns(in: listLine) > items[items.count - 1].depth * 2 {
+                        items[items.count - 1].content += " " + listTrimmed
                     } else {
                         break
                     }
                     i += 1
                 }
-                blocks.append(MarkdownBlock(index: blocks.count, kind: .unorderedList(items: items)))
-                continue
-            }
-
-            // Ordered list (1. 2. etc.)
-            if isOrderedListItem(trimmed) {
-                var items: [String] = []
-                while i < lines.count {
-                    let ll = lines[i]
-                    let lt = ll.trimmingCharacters(in: .whitespaces)
-                    if lt.isEmpty { break }
-                    if isOrderedListItem(lt) {
-                        items.append(stripOrderedListMarker(lt))
-                    } else if ll.hasPrefix("  ") || ll.hasPrefix("\t") {
-                        // Continuation of previous item
-                        if !items.isEmpty {
-                            items[items.count - 1] += " " + lt
-                        }
-                    } else {
-                        break
-                    }
-                    i += 1
-                }
-                blocks.append(MarkdownBlock(index: blocks.count, kind: .orderedList(items: items)))
+                blocks.append(MarkdownBlock(index: blocks.count, kind: .list(items: items)))
                 continue
             }
 
@@ -179,7 +165,7 @@ enum MarkdownBlockParser {
                 let pt = pl.trimmingCharacters(in: .whitespaces)
                 if pt.isEmpty { break }
                 if pt.hasPrefix("```") || pt.hasPrefix("#") || pt.hasPrefix(">")
-                    || isUnorderedListItem(pt) || isOrderedListItem(pt)
+                    || parseListItem(pl) != nil
                     || isHorizontalRule(pt) || MarkdownTableParser.isTableLine(pt) { break }
                 paraLines.append(pl)
                 i += 1
@@ -199,9 +185,7 @@ enum MarkdownBlockParser {
                 return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             case .codeBlock(_, let code):
                 return !code.isEmpty
-            case .unorderedList(let items):
-                return !items.isEmpty
-            case .orderedList(let items):
+            case .list(let items):
                 return !items.isEmpty
             case .table, .horizontalRule:
                 return true
@@ -239,32 +223,40 @@ enum MarkdownBlockParser {
         return chars.count == 1 && (chars.contains("-") || chars.contains("*") || chars.contains("_"))
     }
 
-    private static func isUnorderedListItem(_ line: String) -> Bool {
-        let prefixes = ["- ", "* ", "+ "]
-        return prefixes.contains(where: { line.hasPrefix($0) })
+    private static func parseListItem(_ line: String) -> MarkdownListItem? {
+        let columns = leadingIndentColumns(in: line)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let depth = columns / 2
+
+        if ["- ", "* ", "+ "].contains(where: trimmed.hasPrefix) {
+            return MarkdownListItem(
+                depth: depth,
+                marker: .unordered,
+                content: String(trimmed.dropFirst(2))
+            )
+        }
+
+        guard let dotIndex = trimmed.firstIndex(of: ".") else { return nil }
+        let prefix = trimmed[trimmed.startIndex..<dotIndex]
+        guard let number = Int(prefix), !prefix.isEmpty else { return nil }
+        let afterDot = trimmed.index(after: dotIndex)
+        guard afterDot < trimmed.endIndex, trimmed[afterDot] == " " else { return nil }
+        return MarkdownListItem(
+            depth: depth,
+            marker: .ordered(number),
+            content: String(trimmed[trimmed.index(after: afterDot)...])
+        )
     }
 
-    private static func isOrderedListItem(_ line: String) -> Bool {
-        // Match "1. ", "2. ", "10. " etc.
-        guard let dotIndex = line.firstIndex(of: ".") else { return false }
-        let prefix = line[line.startIndex..<dotIndex]
-        guard !prefix.isEmpty, prefix.allSatisfy({ $0.isNumber }) else { return false }
-        let afterDot = line.index(after: dotIndex)
-        guard afterDot < line.endIndex, line[afterDot] == " " else { return false }
-        return true
-    }
-
-    private static func stripListMarker(_ line: String) -> String {
-        // Remove "- ", "* ", "+ " prefix
-        guard line.count >= 2 else { return line }
-        return String(line.dropFirst(2))
-    }
-
-    private static func stripOrderedListMarker(_ line: String) -> String {
-        // Remove "1. ", "10. " etc.
-        guard let dotIndex = line.firstIndex(of: ".") else { return line }
-        let afterDot = line.index(after: dotIndex)
-        guard afterDot < line.endIndex else { return "" }
-        return String(line[line.index(after: afterDot)...]).trimmingCharacters(in: .init(charactersIn: " "))
+    private static func leadingIndentColumns(in line: String) -> Int {
+        var columns = 0
+        for character in line {
+            switch character {
+            case " ": columns += 1
+            case "\t": columns += 4
+            default: return columns
+            }
+        }
+        return columns
     }
 }

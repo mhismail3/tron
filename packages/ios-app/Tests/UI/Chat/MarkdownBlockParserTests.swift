@@ -139,10 +139,11 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "- Item 1\n- Item 2\n- Item 3"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .unorderedList(let items) = blocks[0].kind {
+        if case .list(let items) = blocks[0].kind {
             XCTAssertEqual(items.count, 3)
+            XCTAssertTrue(items.allSatisfy { $0.marker == .unordered && $0.depth == 0 })
         } else {
-            XCTFail("Expected unordered list")
+            XCTFail("Expected list")
         }
     }
 
@@ -150,11 +151,39 @@ final class MarkdownBlockParserTests: XCTestCase {
         let text = "1. First\n2. Second"
         let blocks = MarkdownBlockParser.parse(text)
         XCTAssertEqual(blocks.count, 1)
-        if case .orderedList(let items) = blocks[0].kind {
+        if case .list(let items) = blocks[0].kind {
             XCTAssertEqual(items.count, 2)
+            XCTAssertEqual(items.map(\.marker), [.ordered(1), .ordered(2)])
         } else {
-            XCTFail("Expected ordered list")
+            XCTFail("Expected list")
         }
+    }
+
+    func testNestedAndMixedListsPreserveHierarchyAndMarkers() {
+        let text = """
+        - Parent
+          - Nested bullet
+            7. Nested ordered
+        - Sibling
+        """
+
+        let blocks = MarkdownBlockParser.parse(text)
+        XCTAssertEqual(blocks.count, 1)
+        guard case .list(let items) = blocks[0].kind else {
+            return XCTFail("Expected list")
+        }
+        XCTAssertEqual(items.map(\.depth), [0, 1, 2, 0])
+        XCTAssertEqual(items.map(\.marker), [.unordered, .unordered, .ordered(7), .unordered])
+        XCTAssertEqual(items.map(\.content), ["Parent", "Nested bullet", "Nested ordered", "Sibling"])
+    }
+
+    func testIndentedContinuationStaysWithOwningListItem() {
+        let text = "- Item with\n    wrapped continuation\n- Next"
+        let blocks = MarkdownBlockParser.parse(text)
+        guard case .list(let items) = blocks.first?.kind else {
+            return XCTFail("Expected list")
+        }
+        XCTAssertEqual(items.map(\.content), ["Item with wrapped continuation", "Next"])
     }
 
     func testBlockquoteParsing() {
@@ -189,7 +218,7 @@ final class MarkdownBlockParserTests: XCTestCase {
         if case .header = blocks[0].kind {} else { XCTFail("Expected header at 0") }
         if case .paragraph = blocks[1].kind {} else { XCTFail("Expected paragraph at 1") }
         if case .codeBlock = blocks[2].kind {} else { XCTFail("Expected code at 2") }
-        if case .unorderedList = blocks[3].kind {} else { XCTFail("Expected list at 3") }
+        if case .list = blocks[3].kind {} else { XCTFail("Expected list at 3") }
     }
 
     func testSingleParagraphNoCrash() {

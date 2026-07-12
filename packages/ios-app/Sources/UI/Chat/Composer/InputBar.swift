@@ -26,11 +26,6 @@ struct InputBar: View {
     @State private var showingImagePicker = false
     @State private var showRecentInputs = false
     @State private var hasAppeared = false
-    @State private var showAttachmentButton = false
-
-    // Namespaces for morph animations
-    @Namespace private var actionButtonNamespace
-    @Namespace private var attachmentButtonNamespace
 
     private let actionButtonSize: CGFloat = 40
 
@@ -44,13 +39,6 @@ struct InputBar: View {
     /// Show stop button while the agent is active.
     private var showStop: Bool {
         config.agentPhase.isActive
-    }
-
-    private var shouldShowActionButton: Bool {
-        if config.agentPhase.isActive {
-            return true
-        }
-        return canSend
     }
 
     private var shouldShowStatusPills: Bool { true }
@@ -68,15 +56,6 @@ struct InputBar: View {
         return config.readOnly || config.agentPhase.isActive || config.isTranscribing || !config.isConnected
     }
 
-    private var textFieldTrailingPadding: CGFloat {
-        let basePadding: CGFloat = 14
-        var totalPadding = basePadding
-        if !shouldShowActionButton {
-            totalPadding += actionButtonSize + 8
-        }
-        return totalPadding
-    }
-
     // MARK: - Body
 
     var body: some View {
@@ -86,77 +65,46 @@ struct InputBar: View {
                 .padding(.horizontal, 16)
                 .transition(.opacity)
 
-            // Input row - floating liquid glass elements
-            HStack(alignment: .bottom, spacing: 12) {
-                // Attachment button
-                if showAttachmentButton {
-                    GlassAttachmentButton(
+            // One composer surface owns attachment, text, and the trailing
+            // state action. This prevents independently animated controls from
+            // drifting or creating competing hit targets.
+            HStack(alignment: .bottom, spacing: 4) {
+                if !config.readOnly {
+                    ComposerAttachmentButton(
                         isDisabled: config.agentPhase.isActive || config.readOnly,
                         attachmentCapability: config.attachmentCapability,
                         includeRecentInputs: shouldShowRecentInputsMenuAction,
                         onSelect: presentAttachmentAction,
                         buttonSize: actionButtonSize
                     )
-                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
 
-                // Text field with glass background
-                textFieldGlass
-                    .overlay(alignment: .leading) {
-                        Group {
-                            if !showAttachmentButton {
-                                AttachmentButtonDock(buttonSize: actionButtonSize)
-                                    .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
-                            }
-                        }
-                        // Prevent overlay from intercepting text selection drag gestures
-                        .allowsHitTesting(false)
-                    }
-                    .overlay(alignment: .trailing) {
-                        HStack(spacing: 8) {
-                            if !shouldShowActionButton {
-                                ActionButtonDock(namespace: actionButtonNamespace, buttonSize: actionButtonSize)
-                            }
-                        }
-                        .padding(.trailing, 8)
-                        // Prevent overlay from intercepting text selection drag gestures
-                        .allowsHitTesting(false)
-                    }
-
-                // Send/Abort button
-                if shouldShowActionButton && !config.readOnly {
-                    GlassActionButton(
-                        showStop: showStop,
-                        canSend: canSend,
-                        onSend: actions.onSend,
-                        onAbort: actions.onAbort,
-                        namespace: actionButtonNamespace,
-                        buttonSize: actionButtonSize
-                    )
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
-                    // Explain the disabled state. Visible on long-press
-                    // / hover via `.help()`; always read by VoiceOver via
-                    // `.accessibilityHint()`.
-                    .help(config.sendBlockReason?.description ?? "")
-                    .accessibilityHint(config.sendBlockReason?.description ?? "")
-                }
+                inputField
 
                 if !config.readOnly {
-                    GlassMicButton(
+                    ComposerTrailingButton(
+                        showStop: showStop,
+                        canSend: canSend,
                         isRecording: config.isRecording,
                         isTranscribing: config.isTranscribing,
-                        isDisabled: micDisabled,
+                        micDisabled: micDisabled,
+                        onSend: actions.onSend,
+                        onAbort: actions.onAbort,
                         onMicTap: {
                             isFocused = false
                             actions.onMicTap()
                         },
                         buttonSize: actionButtonSize
                     )
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .help(config.sendBlockReason?.description ?? "")
                 }
-
             }
+            .frame(minHeight: actionButtonSize)
+            .padding(.horizontal, 4)
+            .glassEffect(
+                .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
             .overlay(alignment: .top) {
                 if config.showDragHint {
                     Image(systemName: "chevron.up")
@@ -166,8 +114,6 @@ struct InputBar: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showAttachmentButton)
-            .animation(.tronStandard, value: shouldShowActionButton)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
@@ -209,18 +155,10 @@ struct InputBar: View {
                 )
             }
         }
-        // Entrance animation — staggered morph-ins for attachment/status.
-        // All timings/springs live in TronAnimationTiming so the
-        // cumulative timeline can be tweaked in one place.
         .onAppear {
-            showAttachmentButton = false
             hasAppeared = false
 
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarAttachmentDelayNanos)
-                withAnimation(TronAnimationTiming.inputBarButtonSpring) {
-                    showAttachmentButton = true
-                }
                 try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarFinalDelayNanos)
                 withAnimation(TronAnimationTiming.inputBarFinalSpring) {
                     hasAppeared = true
@@ -228,7 +166,6 @@ struct InputBar: View {
             }
         }
         .onDisappear {
-            showAttachmentButton = false
             hasAppeared = false
         }
     }
@@ -261,7 +198,7 @@ struct InputBar: View {
 
     // MARK: - Text Field
 
-    private var textFieldGlass: some View {
+    private var inputField: some View {
         ZStack(alignment: .leading) {
             if state.text.isEmpty && !isFocused {
                 HStack(spacing: 7) {
@@ -278,7 +215,7 @@ struct InputBar: View {
                         .foregroundStyle(.tronEmerald.opacity(0.5))
                         .contentTransition(.opacity)
                 }
-                .padding(.leading, 14)
+                .padding(.leading, 2)
                 .padding(.vertical, 10)
                 .id("\(config.placeholderText)-\(config.placeholderShowsProgress)")
                 .accessibilityIdentifier("message-input-placeholder")
@@ -288,8 +225,7 @@ struct InputBar: View {
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
                 .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
-                .padding(.leading, 14)
-                .padding(.trailing, textFieldTrailingPadding)
+                .padding(.horizontal, 2)
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
                 .focused($isFocused)
@@ -305,8 +241,6 @@ struct InputBar: View {
                 }
         }
         .frame(minHeight: actionButtonSize)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .animation(.tronStandard, value: shouldShowActionButton)
         .animation(.easeOut(duration: 0.18), value: config.placeholderText)
         .animation(.easeOut(duration: 0.18), value: config.placeholderShowsProgress)
     }

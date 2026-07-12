@@ -59,10 +59,8 @@ struct MarkdownBlockView: View {
             codeBlockView(language: language, code: code)
         case .blockquote(let content):
             blockquoteView(content: content)
-        case .unorderedList(let items):
-            unorderedListView(items: items)
-        case .orderedList(let items):
-            orderedListView(items: items)
+        case .list(let items):
+            listView(items: items)
         case .table(let table):
             MarkdownTableView(table: table)
         case .horizontalRule:
@@ -146,44 +144,33 @@ struct MarkdownBlockView: View {
         }
     }
 
-    // MARK: - Unordered List
+    // MARK: - List
 
     @ViewBuilder
-    private func unorderedListView(items: [String]) -> some View {
+    private func listView(items: [MarkdownListItem]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\u{2022}")
+                    Text(markerText(for: item.marker))
                         .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular)))
                         .foregroundStyle(.tronTextSecondary)
-                    Text(inlineMarkdown(from: item))
+                        .frame(width: 22, alignment: .trailing)
+                    Text(inlineMarkdown(from: item.content))
                         .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)
                         .lineSpacing(4)
                 }
-                .padding(.leading, 8)
+                .padding(.leading, 8 + CGFloat(item.depth) * 22)
             }
         }
     }
 
-    // MARK: - Ordered List
-
-    @ViewBuilder
-    private func orderedListView(items: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(index + 1).")
-                        .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .medium)))
-                        .foregroundStyle(.tronTextSecondary)
-                        .frame(minWidth: 20, alignment: .trailing)
-                    Text(inlineMarkdown(from: item))
-                        .foregroundStyle(textColor)
-                        .selectableText(!textSelectionDisabled)
-                        .lineSpacing(4)
-                }
-                .padding(.leading, 8)
-            }
+    private func markerText(for marker: MarkdownListItem.Marker) -> String {
+        switch marker {
+        case .unordered:
+            return "\u{2022}"
+        case .ordered(let number):
+            return "\(number)."
         }
     }
 

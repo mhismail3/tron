@@ -7,6 +7,9 @@ enum RecentInputHistoryPresentation {
     nonisolated static let emptyMessage = "Messages you send from this device will appear here."
     nonisolated static let clearSystemImage = "trash"
     nonisolated static let clearAccessibilityLabel = "Clear recent inputs"
+    nonisolated static let clearConfirmationTitle = "Clear recent inputs?"
+    nonisolated static let clearConfirmationMessage = "This removes every recent input stored on this device."
+    nonisolated static let clearConfirmationActionTitle = "Clear Recent Inputs"
     nonisolated static let rowFontSize = TronTypography.sizeBody
     nonisolated static let rowLineLimit = 2
     nonisolated static let rowVerticalPadding: CGFloat = 2
@@ -26,6 +29,7 @@ struct RecentInputHistorySheet: View {
     let onSelect: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showClearConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -45,7 +49,7 @@ struct RecentInputHistorySheet: View {
                 if !historyStore.history.isEmpty {
                     ToolbarItem(placement: .topBarLeading) {
                         Button(role: .destructive) {
-                            historyStore.clearHistory()
+                            showClearConfirmation = true
                         } label: {
                             Image(systemName: RecentInputHistoryPresentation.clearSystemImage)
                                 .foregroundStyle(.red)
@@ -57,6 +61,18 @@ struct RecentInputHistorySheet: View {
                     SheetDismissButton(color: .tronEmerald)
                 }
             }
+        }
+        .confirmationDialog(
+            RecentInputHistoryPresentation.clearConfirmationTitle,
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(RecentInputHistoryPresentation.clearConfirmationActionTitle, role: .destructive) {
+                historyStore.clearHistory()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(RecentInputHistoryPresentation.clearConfirmationMessage)
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(.tronEmerald)

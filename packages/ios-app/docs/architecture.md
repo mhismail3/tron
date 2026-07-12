@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-09 (dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-11 (the prompt composer owns one integrated Liquid Glass surface with embedded attachment and state-driven voice/send/stop controls; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -83,9 +83,11 @@ and matching database/event/settings/dependency work.
   recent session workspaces, and manual Mac paths, prompt composer with a
   local recent-input picker, a functional-only native attachment menu that
   preserves composer keyboard focus while layering native camera/photo/file
-  pickers above it, unified attachments for images/documents, a right-side mic
-  affordance for local composer transcription when enabled, and message
-  rendering with quiet blank empty/loading chat content, streamed thinking content, and
+  pickers above it, unified attachments for images/documents, and one composer
+  surface with an embedded left attachment action plus a right state action
+  that becomes voice, send, transcribing, or stop as needed. Message rendering
+  preserves ordered/unordered list nesting and includes quiet blank
+  empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Chat timeline/model pill Session Briefing sheet for model switching,
@@ -475,7 +477,7 @@ Recent input history is stored only on the device through
 `InputHistoryStore`, capped at 100 sent text prompts, exposed from the
 composer attachment menu only while local history exists and the session is
 idle/editable, and clearable from the Recent Inputs sheet with an icon-only
-destructive toolbar action. It is not a server prompt-library
+destructive toolbar action followed by explicit confirmation. It is not a server prompt-library
 resource, snippet catalog, routing plane, or generated management surface.
 
 ## Event Handling

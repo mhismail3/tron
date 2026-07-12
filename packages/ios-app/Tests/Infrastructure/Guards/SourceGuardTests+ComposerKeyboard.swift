@@ -23,7 +23,9 @@ extension SourceGuardTests {
             ".controlSize(.small)",
             "NotificationCenter.default.post(name: .attachmentMenuAction, object: action)",
             ".onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction))",
-            ".matchedGeometryEffect(id: \"attachmentMorph\"",
+            "ComposerAttachmentButton(",
+            "ComposerTrailingButton(",
+            ".glassEffect(",
             "includeRecentInputs: shouldShowRecentInputsMenuAction",
             ".sheet(isPresented: $showCamera)",
             ".sheet(isPresented: $showFilePicker)",
@@ -55,6 +57,11 @@ extension SourceGuardTests {
             "compactHeightSheetPresentation(height: CompactActionSheetLayout.sheetHeight",
             ".font(.system(size: 28",
             ".frame(width: 300, alignment: .leading)",
+            "GlassAttachmentButton(",
+            "GlassActionButton(",
+            "GlassMicButton(",
+            ".matchedGeometryEffect(id: \"attachmentMorph\"",
+            ".matchedGeometryEffect(id: \"actionMorph\"",
         ]
 
         let combined = try checkedPaths.map { relativePath in
@@ -87,8 +94,8 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift"),
             encoding: .utf8
         )
-        let attachmentButtonRange = try #require(source.range(of: "GlassAttachmentButton("))
-        let textFieldRange = try #require(source.range(of: "// Text field with glass background"))
+        let attachmentButtonRange = try #require(source.range(of: "ComposerAttachmentButton("))
+        let textFieldRange = try #require(source.range(of: "inputField"))
         let attachmentButtonSource = String(source[attachmentButtonRange.lowerBound..<textFieldRange.lowerBound])
 
         #expect(
@@ -96,7 +103,7 @@ extension SourceGuardTests {
             "Opening the attachment menu must not clear composer text focus or dismiss the keyboard"
         )
         #expect(
-            source.contains("GlassAttachmentButton(") &&
+            source.contains("ComposerAttachmentButton(") &&
                 source.contains("attachmentCapability: config.attachmentCapability") &&
                 source.contains("includeRecentInputs: shouldShowRecentInputsMenuAction"),
             "The attachment action menu should stay attached to the composer plus button with the current model capability"
@@ -106,6 +113,25 @@ extension SourceGuardTests {
                 !source.contains(".sheet(isPresented: $showAttachmentMenu"),
             "The attachment action menu must not use a SwiftUI presentation that steals composer focus"
         )
+    }
+
+    @Test("Composer owns one integrated control surface")
+    func testComposerOwnsOneIntegratedControlSurface() throws {
+        let iosRoot = iosAppRoot()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("ComposerAttachmentButton("))
+        #expect(source.contains("ComposerTrailingButton("))
+        #expect(source.contains("inputField"))
+        #expect(source.components(separatedBy: ".glassEffect(").count - 1 == 1)
+        #expect(!source.contains("GlassAttachmentButton("))
+        #expect(!source.contains("GlassActionButton("))
+        #expect(!source.contains("GlassMicButton("))
+        #expect(!source.contains("attachmentMorph"))
+        #expect(!source.contains("actionMorph"))
     }
 
     @Test("Composer recent input history stays local and non-routing")
