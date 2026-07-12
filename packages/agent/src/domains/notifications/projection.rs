@@ -80,7 +80,7 @@ pub(super) fn delivery_summary(
         "notificationResourceId": projected_string(payload, "notificationResourceId", PROJECTION_ID_BYTES),
         "deviceRegistrationResourceId": projected_string(payload, "deviceRegistrationResourceId", PROJECTION_ID_BYTES),
         "apnsEnvironment": projected_string(payload, "apnsEnvironment", PROJECTION_ID_BYTES),
-        "outcome": projected_object(payload.get("outcome"), &["status", "reason"], &[]),
+        "outcome": projected_delivery_outcome(payload.get("outcome")),
         "push": projected_push(payload.get("push")),
         "badge": projected_badge(payload.get("badge")),
         "createdAt": projected_string(payload, "createdAt", PROJECTION_TIMESTAMP_BYTES),
@@ -178,13 +178,31 @@ fn projected_push(value: Option<&Value>) -> Value {
         "liveApnsAttempted": push.get("liveApnsAttempted").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
         "liveApnsEnabled": push.get("liveApnsEnabled").and_then(Value::as_bool).map_or(Value::Null, |value| json!(value)),
         "tokenFingerprint": {
-            "redacted": true,
-            "hashPrefix": push
-                .get("tokenHash")
-                .and_then(Value::as_str)
-                .map(|text| projected_text(&text.chars().take(12).collect::<String>(), 12))
-                .unwrap_or(Value::Null)
+            "redacted": push.get("tokenHash").is_some()
         }
+    })
+}
+
+fn projected_delivery_outcome(value: Option<&Value>) -> Value {
+    let Some(Value::Object(outcome)) = value else {
+        return Value::Null;
+    };
+    json!({
+        "status": outcome
+            .get("status")
+            .and_then(Value::as_str)
+            .map(|value| projected_text(value, PROJECTION_STRING_BYTES))
+            .unwrap_or(Value::Null),
+        "reason": outcome
+            .get("reason")
+            .and_then(Value::as_str)
+            .map(|value| projected_text(value, PROJECTION_STRING_BYTES))
+            .unwrap_or(Value::Null),
+        "statusCode": outcome.get("statusCode").and_then(Value::as_u64),
+        "terminalTokenRejected": outcome
+            .get("terminalTokenRejected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     })
 }
 

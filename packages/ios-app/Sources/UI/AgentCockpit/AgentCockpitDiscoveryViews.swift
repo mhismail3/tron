@@ -32,7 +32,7 @@ struct CapabilitiesSummaryCard: View {
             }
             HStack(spacing: 8) {
                 capabilityMetric("Areas", overview.groups.count)
-                capabilityMetric("Operations", operationMetricCount)
+                capabilityMetric("Agent operations", operationMetricCount)
                 capabilityMetric("Workers", overview.workerCount)
                 capabilityMetric("Triggers", overview.triggerCount)
             }
@@ -61,8 +61,7 @@ struct CapabilitiesSummaryCard: View {
     }
 
     private var operationMetricCount: Int {
-        overview.capabilityVisibility?.operationList.totalOperations
-            ?? (overview.operationCount > 0 ? overview.operationCount : overview.functionCount)
+        overview.agentOperationCount
     }
 
     private var statusColor: Color {
@@ -84,6 +83,42 @@ struct CapabilitiesSummaryCard: View {
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct EngineCoreSummaryCard: View {
+    let overview: AgentCockpitDiscoveryOverview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Engine Core", systemImage: "lock.shield")
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            Text("Read-only engine, governance, and diagnostic contracts that keep capability execution safe and inspectable. They evolve through reviewed source changes rather than live module routing.")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                metric("Engine operations", overview.engineOperationCount)
+                metric("Internal contracts", overview.internalContractCount)
+                metric("Areas", overview.engineGroups.count)
+            }
+        }
+        .padding(13)
+        .sectionFill(.tronInfo, cornerRadius: 12, subtle: true, interactive: false)
+    }
+
+    private func metric(_ title: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

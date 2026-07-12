@@ -75,6 +75,7 @@ impl Fixture {
             jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
                 startup_cutoff: Utc::now(),
             },
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
@@ -310,6 +311,7 @@ impl ShadowFixture {
             jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
                 startup_cutoff: Utc::now(),
             },
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_kinds = shadow_trial_kinds();
@@ -611,6 +613,7 @@ impl RouteFixture {
             jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
                 startup_cutoff: Utc::now(),
             },
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_kinds = route_kinds();

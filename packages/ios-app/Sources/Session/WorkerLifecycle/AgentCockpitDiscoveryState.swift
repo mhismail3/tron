@@ -65,6 +65,10 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var reports: [AgentCockpitDiscoveryReportRow]
     var families: [AgentCockpitCapabilityFamilyRow]
     var groups: [AgentCockpitCapabilityGroupRow]
+    var engineGroups: [AgentCockpitCapabilityGroupRow]
+    var agentOperationCount: Int
+    var engineOperationCount: Int
+    var internalContractCount: Int
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
 
     static let empty = AgentCockpitDiscoveryOverview(
@@ -84,6 +88,10 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
         reports: [],
         families: [],
         groups: [],
+        engineGroups: [],
+        agentOperationCount: 0,
+        engineOperationCount: 0,
+        internalContractCount: 0,
         capabilityVisibility: nil
     )
 }
@@ -118,13 +126,35 @@ extension AgentCockpitProjection {
             }
             return lhs.missingSchemaCount > rhs.missingSchemaCount
         }
-        let groups = capabilityGroups(
-            workers: workers,
-            functions: functions,
-            modularityOperations: modularityOperations,
-            triggers: triggers,
-            hasOperationProjection: hasOperationProjection
-        )
+        let agentOperations = modularityOperations.filter(\.isAgentFunctionalCapability)
+        let engineOperations = modularityOperations.filter { !$0.isAgentFunctionalCapability }
+        let groups: [AgentCockpitCapabilityGroupRow]
+        let engineGroups: [AgentCockpitCapabilityGroupRow]
+        if hasOperationProjection {
+            groups = capabilityGroups(
+                workers: workers,
+                functions: [],
+                modularityOperations: agentOperations,
+                triggers: [],
+                hasOperationProjection: true
+            )
+            engineGroups = capabilityGroups(
+                workers: workers,
+                functions: functions,
+                modularityOperations: engineOperations,
+                triggers: triggers,
+                hasOperationProjection: true
+            )
+        } else {
+            groups = capabilityGroups(
+                workers: workers,
+                functions: functions,
+                modularityOperations: modularityOperations,
+                triggers: triggers,
+                hasOperationProjection: false
+            )
+            engineGroups = []
+        }
 
         let latestReport = reportRows.first
         let normalizedLatest = latestReport.map { normalized($0.lifecycle) }
@@ -157,7 +187,7 @@ extension AgentCockpitProjection {
             image = "questionmark.folder"
         } else {
             title = "Unverified"
-            let visibleOperations = modularityOperations.isEmpty ? functions.count : modularityOperations.count
+            let visibleOperations = modularityOperations.isEmpty ? functions.count : agentOperations.count
             detail = "\(visibleOperations) operations across \(groups.count) capability areas"
             image = "shield.lefthalf.filled"
         }
@@ -179,6 +209,10 @@ extension AgentCockpitProjection {
             reports: reportRows,
             families: families,
             groups: groups,
+            engineGroups: engineGroups,
+            agentOperationCount: hasOperationProjection ? agentOperations.count : (modularityOperations.isEmpty ? functions.count : modularityOperations.count),
+            engineOperationCount: hasOperationProjection ? engineOperations.count : 0,
+            internalContractCount: hasOperationProjection ? functions.count : 0,
             capabilityVisibility: capabilityVisibility
         )
     }

@@ -70,6 +70,7 @@ async fn boot_server() -> TestServer {
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: tron::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: tron::platform::apns::ApnsRuntime::disabled(),
         settings_path,
         profile_runtime: Arc::new(ProfileRuntime::load(&home).unwrap()),
         agent_deps: None,

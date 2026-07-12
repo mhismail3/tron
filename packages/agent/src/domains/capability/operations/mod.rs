@@ -380,6 +380,7 @@ mod tests {
             jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
                 startup_cutoff: Utc::now(),
             },
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = "unsupported-operation-trace-session";
         let invocation = Invocation {

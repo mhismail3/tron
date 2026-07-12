@@ -94,7 +94,12 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
     let missing_environment = fixture
         .register_error(
             "missing-environment",
-            json!({"deviceId": "ios-device", "apnsToken": APNS_TOKEN}),
+            json!({
+                "deviceId": "ios-device",
+                "platform": "ios",
+                "apnsToken": APNS_TOKEN,
+                "bundleId": "com.example.tron.beta"
+            }),
         )
         .await;
     assert!(
@@ -107,8 +112,10 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
             "invalid-environment",
             json!({
                 "deviceId": "ios-device",
+                "platform": "ios",
                 "apnsEnvironment": "sandbox",
-                "apnsToken": APNS_TOKEN
+                "apnsToken": APNS_TOKEN,
+                "bundleId": "com.example.tron.beta"
             }),
         )
         .await;
@@ -122,8 +129,10 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
             "push-without-opt-in",
             json!({
                 "deviceId": "ios-device",
+                "platform": "ios",
                 "apnsEnvironment": "development",
                 "apnsToken": APNS_TOKEN,
+                "bundleId": "com.example.tron.beta",
                 "pushEnabled": true
             }),
         )
@@ -236,46 +245,45 @@ async fn device_registration_rejects_broad_or_untrusted_authority() {
     let agent_error = fixture
         .register_error_with_actor("agent-denied", ActorKind::Agent, register_payload())
         .await;
-    assert!(agent_error.contains("system/admin"), "{agent_error}");
+    assert!(
+        agent_error.contains("engine-client authority"),
+        "{agent_error}"
+    );
 
-    let wildcard_grant = fixture
-        .derive_grant(
-            "wildcard",
-            &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
-            &["*"],
-            &["kind:device_registration"],
-            "none",
-        )
-        .await;
-    let wildcard_invocation = fixture.write_invocation_with_grant(
-        "wildcard-denied",
+    let mut wrong_function = fixture.write_invocation(
+        "wrong-function-denied",
         register_payload(),
         ActorKind::System,
-        wildcard_grant,
-        &[WRITE_SCOPE, RESOURCE_WRITE_SCOPE],
-        &fixture.session_id,
     );
-    let wildcard = register_device_value_at(
+    wrong_function.function_id = FunctionId::new("capability::execute").unwrap();
+    let wrong_function = register_device_value_at(
         &fixture.deps,
-        &wildcard_invocation,
-        &wildcard_invocation.payload,
+        &wrong_function,
+        &wrong_function.payload,
         default_operation_at(),
     )
     .await
-    .expect_err("wildcard denied")
+    .expect_err("wrong function denied")
     .to_string();
-    assert!(wildcard.contains("wildcard"), "{wildcard}");
+    assert!(
+        wrong_function.contains("device::register"),
+        "{wrong_function}"
+    );
 }
 
 #[tokio::test]
-async fn device_reads_are_scoped_to_current_session() {
+async fn device_reads_use_global_redacted_registration_scope() {
     let fixture = Fixture::new("scope-a").await;
     let registered = fixture.register("scope-register", register_payload()).await;
     let resource_id = registered["deviceRegistrationResourceId"].as_str().unwrap();
     let other = fixture.clone_for_session("scope-b-session").await;
 
-    let error = other.inspect_error("scope-denied", resource_id).await;
-    assert!(error.contains("outside the current scope"), "{error}");
+    let inspected = other.inspect("scope-visible", resource_id).await;
+    assert_eq!(
+        inspected["device"]["payload"]["scope"]["kind"],
+        json!("system")
+    );
+    assert_eq!(inspected["apnsTokenReturned"], json!(false));
 }
 
 struct Fixture {
@@ -290,6 +298,7 @@ impl Fixture {
         let ctx = make_test_context();
         let deps = Deps {
             engine_host: ctx.engine_host.clone(),
+            apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
@@ -401,11 +410,12 @@ impl Fixture {
         reason: &str,
         operation_at: DateTime<Utc>,
     ) -> Value {
-        let invocation = self.write_invocation(
+        let mut invocation = self.write_invocation(
             key,
             json!({"deviceRegistrationResourceId": resource_id, "reason": reason}),
             ActorKind::System,
         );
+        invocation.function_id = FunctionId::new("device::unregister").unwrap();
         unregister_device_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
             .await
             .expect("unregister")
@@ -424,15 +434,6 @@ impl Fixture {
         inspect_device_value(&self.deps, &invocation, &invocation.payload)
             .await
             .expect("inspect device")
-    }
-
-    async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
-        let invocation =
-            self.read_invocation(key, json!({"deviceRegistrationResourceId": resource_id}));
-        inspect_device_value(&self.deps, &invocation, &invocation.payload)
-            .await
-            .expect_err("inspect should fail")
-            .to_string()
     }
 
     async fn device_lifecycle_events(&self) -> Value {
@@ -478,7 +479,10 @@ impl Fixture {
         scopes: &[&str],
         session_id: &str,
     ) -> Invocation {
-        invocation(key, payload, grant_id, actor_kind, scopes, Some(session_id))
+        let mut invocation =
+            invocation(key, payload, grant_id, actor_kind, scopes, Some(session_id));
+        invocation.function_id = FunctionId::new("device::register").unwrap();
+        invocation
     }
 
     fn read_invocation(&self, key: &str, payload: Value) -> Invocation {
@@ -576,7 +580,8 @@ fn register_payload() -> Value {
         "deviceId": "ios-device",
         "platform": "ios",
         "apnsEnvironment": "development",
-        "apnsToken": APNS_TOKEN
+        "apnsToken": APNS_TOKEN,
+        "bundleId": "com.example.tron.beta"
     })
 }
 

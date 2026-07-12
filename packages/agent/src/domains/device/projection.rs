@@ -87,13 +87,13 @@ fn projected_apns(value: Option<&Value>) -> Value {
             .and_then(Value::as_str)
             .map(|text| projected_text(text, PROJECTION_STRING_BYTES))
             .unwrap_or(Value::Null),
+        "bundleId": apns
+            .get("bundleId")
+            .and_then(Value::as_str)
+            .map(|text| projected_text(text, PROJECTION_STRING_BYTES))
+            .unwrap_or(Value::Null),
         "tokenFingerprint": {
-            "redacted": true,
-            "hashPrefix": apns
-                .get("tokenHash")
-                .and_then(Value::as_str)
-                .map(|text| projected_text(&text.chars().take(12).collect::<String>(), 12))
-                .unwrap_or(Value::Null),
+            "redacted": apns.get("tokenHash").is_some(),
             "rawPreviewReturned": false
         },
         "tokenStorage": apns

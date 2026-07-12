@@ -350,6 +350,9 @@ fn build_server_runtime_context(
         event_store: services.event_store.clone(),
         engine_host,
         transcription_runtime: services.transcription_runtime.clone(),
+        apns_runtime: crate::platform::apns::ApnsRuntime::production(
+            &crate::shared::foundation::paths::internal_dir(),
+        ),
         settings_path,
         profile_runtime,
         agent_deps: services.agent_deps,

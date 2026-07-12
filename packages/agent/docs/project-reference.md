@@ -839,13 +839,14 @@ device/notification operation authority needs, kind-selector-bounded generic
 resource authority needs, and validation gates for APNs
 credential custody, APNs environment labels, entitlement proof, physical-device
 validation, delivery-failure evidence, provider redaction, and native inbox
-product decisions. It does not enable APNs transport, native inbox UI,
-entitlements, public notification APIs, provider payload leakage, or network
-behavior.
+product decisions. The current platform adapter enables opt-in APNs relay
+delivery and iOS entitlements without changing that provider-visible manifest.
+Native inbox UI, public notification APIs, provider payload leakage, and hidden
+background behavior remain absent.
 Device registration and unregistration are not provider-visible operations and
-there is currently no production token-registration transport seam. Their
-hash-only custody and lifecycle behavior remain test fixtures for a future
-trusted native transport; the agent cannot submit APNs token material.
+the agent cannot submit APNs token material. The trusted iOS client registers
+through internal engine functions; raw tokens remain in private platform
+custody while durable resources and model projections retain redacted evidence.
 Accepted Phase 3 Slice 24H also seeds a pending-review
 `import_update_module` manifest for existing `import_history_record`,
 `repository_tree_snapshot`, `import_preview`, and `update_diagnostic_record`
@@ -1716,12 +1717,13 @@ The accepted Slice 13 foundation adds `domains/device` and
 `domains/notifications` as server-owned resource foundations behind the same
 single `capability::execute` primitive. `domains/device` owns the durable
 `device_registration` schema and production redacted list/inspect projections.
-Only `device_list` and `device_inspect` are model-facing. Production registers
-no device writer or lifecycle publisher; registration/unregistration fixtures
-are test-only and verify the deferred trusted transport's hash-only token,
-environment, opt-in, retention, and lifecycle contract. The production engine
-accepts no APNs token input, and raw APNs tokens or full token hashes are never
-returned.
+Only `device_list` and `device_inspect` are model-facing. A trusted engine
+client may call internal `device::register` and `device::unregister` functions;
+models cannot. Durable resources retain a token hash while raw APNs tokens live
+only in the private platform store under the internal notifications directory.
+Registration records explicit environment, bundle, opt-in, retention, and
+lifecycle evidence. Raw tokens, token fragments, and full token hashes are
+never returned in provider projections, lifecycle events, or logs.
 `domains/notifications` owns durable `notification` inbox/read-state records,
 `notification_delivery` evidence, unread-count badge semantics, trace/replay
 refs, retention defaults, and `notifications.lifecycle` stream evidence.
@@ -1729,9 +1731,11 @@ Provider-visible access is limited to `notification_send`,
 `notification_list`, `notification_inspect`, `notification_mark_read`, and
 `notification_mark_all_read`, with explicit non-wildcard resource grants.
 Push-requested sends record inbox-only, no-device, policy-disabled,
-family-opt-out, or transport-disabled delivery evidence; live APNs transport,
-APNs entitlements, public notification APIs, native iOS inbox/deep links,
-hidden background loops, and fake client-local inboxes remain deferred.
+family-opt-out, relay-disabled, delivered, or failed evidence. Eligible sends
+delegate to the injected HMAC APNs relay adapter; the notification domain does
+not own tokens or credentials. iOS owns permission and token lifecycle plus
+safe session deep-link handling. Public notification APIs, a native inbox,
+hidden background loops, and fake client-local inboxes remain absent.
 Accepted Slice 14A adds `domains/media` as a narrow server-owned resource
 foundation for media artifacts and voice-note metadata behind the same single
 `capability::execute` primitive. Media records are

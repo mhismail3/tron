@@ -1,39 +1,35 @@
-//! Server-owned device registration foundation.
+//! Server-owned device registration and redacted inspection.
 //!
-//! Slice 13 restores the backend device schema and redacted read substrate
-//! without restoring iOS APNs entitlements, permission prompts, registration,
-//! or a live APNs transport. Production code lists and inspects existing
-//! `device_registration` resources. Test-only fixtures exercise the deferred
-//! registration schema's hash-only APNs token custody, environment policy,
-//! opt-in preferences, and lifecycle evidence. The paired-device request broker in
-//! `platform::device_broker` remains a local request/response substrate; it
-//! does not own APNs token custody or notification delivery policy.
+//! Trusted engine clients register iOS APNs tokens through the internal
+//! `device::register` transport function. Durable `device_registration`
+//! resources retain policy and a token hash; raw tokens live only in the
+//! private [`crate::platform::apns`] store. Models can list and inspect the
+//! redacted registration records, but cannot register or unregister devices.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `contract` | Worker id, stream topic, and authority scope constants |
+//! | `contract` | Internal registration contracts, stream topic, and authority scopes |
+//! | `handlers` | Trusted transport bindings for registration and unregistration |
 //! | `projection` | Bounded redacted device list/inspect projections |
-//! | `service` | Production list/inspect behavior plus test-only registration fixtures for the deferred trusted transport |
+//! | `service` | Registration lifecycle plus list/inspect behavior |
 //! | `support` | Record construction, authority guards, refs, and redaction helpers |
 //! | `validation` | Payload parsing, APNs environment/token, and bounds checks |
 //! | `tests` | Token redaction, authority, environment, and scope regressions |
 //!
 //! # INVARIANT: device tokens are never provider-visible
 //!
-//! The production engine does not accept APNs token material while live APNs
-//! transport is deferred. Test-only registration fixtures prove that the
-//! registered resource schema retains only full SHA-256 hash custody evidence;
-//! projections and lifecycle events never return raw tokens, raw-token
-//! prefixes/suffixes/previews, or full token hashes. Push remains opt-in and
-//! live APNs transport is disabled by default in this foundation. A future
-//! trusted transport must own registration and unregistration explicitly; they
-//! are not model-facing `capability::execute` operations.
+//! Raw tokens may cross only the trusted engine-client registration boundary
+//! and the private APNs transport. Resources, projections, lifecycle events,
+//! traces, and logs never return raw tokens, token fragments, or full token
+//! hashes. Registration and unregistration are deliberately not model-facing
+//! `capability::execute` operations.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
 pub(crate) mod contract;
+mod handlers;
 mod projection;
 pub(crate) mod service;
 mod support;
@@ -42,14 +38,23 @@ mod validation;
 #[derive(Clone)]
 pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
+    pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
 }
 
 pub(crate) use crate::engine::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID};
 
 pub(crate) fn worker_module(
-    _deps: &DomainRegistrationContext,
+    deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    crate::domains::registration::worker::domain_worker_module(contract::WORKER, &[], Vec::new())
+    let domain_deps = Deps {
+        engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
+    };
+    crate::domains::registration::worker::domain_worker_module(
+        contract::WORKER,
+        contract::STREAM_TOPICS,
+        handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+    )
 }
 
 #[cfg(test)]

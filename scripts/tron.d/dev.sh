@@ -1,13 +1,56 @@
 #!/bin/bash
 # dev.sh - sourced by tron; do not execute directly.
 
+load_dev_relay_environment() {
+    local env_file="$PROJECT_DIR/packages/mac-app/.env.local"
+    if [ -f "$env_file" ]; then
+        while IFS='=' read -r key value; do
+            key="${key#export }"
+            case "$key" in
+                TRON_RELAY_URL|TRON_RELAY_SECRET)
+                    if [ -z "${!key:-}" ]; then
+                        value="${value%$'\r'}"
+                        value="${value#\"}"
+                        value="${value%\"}"
+                        export "$key=$value"
+                    fi
+                    ;;
+            esac
+        done < "$env_file"
+    fi
+
+    if { [ -n "${TRON_RELAY_URL:-}" ] && [ -z "${TRON_RELAY_SECRET:-}" ]; } \
+        || { [ -z "${TRON_RELAY_URL:-}" ] && [ -n "${TRON_RELAY_SECRET:-}" ]; }; then
+        print_error "TRON_RELAY_URL and TRON_RELAY_SECRET must be configured together"
+        return 1
+    fi
+}
+
+xml_escape() {
+    local value="$1"
+    value="${value//&/&amp;}"
+    value="${value//</&lt;}"
+    value="${value//>/&gt;}"
+    value="${value//\"/&quot;}"
+    value="${value//\'/&apos;}"
+    printf '%s' "$value"
+}
+
 create_dev_launchd_plist() {
     local log_level="${1:-}"
     local log_level_xml=""
+    local relay_environment_xml=""
     if [ -n "$log_level" ]; then
         log_level_xml="
         <string>--log-level</string>
         <string>$log_level</string>"
+    fi
+    if [ -n "${TRON_RELAY_URL:-}" ]; then
+        relay_environment_xml="
+        <key>TRON_RELAY_URL</key>
+        <string>$(xml_escape "$TRON_RELAY_URL")</string>
+        <key>TRON_RELAY_SECRET</key>
+        <string>$(xml_escape "$TRON_RELAY_SECRET")</string>"
     fi
 
     cat > "$DEV_PLIST_PATH" << PLIST
@@ -44,6 +87,7 @@ create_dev_launchd_plist() {
         <string>${RUST_LOG:-info,ort=error}</string>
         <key>TRON_DEV_BINARY</key>
         <string>$DEV_BINARY</string>
+        $relay_environment_xml
     </dict>
 
     <key>StandardOutPath</key>
@@ -53,10 +97,12 @@ create_dev_launchd_plist() {
 </dict>
 </plist>
 PLIST
+    chmod 600 "$DEV_PLIST_PATH"
 }
 
 cmd_dev() {
     require_project_dir
+    load_dev_relay_environment
 
     local do_build=false
     local do_test=false

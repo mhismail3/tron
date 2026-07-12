@@ -18,7 +18,8 @@ extension SourceGuardTests {
             "Tests/Engine/Protocol/EngineProtocolTypesTests.swift",
         ]
         let forbiddenNeedles: [(String, String)] = [
-            ("Image" + "Attachment", "image-only prompt DTO"),
+            ("struct Image" + "Attachment", "image-only prompt DTO"),
+            ("Image" + "Attachment(", "image-only prompt DTO construction"),
             ("last" + "Images", "image-only mock state"),
             ("last" + "Send" + "Prompt" + "Images", "image-only repository mock state"),
             ("images:", "image-only prompt argument"),

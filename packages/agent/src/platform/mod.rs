@@ -7,11 +7,14 @@
 //!
 //! | Module | Content |
 //! |--------|---------|
+//! | [`apns`] | Private device-token custody and optional APNs relay delivery |
 //! | [`device_broker`] | Engine-stream request/response broker for paired devices |
 //!
 //! ## Invariants
 //!
-//! - The retained platform layer may broker local paired-device responses, but
-//!   it does not own push notification state or product delivery policy.
+//! - APNs owns only private token custody and transport. Device registration
+//!   metadata and notification delivery policy remain in their domains.
+//! - The paired-device broker does not own push notification state.
 
+pub mod apns;
 pub mod device_broker;

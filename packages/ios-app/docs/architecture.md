@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-11 (the prompt composer owns one integrated Liquid Glass surface with embedded attachment and state-driven voice/send/stop controls; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down; Capability Cockpit Visibility added `capability_binding::cockpit_overview` progressive disclosure; chat top-detent viewport anchoring and reconnect reconstruction continuity; Agent Briefing and Session Briefing implementation candidate added; Phase 3 Slice 23H Runtime Cockpit module activity implementation candidate added; Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-07-12 (trusted APNs lifecycle registration and redacted server delivery were restored; the prompt composer owns one integrated Liquid Glass surface with provider-policy-driven attachments and state-driven voice/send/stop controls; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down).
 
 ## Overview
 
@@ -51,11 +51,10 @@ source-control state, worker state, or product panels locally.
 Notification and inbox affordances remain deferred in the current Phase 1
 shell. Local chat error pills, app-global connection toasts, timeline system
 events, Logs, Server Diagnostics, and feedback are the current attention
-surfaces. A notification bell, unread inbox, APNs registration, push delivery,
-device broker behavior, notification read state, and notification delivery
-chips return only with a future server-owned APNs/device/capability resource
-mechanism; iOS must not create a local substitute that implies hidden backend
-truth.
+surfaces. A notification bell, unread inbox, and fixed delivery chips remain
+absent. APNs registration and push delivery are narrow lifecycle effects backed
+by server-owned device, notification, and delivery resources; iOS must not
+create a local substitute that implies hidden backend truth.
 
 The iOS Affordance Restoration Map is the active planning artifact for
 functional-only Phase 1 iOS UX restoration. It classifies every deleted or
@@ -151,6 +150,7 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  model.list attachmentPolicy -> camera/photo/file data -> ImageAttachmentPreparer -> Attachment -> agent::prompt policy validation
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> cancellable transcription::audio -> InputBar
+Push:    AppDelegate token -> PushNotificationService -> system device::register -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView

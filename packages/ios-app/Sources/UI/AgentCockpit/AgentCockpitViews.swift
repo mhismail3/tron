@@ -234,6 +234,24 @@ struct AgentCockpitSheet: View {
                     }
                 }
             }
+            if !viewModel.overview.discovery.engineGroups.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Engine Layer")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextSecondary)
+                    EngineCoreSummaryCard(overview: viewModel.overview.discovery)
+                    ForEach(viewModel.overview.discovery.engineGroups) { group in
+                        Button {
+                            selectedCapabilityGroup = group
+                        } label: {
+                            CapabilityGroupCard(group: group)
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .accessibilityIdentifier("engine-capability-group-\(group.id)")
+                    }
+                }
+            }
         }
     }
 

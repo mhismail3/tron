@@ -1,4 +1,5 @@
 use serde_json::json;
+use std::sync::Arc;
 
 use super::support::{APNS_TOKEN, Fixture, assert_no_token_fragments, dt};
 
@@ -135,7 +136,8 @@ async fn push_requested_records_failure_evidence_without_live_apns() {
         json!("skipped_policy_disabled")
     );
 
-    let transport = Fixture::new("push-transport").await;
+    let sender = Arc::new(crate::platform::apns::MockPushSender::succeeding());
+    let transport = Fixture::new_with_sender("push-transport", sender.clone()).await;
     transport
         .register_device(
             "push-transport-device",
@@ -155,17 +157,17 @@ async fn push_requested_records_failure_evidence_without_live_apns() {
             "push-transport-send",
             json!({
                 "title": "Push transport",
-                "body": "Transport disabled",
+                "body": "Transport enabled",
                 "family": "approval",
                 "pushRequested": true
             }),
         )
         .await;
     let delivery = &transport_sent["delivery"]["records"][0];
-    assert_eq!(delivery["state"], json!("skipped_transport_disabled"));
+    assert_eq!(delivery["state"], json!("delivered"));
     assert_eq!(delivery["apnsEnvironment"], json!("production"));
-    assert_eq!(delivery["push"]["liveApnsEnabled"], json!(false));
-    assert_eq!(delivery["push"]["liveApnsAttempted"], json!(false));
+    assert_eq!(delivery["push"]["liveApnsEnabled"], json!(true));
+    assert_eq!(delivery["push"]["liveApnsAttempted"], json!(true));
     assert_eq!(
         delivery["push"]["tokenFingerprint"]["redacted"],
         json!(true)
@@ -181,6 +183,10 @@ async fn push_requested_records_failure_evidence_without_live_apns() {
         &transport_sent,
         APNS_TOKEN,
     );
+    let calls = sender.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0.environment, "production");
+    assert_eq!(calls[0].0.bundle_id, "com.example.tron.beta");
 
     let inspected_transport = transport
         .inspect(
@@ -193,6 +199,70 @@ async fn push_requested_records_failure_evidence_without_live_apns() {
         &inspected_transport,
         APNS_TOKEN,
     );
+}
+
+#[tokio::test]
+async fn terminal_apns_rejection_removes_private_token_and_fails_closed_afterward() {
+    let sender = Arc::new(crate::platform::apns::MockPushSender::with_results(vec![
+        vec![crate::platform::apns::ApnsSendResult {
+            success: false,
+            device_token: APNS_TOKEN.to_owned(),
+            apns_id: None,
+            status_code: Some(410),
+            reason: Some("Unregistered".to_owned()),
+            error: None,
+        }],
+    ]));
+    let fixture = Fixture::new_with_sender("push-terminal", sender.clone()).await;
+    fixture
+        .register_device(
+            "push-terminal-device",
+            json!({
+                "deviceId": "ios-terminal",
+                "platform": "ios",
+                "apnsEnvironment": "production",
+                "apnsToken": APNS_TOKEN,
+                "pushOptIn": true,
+                "pushEnabled": true,
+                "eventFamilies": ["approval"]
+            }),
+        )
+        .await;
+
+    let rejected = fixture
+        .send_with_push_grant(
+            "push-terminal-send",
+            json!({
+                "title": "Terminal token",
+                "body": "Terminal token rejection",
+                "family": "approval",
+                "pushRequested": true
+            }),
+        )
+        .await;
+    assert_eq!(rejected["delivery"]["records"][0]["state"], json!("failed"));
+    assert_eq!(
+        rejected["delivery"]["records"][0]["outcome"]["terminalTokenRejected"],
+        json!(true)
+    );
+
+    let missing = fixture
+        .send_with_push_grant(
+            "push-after-terminal-send",
+            json!({
+                "title": "Missing token",
+                "body": "Private token was removed",
+                "family": "approval",
+                "pushRequested": true
+            }),
+        )
+        .await;
+    assert_eq!(missing["delivery"]["records"][0]["state"], json!("failed"));
+    assert_eq!(
+        missing["delivery"]["records"][0]["outcome"]["reason"],
+        json!("private_device_token_missing")
+    );
+    assert_eq!(sender.calls().len(), 1);
 }
 
 #[tokio::test]

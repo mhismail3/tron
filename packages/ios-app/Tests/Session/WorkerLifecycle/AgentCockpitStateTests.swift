@@ -83,8 +83,11 @@ struct AgentCockpitStateTests {
 
         #expect(overview.discovery.operationCount == 2)
         #expect(overview.modularityOperations.count == 2)
-        #expect(overview.invokableUnitCount == 2)
-        #expect(overview.invokableUnitLabel == "Operations")
+        #expect(overview.invokableUnitCount == 1)
+        #expect(overview.invokableUnitLabel == "Agent operations")
+        #expect(overview.discovery.agentOperationCount == 1)
+        #expect(overview.discovery.engineOperationCount == 1)
+        #expect(overview.discovery.internalContractCount == 1)
         let git = overview.modularityOperations.first { $0.name == "git_status" }
         #expect(git?.ownerLabel == "Built-in Git adapter")
         #expect(git?.metadataSourceLabel == "Capability execute registry")
@@ -128,6 +131,13 @@ struct AgentCockpitStateTests {
 
         let resourcesGroup = overview.discovery.groups.first { $0.id == "resources_memory" }
         #expect(resourcesGroup?.operations.contains { $0.name == "git_status" } == true)
+        #expect(overview.discovery.groups.allSatisfy { group in
+            group.operations.allSatisfy(\.isAgentFunctionalCapability)
+        })
+        #expect(overview.discovery.engineGroups.contains { group in
+            group.operations.contains { $0.name == "observe" }
+        })
+        #expect(overview.discovery.engineGroups.contains { !$0.functions.isEmpty })
         #expect(overview.capabilityVisibility?.projection.rawResourceIdsReturned == false)
         #expect(overview.capabilityVisibility?.projection.rawAuthorityIdsReturned == false)
         #expect(overview.capabilityVisibility?.operationList.complete == true)
@@ -245,8 +255,11 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.missingSchemaCount == 0)
         #expect(overview.discovery.catalogDecodeIssueCount == 0)
         #expect(overview.discovery.groups.allSatisfy { $0.missingSchemaCount == 0 })
-        #expect(overview.invokableUnitLabel == "Operations")
-        #expect(overview.invokableUnitCount == 2)
+        #expect(overview.invokableUnitLabel == "Agent operations")
+        #expect(overview.invokableUnitCount == 1)
+        #expect(overview.discovery.agentOperationCount == 1)
+        #expect(overview.discovery.engineOperationCount == 1)
+        #expect(overview.discovery.internalContractCount == 1)
     }
 
     @Test("Projection treats missing operation pool classification as a cockpit issue")

@@ -64,6 +64,7 @@ pub fn test_runtime() -> TestRuntime {
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: tron::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: tron::platform::apns::ApnsRuntime::disabled(),
         settings_path,
         profile_runtime,
         agent_deps: None,

@@ -120,11 +120,20 @@ pub(crate) async fn send_notification_value_at(
         &resource,
         &notification_version_id,
         &family,
+        &title,
+        &body,
         push_requested,
         badge_count,
         &operation_at,
     )
     .await?;
+    let live_apns_attempted = deliveries.iter().any(|delivery| {
+        delivery
+            .get("push")
+            .and_then(|push| push.get("liveApnsAttempted"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    });
     publish_lifecycle_event(
         deps,
         invocation,
@@ -149,8 +158,8 @@ pub(crate) async fn send_notification_value_at(
         "badgeCount": badge_count,
         "delivery": {
             "records": deliveries,
-            "liveApnsAttempted": false,
-            "deliveryEvidenceOnly": true
+            "liveApnsAttempted": live_apns_attempted,
+            "deliveryEvidenceOnly": false
         },
         "resourceRefs": [resource_ref(&resource, "notification")]
     }))

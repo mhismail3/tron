@@ -1,17 +1,12 @@
 use serde_json::{Value, json};
-#[cfg(test)]
 use sha2::{Digest, Sha256};
 
-#[cfg(test)]
-use crate::engine::{
-    ActorKind, EngineResource, PublishStreamEvent, WorkerId, is_bootstrap_authority_grant_id,
-};
+use crate::engine::{ActorKind, EngineResource, PublishStreamEvent, WorkerId};
 use crate::engine::{
     EngineGrant, EngineResourceInspection, EngineResourceScope, EngineResourceVersion, Invocation,
 };
 use crate::shared::server::errors::CapabilityError;
 
-#[cfg(test)]
 use super::contract::{
     DEVICE_LIFECYCLE_TOPIC, RESOURCE_WRITE_SCOPE, SCHEMA_VERSION, WORKER, WRITE_SCOPE,
 };
@@ -19,12 +14,10 @@ use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE};
 use super::validation::*;
 use super::{DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, Deps};
 
-#[cfg(test)]
 const DEFAULT_EVENT_FAMILIES: &[&str] = &[
     "approval", "question", "goal", "schedule", "web", "git", "job", "subagent", "memory", "system",
 ];
 
-#[cfg(test)]
 pub(super) struct RegistrationRecordInput<'a> {
     pub(super) state: &'a str,
     pub(super) device_id: &'a str,
@@ -32,7 +25,9 @@ pub(super) struct RegistrationRecordInput<'a> {
     pub(super) label: Option<&'a str>,
     pub(super) scope: &'a EngineResourceScope,
     pub(super) environment: &'a str,
+    pub(super) bundle_id: &'a str,
     pub(super) token_hash: &'a str,
+    pub(super) transport_enabled: bool,
     pub(super) push_opt_in: bool,
     pub(super) push_enabled: bool,
     pub(super) event_families: Vec<String>,
@@ -44,7 +39,6 @@ pub(super) struct RegistrationRecordInput<'a> {
     pub(super) revision: u64,
 }
 
-#[cfg(test)]
 pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
     json!({
         "schemaVersion": SCHEMA_VERSION,
@@ -55,16 +49,17 @@ pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
         "scope": scope_ref(input.scope),
         "apns": {
             "environment": input.environment,
+            "bundleId": input.bundle_id,
             "tokenHash": input.token_hash,
-            "tokenStorage": "hash_only_until_live_apns_transport",
-            "liveApnsEnabled": false,
+            "tokenStorage": "private_transport_store",
+            "liveApnsEnabled": input.transport_enabled,
             "registeredAt": input.updated_at
         },
         "notificationPolicy": {
             "optIn": input.push_opt_in,
             "pushEnabled": input.push_enabled,
             "defaultPushEnabled": false,
-            "liveApnsEnabled": false,
+            "liveApnsEnabled": input.transport_enabled,
             "eventFamilies": input.event_families,
             "badgePolicy": {
                 "mode": "unread_count",
@@ -88,7 +83,6 @@ pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
     })
 }
 
-#[cfg(test)]
 pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityError> {
     let values = optional_string_array(payload, "eventFamilies")?.unwrap_or_else(|| {
         DEFAULT_EVENT_FAMILIES
@@ -117,7 +111,6 @@ pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityE
     Ok(families)
 }
 
-#[cfg(test)]
 pub(super) fn retention_policy(payload: &Value) -> Result<Value, CapabilityError> {
     let max_age_days = optional_u64(payload, "maxAgeDays")?
         .unwrap_or(DEFAULT_RETENTION_DAYS)
@@ -127,58 +120,33 @@ pub(super) fn retention_policy(payload: &Value) -> Result<Value, CapabilityError
         .clamp(1, MAX_INBOX_RECORDS);
     Ok(json!({
         "privacyClass": "user_visible_notification_metadata",
-        "tokenCustody": "hash_only",
+        "tokenCustody": "private_transport_store_with_hash_only_resource_evidence",
         "maxAgeDays": max_age_days,
         "maxInboxRecords": max_inbox_records
     }))
 }
 
-#[cfg(test)]
 pub(super) async fn ensure_internal_write_authority(
-    deps: &Deps,
+    _deps: &Deps,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<(), CapabilityError> {
     if !matches!(
         invocation.causal_context.actor_kind,
-        ActorKind::System | ActorKind::Admin
+        ActorKind::Client | ActorKind::System | ActorKind::Admin
     ) {
         return Err(policy(format!(
-            "{operation} requires trusted internal system/admin authority"
+            "{operation} requires trusted engine-client authority"
         )));
     }
-    if !invocation.causal_context.has_scope(WRITE_SCOPE)
-        || !invocation.causal_context.has_scope(RESOURCE_WRITE_SCOPE)
-    {
+    let expected_function = format!("device::{}", operation.trim_start_matches("device_"));
+    if invocation.function_id.as_str() != expected_function {
         return Err(policy(format!(
-            "{operation} requires {WRITE_SCOPE} and {RESOURCE_WRITE_SCOPE}"
+            "{operation} is available only through {expected_function}"
         )));
     }
-    if is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id) {
-        return Err(policy(format!(
-            "{operation} requires a derived non-bootstrap grant"
-        )));
-    }
-    let grant = deps
-        .engine_host
-        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
-        .await
-        .map_err(engine_error)?
-        .ok_or_else(|| policy(format!("{operation} authority grant was not found")))?;
-    require_explicit_grant_item(&grant.allowed_authority_scopes, WRITE_SCOPE, operation)?;
-    require_explicit_grant_item(
-        &grant.allowed_authority_scopes,
-        RESOURCE_WRITE_SCOPE,
-        operation,
-    )?;
-    require_explicit_grant_item(
-        &grant.allowed_resource_kinds,
-        DEVICE_REGISTRATION_KIND,
-        operation,
-    )?;
-    require_kind_selector(&grant, operation)?;
-    if grant.network_policy != "none" {
-        return Err(policy(format!("{operation} requires networkPolicy none")));
+    if !invocation.causal_context.has_scope(WRITE_SCOPE) {
+        return Err(policy(format!("{operation} requires {WRITE_SCOPE}")));
     }
     Ok(())
 }
@@ -319,7 +287,6 @@ pub(super) fn validate_device_resource_id(value: &str) -> Result<(), CapabilityE
     bounded_token("deviceRegistrationResourceId", value, 256).map(|_| ())
 }
 
-#[cfg(test)]
 pub(super) async fn publish_lifecycle_event(
     deps: &Deps,
     invocation: &Invocation,
@@ -351,18 +318,16 @@ pub(super) async fn publish_lifecycle_event(
     Ok(())
 }
 
-#[cfg(test)]
 pub(super) fn resource_policy() -> Value {
     json!({
         "owner": WORKER,
         "authority": WRITE_SCOPE,
         "retention": "explicit",
-        "tokenCustody": "hash_only",
-        "liveApnsTransport": "disabled"
+        "tokenCustody": "private_transport_store_with_hash_only_resource_evidence",
+        "liveApnsTransport": "runtime_configured"
     })
 }
 
-#[cfg(test)]
 fn authority_record(invocation: &Invocation) -> Value {
     json!({
         "grantId": invocation.causal_context.authority_grant_id.as_str(),
@@ -372,7 +337,6 @@ fn authority_record(invocation: &Invocation) -> Value {
     })
 }
 
-#[cfg(test)]
 fn trace_refs(invocation: &Invocation) -> Vec<Value> {
     vec![json!({
         "traceId": invocation.causal_context.trace_id.as_str(),
@@ -381,7 +345,6 @@ fn trace_refs(invocation: &Invocation) -> Vec<Value> {
     })]
 }
 
-#[cfg(test)]
 fn replay_refs(invocation: &Invocation) -> Vec<Value> {
     vec![json!({
         "kind": "engine_invocation",
@@ -394,7 +357,6 @@ pub(super) fn scope_ref(scope: &EngineResourceScope) -> Value {
     json!({"kind": scope.kind(), "value": scope.value()})
 }
 
-#[cfg(test)]
 pub(super) fn resource_ref(resource: &EngineResource, role: &str) -> Value {
     json!({
         "resourceId": resource.resource_id,
@@ -404,7 +366,6 @@ pub(super) fn resource_ref(resource: &EngineResource, role: &str) -> Value {
     })
 }
 
-#[cfg(test)]
 pub(super) fn version_ref(
     resource: &EngineResource,
     version: &EngineResourceVersion,
@@ -419,7 +380,6 @@ pub(super) fn version_ref(
     })
 }
 
-#[cfg(test)]
 pub(super) fn device_resource_id(
     scope: &EngineResourceScope,
     platform: &str,
@@ -442,7 +402,6 @@ pub(super) fn device_resource_id(
     )
 }
 
-#[cfg(test)]
 pub(super) fn assert_no_raw_token(payload: &Value, raw_token: &str) -> Result<(), CapabilityError> {
     let serialized = serde_json::to_string(payload)
         .map_err(|error| invalid(format!("serialize device record: {error}")))?;
@@ -452,12 +411,10 @@ pub(super) fn assert_no_raw_token(payload: &Value, raw_token: &str) -> Result<()
     Ok(())
 }
 
-#[cfg(test)]
 pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-#[cfg(test)]
 pub(super) fn worker_id() -> Result<WorkerId, CapabilityError> {
     WorkerId::new(WORKER).map_err(engine_error)
 }
@@ -468,7 +425,6 @@ pub(super) fn engine_error(error: crate::engine::EngineError) -> CapabilityError
     }
 }
 
-#[cfg(test)]
 fn policy(message: impl Into<String>) -> CapabilityError {
     CapabilityError::Custom {
         code: "DEVICE_POLICY_DENIED".to_owned(),

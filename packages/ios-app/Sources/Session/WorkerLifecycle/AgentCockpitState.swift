@@ -130,6 +130,12 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var rollbackBoundary: String
     var rollbackDetail: String
 
+    var isAgentFunctionalCapability: Bool {
+        capabilityAudience == "session_work"
+            && (capabilityReplacementClass == "runtime_routable"
+                || capabilityReplacementClass == "producer_extensible")
+    }
+
     var activityCount: Int {
         bindingRequested
             + bindingApproved
@@ -255,8 +261,8 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var nextRevision: UInt64?
 
     var invokableUnitCount: Int {
-        if let capabilityVisibility {
-            return capabilityVisibility.operationList.totalOperations
+        if capabilityVisibility != nil {
+            return discovery.agentOperationCount
         }
         if !modularityOperations.isEmpty {
             return modularityOperations.count
@@ -265,7 +271,10 @@ struct AgentCockpitOverview: Equatable, Sendable {
     }
 
     var invokableUnitLabel: String {
-        if capabilityVisibility != nil || !modularityOperations.isEmpty {
+        if capabilityVisibility != nil {
+            return "Agent operations"
+        }
+        if !modularityOperations.isEmpty {
             return "Operations"
         }
         return "Functions"

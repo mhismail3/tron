@@ -184,6 +184,8 @@ pub struct ServerRuntimeContext {
     pub engine_host: EngineHostHandle,
     /// Lazily loaded local speech-to-text backend.
     pub transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
+    /// Private APNs token custody and optional relay transport.
+    pub apns_runtime: crate::platform::apns::ApnsRuntime,
     /// Path to the sparse user profile settings overlay.
     pub settings_path: PathBuf,
     /// Compiled active profile runtime.

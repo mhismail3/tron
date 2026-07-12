@@ -283,6 +283,7 @@ pub(crate) struct Deps {
     pub(crate) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
     pub(crate) jobs_reconcile: jobs::service::ReconcileContext,
+    pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
 }
 
 impl Deps {
@@ -295,6 +296,7 @@ impl Deps {
             jobs_reconcile: jobs::service::ReconcileContext {
                 startup_cutoff: Utc::now(),
             },
+            apns_runtime: deps.apns_runtime.clone(),
         }
     }
 }

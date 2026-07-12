@@ -173,6 +173,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         event_store: store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine::new(),
+        apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         settings_path,
         profile_runtime,
         agent_deps: None,

@@ -15,6 +15,7 @@ pub(super) async fn notification_send(
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::notifications::service::send_notification_value_at(
         &notification_deps,
@@ -36,6 +37,7 @@ pub(super) async fn notification_list(
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::notifications::service::list_notifications_value(
         &notification_deps,
@@ -60,6 +62,7 @@ pub(super) async fn notification_inspect(
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::notifications::service::inspect_notification_value(
         &notification_deps,
@@ -81,6 +84,7 @@ pub(super) async fn notification_mark_read(
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::notifications::service::mark_notification_read_value_at(
         &notification_deps,
@@ -103,6 +107,7 @@ pub(super) async fn notification_mark_all_read(
 ) -> Result<CapabilityResult, CapabilityError> {
     let notification_deps = crate::domains::notifications::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::notifications::service::mark_all_notifications_read_value_at(
         &notification_deps,

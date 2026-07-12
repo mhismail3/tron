@@ -13,6 +13,7 @@ pub(super) async fn device_list(
 ) -> Result<CapabilityResult, CapabilityError> {
     let device_deps = crate::domains::device::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::device::service::list_devices_value(
         &device_deps,
@@ -37,6 +38,7 @@ pub(super) async fn device_inspect(
 ) -> Result<CapabilityResult, CapabilityError> {
     let device_deps = crate::domains::device::Deps {
         engine_host: deps.engine_host.clone(),
+        apns_runtime: deps.apns_runtime.clone(),
     };
     let details = crate::domains::device::service::inspect_device_value(
         &device_deps,

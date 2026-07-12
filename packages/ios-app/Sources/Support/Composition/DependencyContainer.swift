@@ -49,6 +49,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// deduplication; this service only batches the local in-memory buffer.
     private(set) var clientLogIngestionService: ClientLogIngestionService
 
+    /// Owns only the local APNs authorization/token exchange. Server-side
+    /// device registration and delivery remain engine-owned.
+    private(set) var pushNotificationService: PushNotificationService
+
     /// iOS-local paired server list and active selection.
     @ObservationIgnored
     let pairedServerStore: PairedServerStore
@@ -201,6 +205,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
         deepLinkRouter = DeepLinkRouter()
+        pushNotificationService = PushNotificationService()
 
         // Build initial server URL from the iOS-local active pairing. With no
         // pair, use a non-routable placeholder so app launch never silently
