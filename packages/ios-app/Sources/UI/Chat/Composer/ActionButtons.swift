@@ -68,6 +68,7 @@ struct ComposerAttachmentButton: View {
             .font(TronTypography.buttonSM)
             .foregroundStyle(menuDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
             .frame(width: buttonSize, height: buttonSize)
+            .contentShape(Circle())
             .opacity(menuDisabled ? 0.5 : 1.0)
             .overlay {
                 Menu {
@@ -85,17 +86,17 @@ struct ComposerAttachmentButton: View {
                 } label: {
                     Color.clear
                         .frame(width: buttonSize, height: buttonSize)
-                        .contentShape(Rectangle())
+                        .contentShape(Circle())
                 }
                 .controlSize(.small)
                 .disabled(menuDisabled)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
-                guard let action = notification.object as? AttachmentMenuAction else { return }
-                onSelect(action)
-            }
-            .accessibilityLabel("Add attachment")
-            .accessibilityHint(menuDisabled ? "Attachments are unavailable while the agent is active." : "")
+        .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
+            guard let action = notification.object as? AttachmentMenuAction else { return }
+            onSelect(action)
+        }
+        .accessibilityLabel("Add attachment")
+        .accessibilityHint(menuDisabled ? "Attachments are unavailable while the agent is active." : "")
     }
 }
 

@@ -360,6 +360,7 @@
 		7BCE20DA36712279526FD913 /* DependencyEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9EEA07B56DACCCDECEBC0D3 /* DependencyEnvironment.swift */; };
 		7BD678DFE3E954C8ED55B068 /* EventSyncClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A1187F5CE69B24D05A7A6C5 /* EventSyncClient.swift */; };
 		7C479A24BD39912AFA61E5D2 /* SQLiteHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = B961CE075F1D400D2296F441 /* SQLiteHelpers.swift */; };
+		7CAC4898FBF7A4BE6E15D460 /* AgentCockpitTabViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7AC66E952247356882CC44 /* AgentCockpitTabViews.swift */; };
 		7CAC7CD1C81FC76BC9167D21 /* EventPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B887318DCFA22610354E465C /* EventPluginTests.swift */; };
 		7D9735F3A73FA133F4C31530 /* AgentBriefingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7F929DC466F3438E7815DA /* AgentBriefingState.swift */; };
 		7E8A4353961755F46E6032BD /* ProviderApiKeyAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E0FEE0E5D2097A297FC448F /* ProviderApiKeyAlert.swift */; };
@@ -1383,6 +1384,7 @@
 		DBAFC96580F447484D3F9B6E /* EngineProtocolTypes+Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Settings.swift"; sourceTree = "<group>"; };
 		DE04771A42D0380B46C4BBCE /* SessionStateInvariantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStateInvariantsTests.swift; sourceTree = "<group>"; };
 		DE04A97DD57F4543F25B242E /* NeuralSparkIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralSparkIndicator.swift; sourceTree = "<group>"; };
+		DE7AC66E952247356882CC44 /* AgentCockpitTabViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCockpitTabViews.swift; sourceTree = "<group>"; };
 		DE93F65621DB472B61E9543E /* MessageEventProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageEventProjection.swift; sourceTree = "<group>"; };
 		DEFAD995ADDE9C1AA7C9933B /* CapabilityInvocationArgumentsDeltaPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationArgumentsDeltaPlugin.swift; sourceTree = "<group>"; };
 		E08144519D445B92EE1FF9B1 /* SettingsRowDivider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRowDivider.swift; sourceTree = "<group>"; };
@@ -2563,6 +2565,7 @@
 				3E8566C2D210E3E355640134 /* AgentCockpitModuleActivityViews.swift */,
 				C19CF58E972169018520DD85 /* AgentCockpitOperationDetailViews.swift */,
 				33C97654448FF09009B56E3C /* AgentCockpitSummaryViews.swift */,
+				DE7AC66E952247356882CC44 /* AgentCockpitTabViews.swift */,
 				9289DCD629177B5099A7F7AE /* AgentCockpitViews.swift */,
 			);
 			path = AgentCockpit;
@@ -3769,6 +3772,7 @@
 				DC161F92A733D9C50E9808F5 /* AgentCockpitPresentation.swift in Sources */,
 				96BE8B5A2F333C2172BBD7CF /* AgentCockpitState.swift in Sources */,
 				B51288C868E6863BFC7430D9 /* AgentCockpitSummaryViews.swift in Sources */,
+				7CAC4898FBF7A4BE6E15D460 /* AgentCockpitTabViews.swift in Sources */,
 				2D6B7580E05D2B97737EB6E4 /* AgentCockpitViewModel.swift in Sources */,
 				20F1055371E5CE9A5DC75CB5 /* AgentCockpitViews.swift in Sources */,
 				A22991235A09A92B9C263D31 /* AgentReadyPlugin.swift in Sources */,

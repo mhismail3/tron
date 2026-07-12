@@ -136,14 +136,16 @@ extension AgentCockpitProjection {
                 functions: [],
                 modularityOperations: agentOperations,
                 triggers: [],
-                hasOperationProjection: true
+                hasOperationProjection: true,
+                includesLockedOwnership: false
             )
             engineGroups = capabilityGroups(
                 workers: workers,
                 functions: functions,
                 modularityOperations: engineOperations,
                 triggers: triggers,
-                hasOperationProjection: true
+                hasOperationProjection: true,
+                includesLockedOwnership: true
             )
         } else {
             groups = capabilityGroups(
@@ -151,7 +153,8 @@ extension AgentCockpitProjection {
                 functions: functions,
                 modularityOperations: modularityOperations,
                 triggers: triggers,
-                hasOperationProjection: false
+                hasOperationProjection: false,
+                includesLockedOwnership: true
             )
             engineGroups = []
         }
@@ -222,7 +225,8 @@ extension AgentCockpitProjection {
         functions: [AgentCockpitFunctionRow],
         modularityOperations: [AgentCockpitOperationRow],
         triggers: [AgentCockpitTriggerRow],
-        hasOperationProjection: Bool
+        hasOperationProjection: Bool,
+        includesLockedOwnership: Bool
     ) -> [AgentCockpitCapabilityGroupRow] {
         var claimedNamespaces = Set<String>()
         var claimedFamilies = Set<String>()
@@ -250,7 +254,12 @@ extension AgentCockpitProjection {
                 title: definition.title,
                 question: definition.question,
                 narrative: definition.narrative,
-                ownerSummary: ownerSummary(workers: groupWorkers, functions: groupFunctions, operations: groupOperations),
+                ownerSummary: ownerSummary(
+                    workers: groupWorkers,
+                    functions: groupFunctions,
+                    operations: groupOperations,
+                    includesLockedOwnership: includesLockedOwnership
+                ),
                 operationCount: groupOperations.count,
                 functionCount: groupFunctions.count,
                 workerCount: groupWorkers.count,
@@ -283,7 +292,12 @@ extension AgentCockpitProjection {
                     title: "Other Capabilities",
                     question: "What else has Tron learned or exposed?",
                     narrative: "Additional namespaces, including future agent-authored capabilities that do not fit the built-in groups yet.",
-                    ownerSummary: ownerSummary(workers: otherWorkers, functions: otherFunctions, operations: otherOperations),
+                    ownerSummary: ownerSummary(
+                        workers: otherWorkers,
+                        functions: otherFunctions,
+                        operations: otherOperations,
+                        includesLockedOwnership: includesLockedOwnership
+                    ),
                     operationCount: otherOperations.count,
                     functionCount: otherFunctions.count,
                     workerCount: otherWorkers.count,
@@ -382,11 +396,21 @@ extension AgentCockpitProjection {
     private static func ownerSummary(
         workers: [AgentCockpitWorkerRow],
         functions: [AgentCockpitFunctionRow],
-        operations: [AgentCockpitOperationRow]
+        operations: [AgentCockpitOperationRow],
+        includesLockedOwnership: Bool
     ) -> String {
         if !operations.isEmpty {
             let locked = operations.filter(\.isLocked).count
             let replaceable = operations.filter(\.canReplace).count
+            let extensible = operations.filter { $0.canExtend && !$0.canReplace }.count
+            if !includesLockedOwnership {
+                var summaries: [String] = []
+                if replaceable > 0 { summaries.append("\(replaceable) replaceable") }
+                if extensible > 0 { summaries.append("\(extensible) extensible") }
+                return summaries.isEmpty
+                    ? "\(operations.count) modular operation\(operations.count == 1 ? "" : "s")"
+                    : summaries.joined(separator: ", ")
+            }
             if replaceable > 0 {
                 return "\(replaceable) replaceable, \(locked) locked"
             }

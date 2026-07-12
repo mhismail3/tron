@@ -131,12 +131,15 @@ struct AgentCockpitStateTests {
 
         let resourcesGroup = overview.discovery.groups.first { $0.id == "resources_memory" }
         #expect(resourcesGroup?.operations.contains { $0.name == "git_status" } == true)
+        #expect(resourcesGroup?.ownerSummary == "1 replaceable")
+        #expect(resourcesGroup?.ownerSummary.contains("locked") == false)
         #expect(overview.discovery.groups.allSatisfy { group in
             group.operations.allSatisfy(\.isAgentFunctionalCapability)
         })
-        #expect(overview.discovery.engineGroups.contains { group in
+        let engineGroup = overview.discovery.engineGroups.first { group in
             group.operations.contains { $0.name == "observe" }
-        })
+        }
+        #expect(engineGroup?.ownerSummary == "1 locked operation")
         #expect(overview.discovery.engineGroups.contains { !$0.functions.isEmpty })
         #expect(overview.capabilityVisibility?.projection.rawResourceIdsReturned == false)
         #expect(overview.capabilityVisibility?.projection.rawAuthorityIdsReturned == false)

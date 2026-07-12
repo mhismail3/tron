@@ -299,15 +299,6 @@ struct SessionListExpansionControls: View {
 
     var body: some View {
         HStack(spacing: SessionListLayout.iconTextSpacing) {
-            if canViewLess {
-                expansionButton(
-                    title: "View less",
-                    symbolName: "chevron.up",
-                    hint: "Shows only the latest 10 sessions in \(projectName)",
-                    action: onViewLess
-                )
-            }
-
             if canViewMore {
                 expansionButton(
                     title: "View more",
@@ -316,7 +307,20 @@ struct SessionListExpansionControls: View {
                     action: onViewMore
                 )
             }
+
+            Spacer(minLength: SessionListLayout.iconTextSpacing)
+
+            if canViewLess {
+                expansionButton(
+                    title: "View less",
+                    symbolName: "chevron.up",
+                    hint: "Shows only the latest 10 sessions in \(projectName)",
+                    action: onViewLess
+                )
+                .transition(.opacity)
+            }
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func expansionButton(
@@ -340,7 +344,7 @@ struct SessionListExpansionControls: View {
                     .accessibilityHidden(true)
             }
             .foregroundStyle(.tronEmerald)
-            .frame(maxWidth: .infinity, minHeight: SessionListLayout.expansionControlMinimumHeight)
+            .frame(minHeight: SessionListLayout.expansionControlMinimumHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

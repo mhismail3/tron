@@ -123,7 +123,7 @@ struct AgentCockpitMetricStrip: View {
     let overview: AgentCockpitOverview
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             metric("Workers", value: "\(overview.workers.count)", icon: "cpu")
             metric(overview.invokableUnitLabel, value: "\(overview.invokableUnitCount)", icon: "curlybraces")
             metric("Issues", value: "\(issueCount)", icon: "exclamationmark.triangle")
@@ -154,9 +154,10 @@ struct AgentCockpitMetricStrip: View {
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
+                .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
         .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, interactive: false)
     }
 }

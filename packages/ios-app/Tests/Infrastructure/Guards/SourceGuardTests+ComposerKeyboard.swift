@@ -18,6 +18,8 @@ extension SourceGuardTests {
         ]
         let requiredLayoutFragments = [
             "Menu {",
+            ".overlay {",
+            "Color.clear",
             "Label(action.title, systemImage: action.systemImage)",
             ".labelStyle(.titleAndIcon)",
             ".controlSize(.small)",
@@ -127,6 +129,8 @@ extension SourceGuardTests {
         #expect(source.contains("ComposerTrailingButton("))
         #expect(source.contains("inputField"))
         #expect(source.components(separatedBy: ".glassEffect(").count - 1 == 1)
+        #expect(source.contains(".background {\n                // Keep the native Menu outside the material owner."))
+        #expect(!source.contains(".regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive()"))
         #expect(!source.contains("GlassAttachmentButton("))
         #expect(!source.contains("GlassActionButton("))
         #expect(!source.contains("GlassMicButton("))

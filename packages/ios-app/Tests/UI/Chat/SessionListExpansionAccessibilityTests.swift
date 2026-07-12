@@ -25,11 +25,25 @@ final class SessionListExpansionAccessibilityTests: XCTestCase {
         XCTAssertTrue(list.contains("static let pageSize = 10"))
         XCTAssertTrue(list.contains(#"title: "View more""#))
         XCTAssertTrue(list.contains(#"title: "View less""#))
-        XCTAssertTrue(
-            list.contains(
-                ".frame(maxWidth: .infinity, minHeight: SessionListLayout.expansionControlMinimumHeight)"
+        let viewMore = try XCTUnwrap(list.range(of: #"title: "View more""#))
+        let spacer = try XCTUnwrap(
+            list.range(
+                of: "Spacer(minLength: SessionListLayout.iconTextSpacing)",
+                range: viewMore.upperBound..<list.endIndex
             )
         )
+        let viewLess = try XCTUnwrap(
+            list.range(of: #"title: "View less""#, range: spacer.upperBound..<list.endIndex)
+        )
+        XCTAssertLessThan(viewMore.lowerBound, spacer.lowerBound)
+        XCTAssertLessThan(spacer.lowerBound, viewLess.lowerBound)
+        XCTAssertTrue(
+            list.contains(
+                ".frame(minHeight: SessionListLayout.expansionControlMinimumHeight)"
+            )
+        )
+        XCTAssertTrue(list.contains(".transition(.opacity)"))
+        XCTAssertTrue(list.contains(".frame(maxWidth: .infinity)"))
         XCTAssertTrue(list.contains(".buttonStyle(.plain)\n        .contentShape(Rectangle())"))
         XCTAssertTrue(list.contains(#".accessibilityLabel("\(title) sessions in \(projectName)")"#))
         XCTAssertTrue(list.contains(".accessibilityHint(hint)"))

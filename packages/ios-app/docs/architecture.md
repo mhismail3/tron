@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-12 (trusted APNs lifecycle registration and redacted server delivery were restored; the prompt composer owns one integrated Liquid Glass surface with provider-policy-driven attachments and state-driven voice/send/stop controls; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination and per-workspace progressive disclosure; Cockpit UI hygiene keeps top-level Engine Cockpit language on capabilities, operations, verification, and evidence while reserving catalog/resource details for drill-down).
+> Last verified: 2026-07-12 (trusted APNs lifecycle registration and redacted server delivery were restored; the prompt composer owns one integrated Liquid Glass surface with provider-policy-driven attachments and state-driven voice/send/stop controls, while a transparent icon-sized menu target keeps attachment presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination uses independently aligned disclosure controls; Engine Cockpit separates agent capabilities, activity/verification, and inspect-only engine contracts).
 
 ## Overview
 
@@ -80,9 +80,11 @@ and matching database/event/settings/dependency work.
   retained session actions include creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
   recent session workspaces, and manual Mac paths, prompt composer with a
-  local recent-input picker, a functional-only native attachment menu that
-  preserves composer keyboard focus while layering native camera/photo/file
-  pickers above it, unified attachments for images/documents, and one composer
+  local recent-input picker, a functional-only native attachment menu whose
+  transparent icon-sized target preserves composer keyboard focus while the
+  material itself lives in an independent background layer that cannot be
+  replaced or invalidated by menu presentation. Native camera/photo/file
+  pickers layer above it, alongside unified attachments, and one composer
   surface with an embedded left attachment action plus a right state action
   that becomes voice, send, transcribing, or stop as needed. Message rendering
   preserves ordered/unordered list nesting and includes quiet blank
@@ -508,10 +510,11 @@ preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
 The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
-and sheet header are the core engine summary: connection state, visible
-invokable operation count, issue count, and plain verification state from server-owned
-facts. The sheet opens on Capabilities, grouping visible operations into
-user-facing areas before drilling into server-supplied operation owner,
+and equal-height sheet-header metrics are the core engine summary: connection
+state, visible invokable operation count, issue count, and plain verification
+state from server-owned facts. The sheet opens on Capabilities, grouping
+agent-facing operations into user-facing areas before drilling into
+server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
 bounded resource-scan state, locked/built-in/module status, redacted
 replacement target, server-owned capability-pool role, runtime-routable versus
@@ -535,7 +538,12 @@ camelCase client fixtures and the engine's snake_case catalog definitions at
 the protocol boundary so schema, owner, risk, and authority evidence are not
 misclassified as missing by presentation code. The top-level cockpit must stay
 high-signal; binding, shadow-trial, route, readiness, scan completeness, and
-rollback details belong in group and operation drill-down.
+rollback details belong in group and operation drill-down. Agent-facing group
+summaries describe modular replacement/extension ownership without mixing in
+engine-locked counts. Activity owns recent verification reports alongside
+runtime work. Engine owns the Engine Core summary and inspectable
+kernel/governance groups, keeping the trust substrate visible without
+presenting it as ordinary session capability inventory.
 Dashboard, capability group, and operation cards use the whole glass container
 as the disclosure target instead of decorative chevron glyphs; drill-down is
 communicated by the surface hierarchy and tap target, while functional
@@ -548,8 +556,9 @@ Surfaces tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
 Its Activity tab renders invocation-scoped `module_activity::overview`
-summaries from the server: active/waiting/blocked/degraded status, generic timeline
-entries, authority labels, touched-resource summaries, and
+summaries plus bounded catalog-verification history from the server:
+active/waiting/blocked/degraded status, generic timeline entries, authority
+labels, touched-resource summaries, and
 rollback/quarantine/runtime-authorization gate state. iOS does not parse raw
 module resource payloads, invent activity states, own redaction policy, or
 mount fixed source-control, memory, process, subagent, notification, skill,
@@ -558,7 +567,9 @@ reintroduce broad product DTOs, product event variants, or product table-backed
 state.
 `UI/AgentCockpit/AgentCockpitModuleActivityViews.swift` owns the Activity tab's
 bounded summary card so the root cockpit sheet remains only the tab shell and
-shared row composition.
+shared row composition. `UI/AgentCockpit/AgentCockpitTabViews.swift` owns tab
+selection and Capabilities, Activity, Engine, worker, package, and generated
+surface composition so `AgentCockpitViews.swift` remains sheet orchestration.
 The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
 and shared `TronSegmentedControl` tabs rather than a native segmented picker.
 Empty state is allowed when no runtime surface is published; a hardcoded sample

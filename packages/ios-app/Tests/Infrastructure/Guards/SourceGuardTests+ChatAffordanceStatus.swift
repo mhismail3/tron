@@ -86,6 +86,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift"),
             encoding: .utf8
         )
+        let cockpitTabViews = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitTabViews.swift"),
+            encoding: .utf8
+        )
         let cockpitDiscoveryViews = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift"),
             encoding: .utf8
@@ -100,6 +104,7 @@ extension SourceGuardTests {
         #expect(cockpitSummaryViews.contains("overview.invokableUnitCount"))
         #expect(cockpitSummaryViews.contains("briefingPhrase(verificationPhrase)"))
         #expect(cockpitSummaryViews.contains(#"metric("Capability check""#))
+        #expect(cockpitSummaryViews.contains("minHeight: 112"))
         #expect(!cockpitSummaryViews.contains(##""rev \(revision)""##))
         #expect(!cockpitSummaryViews.contains("catalogTrustPhrase"))
         #expect(!cockpitSummaryViews.contains(#"metric("Verified""#))
@@ -119,8 +124,23 @@ extension SourceGuardTests {
         #expect(cockpitViews.contains(#"SheetTitle(title: "Engine Cockpit", color: .tronEmerald)"#))
         #expect(cockpitViews.contains("SheetDismissButton(color: .tronEmerald)"))
         #expect(cockpitViews.contains("TronSegmentedControl("))
+        #expect(cockpitTabViews.contains("case engine"))
+        #expect(cockpitTabViews.contains("[.capabilities, .activity, .engine]"))
         #expect(!cockpitViews.contains(#"Picker("Cockpit""#))
         #expect(cockpitViews.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
+
+        let capabilitiesStart = try #require(cockpitTabViews.range(of: "private var capabilitiesTab"))
+        let engineStart = try #require(cockpitTabViews.range(of: "private var engineTab"))
+        let activityStart = try #require(cockpitTabViews.range(of: "private var activityTab"))
+        let surfacesStart = try #require(cockpitTabViews.range(of: "private var surfacesTab"))
+        let capabilitiesSource = cockpitTabViews[capabilitiesStart.lowerBound..<engineStart.lowerBound]
+        let engineSource = cockpitTabViews[engineStart.lowerBound..<activityStart.lowerBound]
+        let activitySource = cockpitTabViews[activityStart.lowerBound..<surfacesStart.lowerBound]
+        #expect(!capabilitiesSource.contains("discovery.reports"))
+        #expect(engineSource.contains("EngineCoreSummaryCard"))
+        #expect(engineSource.contains("discovery.engineGroups"))
+        #expect(activitySource.contains("discovery.reports"))
+        #expect(activitySource.contains(#"Text("Verification")"#))
 
         let serverSettings = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),

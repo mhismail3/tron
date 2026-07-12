@@ -101,10 +101,16 @@ struct InputBar: View {
             }
             .frame(minHeight: actionButtonSize)
             .padding(.horizontal, 4)
-            .glassEffect(
-                .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-            )
+            .background {
+                // Keep the native Menu outside the material owner. Menu
+                // presentation can rebuild its label hierarchy; the glass
+                // surface must remain a stable sibling throughout that cycle.
+                Color.clear
+                    .glassEffect(
+                        .regular.tint(Color.tronPhthaloGreen.opacity(0.25)),
+                        in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    )
+            }
             .overlay(alignment: .top) {
                 if config.showDragHint {
                     Image(systemName: "chevron.up")
