@@ -261,6 +261,14 @@ final class DefaultModelRepositoryTests: XCTestCase {
             "supportsThinking": true,
             "supportsImages": true,
             "supportsDocuments": true,
+            "attachmentPolicy": {
+                "supportsPdfContent": true,
+                "supportsTextFiles": true,
+                "maxImageDimension": 1568,
+                "maxImageBytes": 1400000,
+                "maxDocumentBytes": 20971520,
+                "supportedImageMimeTypes": ["image/jpeg", "image/png"]
+            },
             "tier": "sonnet",
             "isLegacy": false
         }

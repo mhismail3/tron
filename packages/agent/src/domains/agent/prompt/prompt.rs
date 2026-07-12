@@ -143,7 +143,6 @@ pub(crate) async fn validate_prompt_submission(
     let prompt = require_string_param(params, "prompt")?;
     validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
     let attachments = opt_array(params, "attachments").cloned();
-    validate_attachment_array(attachments.as_deref())?;
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
         return Err(CapabilityError::Custom {
@@ -154,6 +153,22 @@ pub(crate) async fn validate_prompt_submission(
     }
 
     let session = AgentCommandService::load_prompt_session(deps, &session_id).await?;
+    if attachments.as_ref().is_some_and(|items| !items.is_empty()) {
+        let auth_path =
+            crate::domains::auth::credentials::openai::infer_auth_path(&deps.auth_path, None)
+                .unwrap_or(crate::domains::auth::credentials::OpenAIAuthPath::ChatGptCodex);
+        let policy = crate::domains::model::routing::attachments::for_model(
+            &session.latest_model,
+            auth_path,
+        )
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message: format!(
+                "Attachments are unavailable because model '{}' has no attachment policy",
+                session.latest_model
+            ),
+        })?;
+        validate_attachment_array(attachments.as_deref(), &policy)?;
+    }
     let agent_deps =
         deps.agent_deps
             .as_ref()
@@ -175,12 +190,51 @@ pub(crate) async fn validate_prompt_submission(
 
 pub(crate) fn validate_attachment_array(
     attachments: Option<&[Value]>,
+    policy: &crate::domains::model::routing::attachments::AttachmentPolicy,
 ) -> Result<(), CapabilityError> {
     if let Some(attachments) = attachments {
         for attachment in attachments {
-            if let Some(data) = attachment.get("data").and_then(Value::as_str) {
-                validation::validate_attachment_size(data)?;
-            }
+            let data = attachment
+                .get("data")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: "Attachment is missing base64 data".into(),
+                })?;
+            let mime_type = attachment
+                .get("mimeType")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: "Attachment is missing mimeType".into(),
+                })?;
+
+            let max_bytes = if mime_type.starts_with("image/") {
+                if policy.max_image_bytes == 0 || !policy.accepts_image_mime_type(mime_type) {
+                    return Err(CapabilityError::InvalidParams {
+                        message: format!("Model does not accept attachment type '{mime_type}'"),
+                    });
+                }
+                policy.max_image_bytes
+            } else if mime_type == "application/pdf" {
+                if !policy.supports_pdf_content {
+                    return Err(CapabilityError::InvalidParams {
+                        message: "Model does not accept PDF content".into(),
+                    });
+                }
+                policy.max_document_bytes
+            } else if matches!(mime_type, "text/plain" | "application/json") {
+                if !policy.supports_text_files {
+                    return Err(CapabilityError::InvalidParams {
+                        message: "Model does not accept text file content".into(),
+                    });
+                }
+                policy.max_document_bytes
+            } else {
+                return Err(CapabilityError::InvalidParams {
+                    message: format!("Unsupported attachment type '{mime_type}'"),
+                });
+            };
+
+            validation::validate_attachment_size_with_limit(data, max_bytes)?;
         }
     }
     Ok(())
@@ -311,6 +365,40 @@ mod tests {
                 .idempotency_key
                 .as_deref()
                 .is_some_and(|key| key.starts_with("agent::prompt_apply:"))
+        );
+    }
+
+    #[test]
+    fn attachment_validation_enforces_model_policy() {
+        let policy = crate::domains::model::routing::attachments::AttachmentPolicy {
+            supports_pdf_content: false,
+            supports_text_files: true,
+            max_image_dimension: 1_568,
+            max_image_bytes: 10,
+            max_document_bytes: 20,
+            supported_image_mime_types: &["image/jpeg"],
+        };
+
+        assert!(
+            validate_attachment_array(
+                Some(&[json!({"data": "YWJj", "mimeType": "image/jpeg"})]),
+                &policy,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_attachment_array(
+                Some(&[json!({"data": "YWJj", "mimeType": "image/png"})]),
+                &policy,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_attachment_array(
+                Some(&[json!({"data": "YWJj", "mimeType": "application/pdf"})]),
+                &policy,
+            )
+            .is_err()
         );
     }
 }

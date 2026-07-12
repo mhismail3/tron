@@ -167,30 +167,17 @@ extension ChatViewModel {
                 continue
             }
 
-            // Process image with provider-aware limits, preserving format
-            let detectedMime = ImageProcessor.detectMimeType(from: data)
             let limits = await MainActor.run {
                 self.modelPickerState.currentModelInfo(current: self.currentModel)?.providerImageLimits ?? .default
             }
-            guard let result = await ImageProcessor.process(
-                originalData: data,
-                mimeType: detectedMime,
+            guard let attachment = await ImageAttachmentPreparer.prepare(
+                data: data,
                 limits: limits
             ) else {
                 logger.warning("Failed to process library image", category: .chat)
                 appendLocalError(dedupKey: "attachment.photo.failed", title: "Could not attach photo", message: "The selected photo could not be processed.")
                 continue
             }
-
-            let attachment = Attachment(
-                type: .image,
-                data: result.data,
-                mimeType: result.mimeType,
-                fileName: nil,
-                originalSize: data.count,
-                wasConverted: result.wasConverted,
-                originalMimeType: result.wasConverted ? detectedMime : nil
-            )
 
             await MainActor.run {
                 self.attachments.append(attachment)

@@ -42,6 +42,9 @@ pub(crate) async fn known_models(openai_auth_path: OpenAIAuthPath) -> Vec<Value>
     models.extend(all_kimi_models_api_json());
     models.extend(all_ollama_models_api_json_with_availability(None).await);
     models
+        .into_iter()
+        .map(super::attachments::decorate_model)
+        .collect()
 }
 
 pub(crate) fn is_model_supported(model_id: &str) -> bool {

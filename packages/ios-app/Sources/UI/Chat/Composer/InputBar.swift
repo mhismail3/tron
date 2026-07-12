@@ -276,43 +276,49 @@ struct InputBar: View {
 
     private func addCameraImageAttachment(_ capturedImage: UIImage) {
         Task {
-            // Camera always produces JPEG.
             let jpegData = capturedImage.jpegData(compressionQuality: 1.0) ?? Data()
-            let limits = config.providerImageLimits
-            if let result = await ImageProcessor.process(
-                originalData: jpegData,
-                mimeType: "image/jpeg",
-                limits: limits
-            ) {
-                let attachment = Attachment(
-                    type: .image,
-                    data: result.data,
-                    mimeType: result.mimeType,
-                    fileName: nil,
-                    originalSize: jpegData.count,
-                    wasConverted: result.wasConverted
-                )
+            guard let attachment = await ImageAttachmentPreparer.prepare(
+                data: jpegData,
+                declaredMimeType: "image/jpeg",
+                limits: config.providerImageLimits
+            ) else {
                 await MainActor.run {
-                    actions.onAddAttachment(attachment)
+                    actions.onAttachmentError("Could not attach photo", "The captured photo could not be processed.")
                 }
+                return
+            }
+            await MainActor.run {
+                actions.onAddAttachment(attachment)
             }
         }
     }
 
-    private func addDocumentAttachment(url: URL, mimeType: String, fileName: String?) {
-        do {
-            let data = try Data(contentsOf: url)
-            let type = AttachmentType.from(mimeType: mimeType)
+    private func addDocumentAttachment(data: Data, mimeType: String, fileName: String?) {
+        if mimeType.hasPrefix("image/") {
+            Task {
+                guard let attachment = await ImageAttachmentPreparer.prepare(
+                    data: data,
+                    declaredMimeType: mimeType,
+                    fileName: fileName,
+                    limits: config.providerImageLimits
+                ) else {
+                    await MainActor.run {
+                        actions.onAttachmentError("Could not attach image", "The selected image could not be processed.")
+                    }
+                    return
+                }
+                await MainActor.run {
+                    actions.onAddAttachment(attachment)
+                }
+            }
+        } else {
             let attachment = Attachment(
-                type: type,
+                type: AttachmentType.from(mimeType: mimeType),
                 data: data,
                 mimeType: mimeType,
                 fileName: fileName
             )
             actions.onAddAttachment(attachment)
-        } catch {
-            logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
-            actions.onAttachmentError("Could not attach file", error.localizedDescription)
         }
     }
 

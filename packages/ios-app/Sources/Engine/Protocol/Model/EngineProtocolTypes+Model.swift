@@ -12,6 +12,27 @@ struct ModelSwitchResult: Decodable {
     let newModel: String
 }
 
+/// Server-authoritative effective limits for attachments sent to one model.
+struct ModelAttachmentPolicy: Decodable, Hashable {
+    let supportsPdfContent: Bool
+    let supportsTextFiles: Bool
+    let maxImageDimension: Int
+    let maxImageBytes: Int
+    let maxDocumentBytes: Int
+    let supportedImageMimeTypes: [String]
+
+    /// Conservative construction value used before `model.list` has loaded and
+    /// by explicit non-wire test fixtures. Decoded model rows require policy.
+    static let bootstrap = ModelAttachmentPolicy(
+        supportsPdfContent: true,
+        supportsTextFiles: true,
+        maxImageDimension: 1_568,
+        maxImageBytes: 1_400_000,
+        maxDocumentBytes: 20 * 1024 * 1024,
+        supportedImageMimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    )
+}
+
 struct ModelInfo: Decodable, Identifiable, Hashable {
     let id: String
     /// Canonical model ID when `id` may be an alias or snapshot.
@@ -40,6 +61,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let supportsImages: Bool
     /// Whether the model supports document inputs (PDFs, etc.). Required.
     let supportsDocuments: Bool
+    /// Effective attachment contract owned by the server model catalog.
+    let attachmentPolicy: ModelAttachmentPolicy
     /// Server-authoritative tier classification ("opus", "sonnet",
     /// "flagship", "flash", "local", …). Required on the wire — decoding
     /// a model payload without a tier is a server bug, not a client default.
@@ -104,7 +127,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, canonicalModelId, name, provider, apiEndpoint, authPaths, aliasIds
         case replacementModel, isHidden, contextWindow, maxContextWindow, maxOutputTokens
-        case supportsThinking, supportsImages, supportsDocuments, tier
+        case supportsThinking, supportsImages, supportsDocuments, attachmentPolicy, tier
         case isRetiredGeneration = "isLegacy"
         case isRetired = "isDeprecated"
         case retirementDate = "deprecationDate"
@@ -140,6 +163,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         supportsThinking: Bool,
         supportsImages: Bool,
         supportsDocuments: Bool,
+        attachmentPolicy: ModelAttachmentPolicy = .bootstrap,
         tier: String,
         isRetiredGeneration: Bool,
         maxOutputTokens: Int? = nil,
@@ -182,6 +206,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.supportsThinking = supportsThinking
         self.supportsImages = supportsImages
         self.supportsDocuments = supportsDocuments
+        self.attachmentPolicy = attachmentPolicy
         self.tier = tier
         self.isRetiredGeneration = isRetiredGeneration
         self.isRetired = isRetired
@@ -318,13 +343,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         isGemini ? tier : nil
     }
 
-    /// Provider-specific image processing limits.
+    /// Server-authoritative image processing limits.
     var providerImageLimits: ProviderImageLimits {
-        if isAnthropic { return .anthropic }
-        if isCodex { return .openai }
-        if isGemini { return .gemini }
-        if isKimi { return .kimi }
-        return .default
+        ProviderImageLimits(policy: attachmentPolicy)
     }
 }
 

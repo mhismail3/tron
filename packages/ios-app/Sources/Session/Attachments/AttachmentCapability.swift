@@ -1,6 +1,6 @@
 import Foundation
 
-/// Provider-specific image processing limits.
+/// Effective image processing limits received from the server model catalog.
 struct ProviderImageLimits: Equatable {
     /// Maximum dimension in pixels (longest edge).
     let maxDimension: CGFloat
@@ -9,29 +9,22 @@ struct ProviderImageLimits: Equatable {
     /// MIME types the provider accepts.
     let supportedFormats: Set<String>
 
-    static let anthropic = ProviderImageLimits(
-        maxDimension: 1568,
-        maxBytes: 5_242_880,
-        supportedFormats: ["image/jpeg", "image/png", "image/gif", "image/webp"]
-    )
-    static let openai = ProviderImageLimits(
-        maxDimension: 2048,
-        maxBytes: 20_971_520,
-        supportedFormats: ["image/jpeg", "image/png", "image/webp"]
-    )
-    static let gemini = ProviderImageLimits(
-        maxDimension: 3072,
-        maxBytes: 5_242_880,
-        supportedFormats: ["image/jpeg", "image/png", "image/gif", "image/webp"]
-    )
-    static let kimi = ProviderImageLimits(
-        maxDimension: 4096,
-        maxBytes: 10_485_760,
-        supportedFormats: ["image/jpeg", "image/png", "image/gif", "image/webp"]
-    )
+    init(policy: ModelAttachmentPolicy) {
+        maxDimension = CGFloat(policy.maxImageDimension)
+        maxBytes = policy.maxImageBytes
+        supportedFormats = Set(policy.supportedImageMimeTypes)
+    }
+
+    init(maxDimension: CGFloat, maxBytes: Int, supportedFormats: Set<String>) {
+        self.maxDimension = maxDimension
+        self.maxBytes = maxBytes
+        self.supportedFormats = supportedFormats
+    }
+
+    /// Conservative construction value before the first model catalog read.
     static let `default` = ProviderImageLimits(
-        maxDimension: 1568,
-        maxBytes: 5_242_880,
+        maxDimension: 1_568,
+        maxBytes: 1_400_000,
         supportedFormats: ["image/jpeg", "image/png", "image/gif", "image/webp"]
     )
 }
@@ -49,63 +42,24 @@ struct AttachmentCapability: Equatable {
     /// Maximum document file size in bytes.
     let maxDocumentBytes: Int
 
-    /// Derive capability from model info. Falls back to permissive defaults.
+    /// Derive capability from the server-owned model attachment policy.
     static func from(model: ModelInfo?) -> AttachmentCapability {
         guard let model = model else { return .default }
-
-        if model.isAnthropic {
-            return AttachmentCapability(
-                supportsImages: true,
-                supportsPdfContent: true,
-                supportsTextFiles: true,
-                maxImageBytes: 5_242_880,
-                maxDocumentBytes: 20_971_520
-            )
-        }
-        if model.isCodex {
-            return AttachmentCapability(
-                supportsImages: model.supportsImages,
-                supportsPdfContent: false,
-                supportsTextFiles: true,
-                maxImageBytes: 20_971_520,
-                maxDocumentBytes: 52_428_800
-            )
-        }
-        if model.isGemini {
-            return AttachmentCapability(
-                supportsImages: true,
-                supportsPdfContent: true,
-                supportsTextFiles: true,
-                maxImageBytes: 5_242_880,
-                maxDocumentBytes: 20_971_520
-            )
-        }
-        if model.isKimi {
-            return AttachmentCapability(
-                supportsImages: model.supportsImages,
-                supportsPdfContent: false,
-                supportsTextFiles: true,
-                maxImageBytes: 10_485_760,
-                maxDocumentBytes: 104_857_600
-            )
-        }
-        if model.isMiniMax {
-            return AttachmentCapability(
-                supportsImages: false,
-                supportsPdfContent: false,
-                supportsTextFiles: true,
-                maxImageBytes: 0,
-                maxDocumentBytes: 0
-            )
-        }
-        return .default
+        let policy = model.attachmentPolicy
+        return AttachmentCapability(
+            supportsImages: model.supportsImages && policy.maxImageBytes > 0,
+            supportsPdfContent: policy.supportsPdfContent,
+            supportsTextFiles: policy.supportsTextFiles,
+            maxImageBytes: policy.maxImageBytes,
+            maxDocumentBytes: policy.maxDocumentBytes
+        )
     }
 
     static let `default` = AttachmentCapability(
         supportsImages: true,
         supportsPdfContent: true,
         supportsTextFiles: true,
-        maxImageBytes: 5_242_880,
+        maxImageBytes: 1_400_000,
         maxDocumentBytes: 20_971_520
     )
 }
