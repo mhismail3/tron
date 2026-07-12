@@ -48,7 +48,8 @@ struct SystemClientTests {
             #expect(registration.apnsToken == "0011aabb")
             #expect(registration.pushOptIn)
             #expect(registration.pushEnabled)
-            #expect(idempotencyKey.rawValue.hasPrefix("ios:device-register:v2:"))
+            #expect(idempotencyKey.rawValue.hasPrefix("ios:device-register:v4:"))
+            #expect(!idempotencyKey.rawValue.contains("0011aabb"))
             return DeviceRegistrationResult(
                 status: "active",
                 idempotentReplay: false,
@@ -61,6 +62,49 @@ struct SystemClientTests {
         #expect(result.apnsTokenRedacted)
         #expect(result.liveApnsEnabled)
         #expect(transport.lastWriteFunctionId?.rawValue == "device::register")
+    }
+
+    @Test("device installation identity is stable and isolated by defaults store")
+    func deviceInstallationIdentityIsStableAndIsolated() throws {
+        let firstSuite = try #require(UserDefaults(suiteName: "SystemClientTests.first"))
+        let secondSuite = try #require(UserDefaults(suiteName: "SystemClientTests.second"))
+        defer {
+            firstSuite.removePersistentDomain(forName: "SystemClientTests.first")
+            secondSuite.removePersistentDomain(forName: "SystemClientTests.second")
+        }
+        firstSuite.removePersistentDomain(forName: "SystemClientTests.first")
+        secondSuite.removePersistentDomain(forName: "SystemClientTests.second")
+
+        let first = DeviceInstallationIdentity.current(defaults: firstSuite)
+        #expect(DeviceInstallationIdentity.current(defaults: firstSuite) == first)
+        #expect(DeviceInstallationIdentity.current(defaults: secondSuite) != first)
+    }
+
+    @Test("device registration idempotency is stable and installation-specific")
+    func deviceRegistrationIdempotencyIsInstallationSpecific() {
+        let first = DeviceRegistrationIdempotency.key(
+            bundleId: "com.example.app",
+            environment: "development",
+            deviceId: "installation-a",
+            token: "token"
+        )
+        let replay = DeviceRegistrationIdempotency.key(
+            bundleId: "com.example.app",
+            environment: "development",
+            deviceId: "installation-a",
+            token: "token"
+        )
+        let second = DeviceRegistrationIdempotency.key(
+            bundleId: "com.example.app",
+            environment: "development",
+            deviceId: "installation-b",
+            token: "token"
+        )
+
+        #expect(first == replay)
+        #expect(first != second)
+        #expect(!first.rawValue.contains("installation-a"))
+        #expect(!first.rawValue.contains("token"))
     }
 
 }

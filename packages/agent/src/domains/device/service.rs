@@ -49,7 +49,7 @@ pub(crate) async fn register_device_value_at(
     let event_families = event_families(payload)?;
     let retention = retention_policy(payload)?;
     let now = operation_at.to_rfc3339();
-    let resource_id = device_resource_id(&scope, &platform, &environment, &device_id);
+    let resource_id = device_resource_id(&scope, &platform, &environment, &bundle_id, &device_id);
 
     if let Some(existing) = deps
         .engine_host
@@ -80,6 +80,16 @@ pub(crate) async fn register_device_value_at(
                 &bundle_id,
                 &now,
             )?;
+            supersede_duplicate_token_registrations(
+                deps,
+                invocation,
+                &resource_id,
+                &token_hash,
+                &environment,
+                &bundle_id,
+                &now,
+            )
+            .await?;
             return Ok(json!({
                 "schemaVersion": SCHEMA_VERSION,
                 "operation": "device_register",
@@ -158,6 +168,16 @@ pub(crate) async fn register_device_value_at(
             &bundle_id,
             &now,
         )?;
+        supersede_duplicate_token_registrations(
+            deps,
+            invocation,
+            &resource_id,
+            &token_hash,
+            &environment,
+            &bundle_id,
+            &now,
+        )
+        .await?;
         remove_rotated_token(deps, previous_token_hash.as_deref(), &token_hash)?;
         return Ok(json!({
             "schemaVersion": SCHEMA_VERSION,
@@ -234,6 +254,16 @@ pub(crate) async fn register_device_value_at(
         &bundle_id,
         &now,
     )?;
+    supersede_duplicate_token_registrations(
+        deps,
+        invocation,
+        &resource_id,
+        &token_hash,
+        &environment,
+        &bundle_id,
+        &now,
+    )
+    .await?;
     Ok(json!({
         "schemaVersion": SCHEMA_VERSION,
         "operation": "device_register",
@@ -472,6 +502,100 @@ fn remove_rotated_token(
         && previous_token_hash != current_token_hash
     {
         let _ = deps.apns_runtime.token_store.remove(previous_token_hash)?;
+    }
+    Ok(())
+}
+
+async fn supersede_duplicate_token_registrations(
+    deps: &Deps,
+    invocation: &Invocation,
+    current_resource_id: &str,
+    token_hash: &str,
+    environment: &str,
+    bundle_id: &str,
+    updated_at: &str,
+) -> Result<(), CapabilityError> {
+    let resources = deps
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(DEVICE_REGISTRATION_KIND.to_owned()),
+            scope: Some(crate::engine::EngineResourceScope::System),
+            lifecycle: Some("active".to_owned()),
+            limit: LIST_LIMIT_MAX,
+        })
+        .await
+        .map_err(engine_error)?;
+
+    for resource in resources {
+        if resource.resource_id == current_resource_id {
+            continue;
+        }
+        let Some(mut inspection) = deps
+            .engine_host
+            .inspect_resource(&resource.resource_id)
+            .await
+            .map_err(engine_error)?
+        else {
+            continue;
+        };
+        ensure_device_registration(&inspection, "device_register supersession")?;
+        let (version, payload) = current_payload(&inspection, "device_register supersession")?;
+        let matches_route = payload.pointer("/apns/tokenHash").and_then(Value::as_str)
+            == Some(token_hash)
+            && payload.pointer("/apns/environment").and_then(Value::as_str) == Some(environment)
+            && payload.pointer("/apns/bundleId").and_then(Value::as_str) == Some(bundle_id);
+        if !matches_route {
+            continue;
+        }
+
+        let mut superseded = payload.clone();
+        superseded["state"] = json!("unregistered");
+        superseded["updatedAt"] = json!(updated_at);
+        superseded["unregistered"] = json!({
+            "at": updated_at,
+            "actorId": invocation.causal_context.actor_id.as_str(),
+            "reason": "superseded_by_current_registration",
+            "replacementResourceId": current_resource_id,
+            "idempotency": {
+                "key": invocation.causal_context.idempotency_key,
+                "invocationId": invocation.id.as_str()
+            }
+        });
+        superseded["revision"] = json!(
+            superseded["revision"]
+                .as_u64()
+                .unwrap_or(1)
+                .saturating_add(1)
+        );
+        let replacement_version = deps
+            .engine_host
+            .update_resource(UpdateResource {
+                resource_id: resource.resource_id.clone(),
+                expected_current_version_id: Some(version.version_id.clone()),
+                lifecycle: Some("unregistered".to_owned()),
+                payload: superseded,
+                state: None,
+                locations: Vec::new(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+            })
+            .await
+            .map_err(engine_error)?;
+        inspection.resource.lifecycle = "unregistered".to_owned();
+        inspection.resource.current_version_id = Some(replacement_version.version_id);
+        publish_lifecycle_event(
+            deps,
+            invocation,
+            "device.unregistered",
+            &inspection.resource,
+            json!({
+                "state": "unregistered",
+                "reason": "superseded_by_current_registration",
+                "replacementResourceId": current_resource_id,
+                "apnsTokenRedacted": true
+            }),
+        )
+        .await?;
     }
     Ok(())
 }

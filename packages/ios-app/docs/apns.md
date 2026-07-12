@@ -18,9 +18,20 @@ event-family, authority, or exact-selector policy.
 The notifications domain owns the canonical event-family taxonomy used by
 both trusted device registration and `notification_send`. The default family,
 `agent_attention`, is enabled in the default device policy. iOS includes a
-registration-policy version in its idempotency key; incrementing that version
-causes an existing token to be registered with a changed policy while normal
-reconnects remain idempotent.
+registration-policy version plus a digest of the app-installation identity and
+APNs token in its idempotency key. Incrementing that version applies policy
+changes, while distinct installations cannot replay one another's registration
+and normal reconnects remain idempotent.
+
+Each app installation owns a persisted random installation identity. The
+server registration key also includes the bundle id and APNs environment, so
+Production, Beta, and simulator/device variants cannot overwrite one another.
+iOS registration idempotency includes that installation identity, and the
+server durably retires older active resources for the same token, bundle, and
+environment so a migration or reinstall cannot produce duplicate relay sends.
+iOS retries registration after pairing, connection, token refresh, and app
+foreground. If notification authorization is denied, registration remains
+fail-closed and the local diagnostic log names the required Settings action.
 
 ## Local Development
 
@@ -39,8 +50,11 @@ live APNs is disabled. A push-requested notification records
 
 - Raw tokens, relay secrets, APNs response ids, and full token hashes never
   enter model projections or logs.
-- Development tokens route to the APNs sandbox with the Beta bundle id;
-  production tokens route to production with the production bundle id.
+- Development tokens route to the APNs sandbox; production-signed tokens route
+  to production. A locally developer-signed Production bundle can carry a
+  development APNs entitlement and therefore uses the sandbox with
+  `com.tron.mobile`; routing follows the signed entitlement, not the Xcode
+  configuration name.
 - Terminal APNs token rejection removes private token custody.
 - Notification resources remain the source of truth; push is only a delivery
   effect.

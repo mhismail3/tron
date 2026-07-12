@@ -54,7 +54,10 @@ events, Logs, Server Diagnostics, and feedback are the current attention
 surfaces. A notification bell, unread inbox, and fixed delivery chips remain
 absent. APNs registration and push delivery are narrow lifecycle effects backed
 by server-owned device, notification, and delivery resources; iOS must not
-create a local substitute that implies hidden backend truth.
+create a local substitute that implies hidden backend truth. One observable
+push service owns token callbacks; the app retries registration after pairing,
+connection, and foreground transitions. Per-install identity plus server-side
+bundle/environment identity keeps side-by-side variants independent.
 
 The iOS Affordance Restoration Map is the active planning artifact for
 functional-only Phase 1 iOS UX restoration. It classifies every deleted or
@@ -152,7 +155,7 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  model.list attachmentPolicy -> camera/photo/file data -> AttachmentImagePreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> cancellable transcription::audio -> InputBar
-Push:    AppDelegate token -> PushNotificationService -> system device::register -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
+Push:    AppDelegate token -> observable PushNotificationService -> system device::register (install + bundle + environment identity) -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView

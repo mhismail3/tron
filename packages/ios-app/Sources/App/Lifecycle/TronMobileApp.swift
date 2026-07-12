@@ -60,8 +60,8 @@ struct TronMobileApp: App {
             .task {
                 await initializeApp()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .deviceTokenDidUpdate)) { notification in
-                guard let token = notification.userInfo?["token"] as? String else { return }
+            .onChange(of: container.pushNotificationService.deviceToken, initial: true) { _, token in
+                guard let token else { return }
                 Task { await registerDeviceToken(token) }
             }
             .onChange(of: container.engineClient.connectionState) { oldState, newState in
@@ -118,6 +118,9 @@ struct TronMobileApp: App {
                 if newPhase == .active && oldPhase != .active {
                     Task {
                         await recoverForegroundConnection()
+                        if container.engineClient.connectionState.isConnected && onboardingComplete {
+                            await registerPushIfAuthorized()
+                        }
 
                         // Handle reconnection based on current connection state.
                         // Session-list refresh is requested unconditionally — the central

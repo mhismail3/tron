@@ -81,12 +81,13 @@ pub(super) fn registration_record(input: RegistrationRecordInput<'_>) -> Value {
 }
 
 pub(super) fn event_families(payload: &Value) -> Result<Vec<String>, CapabilityError> {
-    let values = optional_string_array(payload, "eventFamilies")?.unwrap_or_else(|| {
-        EVENT_FAMILIES
-            .iter()
-            .map(|value| (*value).to_owned())
-            .collect()
-    });
+    let values = optional_string_array(payload, "eventFamilies", EVENT_FAMILIES.len())?
+        .unwrap_or_else(|| {
+            EVENT_FAMILIES
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect()
+        });
     let mut families = Vec::with_capacity(values.len());
     for value in values {
         let family = bounded_token("eventFamilies", &value, 64)?;
@@ -378,6 +379,7 @@ pub(super) fn device_resource_id(
     scope: &EngineResourceScope,
     platform: &str,
     environment: &str,
+    bundle_id: &str,
     device_id: &str,
 ) -> String {
     let mut hasher = Sha256::new();
@@ -388,6 +390,8 @@ pub(super) fn device_resource_id(
     hasher.update(platform.as_bytes());
     hasher.update(b":");
     hasher.update(environment.as_bytes());
+    hasher.update(b":");
+    hasher.update(bundle_id.as_bytes());
     hasher.update(b":");
     hasher.update(device_id.as_bytes());
     format!(

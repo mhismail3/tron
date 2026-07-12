@@ -9,7 +9,6 @@ pub(super) const DEVICE_ID_MAX_BYTES: usize = 160;
 pub(super) const LABEL_MAX_BYTES: usize = 160;
 pub(super) const REASON_MAX_BYTES: usize = 1_000;
 pub(super) const BUNDLE_ID_MAX_BYTES: usize = 255;
-pub(super) const MAX_EVENT_FAMILIES: usize = 12;
 pub(super) const DEFAULT_RETENTION_DAYS: u64 = 90;
 pub(super) const MAX_RETENTION_DAYS: u64 = 366;
 pub(super) const DEFAULT_MAX_INBOX_RECORDS: u64 = 500;
@@ -53,13 +52,14 @@ pub(super) fn optional_u64(payload: &Value, field: &str) -> Result<Option<u64>, 
 pub(super) fn optional_string_array(
     payload: &Value,
     field: &str,
+    max_items: usize,
 ) -> Result<Option<Vec<String>>, CapabilityError> {
     match payload.get(field) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Array(items)) => {
-            if items.len() > MAX_EVENT_FAMILIES {
+            if items.len() > max_items {
                 return Err(invalid(format!(
-                    "{field} may contain at most {MAX_EVENT_FAMILIES} entries"
+                    "{field} may contain at most {max_items} entries"
                 )));
             }
             items

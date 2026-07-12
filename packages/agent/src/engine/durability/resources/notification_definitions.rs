@@ -68,7 +68,7 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
             redaction_rules: json!({
                 "preview": "device_registration_redacted",
                 "rawApnsToken": "never_return",
-                "tokenHash": "prefix_only"
+                "tokenHash": "redacted_presence_only"
             }),
             materialization_rules: json!({
                 "rawApnsToken": "not_materialized_in_resource_payload",
@@ -210,7 +210,7 @@ pub(super) fn notification_resource_type_definitions() -> Vec<RegisterResourceTy
             redaction_rules: json!({
                 "preview": "delivery_summary",
                 "rawApnsToken": "never_return",
-                "tokenHash": "prefix_only"
+                "tokenHash": "redacted_presence_only"
             }),
             materialization_rules: json!({
                 "liveApnsAttempt": "relay_only",

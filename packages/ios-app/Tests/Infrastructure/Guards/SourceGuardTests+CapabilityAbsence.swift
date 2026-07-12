@@ -164,6 +164,9 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         #expect(systemClient.contains("device::register"))
+        #expect(systemClient.contains("UUID().uuidString"))
+        #expect(systemClient.contains("ios:device-register:v4:"))
+        #expect(!systemClient.contains("identifierForVendor"))
         #expect(!systemClient.contains("UserDefaults.standard.set(token"))
 
         let appDelegate = try String(
@@ -172,6 +175,24 @@ extension SourceGuardTests {
         )
         #expect(appDelegate.contains("didRegisterForRemoteNotificationsWithDeviceToken"))
         #expect(!appDelegate.contains("APNs token: "))
+
+        let appLifecycle = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/App/Lifecycle/TronMobileApp.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(appLifecycle.contains("container.pushNotificationService.deviceToken"))
+        #expect(appLifecycle.contains("await registerPushIfAuthorized()"))
+
+        let pushService = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "Sources/Support/Foundation/Notifications/PushNotificationService.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(pushService.contains("Notification authorization status:"))
+        #expect(pushService.contains("notifications are disabled in iOS Settings"))
     }
 
 

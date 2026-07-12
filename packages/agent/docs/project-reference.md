@@ -1722,8 +1722,13 @@ client may call internal `device::register` and `device::unregister` functions;
 models cannot. Durable resources retain a token hash while raw APNs tokens live
 only in the private platform store under the internal notifications directory.
 Registration records explicit environment, bundle, opt-in, retention, and
-lifecycle evidence. Raw tokens, token fragments, and full token hashes are
-never returned in provider projections, lifecycle events, or logs.
+lifecycle evidence. Registration resource identity includes scope, platform,
+APNs environment, bundle id, and app-install identity so side-by-side variants
+cannot overwrite each other's token policy. A current registration durably
+retires older active resources for the same token route, preventing duplicate
+relay sends while preserving lifecycle history. Raw tokens, token fragments,
+and full token hashes are never returned in provider projections, lifecycle
+events, or logs.
 `domains/notifications` owns durable `notification` inbox/read-state records,
 `notification_delivery` evidence, unread-count badge semantics, trace/replay
 refs, retention defaults, and `notifications.lifecycle` stream evidence.
@@ -1739,8 +1744,10 @@ enabled by the default device policy. Send results distinguish durable inbox
 recording from APNs acceptance, partial delivery, policy/configuration skips,
 and transport failure, including on idempotent replay. iOS versions its token
 registration idempotency key when registration policy changes so an existing
-token can acquire the current policy without duplicate transport sends. iOS
-owns permission and token lifecycle plus safe session deep-link handling.
+token can acquire the current policy without duplicate transport sends. Each
+iOS app installation persists its own random identity and retries the trusted
+registration path after pairing, connection, token refresh, and foreground.
+iOS owns permission and token lifecycle plus safe session deep-link handling.
 Public notification APIs, a native inbox, hidden background loops, and fake
 client-local inboxes remain absent.
 Accepted Slice 14A adds `domains/media` as a narrow server-owned resource

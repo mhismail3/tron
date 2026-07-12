@@ -27,6 +27,10 @@
 //! `capability::execute` operations. Device notification policy consumes the
 //! canonical event-family taxonomy owned by the notifications domain so the
 //! default send family is always eligible under the default device policy.
+//! Registration identity includes the app bundle and APNs environment so
+//! side-by-side app variants cannot overwrite one another. Registering a token
+//! route durably retires older resources for the same bundle and environment,
+//! preventing duplicate relay delivery while preserving lifecycle history.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

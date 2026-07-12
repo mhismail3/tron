@@ -150,6 +150,65 @@ async fn register_requires_explicit_environment_and_push_opt_in() {
 }
 
 #[tokio::test]
+async fn side_by_side_apps_have_distinct_registration_resources() {
+    let fixture = Fixture::new("side-by-side-apps").await;
+    let beta = fixture.register("beta-register", register_payload()).await;
+    let mut production_payload = register_payload();
+    production_payload["bundleId"] = json!("com.example.tron");
+    let production = fixture
+        .register("production-register", production_payload)
+        .await;
+
+    assert_ne!(
+        beta["deviceRegistrationResourceId"], production["deviceRegistrationResourceId"],
+        "bundle-scoped APNs tokens must not overwrite one another"
+    );
+    let listed = fixture
+        .list("side-by-side-list", json!({"limit": 10}))
+        .await;
+    assert_eq!(listed["devices"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn matching_token_route_supersedes_older_registration() {
+    let fixture = Fixture::new("supersede-token-route").await;
+    let original = fixture
+        .register("original-register", register_payload())
+        .await;
+    let original_resource_id = original["deviceRegistrationResourceId"].as_str().unwrap();
+    let mut replacement_payload = register_payload();
+    replacement_payload["deviceId"] = json!("replacement-installation");
+    let replacement = fixture
+        .register("replacement-register", replacement_payload)
+        .await;
+
+    assert_ne!(
+        original["deviceRegistrationResourceId"],
+        replacement["deviceRegistrationResourceId"]
+    );
+    let active = fixture
+        .list("supersede-active-list", json!({"limit": 10}))
+        .await;
+    assert_eq!(active["devices"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        active["devices"][0]["deviceRegistrationResourceId"],
+        replacement["deviceRegistrationResourceId"]
+    );
+    let original_inspection = fixture
+        .deps
+        .engine_host
+        .inspect_resource(original_resource_id)
+        .await
+        .expect("inspect original")
+        .expect("original registration");
+    assert_eq!(original_inspection.resource.lifecycle, "unregistered");
+    assert_eq!(
+        current_payload(&original_inspection)["unregistered"]["reason"],
+        json!("superseded_by_current_registration")
+    );
+}
+
+#[tokio::test]
 async fn unregister_preserves_durable_state_and_default_list_hides_it() {
     let fixture = Fixture::new("unregister").await;
     let registered = fixture

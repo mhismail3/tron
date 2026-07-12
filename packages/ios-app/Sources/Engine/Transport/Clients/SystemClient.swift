@@ -1,6 +1,5 @@
 import Foundation
 import CryptoKit
-import UIKit
 
 /// Client for system-level engine operations.
 final class SystemClient: EngineDomainClient {
@@ -33,9 +32,6 @@ final class SystemClient: EngineDomainClient {
             throw EngineClientError.invalidURL
         }
         let deviceId = DeviceInstallationIdentity.current()
-        let tokenDigest = SHA256.hash(data: Data(token.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
         return try await invokeWrite(
             "device::register",
             DeviceRegistrationParams(
@@ -47,8 +43,11 @@ final class SystemClient: EngineDomainClient {
                 pushOptIn: true,
                 pushEnabled: true
             ),
-            idempotencyKey: EngineIdempotencyKey(
-                rawValue: "ios:device-register:v2:\(bundleId):\(environment):\(tokenDigest)"
+            idempotencyKey: DeviceRegistrationIdempotency.key(
+                bundleId: bundleId,
+                environment: environment,
+                deviceId: deviceId,
+                token: token
             )
         )
     }
@@ -72,14 +71,35 @@ struct DeviceRegistrationResult: Decodable, Equatable {
     let liveApnsEnabled: Bool
 }
 
-private enum DeviceInstallationIdentity {
+enum DeviceRegistrationIdempotency {
+    static func key(
+        bundleId: String,
+        environment: String,
+        deviceId: String,
+        token: String
+    ) -> EngineIdempotencyKey {
+        let registrationDigest = SHA256.hash(
+            data: Data("\(deviceId)\u{0}\(token)".utf8)
+        )
+        .map { String(format: "%02x", $0) }
+        .joined()
+        return EngineIdempotencyKey(
+            rawValue: "ios:device-register:v4:\(bundleId):\(environment):\(registrationDigest)"
+        )
+    }
+}
+
+enum DeviceInstallationIdentity {
     private static let storageKey = "tron.deviceInstallationId"
 
     static func current(defaults: UserDefaults = .standard) -> String {
         if let existing = defaults.string(forKey: storageKey), !existing.isEmpty {
             return existing
         }
-        let identifier = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        // This identity belongs to one app installation. A vendor-scoped
+        // device identity would let side-by-side Tron apps overwrite each
+        // other's APNs registrations.
+        let identifier = UUID().uuidString
         defaults.set(identifier, forKey: storageKey)
         return identifier
     }

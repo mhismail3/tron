@@ -36,6 +36,10 @@ final class PushNotificationService {
     func registerAfterPairing() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         authorizationStatus = settings.authorizationStatus
+        TronLogger.shared.info(
+            "Notification authorization status: \(settings.authorizationStatus.tronLabel)",
+            category: .notification
+        )
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral:
             UIApplication.shared.registerForRemoteNotifications()
@@ -55,9 +59,30 @@ final class PushNotificationService {
                 )
             }
         case .denied:
-            break
+            registrationError = "Notifications are disabled in iOS Settings"
+            TronLogger.shared.warning(
+                "APNs registration skipped because notifications are disabled in iOS Settings",
+                category: .notification
+            )
         @unknown default:
-            break
+            registrationError = "Notification authorization status is unsupported"
+            TronLogger.shared.warning(
+                "APNs registration skipped because notification authorization is unsupported",
+                category: .notification
+            )
+        }
+    }
+}
+
+private extension UNAuthorizationStatus {
+    var tronLabel: String {
+        switch self {
+        case .notDetermined: "not_determined"
+        case .denied: "denied"
+        case .authorized: "authorized"
+        case .provisional: "provisional"
+        case .ephemeral: "ephemeral"
+        @unknown default: "unknown"
         }
     }
 }
