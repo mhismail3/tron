@@ -74,22 +74,35 @@ struct SessionSidebar: View {
                 }
 
                 ForEach(workspaceGroups) { group in
+                    let visibleSessions = sessionExpansion.visibleSessions(in: group)
+                    let canViewMore = sessionExpansion.canViewMore(
+                        groupId: group.id,
+                        totalCount: group.sessions.count
+                    )
+                    let canViewLess = sessionExpansion.canViewLess(
+                        groupId: group.id,
+                        totalCount: group.sessions.count
+                    )
+                    let hasExpansionControls = canViewMore || canViewLess
+                    let disclosureItemCount = visibleSessions.count + (hasExpansionControls ? 1 : 0)
+                    let rowsAreVisible = workspaceDisclosure.areRowsVisible(group.id)
+
                     Section {
                         if workspaceDisclosure.shouldRenderRows(group.id) {
-                            ForEach(sessionExpansion.visibleSessions(in: group)) { session in
+                            ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
                                 sessionRow(session)
-                                    .opacity(workspaceDisclosure.areRowsVisible(group.id) ? 1 : 0)
+                                    .opacity(rowsAreVisible ? 1 : 0)
+                                    .animation(
+                                        SessionListLayout.disclosureRowAnimation(
+                                            index: index,
+                                            itemCount: disclosureItemCount,
+                                            isVisible: rowsAreVisible
+                                        ),
+                                        value: rowsAreVisible
+                                    )
                             }
 
-                            let canViewMore = sessionExpansion.canViewMore(
-                                groupId: group.id,
-                                totalCount: group.sessions.count
-                            )
-                            let canViewLess = sessionExpansion.canViewLess(
-                                groupId: group.id,
-                                totalCount: group.sessions.count
-                            )
-                            if canViewMore || canViewLess {
+                            if hasExpansionControls {
                                 SessionListExpansionControls(
                                     projectName: group.name,
                                     canViewLess: canViewLess,
@@ -108,7 +121,15 @@ struct SessionSidebar: View {
                                         }
                                     }
                                 )
-                                .opacity(workspaceDisclosure.areRowsVisible(group.id) ? 1 : 0)
+                                .opacity(rowsAreVisible ? 1 : 0)
+                                .animation(
+                                    SessionListLayout.disclosureRowAnimation(
+                                        index: visibleSessions.count,
+                                        itemCount: disclosureItemCount,
+                                        isVisible: rowsAreVisible
+                                    ),
+                                    value: rowsAreVisible
+                                )
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(SessionListLayout.rowInsets)
@@ -119,7 +140,7 @@ struct SessionSidebar: View {
                             title: group.name,
                             isExpanded: workspaceDisclosure.isExpanded(group.id)
                         ) {
-                            toggleWorkspaceGroup(group.id)
+                            toggleWorkspaceGroup(group.id, itemCount: disclosureItemCount)
                         }
                     }
                 }
@@ -197,24 +218,28 @@ struct SessionSidebar: View {
         withTransaction(transaction, mutation)
     }
 
-    private func toggleWorkspaceGroup(_ groupId: String) {
+    private func toggleWorkspaceGroup(_ groupId: String, itemCount: Int) {
         let direction = workspaceDisclosure.toggleDirection(for: groupId)
-        let beginAnimation = direction == .collapse
-            ? SessionListLayout.disclosureFadeOutAnimation
-            : SessionListLayout.expansionAnimation
-        let transition = withAnimation(beginAnimation) {
-            workspaceDisclosure.beginToggle(groupId)
+        let transition: SessionListWorkspaceDisclosureTransition
+        switch direction {
+        case .collapse:
+            transition = workspaceDisclosure.beginToggle(groupId)
+        case .expand:
+            transition = withAnimation(SessionListLayout.expansionAnimation) {
+                workspaceDisclosure.beginToggle(groupId)
+            }
         }
 
         Task { @MainActor in
             let delay = transition.direction == .collapse
-                ? SessionListLayout.disclosureFadeOutDelay
+                ? SessionListLayout.disclosureCollapseDelay(itemCount: itemCount)
                 : SessionListLayout.disclosureLayoutDelay
             try? await Task.sleep(for: delay)
-            let completionAnimation = transition.direction == .collapse
-                ? SessionListLayout.expansionAnimation
-                : SessionListLayout.disclosureFadeInAnimation
-            _ = withAnimation(completionAnimation) {
+            if transition.direction == .collapse {
+                _ = withAnimation(SessionListLayout.expansionAnimation) {
+                    workspaceDisclosure.complete(transition)
+                }
+            } else {
                 workspaceDisclosure.complete(transition)
             }
         }

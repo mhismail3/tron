@@ -172,10 +172,38 @@ enum SessionListLayout {
         rowContainerHorizontalInset + rowContentHorizontalPadding
     }
     static let expansionAnimation = Animation.snappy(duration: 0.14)
-    static let disclosureFadeOutAnimation = Animation.easeOut(duration: 0.06)
-    static let disclosureFadeInAnimation = Animation.easeOut(duration: 0.10)
-    static let disclosureFadeOutDelay: Duration = .milliseconds(60)
+    static let disclosureRowFadeDuration: TimeInterval = 0.08
+    static let disclosureMaximumStaggerDuration: TimeInterval = 0.12
     static let disclosureLayoutDelay: Duration = .milliseconds(140)
+
+    static func disclosureRowDelay(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> TimeInterval {
+        let boundedCount = max(itemCount, 1)
+        let boundedIndex = min(max(index, 0), boundedCount - 1)
+        let order = isVisible ? boundedIndex : boundedCount - boundedIndex - 1
+        let step = boundedCount > 1
+            ? disclosureMaximumStaggerDuration / Double(boundedCount - 1)
+            : 0
+        return Double(order) * step
+    }
+
+    static func disclosureRowAnimation(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> Animation {
+        .easeOut(duration: disclosureRowFadeDuration)
+            .delay(disclosureRowDelay(index: index, itemCount: itemCount, isVisible: isVisible))
+    }
+
+    static func disclosureCollapseDelay(itemCount: Int) -> Duration {
+        let stagger = itemCount > 1 ? disclosureMaximumStaggerDuration : 0
+        let milliseconds = Int(((disclosureRowFadeDuration + stagger) * 1_000).rounded(.up))
+        return .milliseconds(milliseconds)
+    }
 
     static var headerInsets: EdgeInsets {
         EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)

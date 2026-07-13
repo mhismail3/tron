@@ -482,9 +482,11 @@ derived from each refreshed server group, so new or archived rows cannot leave
 stale counts; disappearing or <=10-row groups shed obsolete expansion state.
 Workspace disclosure is a staged state machine because each interactive Liquid
 Glass row is its own compositing layer. Collapse fades child rows out before an
-animated layout removal; expansion inserts invisible rows, animates project
-headers into place, and only then fades the rows in. Generation-checked phases
-make rapid direction changes deterministic without stale completion tasks.
+animated layout removal, ordered from the last visible row upward; expansion
+inserts invisible rows, animates project headers into place, and then reveals
+rows from the first visible row downward. The total stagger is bounded so large
+projects remain responsive. Generation-checked phases make rapid direction
+changes deterministic without stale completion tasks.
 Pagination still changes row membership atomically so existing rows cannot pass
 through neighboring project headers.
 `NewSessionFlow` owns the new-session sheet workflow and presents with medium

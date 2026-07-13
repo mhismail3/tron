@@ -100,6 +100,43 @@ final class SessionListPresentationTests: XCTestCase {
         XCTAssertTrue(disclosure.areRowsVisible("workspace"))
     }
 
+    func testDisclosureStaggerIsTopDownOnExpandAndBottomUpOnCollapse() {
+        let itemCount = 10
+
+        XCTAssertEqual(
+            SessionListLayout.disclosureRowDelay(index: 0, itemCount: itemCount, isVisible: true),
+            0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            SessionListLayout.disclosureRowDelay(
+                index: itemCount - 1,
+                itemCount: itemCount,
+                isVisible: true
+            ),
+            SessionListLayout.disclosureMaximumStaggerDuration,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            SessionListLayout.disclosureRowDelay(index: 0, itemCount: itemCount, isVisible: false),
+            SessionListLayout.disclosureMaximumStaggerDuration,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            SessionListLayout.disclosureRowDelay(
+                index: itemCount - 1,
+                itemCount: itemCount,
+                isVisible: false
+            ),
+            0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            SessionListLayout.disclosureCollapseDelay(itemCount: itemCount),
+            .milliseconds(200)
+        )
+    }
+
     func testEachProjectShowsExactlyTenSessionsByDefault() {
         let groups = SessionListWorkspaceGroup.groups(from: makeSessions(count: 24, project: "Workspace"))
         let expansion = SessionListSessionExpansion()
