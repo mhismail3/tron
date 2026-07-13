@@ -974,7 +974,7 @@ packages/ios-app/Sources/UI/Chat/Composer/ActionButtons.swift	implementation	ios
 packages/ios-app/Sources/UI/Chat/Composer/AttachmentBubble.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Composer/CameraCaptureSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Composer/ContentAreaView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Chat/Composer/ContextStatusPill.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Chat/Composer/ContextBriefingButton.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Composer/DocumentPicker.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Composer/InputBar.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Composer/InputTextField.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering

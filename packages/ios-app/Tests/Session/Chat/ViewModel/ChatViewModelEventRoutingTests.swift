@@ -95,7 +95,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         tokenRecord: TokenRecord? = nil,
         stopReason: String? = "end_turn",
         cost: Double? = nil,
-        contextLimit: Int? = nil
+        contextLimit: Int? = nil,
+        model: String? = nil
     ) -> TurnEndPlugin.Result {
         TurnEndPlugin.Result(
             turnNumber: turnNumber,
@@ -103,7 +104,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             tokenRecord: tokenRecord,
             stopReason: stopReason,
             cost: cost,
-            contextLimit: contextLimit
+            contextLimit: contextLimit,
+            model: model
         )
     }
 

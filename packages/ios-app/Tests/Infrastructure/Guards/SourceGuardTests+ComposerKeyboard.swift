@@ -28,6 +28,7 @@ extension SourceGuardTests {
             "ComposerAttachmentButton(",
             "ComposerTrailingButton(",
             ".glassEffect(",
+            ".overlay(alignment: .bottomLeading)",
             "includeRecentInputs: shouldShowRecentInputsMenuAction",
             ".sheet(isPresented: $showCamera)",
             ".sheet(isPresented: $showFilePicker)",
@@ -53,7 +54,6 @@ extension SourceGuardTests {
             "AttachmentMenuPopup",
             "AttachmentMenuSheet",
             "GlassRecentInputsButton",
-            ".overlay(alignment: .bottomLeading)",
             ".popover(isPresented: $showAttachmentMenu",
             ".sheet(isPresented: $showAttachmentMenu",
             "compactHeightSheetPresentation(height: CompactActionSheetLayout.sheetHeight",
@@ -97,8 +97,11 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let attachmentButtonRange = try #require(source.range(of: "ComposerAttachmentButton("))
-        let textFieldRange = try #require(source.range(of: "inputField"))
-        let attachmentButtonSource = String(source[attachmentButtonRange.lowerBound..<textFieldRange.lowerBound])
+        let dragHintRange = try #require(source.range(
+            of: ".overlay(alignment: .top)",
+            range: attachmentButtonRange.lowerBound..<source.endIndex
+        ))
+        let attachmentButtonSource = String(source[attachmentButtonRange.lowerBound..<dragHintRange.lowerBound])
 
         #expect(
             !attachmentButtonSource.contains("isFocused = false"),
@@ -124,13 +127,20 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift"),
             encoding: .utf8
         )
+        let glassRange = try #require(source.range(of: ".glassEffect("))
+        let attachmentMenuRange = try #require(source.range(of: "ComposerAttachmentButton("))
 
         #expect(source.contains("ComposerAttachmentButton("))
+        #expect(source.contains("ContextBriefingButton("))
         #expect(source.contains("ComposerTrailingButton("))
         #expect(source.contains("inputField"))
         #expect(source.components(separatedBy: ".glassEffect(").count - 1 == 1)
-        #expect(source.contains(".background {\n                // Keep the native Menu outside the material owner."))
-        #expect(!source.contains(".regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive()"))
+        #expect(glassRange.lowerBound < attachmentMenuRange.lowerBound)
+        #expect(source.contains(".overlay(alignment: .bottomLeading)"))
+        #expect(source.contains("The native Menu itself is overlaid after the material"))
+        #expect(source.contains(".interactive(!config.readOnly)"))
+        #expect(!source.contains("ContextStatusPill("))
+        #expect(!source.contains("shouldShowStatusPills"))
         #expect(!source.contains("GlassAttachmentButton("))
         #expect(!source.contains("GlassActionButton("))
         #expect(!source.contains("GlassMicButton("))

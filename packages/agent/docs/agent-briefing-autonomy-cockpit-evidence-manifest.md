@@ -10,7 +10,7 @@ Last updated: 2026-07-05
 | Backend projection | `packages/agent/src/domains/agent_briefing/` adds `agent_briefing::overview`, a pure-read projection over `module_activity::overview`. |
 | Dashboard UI | `packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift` mounts `AgentBriefingDashboardBand` above existing workspace groups. |
 | Full briefing sheet | `packages/ios-app/Sources/UI/AgentBriefing/AgentBriefingViews.swift` renders sections, evidence drill-down, empty states, and degraded state. |
-| Session Briefing | `packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheet.swift` reframes the context/model pill sheet as Session Briefing while retaining model picker, context breakdown, compact, clear, memory status, and action audit. |
+| Session Briefing | `packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheet.swift` opens from the composer context ring or audited timeline actions while retaining model picker, context breakdown, compact, clear, memory status, and action audit. |
 | Diagnostics retained | `packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift` owns the dashboard band that opens `AgentCockpitSheet`. |
 
 ## Validation Evidence

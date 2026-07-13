@@ -962,7 +962,7 @@ packages/ios-app/Sources/UI/Chat/Composer/ActionButtons.swift	retain	ios ui	PCC-
 packages/ios-app/Sources/UI/Chat/Composer/AttachmentBubble.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Composer/CameraCaptureSheet.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Composer/ContentAreaView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Chat/Composer/ContextStatusPill.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/UI/Chat/Composer/ContextBriefingButton.swift	retain	ios ui	PCC-10/AHA-9	Current tracked owner retained as the proportional Session Briefing context ring after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Composer/DocumentPicker.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Composer/InputBar.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Composer/InputTextField.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -2160,7 +2160,7 @@ packages/ios-app/Tests/UI/Settings/EngineSettingsPageLayoutTests.swift	retain	io
 packages/ios-app/TronMobile.xcodeproj/xcshareddata/xcschemes/Tron UI Validation.xcscheme	retain	ios project owner	PCC-10/ui-validation	UI validation scheme retained for simulator-backed focused iOS visual and interaction tests.
 packages/ios-app/UITests/DashboardHitTargetUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Dashboard hit-target UI tests retained to prevent icon-only tappable containers.
 packages/ios-app/UITests/OnboardingSheetDetentUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Onboarding detent UI tests retained to prevent stretched sheet row regressions.
-packages/ios-app/UITests/SessionBriefingUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Session briefing UI tests retained for chat pill briefing sheet context controls and model picker coverage.
+packages/ios-app/UITests/SessionBriefingUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Session Briefing UI tests retained for composer context-ring controls, attachment-menu interaction, and model picker coverage.
 packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md	retain	docs owner	PCC-10/dynamic-replacement	Dynamic replacement evidence retained for governed route activation rollback and failure proof.
 packages/agent/docs/capability-dynamic-replacement-inventory.tsv	retain	docs owner	PCC-10/dynamic-replacement	Dynamic replacement inventory retained for machine-checked route coverage.
 packages/agent/docs/capability-dynamic-replacement-scorecard.md	retain	docs owner	PCC-10/dynamic-replacement	Dynamic replacement scorecard retained for governed replacement acceptance criteria.

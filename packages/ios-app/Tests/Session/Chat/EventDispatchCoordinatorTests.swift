@@ -139,7 +139,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             tokenRecord: nil,
             stopReason: nil,
             cost: nil,
-            contextLimit: nil
+            contextLimit: nil,
+            model: nil
         )
 
         // When: Dispatching
@@ -151,6 +152,26 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
         // Then: Handler should be called
         XCTAssertEqual(mockContext.handleTurnEndCalledWith?.turnNumber, 1)
+    }
+
+    func testDispatch_responseComplete_callsHandleResponseComplete() {
+        let result = AgentResponseCompletePlugin.Result(
+            turnNumber: 2,
+            hasCapabilityInvocations: false,
+            capabilityInvocationCount: 0
+        )
+
+        coordinator.dispatch(
+            type: AgentResponseCompletePlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.handleResponseCompleteCalledWith?.turnNumber, 2)
+        XCTAssertEqual(
+            mockContext.handleResponseCompleteCalledWith?.hasCapabilityInvocations,
+            false
+        )
     }
 
     func testDispatch_complete_callsHandleComplete() {
@@ -331,7 +352,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
     func testDispatch_markerNoOpEventsDoNotLogWarnings() {
         for eventType in [
             AgentStartPlugin.eventType,
-            AgentResponseCompletePlugin.eventType,
             ThinkingStartPlugin.eventType,
             CapabilityInvocationBatchPlugin.eventType
         ] {
@@ -403,6 +423,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     // MARK: - Turn Lifecycle
     var handleTurnStartCalledWith: TurnStartPlugin.Result?
+    var handleResponseCompleteCalledWith: AgentResponseCompletePlugin.Result?
     var handleTurnEndCalledWith: TurnEndPlugin.Result?
     var handleCompleteCalled = false
     var handleAgentErrorCalledWith: String?
@@ -458,6 +479,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleTurnStart(_ result: TurnStartPlugin.Result) {
         handleTurnStartCalledWith = result
+    }
+
+    func handleResponseComplete(_ result: AgentResponseCompletePlugin.Result) {
+        handleResponseCompleteCalledWith = result
     }
 
     func handleTurnEnd(_ result: TurnEndPlugin.Result) {

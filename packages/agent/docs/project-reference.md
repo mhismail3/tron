@@ -781,8 +781,9 @@ policy snapshots provide the server-owned evidence packet used to verify that
 replaceable summarizers honored those refs. Policy refs are typed,
 kind-matched, non-wildcard provider-safe refs with required rationale, and
 policy snapshot/list projections fail closed if active records exceed the
-bounded projection instead of silently truncating custody evidence. The iOS Session Briefing sheet renders this substrate from the chat
-timeline/model pill and audited timeline pills as a Context Breakdown section,
+bounded projection instead of silently truncating custody evidence. The iOS
+Session Briefing sheet renders this substrate from the prompt composer's
+proportional context ring and audited timeline actions as a Context Breakdown section,
 alongside the same model picker used by new-session setup. Native Session Briefing
 uses first-party `context_control::ui_*` wrappers that validate the current
 session and record through the same server-owned context-control service instead
@@ -3073,7 +3074,7 @@ packages/ios-app/Sources/
   shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
   inline folder creation, prompt input with clearable
   device-local recent-input reuse, the
-  Session Briefing sheet opened from the timeline/model pill for model switching,
+  Session Briefing sheet opened from the composer context ring for model switching,
   provider-safe context breakdown, compact, clear, read-only memory status, and
   recent action audit detail,
   functional-only native composer attachment menu that preserves keyboard

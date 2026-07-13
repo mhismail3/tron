@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-02 (thinking vs reasoning-summary stream contracts; generating capability chip reconstruction; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
+> Last verified: 2026-07-13 (response-complete finality dispatch and live/replay metadata parity; thinking vs reasoning-summary stream contracts; generating capability chip reconstruction; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -54,8 +54,7 @@ of ordinary source and docs.
 
 Server stream event labels under `packages/agent/src/transport/runtime/streams`
 must have an iOS plugin entry even when they intentionally render no UI. Marker
-plugins such as `agent.start`, `agent.response_complete`,
-`agent.thinking_start`, `agent.interrupted`,
+plugins such as `agent.start`, `agent.thinking_start`, `agent.interrupted`,
 `agent.retry`, `context.warning`, `session.forked`,
 `capability.invocation.batch`, and `capability.invocation.arguments_delta`
 parse only the routing envelope when their payload can contain partial
@@ -64,6 +63,17 @@ successful parse is a no-op, not a transform warning; malformed payload decode
 still logs at the parser boundary. `SourceGuardTests+EventSurface` compares the
 Rust stream labels with `EventRegistry.registerAll()` so new server events
 cannot silently become unknown in the app.
+
+`agent.response_complete` is dispatched lifecycle evidence rather than a
+marker. Its server-owned capability count identifies the conservative subset
+of responses that are final clean text: zero-capability responses may be
+marked final, while capability-bearing responses never own a metadata footer.
+The matching `agent.turn_end` supplies token, model, and latency presentation
+facts, and accounting still updates for every turn. Stored reconstruction
+applies the same policy from `message.assistant`:
+text must exist, the payload must not be interrupted, and no
+capability-invocation block may be present. Neither path treats provider
+stop-reason spelling or rendered item order as finality evidence.
 
 `agent.thinking_end` is not a marker: it carries the server-authoritative final
 thinking-like text for the visible block. The live plugin replaces any

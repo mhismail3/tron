@@ -130,10 +130,7 @@ struct InputBarConfig {
     let placeholderText: String
     /// Whether the placeholder represents a shell-owned loading state.
     let placeholderShowsProgress: Bool
-    let tokenUsage: TokenUsage?
     let contextPercentage: Int
-    let contextWindow: Int
-    let lastTurnInputTokens: Int
 
     // MARK: - Model / Attachments
     let currentModelInfo: ModelInfo?
@@ -142,7 +139,6 @@ struct InputBarConfig {
     let inputHistory: InputHistoryStore?
 
     // MARK: - Misc
-    let animationCoordinator: AnimationCoordinator?
     let readOnly: Bool
 
     // MARK: - Attachment Limits
@@ -168,13 +164,9 @@ struct InputBarConfig {
         isTranscribing: Bool = false,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
-        tokenUsage: TokenUsage? = nil,
         contextPercentage: Int = 0,
-        contextWindow: Int = 0,
-        lastTurnInputTokens: Int = 0,
         currentModelInfo: ModelInfo? = nil,
         inputHistory: InputHistoryStore? = nil,
-        animationCoordinator: AnimationCoordinator? = nil,
         readOnly: Bool = false,
         showDragHint: Bool = false
     ) {
@@ -186,13 +178,9 @@ struct InputBarConfig {
         self.isTranscribing = isTranscribing
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress
-        self.tokenUsage = tokenUsage
         self.contextPercentage = contextPercentage
-        self.contextWindow = contextWindow
-        self.lastTurnInputTokens = lastTurnInputTokens
         self.currentModelInfo = currentModelInfo
         self.inputHistory = inputHistory
-        self.animationCoordinator = animationCoordinator
         self.readOnly = readOnly
         self.showDragHint = showDragHint
     }

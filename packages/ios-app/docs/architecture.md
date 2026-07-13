@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-12 (trusted APNs lifecycle registration and redacted server delivery were restored; the prompt composer owns one integrated Liquid Glass surface with provider-policy-driven attachments and state-driven voice/send/stop controls, while a transparent icon-sized menu target keeps attachment presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination uses independently aligned disclosure controls; Dashboard separates agent capabilities, inspect-only engine functions, and activity/verification).
+> Last verified: 2026-07-13 (the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free glyph inside that surface; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination uses independently aligned disclosure controls; Dashboard separates agent capabilities, inspect-only engine functions, and activity/verification).
 
 ## Overview
 
@@ -33,9 +33,11 @@ being silently omitted from counts or verified/no-capabilities summaries. The ap
 does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
-Session Briefing is the first restored chat pill affordance: tapping the chat
-timeline/model pill opens a server-backed sheet with narrative session context
-status, model switching, a
+Session Briefing opens from the prompt composer's context progress ring or an
+audited timeline action. The ring fills in direct proportion to the bounded
+server-projected context percentage; model identity remains available to
+accessibility without occupying a floating visual pill. The server-backed
+sheet provides narrative session context status, model switching, a
 provider-safe Context Breakdown, compact, clear, read-only memory status, and
 recent context action audit detail. Its context section renders
 `context_control` records and timeline action refs through first-party
@@ -86,17 +88,20 @@ and matching database/event/settings/dependency work.
   a new-session workspace selector over the configured default workspace,
   recent session workspaces, and manual Mac paths, prompt composer with a
   local recent-input picker, a functional-only native attachment menu whose
-  transparent icon-sized target preserves composer keyboard focus while the
-  material itself lives in an independent background layer that cannot be
-  replaced or invalidated by menu presentation. Native camera/photo/file
-  pickers layer above it, alongside unified attachments, and one composer
-  surface with an embedded left attachment action plus a right state action
-  that becomes voice, send, transcribing, or stop as needed. Message rendering
+  transparent icon-sized target preserves composer keyboard focus. The
+  composed content row directly owns native interactive Liquid Glass, while
+  that Menu is applied afterward over a reserved leading dock so rebuilding
+  its label cannot replace or invalidate the material owner. Native
+  camera/photo/file pickers layer above it, alongside unified attachments, and
+  one composer surface with an embedded left
+  attachment action plus a right-side, background-free proportional context
+  ring and state action that becomes voice, send, transcribing, or stop as
+  needed. Message rendering
   preserves ordered/unordered list nesting and includes quiet blank
   empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
-- Chat timeline/model pill Session Briefing sheet for model switching,
+- Composer context-ring Session Briefing sheet for model switching,
   server-owned context snapshots, manual compact/clear actions, read-only memory
   refs, and durable context action audit refs.
 - Dashboard band and sheet for core engine link/catalog health,
@@ -162,7 +167,7 @@ New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector 
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
-Context: ContextStatusPill/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
+Context: ContextBriefingButton/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
 Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
 Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
@@ -342,6 +347,18 @@ The chat timeline owns only truthful local/session presentation state:
   iOS must not treat it as another delta.
   Legacy OpenAI replay blocks without an explicit `kind` field use the same
   reasoning-summary presentation based on persisted provider type.
+- Thinking, streaming response, and completed assistant text use the same
+  rail-free leading edge. Per-item metadata is absent from thinking blocks,
+  capability chips, and intermediate assistant text. A metadata footer may
+  appear only beneath completed assistant text projected as the final clean
+  response: live events use `agent.response_complete` with zero capability
+  invocations, then attach token/model/latency facts from the matching
+  `agent.turn_end`; replay uses a non-interrupted `message.assistant` payload
+  with text and no capability-invocation block. Raw provider stop reasons and
+  visual position never establish finality.
+  Capability-bearing responses get no footer even when capability execution
+  explicitly stops, while their token records still contribute to
+  session/context accounting.
 - Capability evidence uses `CapabilityEvidencePresentation` for one-line chat
   chips and `CapabilityInvocationBriefPresentation` for detail sheets. Chips
   stay compact; detail sheets read as a progressive briefing: what happened,

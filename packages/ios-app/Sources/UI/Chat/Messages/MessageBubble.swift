@@ -10,13 +10,6 @@ struct MessageBubble: View {
         message.role == .user
     }
 
-    /// Check if we have any metadata to display
-    private var hasMetadata: Bool {
-        message.tokenRecord != nil ||
-        message.shortModelName != nil ||
-        message.formattedLatency != nil
-    }
-
     var body: some View {
         VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
             if let attachments = message.attachments, !attachments.isEmpty {
@@ -25,16 +18,8 @@ struct MessageBubble: View {
 
             contentView
 
-            // Show enriched metadata badge for assistant messages with metadata
-            if !isUserMessage && hasMetadata {
-                MessageMetadataBadge(
-                    tokenRecord: message.tokenRecord,
-                    model: message.shortModelName,
-                    latency: message.formattedLatency
-                )
-            } else if let record = message.tokenRecord {
-                // User messages use the compact token badge.
-                TokenBadge(record: record)
+            if let metadata = message.finalAssistantResponseMetadata {
+                MessageMetadataBadge(metadata: metadata)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)

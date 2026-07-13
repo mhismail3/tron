@@ -7,10 +7,12 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     func testApprovedChatAffordancesRenderForVisualQA() throws {
         let samples: [(String, AnyView, CGSize)] = [
             ("chat-normal.png", AnyView(Self.normalChatView), CGSize(width: 430, height: 360)),
+            ("chat-response-presentation.png", AnyView(Self.responsePresentationView), CGSize(width: 430, height: 620)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-capability-chip.png", AnyView(Self.capabilityChipView), CGSize(width: 430, height: 180)),
             ("chat-connection-toast.png", AnyView(Self.connectionToastView), CGSize(width: 430, height: 180)),
+            ("chat-composer-context-ring.png", AnyView(ComposerContextRingFixture()), CGSize(width: 430, height: 180)),
         ]
 
         for (name, view, size) in samples {
@@ -39,6 +41,38 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
             ),
             onDetails: { _ in }
         )
+        .padding(20)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private static var responsePresentationView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ThinkingContentView(
+                content: "Checking the available operation before responding.",
+                isExpanded: false,
+                isStreaming: false,
+                kind: .reasoningSummary
+            )
+
+            StreamingContentView(text: "Streaming response text without a leading rail.")
+
+            MessageBubble(message: ChatMessage(
+                role: .assistant,
+                content: .text("I will inspect that first."),
+                model: "gpt-5.5",
+                latencyMs: 900
+            ))
+
+            CapabilityInvocationChip(data: fixtureInvocation, onTap: {}, onCancel: nil)
+
+            MessageBubble(message: ChatMessage(
+                role: .assistant,
+                content: .text("The final response keeps the single metadata row."),
+                model: "gpt-5.5",
+                latencyMs: 1_900,
+                isFinalAssistantResponse: true
+            ))
+        }
         .padding(20)
         .background(Color(uiColor: .systemBackground))
     }
@@ -83,6 +117,27 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
                 traceId: "trace-visual"
             )
         )
+    }
+
+    private struct ComposerContextRingFixture: View {
+        @State private var state = InputBarState()
+
+        var body: some View {
+            VStack {
+                Spacer()
+                InputBar(
+                    state: state,
+                    config: InputBarConfig(
+                        contextPercentage: 68,
+                        currentModelInfo: nil,
+                        readOnly: false
+                    ),
+                    actions: InputBarActions(onContextTap: {})
+                )
+            }
+            .padding(.bottom, 20)
+            .background(Color(uiColor: .systemBackground))
+        }
     }
 
     private func render(view: AnyView, size: CGSize, outputName: String) throws -> URL {

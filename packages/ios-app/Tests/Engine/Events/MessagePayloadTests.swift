@@ -38,6 +38,45 @@ final class AssistantMessagePayloadTests: XCTestCase {
         XCTAssertEqual(parsed?.contentBlocks[0]["text"] as? String, "Hello world")
     }
 
+    func testTextWithoutCapabilitiesIsEligibleForFinalResponsePresentation() {
+        let payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "Final response"] as [String: Any]
+        ] as [[String: Any]]), stopReason: "provider_specific_reason")
+
+        let parsed = AssistantMessagePayload(from: payload)
+
+        XCTAssertEqual(parsed?.hasCapabilityInvocations, false)
+        XCTAssertEqual(parsed?.isFinalAssistantResponse, true)
+    }
+
+    func testCapabilityBearingTextIsIneligibleRegardlessOfStopReason() {
+        let payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "I will inspect that"] as [String: Any],
+            [
+                "type": "capability_invocation",
+                "id": "call-1",
+                "name": "execute",
+                "input": ["command": "true"]
+            ] as [String: Any]
+        ] as [[String: Any]]), stopReason: "end_turn")
+
+        let parsed = AssistantMessagePayload(from: payload)
+
+        XCTAssertEqual(parsed?.hasCapabilityInvocations, true)
+        XCTAssertEqual(parsed?.isFinalAssistantResponse, false)
+    }
+
+    func testInterruptedTextIsIneligibleForFinalResponsePresentation() {
+        var payload = validPayload(content: AnyCodable([
+            ["type": "text", "text": "Partial response"] as [String: Any]
+        ] as [[String: Any]]))
+        payload["interrupted"] = AnyCodable(true)
+
+        let parsed = AssistantMessagePayload(from: payload)
+
+        XCTAssertEqual(parsed?.isFinalAssistantResponse, false)
+    }
+
     func testMissingContentFailsDecode() {
         // `content` is non-optional on the Rust payload. Its absence
         // is a schema violation; init? must return nil.

@@ -44,7 +44,7 @@ enum TableAlignment: Equatable, Hashable {
     case right
 }
 
-// MARK: - Text Content View (Terminal-style with Block Markdown)
+// MARK: - Text Content View (Block Markdown)
 
 struct TextContentView: View {
     let text: String
@@ -71,14 +71,7 @@ struct TextContentView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if role == .assistant {
-                Rectangle()
-                    .fill(Color.tronEmerald)
-                    .frame(width: 2)
-                    .padding(.trailing, 12)
-            }
-
+        Group {
             if isUser {
                 Text(text)
                     .font(TronTypography.messageBody)

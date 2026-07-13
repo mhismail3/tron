@@ -237,8 +237,8 @@ extension SourceGuardTests {
             contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
-        let contextPill = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/ContextStatusPill.swift"),
+        let contextButton = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/ContextBriefingButton.swift"),
             encoding: .utf8
         )
         let contextSheet = try String(
@@ -265,10 +265,11 @@ extension SourceGuardTests {
 
         #expect(FileManager.default.fileExists(atPath: uiTest.path))
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/" + "Agent" + "Control" + "UITests.swift").path))
-        #expect(readme.contains("Session Briefing sheet opened from the timeline/model pill"))
-        #expect(!readme.contains(retiredSurfaceName + " sheet opened from the timeline/model pill"))
-        #expect(contextPill.contains("Opens Session Briefing"))
-        #expect(!contextPill.contains("Opens " + retiredSurfaceName))
+        #expect(readme.contains("Session Briefing sheet opened from the composer context ring"))
+        #expect(!readme.contains(retiredSurfaceName + " sheet opened from the composer context ring"))
+        #expect(contextButton.contains("Context Briefing Button"))
+        #expect(contextButton.contains(".accessibilityLabel(\"Session Briefing\")"))
+        #expect(!contextButton.contains("Opens " + retiredSurfaceName))
         #expect(contextSheet.contains("session-briefing-context-summary"))
         #expect(contextSheet.contains("session-briefing-composition-card"))
         #expect(contextSheet.contains("session-briefing-model-card"))

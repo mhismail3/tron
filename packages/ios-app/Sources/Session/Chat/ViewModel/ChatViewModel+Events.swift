@@ -206,6 +206,10 @@ extension ChatViewModel {
         pruneOldMessagesIfNeeded()
     }
 
+    func handleResponseComplete(_ pluginResult: AgentResponseCompletePlugin.Result) {
+        turnLifecycleCoordinator.handleResponseComplete(pluginResult, context: self)
+    }
+
     func handleComplete() {
         // Only transition from .processing -> .idle.
         // After abort, agentPhase is already .idle — skip to prevent flicker.

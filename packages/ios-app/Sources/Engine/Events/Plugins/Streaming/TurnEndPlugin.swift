@@ -21,9 +21,10 @@ enum TurnEndPlugin: DispatchableEventPlugin {
             let stopReason: String?
             let cost: Double?
             let contextLimit: Int?
+            let model: String?
 
             enum CodingKeys: String, CodingKey {
-                case turn, turnNumber, duration, tokenRecord, stopReason, cost, contextLimit
+                case turn, turnNumber, duration, tokenRecord, stopReason, cost, contextLimit, model
             }
 
             init(from decoder: Decoder) throws {
@@ -34,6 +35,7 @@ enum TurnEndPlugin: DispatchableEventPlugin {
                 tokenRecord = try container.decodeIfPresent(TokenRecord.self, forKey: .tokenRecord)
                 stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
                 contextLimit = try container.decodeIfPresent(Int.self, forKey: .contextLimit)
+                model = try container.decodeIfPresent(String.self, forKey: .model)
 
                 // Handle cost as either Double or String
                 if let costDouble = try? container.decodeIfPresent(Double.self, forKey: .cost) {
@@ -60,6 +62,7 @@ enum TurnEndPlugin: DispatchableEventPlugin {
         let stopReason: String?
         let cost: Double?
         let contextLimit: Int?
+        let model: String?
     }
 
     // MARK: - Protocol Implementation
@@ -72,7 +75,8 @@ enum TurnEndPlugin: DispatchableEventPlugin {
             tokenRecord: data.tokenRecord,
             stopReason: data.stopReason,
             cost: data.cost,
-            contextLimit: data.contextLimit
+            contextLimit: data.contextLimit,
+            model: data.model
         )
     }
 

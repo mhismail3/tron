@@ -13,7 +13,8 @@ final class TurnEndPluginTests: XCTestCase {
                 "duration": 5000,
                 "stopReason": "end_turn",
                 "cost": 0.025,
-                "contextLimit": 200000
+                "contextLimit": 200000,
+                "model": "claude-sonnet-4"
             }
         }
         """))
@@ -25,6 +26,7 @@ final class TurnEndPluginTests: XCTestCase {
         XCTAssertEqual(event.data?.stopReason, "end_turn")
         XCTAssertEqual(event.data?.cost, 0.025)
         XCTAssertEqual(event.data?.contextLimit, 200000)
+        XCTAssertEqual(event.data?.model, "claude-sonnet-4")
     }
 
     func testParseWithCostAsString() throws {
@@ -126,7 +128,8 @@ final class TurnEndPluginTests: XCTestCase {
                 "duration": 3000,
                 "stopReason": "capability_invocation",
                 "cost": 0.05,
-                "contextLimit": 128000
+                "contextLimit": 128000,
+                "model": "claude-opus-4-6"
             }
         }
         """))
@@ -142,6 +145,7 @@ final class TurnEndPluginTests: XCTestCase {
         XCTAssertEqual(turnResult.stopReason, "capability_invocation")
         XCTAssertEqual(turnResult.cost, 0.05)
         XCTAssertEqual(turnResult.contextLimit, 128000)
+        XCTAssertEqual(turnResult.model, "claude-opus-4-6")
     }
 
     func testTransformWithTokenRecord() throws {

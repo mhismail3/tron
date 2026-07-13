@@ -111,6 +111,18 @@ enum MessageContent: Equatable {
         }
     }
 
+    /// Text that belongs to an assistant response. Streaming text is included
+    /// so live turn metadata can be attached before finalization swaps the
+    /// content to `.text`; presentation waits for the completed `.text` state.
+    var isAssistantResponseText: Bool {
+        switch self {
+        case .text, .streaming:
+            true
+        default:
+            false
+        }
+    }
+
     var isCapabilityRelated: Bool {
         switch self {
         case .capabilityInvocation, .capabilityResult:

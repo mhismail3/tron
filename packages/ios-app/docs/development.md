@@ -139,6 +139,50 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+For chat response rails and final-response metadata projection, run only the
+payload, dispatch, lifecycle, reconstruction, and presentation contracts:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/AssistantMessagePayloadTests \
+  -only-testing:TronMobileTests/AgentResponseCompletePluginTests \
+  -only-testing:TronMobileTests/TurnEndPluginTests \
+  -only-testing:TronMobileTests/EventPluginTests \
+  -only-testing:TronMobileTests/EventDispatchCoordinatorTests \
+  -only-testing:TronMobileTests/ChatViewModelEventRoutingTests \
+  -only-testing:TronMobileTests/TurnLifecycleCoordinatorTests \
+  -only-testing:TronMobileTests/TextStreamConvergenceTests \
+  -only-testing:TronMobileTests/UnifiedEventTransformerTokenMetadataTests \
+  -only-testing:TronMobileTests/ChatMessagePresentationTests \
+  -only-testing:TronMobileTests/CapabilityInvocationGroupingTests \
+  -only-testing:TronMobileTests/EventDatabaseTests/testEnrichedAssistantMessageMetadata
+
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests
+
+```
+
+For the interactive prompt-composer glass and background-free proportional
+Session Briefing context ring, run the focused presentation/source contracts
+and visual render:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/ContextBriefingButtonTests \
+  -only-testing:TronMobileTests/InputBarKeyboardTraversalTests
+
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests
+
+xcodebuild test -scheme 'Tron UI Validation' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileUITests/SessionBriefingUITests/testComposerGlassKeepsAttachmentMenuAndSessionBriefingInteractive
+```
+
 For dashboard session-list loading and per-workspace disclosure changes, run:
 
 ```bash

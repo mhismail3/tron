@@ -4,9 +4,9 @@ import SwiftUI
 /// Coordinates turn lifecycle event handling for ChatViewModel.
 ///
 /// Responsibilities:
-/// - Handling turn start/end events
+/// - Handling turn start/response-complete/end events
 /// - Managing turn state (tracking indices, capability invocations)
-/// - Updating message metadata with token usage
+/// - Marking the server-identified final response and attaching its metadata
 /// - Coordinating with ThinkingState, ContextState
 /// - Managing completion state cleanup
 ///
@@ -70,6 +70,41 @@ final class TurnLifecycleCoordinator {
         context.logDebug("Turn \(pluginResult.turnNumber) boundary set at message index \(context.turnStartMessageIndex ?? -1)")
     }
 
+    // MARK: - Response Complete Handling
+
+    /// Mark the textual response that ends the current prompt cycle.
+    ///
+    /// Provider stop reasons are not finality: a provider may report
+    /// `end_turn` while also returning capability invocations. A completed
+    /// response with zero invocations is the conservative server-backed signal
+    /// for a clean final textual response.
+    func handleResponseComplete(
+        _ pluginResult: AgentResponseCompletePlugin.Result,
+        context: TurnLifecycleContext
+    ) {
+        guard !pluginResult.hasCapabilityInvocations else {
+            context.logDebug(
+                "Response for turn \(pluginResult.turnNumber) includes \(pluginResult.capabilityInvocationCount) capability invocation(s); omitting final-response metadata"
+            )
+            return
+        }
+
+        guard let index = currentResponseTextIndex(in: context) else {
+            context.logDebug(
+                "Terminal response for turn \(pluginResult.turnNumber) has no textual chat message"
+            )
+            return
+        }
+
+        context.updateMessage(at: index) { message in
+            message.isFinalAssistantResponse = true
+            message.turnNumber = pluginResult.turnNumber
+        }
+        context.logDebug(
+            "Marked textual response for turn \(pluginResult.turnNumber) as final"
+        )
+    }
+
     // MARK: - Turn End Handling
 
     /// Handle a turn end event.
@@ -114,51 +149,18 @@ final class TurnLifecycleCoordinator {
             context.logDebug("Marked thinking message as no longer streaming")
         }
 
-        // Find the message to update with metadata.
-        // The stats line renders BELOW the target message, so we must pick the
-        // LAST message in the turn to ensure stats appear after all capability chips.
-        //
-        // Strategy:
-        //   1. Active streaming message (text-only turns ending mid-stream)
-        //   2. Last assistant message in turn range (text+capabilities, capability-only, or text-only)
-        //   3. Tracked first text ID if the turn boundary was cleared early
-        var targetIndex: Int?
-
-        if let id = context.streamingMessageId,
-           let index = MessageFinder.indexById(id, in: context.messages) {
-            targetIndex = index
-            context.logDebug("Using streaming message for turn metadata at index \(index)")
-        } else if let startIndex = context.turnStartMessageIndex,
-                  startIndex < context.messages.count {
-            // Find the LAST assistant message in this turn.
-            // This ensures the stats line appears after all parallel capability chips,
-            // not between the first and second capability invocation.
-            for i in startIndex..<context.messages.count {
-                if context.messages[i].role == .assistant {
-                    switch context.messages[i].content {
-                    case .text, .capabilityInvocation:
-                        targetIndex = i
-                    default:
-                        break
-                    }
-                }
-            }
-            if let idx = targetIndex {
-                context.logDebug("Using last assistant message for turn metadata at index \(idx) (turn=\(pluginResult.turnNumber))")
-            }
-        } else if let firstTextId = context.firstTextMessageIdForTurn,
-                  let index = MessageFinder.indexById(firstTextId, in: context.messages) {
-            targetIndex = index
-            context.logDebug("Using tracked text message for turn metadata at index \(index)")
-        }
-
-        // Update the target message with metadata
-        if let index = targetIndex {
+        // Only the response previously marked by the server's exact
+        // response-complete capability signal may own presentation metadata.
+        if let index = finalResponseIndex(
+            for: pluginResult.turnNumber,
+            in: context
+        ) {
             context.updateMessage(at: index) { message in
-                message.tokenRecord = pluginResult.tokenRecord
-                message.model = context.currentModel
-                message.latencyMs = pluginResult.duration
-                message.stopReason = pluginResult.stopReason
+                message.applyFinalAssistantResponseMetadata(
+                    tokenRecord: pluginResult.tokenRecord,
+                    model: pluginResult.model,
+                    latencyMs: pluginResult.duration
+                )
                 message.turnNumber = pluginResult.turnNumber
             }
 
@@ -169,8 +171,6 @@ final class TurnLifecycleCoordinator {
             } else {
                 context.logError("[TOKEN-FLOW] iOS: stream.turn_end MISSING tokenRecord (turn=\(pluginResult.turnNumber))")
             }
-        } else {
-            context.logWarning("Could not find message to update with turn metadata (turn=\(pluginResult.turnNumber))")
         }
 
         // Update all assistant messages from this turn with turn number
@@ -231,6 +231,49 @@ final class TurnLifecycleCoordinator {
                 }
             }
         }
+    }
+
+    /// Locate the current turn's text message without using its visual position
+    /// to decide finality. Finality is assigned separately by
+    /// `handleResponseComplete`.
+    private func currentResponseTextIndex(in context: TurnLifecycleContext) -> Int? {
+        if let id = context.streamingMessageId,
+           let index = MessageFinder.indexById(id, in: context.messages),
+           context.messages[index].role == .assistant,
+           context.messages[index].content.isAssistantResponseText {
+            return index
+        }
+
+        if let id = context.firstTextMessageIdForTurn,
+           let index = MessageFinder.indexById(id, in: context.messages),
+           context.messages[index].role == .assistant,
+           context.messages[index].content.isAssistantResponseText {
+            return index
+        }
+
+        guard let startIndex = context.turnStartMessageIndex,
+              startIndex < context.messages.count
+        else {
+            return nil
+        }
+
+        return (startIndex..<context.messages.count).reversed().first {
+            context.messages[$0].role == .assistant &&
+            context.messages[$0].content.isAssistantResponseText
+        }
+    }
+
+    private func finalResponseIndex(
+        for turnNumber: Int,
+        in context: TurnLifecycleContext
+    ) -> Int? {
+        guard let index = currentResponseTextIndex(in: context),
+              context.messages[index].isFinalAssistantResponse,
+              context.messages[index].turnNumber == turnNumber
+        else {
+            return nil
+        }
+        return index
     }
 
     // MARK: - Complete Handling

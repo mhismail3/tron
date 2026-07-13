@@ -17,7 +17,7 @@ final class ContextTrackingState {
     /// Per-turn NEW tokens (for stats line display) - from server's tokenRecord.computed.newInputTokens
     var newInputTokens: Int = 0
 
-    /// Total context size in tokens (for progress pill) - synced from tokenRecord
+    /// Total context size in tokens (for the composer context ring) - synced from tokenRecord
     var contextWindowTokens: Int = 0
 
     /// Output tokens for this turn - from server's tokenRecord.source.rawOutputTokens

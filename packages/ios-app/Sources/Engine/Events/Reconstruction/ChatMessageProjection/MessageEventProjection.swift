@@ -51,17 +51,20 @@ enum MessageEventProjection {
         // Capability blocks are handled by capability.invocation.started/capability.invocation.completed events
         guard let text = parsed.textContent, !text.isEmpty else { return nil }
 
-        return ChatMessage(
+        var message = ChatMessage(
             role: .assistant,
             content: .text(text),
             timestamp: timestamp,
-            tokenRecord: parsed.tokenRecord,
-            model: parsed.model,
-            latencyMs: parsed.latencyMs,
             turnNumber: parsed.turn,
             hasThinking: parsed.hasThinking,
-            stopReason: parsed.stopReason?.rawValue
+            isFinalAssistantResponse: parsed.isFinalAssistantResponse
         )
+        message.applyFinalAssistantResponseMetadata(
+            tokenRecord: parsed.tokenRecord,
+            model: parsed.model,
+            latencyMs: parsed.latencyMs
+        )
+        return message
     }
 
     /// Transform message.system event into a ChatMessage.

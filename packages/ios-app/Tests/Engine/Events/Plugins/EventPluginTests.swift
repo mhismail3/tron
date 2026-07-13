@@ -260,7 +260,6 @@ final class EventPluginTests: XCTestCase {
             "context.warning",
             "session.forked",
             "agent.thinking_start",
-            "agent.response_complete",
             "capability.invocation.batch",
             "capability.invocation.arguments_delta"
         ] {

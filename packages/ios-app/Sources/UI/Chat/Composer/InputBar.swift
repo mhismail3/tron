@@ -25,7 +25,6 @@ struct InputBar: View {
     @State private var showFilePicker = false
     @State private var showingImagePicker = false
     @State private var showRecentInputs = false
-    @State private var hasAppeared = false
 
     private let actionButtonSize: CGFloat = 40
 
@@ -40,8 +39,6 @@ struct InputBar: View {
     private var showStop: Bool {
         config.agentPhase.isActive
     }
-
-    private var shouldShowStatusPills: Bool { true }
 
     private var shouldShowRecentInputsMenuAction: Bool {
         RecentInputHistoryPresentation.shouldShowMenuAction(
@@ -60,28 +57,34 @@ struct InputBar: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            // Content area: attachments and status pills
-            contentArea
-                .padding(.horizontal, 16)
-                .transition(.opacity)
+            if !state.attachments.isEmpty {
+                attachmentArea
+                    .padding(.horizontal, 16)
+                    .transition(.opacity)
+            }
 
-            // One composer surface owns attachment, text, and the trailing
-            // state action. This prevents independently animated controls from
-            // drifting or creating competing hit targets.
+            // One composer surface owns the attachment action, text, context
+            // briefing progress, and trailing state action.
             HStack(alignment: .bottom, spacing: 4) {
                 if !config.readOnly {
-                    ComposerAttachmentButton(
-                        isDisabled: config.agentPhase.isActive || config.readOnly,
-                        attachmentCapability: config.attachmentCapability,
-                        includeRecentInputs: shouldShowRecentInputsMenuAction,
-                        onSelect: presentAttachmentAction,
-                        buttonSize: actionButtonSize
-                    )
+                    // Reserve the attachment action's layout inside the glass.
+                    // The native Menu itself is overlaid after the material so
+                    // rebuilding its label cannot replace the glass owner.
+                    Color.clear
+                        .frame(width: actionButtonSize, height: actionButtonSize)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
 
                 inputField
 
                 if !config.readOnly {
+                    ContextBriefingButton(
+                        contextPercentage: config.contextPercentage,
+                        modelName: config.currentModelInfo?.name,
+                        onTap: actions.onContextTap
+                    )
+
                     ComposerTrailingButton(
                         showStop: showStop,
                         canSend: canSend,
@@ -101,15 +104,23 @@ struct InputBar: View {
             }
             .frame(minHeight: actionButtonSize)
             .padding(.horizontal, 4)
-            .background {
-                // Keep the native Menu outside the material owner. Menu
-                // presentation can rebuild its label hierarchy; the glass
-                // surface must remain a stable sibling throughout that cycle.
-                Color.clear
-                    .glassEffect(
-                        .regular.tint(Color.tronPhthaloGreen.opacity(0.25)),
-                        in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .glassEffect(
+                .regular
+                    .tint(Color.tronPhthaloGreen.opacity(0.25))
+                    .interactive(!config.readOnly),
+                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            )
+            .overlay(alignment: .bottomLeading) {
+                if !config.readOnly {
+                    ComposerAttachmentButton(
+                        isDisabled: config.agentPhase.isActive || config.readOnly,
+                        attachmentCapability: config.attachmentCapability,
+                        includeRecentInputs: shouldShowRecentInputsMenuAction,
+                        onSelect: presentAttachmentAction,
+                        buttonSize: actionButtonSize
                     )
+                    .padding(.leading, 4)
+                }
             }
             .overlay(alignment: .top) {
                 if config.showDragHint {
@@ -161,45 +172,18 @@ struct InputBar: View {
                 )
             }
         }
-        .onAppear {
-            hasAppeared = false
-
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarFinalDelayNanos)
-                withAnimation(TronAnimationTiming.inputBarFinalSpring) {
-                    hasAppeared = true
-                }
-            }
-        }
-        .onDisappear {
-            hasAppeared = false
-        }
     }
 
-    // MARK: - Content Area
+    // MARK: - Attachment Area
 
     @ViewBuilder
-    private var contentArea: some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            if !state.attachments.isEmpty {
-                ContentAreaView(
-                    attachments: state.attachments,
-                    attachmentCapability: config.attachmentCapability,
-                    onRemoveAttachment: actions.onRemoveAttachment
-                )
-            }
-
-            Spacer(minLength: 0)
-
-            ContextStatusPill(
-                contextPercentage: config.contextPercentage,
-                modelName: config.currentModelInfo?.name,
-                hasAppeared: hasAppeared,
-                readOnly: config.readOnly,
-                onTap: actions.onContextTap
-            )
-            .opacity(shouldShowStatusPills ? 1 : 0)
-        }
+    private var attachmentArea: some View {
+        ContentAreaView(
+            attachments: state.attachments,
+            attachmentCapability: config.attachmentCapability,
+            onRemoveAttachment: actions.onRemoveAttachment
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Text Field
@@ -369,13 +353,9 @@ extension Notification.Name {
         InputBar(
             state: previewState,
             config: InputBarConfig(
-                tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
                 contextPercentage: 30,
-                contextWindow: 200_000,
-                lastTurnInputTokens: 60000,
                 currentModelInfo: nil,
                 inputHistory: nil,
-                animationCoordinator: nil,
                 readOnly: false
             ),
             actions: InputBarActions()

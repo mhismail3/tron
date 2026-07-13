@@ -34,7 +34,7 @@ and test burden.
   labels, token estimates, redacted refs, redaction/truncation proof, epoch and
   action refs. No raw prompts, hidden chain-of-thought, secrets, env values,
   paths, commands, logs, grants, or authorities.
-- Mobile UI idea: tap timeline/model pill; show a model picker section, Context
+- Mobile UI idea: tap the composer context ring or audited timeline action; show a model picker section, Context
   Breakdown, toolbar compact/clear/reload actions, memory read-only status,
   recent actions, and timeline-pill action details.
 - Risks: accidental legacy broad-panel resurrection, raw context leakage, clear

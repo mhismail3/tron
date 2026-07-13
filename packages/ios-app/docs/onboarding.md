@@ -263,8 +263,8 @@ rebuild without requiring every screen to own retry logic.
 The Engine settings sheet follows the same top summary-card pattern and divides
 server settings by ownership. Engine owns the retained quick-session defaults
 that exist as actionable iOS controls: model and workspace.
-Context management remains session-scoped through the chat pill and Context
-Control surfaces instead of Settings.
+Context management remains session-scoped through the prompt composer's context
+ring and Session Briefing surfaces instead of Settings.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a

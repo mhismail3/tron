@@ -18,13 +18,9 @@ extension ChatView {
                         isTranscribing: viewModel.isTranscribing,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         placeholderShowsProgress: !initialLoadComplete,
-                        tokenUsage: viewModel.contextState.totalTokenUsage,
                         contextPercentage: viewModel.contextState.contextPercentage,
-                        contextWindow: viewModel.contextState.currentContextWindow,
-                        lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
                         currentModelInfo: currentModelInfo,
                         inputHistory: inputHistory,
-                        animationCoordinator: viewModel.animationCoordinator,
                         readOnly: workspaceDeleted || !(interactionPolicy?.isConnected ?? false),
                         showDragHint: false
                     ),

@@ -832,7 +832,7 @@ packages/ios-app/Sources/UI/Chat/Composer/ActionButtons.swift	swift	implementati
 packages/ios-app/Sources/UI/Chat/Composer/AttachmentBubble.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/CameraCaptureSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/ContentAreaView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/UI/Chat/Composer/ContextStatusPill.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/ContextBriefingButton.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/DocumentPicker.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/InputBar.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/InputTextField.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
