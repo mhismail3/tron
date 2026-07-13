@@ -25,10 +25,10 @@ struct EngineCockpitDashboardBand: View {
                         .foregroundStyle(.tronTextSecondary)
                         .lineLimit(3)
                     HStack(spacing: 8) {
-                        briefingMetric("Actions", dashboardSummary.agentActions.displayValue)
-                        briefingMetric("Triggers", "\(dashboardSummary.triggers)")
-                        briefingMetric("Issues", "\(dashboardSummary.issues)")
-                        briefingPhrase(dashboardSummary.verification)
+                        summaryMetric("Actions", dashboardSummary.agentActions.displayValue)
+                        summaryMetric("Triggers", "\(dashboardSummary.triggers)")
+                        summaryMetric("Issues", "\(dashboardSummary.issues)")
+                        summaryPhrase(dashboardSummary.verification)
                     }
                 }
 
@@ -74,7 +74,7 @@ struct EngineCockpitDashboardBand: View {
         }
     }
 
-    private func briefingMetric(_ label: String, _ value: String) -> some View {
+    private func summaryMetric(_ label: String, _ value: String) -> some View {
         HStack(spacing: 4) {
             Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -87,7 +87,7 @@ struct EngineCockpitDashboardBand: View {
         .minimumScaleFactor(0.82)
     }
 
-    private func briefingPhrase(_ value: String) -> some View {
+    private func summaryPhrase(_ value: String) -> some View {
         Text(value)
             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(accent)

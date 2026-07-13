@@ -282,8 +282,8 @@ final class SessionListPresentationTests: XCTestCase {
         XCTAssertEqual(SessionListLayout.rowInsets.trailing, SessionListLayout.rowContainerHorizontalInset)
         XCTAssertEqual(SessionListLayout.rowInsets.top, 2)
         XCTAssertEqual(SessionListLayout.rowInsets.bottom, 2)
-        XCTAssertEqual(SessionListLayout.briefingInsets.leading, SessionListLayout.rowInsets.leading)
-        XCTAssertEqual(SessionListLayout.briefingInsets.trailing, SessionListLayout.rowInsets.trailing)
+        XCTAssertEqual(SessionListLayout.dashboardInsets.leading, SessionListLayout.rowInsets.leading)
+        XCTAssertEqual(SessionListLayout.dashboardInsets.trailing, SessionListLayout.rowInsets.trailing)
         XCTAssertEqual(SessionListLayout.rowContainerHorizontalInset, 16)
         XCTAssertEqual(SessionListLayout.rowContentHorizontalPadding, 12)
         XCTAssertEqual(

@@ -42,18 +42,18 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 113 |
-| implementation | 884 |
+| implementation | 877 |
 | support | 392 |
-| test | 613 |
-| docs | 152 |
+| test | 616 |
+| docs | 150 |
 | delete | 0 |
 
 ## Owner Summary
 
 | Owner | Count |
 |-------|------:|
-| `agent_domain` | 16 |
-| `agent_runtime` | 92 |
+| `agent_domain` | 12 |
+| `agent_runtime` | 93 |
 | `app_bootstrap` | 11 |
 | `approval` | 8 |
 | `auth` | 19 |
@@ -62,7 +62,7 @@ The TSV covers tracked and newly introduced files under:
 | `catalog_discovery` | 8 |
 | `context_control` | 9 |
 | `device` | 7 |
-| `docs` | 5 |
+| `docs` | 3 |
 | `docs/static gates` | 139 |
 | `domain_worker` | 7 |
 | `engine` | 110 |
@@ -72,13 +72,13 @@ The TSV covers tracked and newly introduced files under:
 | `import_history` | 6 |
 | `import_preview` | 6 |
 | `ios` | 98 |
-| `ios_app` | 14 |
+| `ios_app` | 11 |
 | `ios_chat_ui` | 4 |
 | `ios_engine` | 139 |
 | `ios_events` | 8 |
-| `ios_session` | 77 |
+| `ios_session` | 78 |
 | `ios_support` | 2 |
-| `ios_ui` | 142 |
+| `ios_ui` | 140 |
 | `jobs` | 8 |
 | `mac` | 76 |
 | `media` | 6 |
@@ -114,7 +114,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 611 |
+| `test_harness` | 614 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

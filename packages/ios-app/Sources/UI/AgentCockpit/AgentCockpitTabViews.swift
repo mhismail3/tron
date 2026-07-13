@@ -135,9 +135,6 @@ extension AgentCockpitSheet {
     private var activityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             CapabilityIssuesCard(overview: viewModel.overview)
-            if let moduleActivity = viewModel.overview.moduleActivity {
-                ModuleActivitySummaryCard(activity: moduleActivity)
-            }
             if viewModel.overview.activity.isEmpty {
                 CockpitEmptyState(
                     symbol: "clock",
@@ -145,8 +142,16 @@ extension AgentCockpitSheet {
                     detail: "No engine or module work is running, waiting, or blocked."
                 )
             } else {
-                ForEach(viewModel.overview.activity) { item in
-                    ActivityRow(item: item)
+                ForEach(AgentCockpitPresentation.activitySections(from: viewModel.overview.activity)) { section in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(section.title)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronTextSecondary)
+                        ForEach(section.items) { item in
+                            ActivityRow(item: item)
+                        }
+                    }
+                    .accessibilityIdentifier("dashboard-activity-section-\(section.id)")
                 }
             }
             if !viewModel.overview.discovery.reports.isEmpty {

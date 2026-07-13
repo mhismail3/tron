@@ -12,9 +12,8 @@
 //! authoring records, inert module validation report records, metadata-only
 //! module install review-gate records, metadata-only module dependency request
 //! and policy records, metadata-only capability binding policy records,
-//! inspect-only generic module activity cockpit projection,
-//! read-only agent briefing projection, metadata-only web research
-//! request/review/source custody,
+//! inspect-only generic module activity cockpit projection, metadata-only web
+//! research request/review/source custody,
 //! durable non-interactive jobs, read-only Git/worktree observation,
 //! goal/question lifecycle records, direct web source fetch provenance, inert
 //! external tool-source proposal provenance, inert subagent task lifecycle
@@ -27,7 +26,6 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `agent_briefing` | Read-only chief-of-staff briefing projection |
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `approval` | Approval request/decision evidence and reusable freshness checks |
 //! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
@@ -117,7 +115,6 @@
 //! integration/static tests rather than a broad domain root test.
 
 pub mod agent;
-pub mod agent_briefing;
 pub mod approval;
 pub mod auth;
 pub mod blob;

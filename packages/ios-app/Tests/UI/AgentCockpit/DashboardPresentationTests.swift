@@ -66,6 +66,9 @@ struct DashboardPresentationTests {
         #expect(!sheet.contains("AgentCockpitMetricStrip"))
         #expect(!tabs.contains("CapabilitiesSummaryCard"))
         #expect(!tabs.contains("WorkerTriggerExplanationCard"))
+        #expect(!tabs.contains("ModuleActivitySummaryCard"))
+        #expect(tabs.contains("AgentCockpitPresentation.activitySections"))
+        #expect(tabs.contains(#"dashboard-activity-section-\(section.id)"#))
         #expect(!discovery.contains("struct CapabilitiesSummaryCard"))
         #expect(!discovery.contains("struct WorkerTriggerExplanationCard"))
         for topLevelSource in [summary, sheet, tabs, discovery] {
@@ -97,24 +100,36 @@ struct DashboardPresentationTests {
         #expect(groupSource.contains("if group.workerCount > 0"))
     }
 
-    @Test("Dashboard bands use the session row icon and text grid")
-    func dashboardBandsUseSessionRowGrid() throws {
-        let briefing = try source("Sources/UI/AgentBriefing/AgentBriefingViews.swift")
+    @Test("Dashboard band uses the session row icon and text grid")
+    func dashboardBandUsesSessionRowGrid() throws {
         let dashboard = try source("Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift")
-        let briefingStart = try #require(briefing.range(of: "struct AgentBriefingDashboardBand"))
-        let briefingEnd = try #require(briefing.range(of: "private var title"))
         let dashboardStart = try #require(dashboard.range(of: "struct EngineCockpitDashboardBand"))
         let dashboardEnd = try #require(dashboard.range(of: "struct AgentCockpitDashboardSummaryCard"))
-        let bands = [
-            briefing[briefingStart.lowerBound..<briefingEnd.lowerBound],
-            dashboard[dashboardStart.lowerBound..<dashboardEnd.lowerBound],
+        let band = dashboard[dashboardStart.lowerBound..<dashboardEnd.lowerBound]
+
+        #expect(band.contains("HStack(alignment: .top, spacing: SessionListLayout.iconTextSpacing)"))
+        #expect(band.contains("width: SessionListLayout.iconColumnWidth"))
+        #expect(band.contains("height: SessionListLayout.iconColumnWidth"))
+        #expect(band.contains(".padding(.horizontal, SessionListLayout.rowContentHorizontalPadding)"))
+    }
+
+    @Test("Dashboard is the only high-signal cockpit stack")
+    func dashboardIsTheOnlyHighSignalCockpitStack() throws {
+        let root = iosAppRoot()
+        let sidebar = try source("Sources/UI/Chat/Shell/SessionSidebar.swift")
+        let retiredType = "Agent" + "Brief" + "ing"
+        let retiredPaths = [
+            "Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+\(retiredType).swift",
+            "Sources/Session/WorkerLifecycle/\(retiredType)State.swift",
+            "Sources/UI/\(retiredType)/\(retiredType)Views.swift",
+            "Tests/Session/WorkerLifecycle/\(retiredType)ViewModelTests.swift"
         ]
 
-        for band in bands {
-            #expect(band.contains("HStack(alignment: .top, spacing: SessionListLayout.iconTextSpacing)"))
-            #expect(band.contains("width: SessionListLayout.iconColumnWidth"))
-            #expect(band.contains("height: SessionListLayout.iconColumnWidth"))
-            #expect(band.contains(".padding(.horizontal, SessionListLayout.rowContentHorizontalPadding)"))
+        #expect(sidebar.components(separatedBy: ".task(id: cockpitRefreshKey)").count == 2)
+        #expect(sidebar.components(separatedBy: "AgentCockpitSheet(").count == 2)
+        #expect(!sidebar.contains(retiredType))
+        for path in retiredPaths {
+            #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
         }
     }
 

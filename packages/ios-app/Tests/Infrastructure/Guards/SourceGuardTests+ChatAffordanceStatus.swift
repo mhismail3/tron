@@ -92,39 +92,29 @@ extension SourceGuardTests {
         #expect(!engineSettings.contains(#"Image(systemName: "chevron.right")"#))
     }
 
-    @Test("Dashboard allows high-signal briefing and engine cockpit")
-    func testDashboardAllowsAgentBriefingBand() throws {
+    @Test("Dashboard is the single high-signal cockpit surface")
+    func testDashboardOwnsHighSignalCockpit() throws {
         let iosRoot = iosAppRoot()
         let sidebar = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
-            encoding: .utf8
-        )
-        let briefingViews = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentBriefing/AgentBriefingViews.swift"),
             encoding: .utf8
         )
         let theme = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Theme/TronColors.swift"),
             encoding: .utf8
         )
-
-        #expect(sidebar.contains("AgentBriefingDashboardBand("))
-        #expect(sidebar.contains("AgentBriefingSheet("))
         #expect(sidebar.contains("EngineCockpitDashboardBand("))
         #expect(sidebar.contains("AgentCockpitSheet("))
         #expect(sidebar.contains("SessionListWorkspaceGroup.groups"))
-        #expect(sidebar.contains("briefingRefreshKey"))
         #expect(sidebar.contains("cockpitRefreshKey"))
         #expect(sidebar.contains("dependencies.connectionRepository.connectionState.isConnected"))
-        #expect(sidebar.contains(".task(id: briefingRefreshKey)"))
         #expect(sidebar.contains(".task(id: cockpitRefreshKey)"))
         #expect(sidebar.contains(".contentShape(shape)\n                .glassEffect("))
         #expect(sidebar.contains(".buttonStyle(.plain)\n        .contentShape(shape)"))
         #expect(theme.contains(".glassEffect(\n                        .regular.tint(color.opacity(glassOpacity)).interactive(),\n                        in: shape\n                    )\n                    .contentShape(shape)"))
+        #expect(sidebar.components(separatedBy: ".task(id: cockpitRefreshKey)").count == 2)
+        #expect(sidebar.components(separatedBy: "AgentCockpitSheet(").count == 2)
         #expect(!sidebar.contains("Dash" + "board" + "V2"))
-        #expect(briefingViews.contains(#"SheetTitle(title: "Agent Briefing", color: .tronEmerald)"#))
-        #expect(!briefingViews.contains(#"Image(systemName: "chevron.right")"#))
-        #expect(!briefingViews.contains(#"SheetTitle(title: "Runtime Cockpit""#))
 
         let retiredLegacyHomePaths = [
             "Sources/UI/Chat/Shell/" + "Dash" + "board" + "V2Components.swift",

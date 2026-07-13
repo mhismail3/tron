@@ -181,7 +181,7 @@ enum SessionListLayout {
         )
     }
 
-    static var briefingInsets: EdgeInsets {
+    static var dashboardInsets: EdgeInsets {
         EdgeInsets(
             top: 10,
             leading: rowContainerHorizontalInset,

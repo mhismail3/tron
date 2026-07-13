@@ -401,8 +401,8 @@ extension AgentCockpitProjection {
                 id: "diagnostics_audit",
                 title: "Diagnostics & Audit",
                 question: "Can Tron prove what changed and why it is safe?",
-                narrative: "Capability verification, module activity, approvals, agent briefing, and provider-safe evidence.",
-                namespaces: ["catalog_discovery", "module_activity", "approval", "agent_briefing"],
+                narrative: "Capability verification, module activity, approvals, and provider-safe evidence.",
+                namespaces: ["catalog_discovery", "module_activity", "approval"],
                 operationFamilies: ["trace", "logs", "update_diagnostics", "tool_sources", "web", "web_research"]
             )
         ]

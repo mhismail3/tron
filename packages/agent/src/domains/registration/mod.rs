@@ -29,7 +29,7 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, agent_briefing, approval, auth, blob, capability, capability_binding, catalog_discovery,
+    agent, approval, auth, blob, capability, capability_binding, catalog_discovery,
     context_control, device, filesystem, git, import_history, import_preview, jobs, logs, media,
     memory, message, model, module_activity, module_authoring, module_dependencies, module_install,
     module_lifecycle, module_registry, module_runtime, module_validation, notifications,
@@ -84,7 +84,6 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
     let deps = DomainRegistrationContext::from_context(ctx);
     let mut modules = vec![
         system::worker_module(&deps)?,
-        agent_briefing::worker_module(&deps)?,
         capability::worker_module(&deps)?,
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
@@ -430,6 +429,7 @@ mod tests {
 
     fn forbidden_startup_prefixes() -> Vec<String> {
         let product_namespaces = vec![
+            ["agent", "_", "briefing"].concat(),
             "browser".to_owned(),
             "cron".to_owned(),
             "display".to_owned(),

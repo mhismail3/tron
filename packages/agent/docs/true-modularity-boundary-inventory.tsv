@@ -981,7 +981,6 @@ packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift	swift	implementation	ios:ui	owner-private operation drill-down sheet rendering; callers enter through AgentCockpit discovery selection state
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
@@ -1393,10 +1392,6 @@ packages/ios-app/Sources/Engine/Transport/Clients/ContextControlClient.swift	swi
 packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheet.swift	swift	implementation	ios:chat-ui	context-control progressive disclosure sheet; chat shell owns presentation and typed drill-in state
 packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheetSupport.swift	swift	implementation	ios:chat-ui	session briefing sheet support primitives; ContextControlSheet owns workflow and mutation state
 packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheetModels.swift	swift	implementation	ios:chat-ui	context-control DTO display models; sheet view consumes bounded values instead of raw response dictionaries
-packages/agent/src/domains/agent_briefing/contract.rs	rust	contract	rust:domain-agent-briefing	may be shared across the owning boundary without concrete implementation imports
-packages/agent/src/domains/agent_briefing/mod.rs	rust	facade	rust:domain-agent-briefing	callers may depend on this narrow owner-approved surface only
-packages/agent/src/domains/agent_briefing/projection.rs	rust	implementation	rust:domain-agent-briefing	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/domains/agent_briefing/service.rs	rust	implementation	rust:domain-agent-briefing	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/capability/operations/capability_binding.rs	rust	adapter	rust:domain-capability	adapter translates external execute or handler calls into owner-private domain contracts
 packages/agent/src/domains/capability/operations/dispatch.rs	rust	implementation	capability:execute	capability execute dispatch seam; registry owns names and dispatch owns operation routing parity
 packages/agent/src/domains/capability_binding/authority.rs	rust	implementation	rust:domain-capability-binding	owner-private; callers must enter through the owner facade or contract
@@ -1411,15 +1406,13 @@ packages/agent/src/domains/capability_binding/service.rs	rust	implementation	rus
 packages/agent/src/domains/capability_binding/shadow_trial.rs	rust	implementation	rust:domain-capability-binding	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/capability_binding/validation.rs	rust	implementation	rust:domain-capability-binding	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/resources/capability_binding_definitions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+AgentBriefing.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
 packages/ios-app/Sources/Session/Chat/Navigation/ChatMessageVisibilityPolicy.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Chat/Navigation/ChatTranscriptRevealPolicy.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Chat/Navigation/ChatViewTaskCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Chat/Navigation/ScrollViewportAnchor.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/Session/WorkerLifecycle/AgentBriefingState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitPresentation.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/UI/AgentBriefing/AgentBriefingViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitIssueState.swift	swift	implementation	ios:session	owner-private Dashboard issue aggregation; canonical activity and catalog truth remain server-owned
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitSummaryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift	swift	implementation	ios:settings-ui	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/capability/operations/operation_contract/mod.rs	rust	contract	capability:execute	canonical typed registry and structural contract owner for every provider-visible execute operation
@@ -1436,6 +1429,7 @@ packages/agent/src/domains/capability/operations/operation_contract/output/spec.
 packages/agent/src/domains/capability/operations/operation_contract/output/types.rs	rust	implementation	capability:execute	owner-private canonical provider output algebra
 packages/agent/src/domains/capability/operations/operation_contract/output/tests.rs	rust	test-support	capability:execute	owner-private provider-safe envelope contract coverage
 packages/agent/src/domains/capability/operations/operation_contract/policy.rs	rust	implementation	capability:execute	owner-private effect, scope, and idempotency policy
+packages/agent/src/domains/capability/operations/operation_contract/presentation.rs	rust	implementation	capability:execute	owner-private user-facing operation presentation metadata
 packages/agent/src/domains/capability/operations/operation_contract/records.rs	rust	implementation	capability:execute	owner-private durable record-plane structural schemas
 packages/agent/src/domains/capability/pool.rs	rust	implementation	rust:domain-capability	owner-private agent-facing operation and catalog classification projection
 packages/agent/src/domains/capability_binding/route.rs	rust	implementation	rust:domain-capability-binding	owner-private governed replacement route resolution and rollback

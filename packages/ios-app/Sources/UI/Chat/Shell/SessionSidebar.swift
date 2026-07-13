@@ -10,9 +10,7 @@ struct SessionSidebar: View {
     @State private var showArchiveConfirmation = false
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
-    @State private var agentBriefing = AgentBriefingViewModel()
     @State private var engineCockpit = AgentCockpitViewModel()
-    @State private var showAgentBriefing = false
     @State private var showEngineCockpit = false
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -28,20 +26,13 @@ struct SessionSidebar: View {
         Dictionary(uniqueKeysWithValues: workspaceGroups.map { ($0.id, $0.sessions.count) })
     }
 
-    private var briefingSessionId: String? {
+    private var dashboardSessionId: String? {
         selectedSessionId ?? eventStoreManager.sortedSessions.first?.id
-    }
-
-    private var briefingRefreshKey: AgentBriefingDashboardRefreshKey {
-        AgentBriefingDashboardRefreshKey(
-            sessionId: briefingSessionId,
-            isConnected: dependencies.connectionRepository.connectionState.isConnected
-        )
     }
 
     private var cockpitRefreshKey: EngineCockpitDashboardRefreshKey {
         EngineCockpitDashboardRefreshKey(
-            sessionId: briefingSessionId,
+            sessionId: dashboardSessionId,
             isConnected: dependencies.connectionRepository.connectionState.isConnected
         )
     }
@@ -49,18 +40,6 @@ struct SessionSidebar: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             List(selection: $selectedSessionId) {
-                Section {
-                    AgentBriefingDashboardBand(
-                        state: agentBriefing.state,
-                        isRefreshing: agentBriefing.isRefreshing
-                    ) {
-                        showAgentBriefing = true
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(SessionListLayout.briefingInsets)
-                }
-
                 Section {
                     EngineCockpitDashboardBand(
                         overview: engineCockpit.overview,
@@ -70,7 +49,7 @@ struct SessionSidebar: View {
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-                    .listRowInsets(SessionListLayout.briefingInsets)
+                    .listRowInsets(SessionListLayout.dashboardInsets)
                 }
 
                 ForEach(workspaceGroups) { group in
@@ -193,26 +172,14 @@ struct SessionSidebar: View {
             sessionExpansion.reconcile(groupCounts: groupCounts)
             reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
-        .task(id: briefingRefreshKey) {
-            await refreshBriefing()
-        }
         .task(id: cockpitRefreshKey) {
             await refreshCockpit()
-        }
-        .sheet(isPresented: $showAgentBriefing) {
-            AgentBriefingSheet(
-                viewModel: agentBriefing,
-                repository: dependencies.workerLifecycleRepository,
-                sessionId: briefingSessionId,
-                workspaceId: nil,
-                connectionState: dependencies.connectionRepository.connectionState
-            )
         }
         .sheet(isPresented: $showEngineCockpit) {
             AgentCockpitSheet(
                 viewModel: engineCockpit,
                 repository: dependencies.workerLifecycleRepository,
-                sessionId: briefingSessionId,
+                sessionId: dashboardSessionId,
                 workspaceId: nil,
                 connectionState: dependencies.connectionRepository.connectionState
             )
@@ -294,19 +261,10 @@ struct SessionSidebar: View {
         }
     }
 
-    private func refreshBriefing() async {
-        await agentBriefing.refresh(
-            repository: dependencies.workerLifecycleRepository,
-            sessionId: briefingSessionId,
-            workspaceId: nil,
-            connectionState: dependencies.connectionRepository.connectionState
-        )
-    }
-
     private func refreshCockpit() async {
         await engineCockpit.refresh(
             repository: dependencies.workerLifecycleRepository,
-            sessionId: briefingSessionId,
+            sessionId: dashboardSessionId,
             workspaceId: nil,
             connectionState: dependencies.connectionRepository.connectionState
         )
@@ -355,11 +313,6 @@ struct SessionSidebar: View {
             .tint(.tronEmerald)
         }
     }
-}
-
-private struct AgentBriefingDashboardRefreshKey: Equatable {
-    let sessionId: String?
-    let isConnected: Bool
 }
 
 private struct EngineCockpitDashboardRefreshKey: Equatable {

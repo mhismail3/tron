@@ -250,6 +250,44 @@ struct AgentCockpitStateTests {
         #expect(summary.degradedActivity == 1)
     }
 
+    @Test("Dashboard groups activity by server-owned state without duplicating items")
+    func dashboardGroupsActivityByServerOwnedState() {
+        func item(_ id: String, status: String) -> AgentCockpitActivityItem {
+            AgentCockpitActivityItem(
+                id: id,
+                title: id,
+                detail: "Server-owned activity",
+                timestamp: nil,
+                systemImage: "clock",
+                status: status,
+                resourceKind: "module_runtime_state",
+                authorityLabels: [],
+                touchedResources: [],
+                rollbackStatus: nil,
+                quarantineStatus: nil,
+                runtimeAuthorizationStatus: nil
+            )
+        }
+
+        let items = [
+            item("recorded", status: "recorded"),
+            item("active", status: "running"),
+            item("waiting", status: "waiting"),
+            item("blocked", status: "blocked"),
+            item("degraded", status: "failed")
+        ]
+        let sections = AgentCockpitPresentation.activitySections(from: items)
+
+        #expect(sections.map(\.kind) == [.needsReview, .needsYou, .activeWork, .recentActivity])
+        #expect(sections[0].items.map(\.id) == ["blocked", "degraded"])
+        #expect(sections[1].items.map(\.id) == ["waiting"])
+        #expect(sections[2].items.map(\.id) == ["active"])
+        #expect(sections[3].items.map(\.id) == ["recorded"])
+        let presentedIDs = sections.flatMap(\.items).map(\.id)
+        #expect(presentedIDs.count == items.count)
+        #expect(Set(presentedIDs) == Set(items.map(\.id)))
+    }
+
     @Test("Present empty capability projection stays authoritative")
     func presentEmptyCapabilityProjectionStaysAuthoritative() {
         var visibility = AgentCockpitViewModelTests.capabilityCockpitOverview()

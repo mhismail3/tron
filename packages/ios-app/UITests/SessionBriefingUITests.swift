@@ -2,39 +2,10 @@ import XCTest
 
 final class SessionBriefingUITests: XCTestCase {
     @MainActor
-    func testAgentBriefingAndSessionBriefingValidationPath() throws {
+    func testSessionBriefingValidationPath() throws {
         let app = XCUIApplication()
         app.launchArguments.append("--tron-ui-test-onboarding-complete")
         app.launch()
-
-        let briefingBand = app.buttons["agent-briefing-dashboard-band"]
-        XCTAssertTrue(briefingBand.waitForExistence(timeout: 20), "Agent Briefing dashboard band should be visible above grouped sessions")
-        RunLoop.current.run(until: Date().addingTimeInterval(2))
-        XCTAssertFalse(
-            app.staticTexts["Connect to the server to read scoped activity."].exists,
-            "Connected dashboard should not keep stale disconnected briefing copy"
-        )
-        keepScreenshot(named: "dashboard-agent-briefing-band")
-        briefingBand.tap()
-
-        XCTAssertTrue(app.staticTexts["Agent Briefing"].waitForExistence(timeout: 20), "Agent Briefing sheet should open")
-        XCTAssertTrue(app.staticTexts["What Tron has been doing"].waitForExistence(timeout: 15), "Briefing should show activity section")
-        XCTAssertTrue(app.staticTexts["Active work"].waitForExistence(timeout: 15), "Briefing should show active work section")
-        keepScreenshot(named: "agent-briefing-sheet")
-
-        app.staticTexts["Active work"].tap()
-        let evidenceDetail = app.otherElements["agent-briefing-evidence-detail"]
-        if !evidenceDetail.waitForExistence(timeout: 8) {
-            let firstInfoButton = app.buttons.matching(
-                NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "Runtime", "activity")
-            ).firstMatch
-            if firstInfoButton.waitForExistence(timeout: 5) {
-                firstInfoButton.tap()
-            }
-        }
-        keepScreenshot(named: "agent-briefing-drilldown")
-
-        app.buttons["Close"].tap()
 
         openRecentSessionIfNeeded(in: app)
 

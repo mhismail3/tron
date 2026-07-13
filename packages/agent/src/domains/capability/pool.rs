@@ -735,9 +735,10 @@ fn catalog_replacement_class(namespace: &str) -> CapabilityPoolReplacementClass 
         }
         "context_control" | "memory" | "media" | "import_history" | "repository_tree"
         | "import_preview" | "program_execution" | "prompt_artifacts" | "update_diagnostics"
-        | "device" | "notifications" | "scheduler" | "agent_briefing" | "module_activity"
-        | "web_research" | "message" | "session" | "model" | "settings" | "blob"
-        | "transcription" => CapabilityPoolReplacementClass::ProducerExtensible,
+        | "device" | "notifications" | "scheduler" | "module_activity" | "web_research"
+        | "message" | "session" | "model" | "settings" | "blob" | "transcription" => {
+            CapabilityPoolReplacementClass::ProducerExtensible
+        }
         _ => CapabilityPoolReplacementClass::KernelEvolutionOnly,
     }
 }

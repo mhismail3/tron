@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-13 (the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard bands share the session-row alignment grid; the Dashboard has one high-signal summary for capabilities, engine, activity, triggers, verification, and issues).
+> Last verified: 2026-07-13 (the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
 
 ## Overview
 
@@ -12,11 +12,8 @@ keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
 runtime surfaces emitted by the engine. The session dashboard keeps its
-workspace-grouped chat list and adds small Agent Briefing and Dashboard
-bands backed by server-owned projections. The full Agent Briefing
-sheet presents activity, adaptation, active work, user-needed work, weak
-points/failures, memory/learned-state, and audit sections with drill-down
-evidence and empty/degraded states. The Dashboard sheet opens from the session list
+workspace-grouped chat list and adds one compact Dashboard band backed by
+server-owned projections. The Dashboard sheet opens from the session list
 and starts with core engine visibility before progressively exposing module-plane
 diagnostics. It surfaces capabilities grouped into user-facing areas,
 schema/health gaps, durable verification history, redacted
@@ -77,7 +74,7 @@ and matching database/event/settings/dependency work.
   selection.
 - Settings needed to reach the server, configure providers, choose models, tune
   server-owned context policy, configure voice input, and inspect local diagnostics.
-- Grouped session dashboard with scoped Agent Briefing and Dashboard bands, collapsible
+- Grouped session dashboard with one scoped Dashboard band, collapsible
   workspace headers and compact
   inset liquid-glass one-line session rows. Each workspace shows its latest 10
   sessions initially and exposes native View more/View less controls for
@@ -146,7 +143,7 @@ Sources/
 +-- Support/              Composition, diagnostics, feedback, foundation,
 |                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
-|                         surfaces, Agent Briefing, Dashboard, capabilities, components,
+|                         surfaces, Dashboard, capabilities, components,
 |                         system sheets
 +-- Assets.xcassets/      App icons and image assets
 +-- Resources/            Fonts and generated app-icon source layers
@@ -176,8 +173,7 @@ Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Context: ContextBriefingButton/timeline action pill -> ContextControlSheet -> context_control::{snapshot,compact,clear,action_list,action_inspect}
-Briefing: SessionSidebar -> WorkerLifecycleRepository -> invocation-scoped agent_briefing::overview -> AgentBriefingViewModel -> AgentBriefingDashboardBand/AgentBriefingSheet
-Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
+Dashboard: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_activity/capability_binding cockpit facts -> AgentCockpitProjection -> EngineCockpitDashboardBand/AgentCockpitSheet
 ```
 
 Transient composer failures use the shared one-line local notification pill.
@@ -572,10 +568,10 @@ It must not map fixed feature names into custom sheets.
 
 The Dashboard opens from the session list, not Settings.
 `AgentCockpitPresentation.dashboardSummary(for:)` is the single presentation
-boundary for its compact band and large sheet summary card. The compact band and
-the Agent Briefing band use the session-row icon width, icon-to-text spacing,
-and horizontal content inset so their icons, titles, and descriptions share the
-same visual columns as session rows. The sheet starts with one larger aggregate
+boundary for its compact band and large sheet summary card. The compact band
+uses the session-row icon width, icon-to-text spacing, and horizontal content
+inset so its icon, title, and description share the same visual columns as
+session rows. The sheet starts with one larger aggregate
 summary card derived from that presentation model. One neutral, untinted glass
 surface uses dividers instead of nested tinted cards, with one status header and
 concise Capabilities, Engine, and Recent activity rows. Quiet state is expressed
@@ -660,9 +656,13 @@ mount fixed source-control, memory, process, subagent, notification, skill,
 approval, work, or work-dashboard panels. These generic surfaces also do not
 reintroduce broad product DTOs, product event variants, or product table-backed
 state.
-`UI/AgentCockpit/AgentCockpitModuleActivityViews.swift` owns the Activity tab's
-bounded summary card so the root cockpit sheet remains only the tab shell and
-shared row composition. `UI/AgentCockpit/AgentCockpitTabViews.swift` owns tab
+`Session/WorkerLifecycle/AgentCockpitPresentation.swift` is the sole
+presentation boundary for the Activity tab's narrative grouping. It maps each
+server-reported item exactly once into Needs review, Needs you, Active work, or
+Recent activity from the explicit server status; unknown or completed states
+remain truthful recent activity rather than being inferred from visual
+position. The separate duplicate module-activity summary card and projection
+path are absent. `UI/AgentCockpit/AgentCockpitTabViews.swift` owns tab
 selection and Capabilities, Activity, Engine, worker, package, and generated
 surface composition so `AgentCockpitViews.swift` remains sheet orchestration.
 The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,

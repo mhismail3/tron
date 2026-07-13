@@ -37,6 +37,34 @@ struct AgentCockpitDashboardSummary: Equatable, Sendable {
     var issues: Int
 }
 
+enum AgentCockpitActivitySectionKind: String, CaseIterable, Hashable, Sendable {
+    case needsReview
+    case needsYou
+    case activeWork
+    case recentActivity
+
+    var title: String {
+        switch self {
+        case .needsReview:
+            return "Needs review"
+        case .needsYou:
+            return "Needs you"
+        case .activeWork:
+            return "Active work"
+        case .recentActivity:
+            return "Recent activity"
+        }
+    }
+}
+
+struct AgentCockpitActivitySection: Equatable, Identifiable, Sendable {
+    var kind: AgentCockpitActivitySectionKind
+    var items: [AgentCockpitActivityItem]
+
+    var id: String { kind.rawValue }
+    var title: String { kind.title }
+}
+
 enum AgentCockpitPresentation {
     static func countPhrase(_ count: Int, singular: String, plural: String) -> String {
         AgentCockpitDashboardCount(value: count, isComplete: true)
@@ -134,6 +162,19 @@ enum AgentCockpitPresentation {
             degradedActivity: degraded,
             issues: issues
         )
+    }
+
+    static func activitySections(
+        from items: [AgentCockpitActivityItem]
+    ) -> [AgentCockpitActivitySection] {
+        var grouped: [AgentCockpitActivitySectionKind: [AgentCockpitActivityItem]] = [:]
+        for item in items {
+            grouped[activitySectionKind(for: item.status), default: []].append(item)
+        }
+        return AgentCockpitActivitySectionKind.allCases.compactMap { kind in
+            guard let items = grouped[kind], !items.isEmpty else { return nil }
+            return AgentCockpitActivitySection(kind: kind, items: items)
+        }
     }
 
     static func verificationStatus(for report: AgentCockpitDiscoveryReportRow?) -> String {
@@ -352,6 +393,21 @@ enum AgentCockpitPresentation {
         if ["pending", "awaiting", "approvalrequired"].contains(normalized) { return "waiting" }
         if ["failed", "quarantined"].contains(normalized) { return "degraded" }
         return normalized
+    }
+
+    private static func activitySectionKind(
+        for status: String
+    ) -> AgentCockpitActivitySectionKind {
+        switch normalizedActivityState(status) {
+        case "blocked", "degraded":
+            return .needsReview
+        case "waiting":
+            return .needsYou
+        case "active":
+            return .activeWork
+        default:
+            return .recentActivity
+        }
     }
 
     private static func activityDetail(_ detail: String?, fallback: String) -> String {
