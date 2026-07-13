@@ -5,9 +5,10 @@
 //! discovered capabilities. Search and inspect are pure reads; conformance
 //! report generation writes only a `catalog_discovery_report` resource plus a
 //! catalog-discovery stream event. Report replay is owned by the engine ledger:
-//! the bounded caller `idempotencyKey` determines both the invocation ledger
+//! the bounded invocation-envelope idempotency key determines both the ledger
 //! identity and a hashed, scope-bound report resource id, while the raw key is
-//! never stored in report payloads or returned projections.
+//! never duplicated in request payloads, stored in report resources, or
+//! returned in projections.
 //!
 //! ## Submodules
 //!

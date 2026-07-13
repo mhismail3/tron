@@ -7,44 +7,25 @@ struct EngineSettingsOwnershipTests {
 
     @Test("server settings categories expose only primitive settings groups")
     func serverSettingsCategoriesExposeOnlyPrimitiveGroups() {
-        #expect(ServerSettingsCategory.serverBackedOrder == [
+        #expect(ServerSettingsCategory.allCases == [
             .engine,
             .providers,
-            .server,
         ])
 
         #expect(ServerSettingsCategory.engine.title == "Engine")
         #expect(ServerSettingsCategory.engine.subtitle == "Server-owned defaults, context, and evidence policy")
-        #expect(ServerSettingsCategory.server.title == "Servers")
-        #expect(ServerSettingsCategory.server.subtitle == "Pairing and connection")
         #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
-        #expect(ServerSettingsCategory.providers.title == "Accounts")
+        #expect(ServerSettingsCategory.providers.title == "Providers")
 
-        #expect(MainSettingsGridDestination.serverOwned == [
+        #expect(MainSettingsGridDestination.order == [
             .engine,
             .providers,
+            .app,
         ])
-        #expect(MainSettingsGridDestination.serverOwned.map(\.description) == [
+        #expect(MainSettingsGridDestination.order.map(\.description) == [
             "Server-owned defaults, context, and evidence policy",
             "OAuth login and API keys",
-        ])
-        #expect(MainSettingsGridDestination.deviceOwned == [
-            .server,
-            .app,
-        ])
-        #expect(MainSettingsGridDestination.deviceOwned.map(\.description) == [
-            "Pairing and connection",
             "Appearance, notifications, local behavior",
-        ])
-        #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: false) == [
-            .engine,
-            .providers,
-            .server,
-            .app,
-        ])
-        #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: true) == [
-            .server,
-            .app,
         ])
         let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
         #expect(ServerSettingsCategory.allCases.map(\.title).allSatisfy { title in

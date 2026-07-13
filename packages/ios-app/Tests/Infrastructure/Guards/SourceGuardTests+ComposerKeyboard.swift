@@ -161,6 +161,8 @@ extension SourceGuardTests {
             "clearHistory()",
             "case .recentInputs:",
             "showRecentInputs = true",
+            "preview(for: input)",
+            ".listRowInsets(EdgeInsets(",
             ".listRowSeparator(.hidden)",
             "actions.onHistoryNavigate?(selected)",
             "onPromptSent?(text)",

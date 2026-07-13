@@ -116,6 +116,9 @@ enum SessionListLayout {
     static let rowTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionControlTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionControlMinimumHeight: CGFloat = 44
+    static var expansionControlHorizontalPadding: CGFloat {
+        rowContainerHorizontalInset + rowContentHorizontalPadding
+    }
     static let expansionAnimation = Animation.snappy(duration: 0.14)
 
     static var headerInsets: EdgeInsets {
@@ -321,6 +324,7 @@ struct SessionListExpansionControls: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, SessionListLayout.expansionControlHorizontalPadding)
     }
 
     private func expansionButton(

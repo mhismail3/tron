@@ -198,7 +198,7 @@ pub(crate) async fn conformance_report_value(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let idempotency_key = required_idempotency_key(payload)?;
+    let idempotency_key = required_idempotency_key(invocation)?;
     let scope = report_scope(invocation);
     let actor = actor_context(invocation);
     let report = build_report_payload(engine_host, invocation, payload, &actor).await?;

@@ -177,7 +177,6 @@
 		3922F51DF6A0E0235407D99F /* EngineDomainClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B063F6DED80FDC57B74CA64 /* EngineDomainClient.swift */; };
 		39454F46C7E71C67F5F4D10D /* TextContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54645E3531DCB6C3A187003D /* TextContentView.swift */; };
 		397F5B4CA2AC4B530424D5BC /* TypewriterText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4117F041F03877DE2476139 /* TypewriterText.swift */; };
-		3A41F7779008D39E28BDC1E2 /* ConnectionSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083FE831ADBEB50DEE728522 /* ConnectionSettingsPage.swift */; };
 		3A9DD7CD39CF0932B921CF23 /* AgentCockpitStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D298DF3A8E5A7A81B60C9836 /* AgentCockpitStateTests.swift */; };
 		3ADA151A12DB4F9A5E5E57B2 /* EngineProtocolTypes+Filesystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550743437BE99F7542036847 /* EngineProtocolTypes+Filesystem.swift */; };
 		3BA365D828D7F9D232F41FBE /* InputTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD384307AD766AF7A9A0207D /* InputTextField.swift */; };
@@ -514,6 +513,7 @@
 		B47E20B8AEF338DD84AC4003 /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E908710663CBB70A7BAFEBC4 /* SessionSidebar.swift */; };
 		B5060A8BAAC16C8F68BE6BE6 /* CapabilitySchemaFormTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD26A1B78F031CBC00A7FD4 /* CapabilitySchemaFormTests.swift */; };
 		B51288C868E6863BFC7430D9 /* AgentCockpitSummaryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33C97654448FF09009B56E3C /* AgentCockpitSummaryViews.swift */; };
+		B54C72F13DF91357ACC119B8 /* EngineServersSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0AE426386E50195B67E5C0 /* EngineServersSection.swift */; };
 		B55D3AD587779785586AD6DB /* EventTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D7903E9FAA6AF4A2ECFDC5 /* EventTypeRegistry.swift */; };
 		B5A03DC51914C86B5BEEAE76 /* SourceGuardTests+ProductSurfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BCE63E1606E8E2C25519F91 /* SourceGuardTests+ProductSurfaces.swift */; };
 		B5EC99CD5DA7391C1812E6E7 /* AuthClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33E14301D0420BB79E0718B /* AuthClientTests.swift */; };
@@ -772,7 +772,6 @@
 		0641EBD209075B94957B3AE6 /* DecodedImageViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodedImageViewTests.swift; sourceTree = "<group>"; };
 		0738329FF02A426C53AA77E7 /* AgentBriefingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBriefingViewModelTests.swift; sourceTree = "<group>"; };
 		07C8DB1F10C994086B91A77C /* ModelRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRepository.swift; sourceTree = "<group>"; };
-		083FE831ADBEB50DEE728522 /* ConnectionSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSettingsPage.swift; sourceTree = "<group>"; };
 		08649936B443A5DE06B4DEB9 /* EngineConnectionProtocolFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineConnectionProtocolFrames.swift; sourceTree = "<group>"; };
 		0885385A8BB5973258BD894E /* TronMobileUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TronMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		08BB435CF20EC47838DDBAD9 /* GeneratedRuntimeSurfaceView+RenderingHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeneratedRuntimeSurfaceView+RenderingHelpers.swift"; sourceTree = "<group>"; };
@@ -1471,6 +1470,7 @@
 		F977E304FB3B1961F025FC07 /* DatabaseActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseActor.swift; sourceTree = "<group>"; };
 		FA8B86B046938B6F23A04FC5 /* EventRegistryReferenceCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRegistryReferenceCycleTests.swift; sourceTree = "<group>"; };
 		FBBDCE2AEB6918534331C4E5 /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
+		FC0AE426386E50195B67E5C0 /* EngineServersSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineServersSection.swift; sourceTree = "<group>"; };
 		FC88FA734BC474DE77D840C7 /* IBMPlexMono-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-SemiBold.ttf"; sourceTree = "<group>"; };
 		FD34424A94CB523A91E77C60 /* CapabilityInvocationDetailViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationDetailViewTests.swift; sourceTree = "<group>"; };
 		FD3C7F191ADB57DDF4C062AC /* ShellToolbarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellToolbarActions.swift; sourceTree = "<group>"; };
@@ -1538,7 +1538,7 @@
 			isa = PBXGroup;
 			children = (
 				7919E6D5CC847FC2AB742282 /* AppearanceSettingsPage.swift */,
-				083FE831ADBEB50DEE728522 /* ConnectionSettingsPage.swift */,
+				FC0AE426386E50195B67E5C0 /* EngineServersSection.swift */,
 				4019AB89F8C0A3818E9669D4 /* EngineSettingsPage.swift */,
 				63820665419571F08B5F4D2C /* ProvidersSettingsPage.swift */,
 				5793EE69534575494AEFA2F3 /* ModelProviders */,
@@ -3887,7 +3887,6 @@
 				D0AA25139687AA1D38E9AF33 /* ConnectionCoordinator.swift in Sources */,
 				3D52F8EEB4AAADF40C184B8C /* ConnectionErrorClassifier.swift in Sources */,
 				45D8F2CE72B2AA1F6C6D049E /* ConnectionManager.swift in Sources */,
-				3A41F7779008D39E28BDC1E2 /* ConnectionSettingsPage.swift in Sources */,
 				76C0FAB19CC63E3B3A0EB26F /* ConnectionStateProvider.swift in Sources */,
 				885D82AD37D8B96D6BD02F10 /* ConnectionToastPolicy.swift in Sources */,
 				E29CE512D44D9BF3FC2C6761 /* ContentAreaView.swift in Sources */,
@@ -3956,6 +3955,7 @@
 				BFD2969413FD9812477D3A26 /* EngineProtocolTypes+WorkerLifecycle.swift in Sources */,
 				A37B6FBB24C9ED5BF3651D66 /* EngineProtocolTypes.swift in Sources */,
 				0F7AC8D60D3B86B944F92D08 /* EngineRetryPolicy.swift in Sources */,
+				B54C72F13DF91357ACC119B8 /* EngineServersSection.swift in Sources */,
 				E7EC49890A0E7F0A630A26BB /* EngineSettingsPage.swift in Sources */,
 				4734D47F0119CC96BBB14E48 /* EngineStreamCursorStore.swift in Sources */,
 				3F5DDC92BF87AA65E54275AE /* EngineTransport.swift in Sources */,

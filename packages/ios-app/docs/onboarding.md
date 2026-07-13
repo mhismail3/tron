@@ -318,7 +318,7 @@ trailing dot.
 
 ## Forgetting a Mac
 
-Settings → Servers → menu → "Forget" is the local reset path for a
+Settings → Engine → Servers → menu → "Forget" is the local reset path for a
 paired server. It deletes the matching iOS Keychain bearer token and removes
 the server from `PairedServerStore`; server settings and sessions on the Mac
 are unchanged. If another paired server remains, iOS switches locally to it.

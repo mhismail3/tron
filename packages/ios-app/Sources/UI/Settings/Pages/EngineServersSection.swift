@@ -1,28 +1,26 @@
 import SwiftUI
 
-struct ConnectionSettingsPage: View {
-    let settingsState: SettingsState
+/// Device-local server pairing embedded in Engine settings.
+///
+/// Server policy remains server-owned; this section only selects, repairs, or
+/// removes the iPhone's connection to that policy owner.
+struct EngineServersSection: View {
     let startServerOnboarding: (PairedServer?) -> Void
 
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
     @State private var serverRemovalError: String?
-    @State private var showLogs = false
-
-    init(
-        settingsState: SettingsState,
-        startServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }
-    ) {
-        self.settingsState = settingsState
-        self.startServerOnboarding = startServerOnboarding
-    }
 
     var body: some View {
-        SettingsPageContainer(title: "Servers") {
-            if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
-                landscapeContent
-            } else {
-                stackedContent
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: "Servers")
+
+            VStack(spacing: 8) {
+                ForEach(dependencies.pairedServerStore.servers) { server in
+                    pairedServerRow(server)
+                }
+
+                onboardRow
             }
         }
         .alert("Forget this server?", isPresented: removalAlertBinding, presenting: serverPendingRemoval) { server in
@@ -36,76 +34,11 @@ struct ConnectionSettingsPage: View {
         } message: {
             Text(serverRemovalError ?? "The pairing token could not be removed from Keychain.")
         }
-        .sheet(isPresented: $showLogs) {
-            LogViewer()
-        }
-    }
-
-    @ViewBuilder
-    private var stackedContent: some View {
-        serverInfoCard
-        pairedServersSection
-        logsSection
-    }
-
-    private var landscapeContent: some View {
-        VStack(spacing: 16) {
-            serverInfoCard
-
-            HStack(alignment: .top, spacing: 16) {
-                VStack(spacing: 16) {
-                    pairedServersSection
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
-
-                VStack(spacing: 16) {
-                    logsSection
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-        }
-    }
-
-    private var serverInfoCard: some View {
-        SettingsInfoCard(
-            icon: activeServerUnavailable ? "wifi.exclamationmark" : "server.rack",
-            title: ServerSettingsSummary.title(for: summaryContext),
-            description: ServerSettingsSummary.description(for: summaryContext),
-            accent: activeServerUnavailable ? .tronWarning : .tronEmerald
-        )
-    }
-
-    private var summaryContext: ServerSettingsSummary.Context {
-        ServerSettingsSummary.Context(
-            activeServerLabel: dependencies.pairedServerStore.activeServer?.label,
-            pairedServerCount: dependencies.pairedServerStore.servers.count,
-            activeServerUnavailable: activeServerUnavailable,
-            isLoaded: settingsState.isLoaded,
-            loadError: settingsState.loadError
-        )
     }
 
     private var activeServerUnavailable: Bool {
-        hasActiveServer && !dependencies.connectionRepository.connectionState.isConnected
-    }
-
-    private var hasActiveServer: Bool {
         dependencies.pairedServerStore.activeServer != nil
-    }
-
-    private var pairedServersSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Paired Servers")
-
-            VStack(spacing: 8) {
-                ForEach(dependencies.pairedServerStore.servers) { server in
-                    pairedServerRow(server)
-                }
-
-                onboardRow
-            }
-        }
+            && !dependencies.connectionRepository.connectionState.isConnected
     }
 
     private func pairedServerRow(_ server: PairedServer) -> some View {
@@ -158,8 +91,8 @@ struct ConnectionSettingsPage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Keep Menu outside SettingsCard's glassEffect tree. iOS 26 can
-            // temporarily flatten ancestor glass to white when a Menu closes.
+            // Keep Menu outside SettingsCard's glassEffect tree. iOS can
+            // temporarily flatten ancestor glass when a Menu closes.
             manageServerMenu(server, presentation: presentation)
                 .padding(.trailing, 12)
         }
@@ -169,7 +102,7 @@ struct ConnectionSettingsPage: View {
     private var onboardRow: some View {
         SettingsCard(interactive: true) {
             Button {
-                startOnboarding(prefill: nil)
+                startServerOnboarding(nil)
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus.circle")
@@ -226,7 +159,7 @@ struct ConnectionSettingsPage: View {
             }
         case .setUp:
             Button {
-                startOnboarding(prefill: server)
+                startServerOnboarding(server)
             } label: {
                 Label(entry.title, systemImage: entry.systemImage)
             }
@@ -259,40 +192,11 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private var logsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: ConnectionSettingsDiagnosticsCopy.sectionTitle)
-
-            SettingsCard(interactive: true) {
-                Button {
-                    showLogs = true
-                } label: {
-                    SettingsRow(icon: "doc.text.magnifyingglass", label: ConnectionSettingsDiagnosticsCopy.logsLabel) {
-                        HStack(spacing: 5) {
-                            Text(ConnectionSettingsDiagnosticsCopy.logsAction)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            SettingsCaption(text: ConnectionSettingsDiagnosticsCopy.caption)
-        }
-    }
-
-    private func startOnboarding(prefill server: PairedServer?) {
-        startServerOnboarding(server)
-    }
-
     private func reconnect(_ server: PairedServer) {
         if dependencies.pairedServerStore.activeServer?.id != server.id {
             dependencies.selectPairedServer(server)
         } else {
-            Task {
-                await dependencies.manualRetry()
-            }
+            Task { await dependencies.manualRetry() }
         }
     }
 

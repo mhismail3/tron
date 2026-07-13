@@ -6,9 +6,24 @@ struct EngineSettingsPage: View {
     let settingsState: SettingsState
     let selectedModelDisplayName: String
     let updateServerSetting: (SettingsMutation) -> Void
+    let startServerOnboarding: (PairedServer?) -> Void
 
     @State private var showWorkspaceSelector = false
     @State private var showDefaultModelPicker = false
+
+    init(
+        settingsState: SettingsState,
+        selectedModelDisplayName: String,
+        updateServerSetting: @escaping (SettingsMutation) -> Void,
+        startServerOnboarding: @escaping (PairedServer?) -> Void = {
+            ServerOnboardingLauncher.post(prefill: $0)
+        }
+    ) {
+        self.settingsState = settingsState
+        self.selectedModelDisplayName = selectedModelDisplayName
+        self.updateServerSetting = updateServerSetting
+        self.startServerOnboarding = startServerOnboarding
+    }
 
     var body: some View {
         SettingsPageContainer(title: "Engine") {
@@ -47,14 +62,14 @@ struct EngineSettingsPage: View {
     @ViewBuilder
     private var stackedContent: some View {
         summaryCard
-        defaultsSection
-        contextSection
-        evidencePolicySection
+        serversSection
+        enginePolicyContent
     }
 
     private var landscapeContent: some View {
         VStack(spacing: 16) {
             summaryCard
+            serversSection
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(spacing: 16) {
@@ -68,6 +83,8 @@ struct EngineSettingsPage: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
+            .disabled(!settingsState.isLoaded)
+            .opacity(settingsState.isLoaded ? 1 : 0.45)
         }
     }
 
@@ -77,6 +94,20 @@ struct EngineSettingsPage: View {
             title: EngineSettingsSummary.title(for: summaryContext),
             description: EngineSettingsSummary.description(for: summaryContext)
         )
+    }
+
+    private var serversSection: some View {
+        EngineServersSection(startServerOnboarding: startServerOnboarding)
+    }
+
+    private var enginePolicyContent: some View {
+        Group {
+            defaultsSection
+            contextSection
+            evidencePolicySection
+        }
+        .disabled(!settingsState.isLoaded)
+        .opacity(settingsState.isLoaded ? 1 : 0.45)
     }
 
     private var summaryContext: EngineSettingsSummary.Context {

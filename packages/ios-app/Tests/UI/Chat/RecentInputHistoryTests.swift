@@ -21,6 +21,7 @@ final class RecentInputHistoryTests: XCTestCase {
 
     func testRecentInputHistoryMenuActionVisibilityRequiresLocalHistoryIdleAndEditable() {
         let history = InputHistoryStore()
+        history.clearHistory()
 
         XCTAssertFalse(RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: history,
@@ -60,9 +61,25 @@ final class RecentInputHistoryTests: XCTestCase {
         XCTAssertEqual(RecentInputHistoryPresentation.clearConfirmationActionTitle, "Clear Recent Inputs")
         XCTAssertFalse(RecentInputHistoryPresentation.clearConfirmationMessage.isEmpty)
         XCTAssertEqual(RecentInputHistoryPresentation.rowFontSize, TronTypography.sizeBody)
-        XCTAssertEqual(RecentInputHistoryPresentation.rowLineLimit, 2)
-        XCTAssertEqual(RecentInputHistoryPresentation.rowVerticalPadding, 2)
+        XCTAssertEqual(RecentInputHistoryPresentation.rowLineLimit, 1)
+        XCTAssertEqual(RecentInputHistoryPresentation.rowVerticalInset, 5)
+        XCTAssertEqual(RecentInputHistoryPresentation.rowHorizontalInset, 18)
         XCTAssertFalse(RecentInputHistoryPresentation.title.contains("Library"))
+    }
+
+    func testRecentInputPreviewMarksOmittedMultilineContent() {
+        XCTAssertEqual(
+            RecentInputHistoryPresentation.preview(for: "Inspect the workspace\nThen summarize failures"),
+            "Inspect the workspace…"
+        )
+        XCTAssertEqual(
+            RecentInputHistoryPresentation.preview(for: "\n  First meaningful line  \r\nSecond line"),
+            "First meaningful line…"
+        )
+        XCTAssertEqual(
+            RecentInputHistoryPresentation.preview(for: "Single line prompt"),
+            "Single line prompt"
+        )
     }
 
     func testRecentInputsSheetConstructs() {

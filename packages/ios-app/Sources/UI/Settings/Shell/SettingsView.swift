@@ -20,7 +20,7 @@ struct SettingsView: View {
     @State var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case engine, providers, server, app
+        case engine, providers, app
         var id: String { rawValue }
     }
 
@@ -184,11 +184,7 @@ struct SettingsView: View {
             EngineSettingsPage(
                 settingsState: settingsState,
                 selectedModelDisplayName: selectedModelDisplayName,
-                updateServerSetting: updateServerSetting
-            )
-        case .server:
-            ConnectionSettingsPage(
-                settingsState: settingsState,
+                updateServerSetting: updateServerSetting,
                 startServerOnboarding: { startOnboarding(prefill: $0) }
             )
         case .providers:

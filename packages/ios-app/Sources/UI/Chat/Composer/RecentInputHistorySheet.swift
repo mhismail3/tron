@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 @MainActor
@@ -11,8 +12,20 @@ enum RecentInputHistoryPresentation {
     nonisolated static let clearConfirmationMessage = "This removes every recent input stored on this device."
     nonisolated static let clearConfirmationActionTitle = "Clear Recent Inputs"
     nonisolated static let rowFontSize = TronTypography.sizeBody
-    nonisolated static let rowLineLimit = 2
-    nonisolated static let rowVerticalPadding: CGFloat = 2
+    nonisolated static let rowLineLimit = 1
+    nonisolated static let rowVerticalInset: CGFloat = 5
+    nonisolated static let rowHorizontalInset: CGFloat = 18
+
+    nonisolated static func preview(for input: String) -> String {
+        let normalized = input.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard let firstLine = lines.first else { return "" }
+        guard lines.count > 1 else { return firstLine }
+        return firstLine.hasSuffix("…") ? firstLine : firstLine + "…"
+    }
 
     static func shouldShowMenuAction(
         inputHistory: InputHistoryStore?,
@@ -85,18 +98,24 @@ struct RecentInputHistorySheet: View {
                     onSelect(input)
                     dismiss()
                 } label: {
-                    Text(input)
+                    Text(RecentInputHistoryPresentation.preview(for: input))
                         .font(TronTypography.sans(size: RecentInputHistoryPresentation.rowFontSize))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(RecentInputHistoryPresentation.rowLineLimit)
+                        .truncationMode(.tail)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, RecentInputHistoryPresentation.rowVerticalPadding)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Insert recent input")
                 .accessibilityValue(input)
                 .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(
+                    top: RecentInputHistoryPresentation.rowVerticalInset,
+                    leading: RecentInputHistoryPresentation.rowHorizontalInset,
+                    bottom: RecentInputHistoryPresentation.rowVerticalInset,
+                    trailing: RecentInputHistoryPresentation.rowHorizontalInset
+                ))
                 .listRowSeparator(.hidden)
             }
         }

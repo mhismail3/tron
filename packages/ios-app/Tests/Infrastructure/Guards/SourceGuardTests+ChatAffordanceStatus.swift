@@ -104,7 +104,14 @@ extension SourceGuardTests {
         #expect(cockpitSummaryViews.contains("overview.invokableUnitCount"))
         #expect(cockpitSummaryViews.contains("briefingPhrase(verificationPhrase)"))
         #expect(cockpitSummaryViews.contains(#"metric("Capability check""#))
-        #expect(cockpitSummaryViews.contains("minHeight: 112"))
+        #expect(cockpitSummaryViews.contains("minHeight: 76, maxHeight: 76"))
+        let metricStart = try #require(cockpitSummaryViews.range(of: "private func metric("))
+        let metricSource = cockpitSummaryViews[metricStart.lowerBound..<cockpitSummaryViews.endIndex]
+        let valuePosition = try #require(metricSource.range(of: "Text(value)")?.lowerBound)
+        let iconPosition = try #require(metricSource.range(of: "Image(systemName: icon)")?.lowerBound)
+        #expect(valuePosition < iconPosition)
+        #expect(metricSource.contains("HStack(alignment: .center"))
+        #expect(cockpitSummaryViews.contains("Spacer(minLength: 4)"))
         #expect(!cockpitSummaryViews.contains(##""rev \(revision)""##))
         #expect(!cockpitSummaryViews.contains("catalogTrustPhrase"))
         #expect(!cockpitSummaryViews.contains(#"metric("Verified""#))
@@ -143,7 +150,7 @@ extension SourceGuardTests {
         #expect(activitySource.contains(#"Text("Verification")"#))
 
         let serverSettings = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineServersSection.swift"),
             encoding: .utf8
         )
         let engineSettings = try String(

@@ -79,7 +79,9 @@ and matching database/event/settings/dependency work.
   workspace headers and compact
   inset liquid-glass one-line session rows. Each workspace shows its latest 10
   sessions initially and exposes native View more/View less controls for
-  independent 10-row progressive disclosure without reordering groups. The
+  independent 10-row progressive disclosure without reordering groups. Those
+  controls share the row content insets so their leading/trailing actions align
+  with the session status and date columns. The
   retained session actions include creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
   recent session workspaces, and manual Mac paths, prompt composer with a
@@ -494,7 +496,8 @@ MetricKit payloads are bounded Application Support diagnostics buffers.
 Recent input history is stored only on the device through
 `InputHistoryStore`, capped at 100 sent text prompts, exposed from the
 composer attachment menu only while local history exists and the session is
-idle/editable, and clearable from the Recent Inputs sheet with an icon-only
+idle/editable, rendered as compact one-line previews with an ellipsis when
+later prompt lines are omitted, and clearable from the Recent Inputs sheet with an icon-only
 destructive toolbar action followed by explicit confirmation. It is not a server prompt-library
 resource, snippet catalog, routing plane, or generated management surface.
 
@@ -522,7 +525,7 @@ preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
 The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
-and equal-height sheet-header metrics are the core engine summary: connection
+and compact equal-height sheet-header metrics are the core engine summary: connection
 state, visible invokable operation count, issue count, and plain verification
 state from server-owned facts. The sheet opens on Capabilities, grouping
 agent-facing operations into user-facing areas before drilling into
@@ -596,13 +599,13 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 `SettingsServerSupport.swift`; and shared row/card primitives stay in
 `SettingsSupport.swift`.
 
-Settings main groups controls by ownership rather than by old product modules.
-Engine owns actionable server-mirrored defaults, context compaction,
-transcription, log level, and storage retention policy; provider routing follows
-the selected model. Accounts owns provider credential setup.
-Servers owns local pairing/connection and redacted local logs. App owns local
-appearance and device behavior. Settings main does not grow a server-health
-dashboard; core engine visibility lives on the dashboard Engine Cockpit.
+Settings main exposes three destinations without category headers: Engine,
+Providers, and App. Engine owns local server pairing alongside actionable
+server-mirrored defaults, context compaction, transcription, log level, and
+storage retention policy; only the pairing section remains active while a
+server policy snapshot is unavailable. Providers owns OAuth and API-key setup,
+and App owns local appearance and device behavior. Settings main does not grow
+a server-health dashboard; core engine visibility lives on the dashboard Engine Cockpit.
 Each main Settings destination or maintenance action renders as its own card;
 the sheet avoids grouped table dividers and chevrons because the card itself is
 the tap target and disclosure affordance.
@@ -625,8 +628,8 @@ primary accent, and success/warning/error remain separate semantic colors.
 
 ## Diagnostics And Build Identity
 
-The settings toolbar and the Servers page Diagnostics section expose Logs in
-every build configuration. The Logs sheet shows redacted local iOS log entries;
+The settings toolbar exposes Logs in every build configuration without
+duplicating that destination inside another settings page. The Logs sheet shows redacted local iOS log entries;
 the client log ingestion service mirrors bounded client logs into the server
 `logs` table while connected, tagging each batch with the active session id so
 server-side `logs::recent` can narrow phone-tested runs by session. iOS redacts

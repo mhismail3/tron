@@ -41,6 +41,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
+        XCTAssertNotNil(landscapeContent.range(of: "serversSection"))
         XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
         XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
         XCTAssertNotNil(landscapeContent.range(of: "evidencePolicySection"))
@@ -119,40 +120,15 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         add(XCTAttachment(contentsOfFile: outputURL))
     }
 
-    func testConnectionSettingsUsesIPadLandscapeColumns() throws {
-        let content = try settingsPageSource(named: "ConnectionSettingsPage.swift")
+    func testServerPairingLivesAsFocusedEngineSection() throws {
+        let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
+        let servers = try settingsPageSource(named: "EngineServersSection.swift")
 
-        XCTAssertTrue(
-            content.contains("SettingsAdaptiveLayout.usesIPadLandscapeLayout"),
-            "Server settings should use the shared iPad-landscape branch"
-        )
-        XCTAssertTrue(
-            content.contains("private var landscapeContent: some View"),
-            "Server settings needs a dedicated landscape projection"
-        )
-
-        let landscapeStart = try XCTUnwrap(
-            content.range(of: "private var landscapeContent: some View")?.lowerBound
-        )
-        let landscapeContent = content[landscapeStart..<content.endIndex]
-        XCTAssertNotNil(landscapeContent.range(of: "pairedServersSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "logsSection"))
-        XCTAssertTrue(
-            landscapeContent.contains("logsSection"),
-            "Server landscape should keep redacted local logs available from the right column"
-        )
-        XCTAssertFalse(
-            landscapeContent.contains("updates" + "Section"),
-            "Server landscape should not retain a fixed update-check section"
-        )
-        XCTAssertTrue(
-            landscapeContent.contains(".fixedSize(horizontal: false, vertical: true)"),
-            "Compact left-column server sections should not stretch to the diagnostics column height"
-        )
-        XCTAssertFalse(
-            landscapeContent.contains("trans" + "cription" + "Section"),
-            "Server settings must not retain deleted media sidecar controls"
-        )
+        XCTAssertTrue(engine.contains("EngineServersSection("))
+        XCTAssertTrue(servers.contains("SettingsSectionHeader(title: \"Servers\")"))
+        XCTAssertTrue(servers.contains(".fixedSize(horizontal: false, vertical: true)"))
+        XCTAssertFalse(servers.contains("SettingsPageContainer"))
+        XCTAssertFalse(servers.contains("LogViewer") || servers.contains("Diagnostics"))
     }
 
     func testProvidersSettingsUsesIPadLandscapeColumns() throws {
@@ -188,23 +164,29 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.observabilityLogLevel(newValue))"))
-        XCTAssertTrue(settingsMain.contains("settingsOwnershipSection("))
-        XCTAssertTrue(settingsMain.contains("title: \"Server-Owned\""))
+        XCTAssertTrue(settingsMain.contains("MainSettingsGridDestination.order"))
+        XCTAssertFalse(settingsMain.contains("Server-Owned"))
+        XCTAssertFalse(settingsMain.contains("This iPhone"))
     }
 
     func testSettingsMainRowsUseSeparateCardsWithoutChevrons() throws {
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
 
         XCTAssertTrue(
-            settingsMain.contains("ForEach(destinations, id: \\.self)")
+            settingsMain.contains("ForEach(MainSettingsGridDestination.order, id: \\.self)")
                 && settingsMain.contains("SettingsCard {")
                 && settingsMain.contains("mainSettingsDestinationRow(destination)"),
-            "Server-Owned and This iPhone rows should render as separate SettingsCard containers"
+            "The three top-level settings pages should render as separate SettingsCard containers"
         )
         XCTAssertTrue(
             settingsMain.contains("ForEach(SettingsDangerZoneAction.order, id: \\.self)")
-                && settingsMain.contains("SettingsCard(accent: .tronError)"),
-            "Maintenance actions should render as separate danger cards rather than one divided table"
+                && settingsMain.contains("SettingsCard(accent: .tronError)")
+                && settingsMain.contains("SettingsSectionHeader(title: \"Danger Zone\")"),
+            "Danger Zone actions should render as separate cards rather than one divided table"
+        )
+        XCTAssertTrue(
+            settingsMain.contains("spacing: MainSettingsListLayout.sectionSpacing"),
+            "Main settings sections should own spacing separately from row spacing"
         )
         XCTAssertFalse(
             settingsMain.contains("SettingsRowDivider()"),
@@ -231,7 +213,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
         XCTAssertFalse(
             settingsView.contains(".safeAreaInset(edge: .bottom"),
-            "The Settings footer should not be a pinned overlay that can cover Maintenance rows"
+            "The Settings footer should not be a pinned overlay that can cover Danger Zone rows"
         )
         XCTAssertFalse(
             pageContainer.contains("safeAreaInset") || pageContainer.contains("footer:"),

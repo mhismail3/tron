@@ -142,22 +142,25 @@ struct AgentCockpitMetricStrip: View {
     }
 
     private func metric(_ title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(.tronTextSecondary)
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .center, spacing: 4) {
+                Text(value)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.66)
+                Spacer(minLength: 4)
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronTextSecondary)
+            }
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
                 .lineLimit(2)
         }
-        .padding(9)
-        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 76, maxHeight: 76, alignment: .topLeading)
         .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, interactive: false)
     }
 }

@@ -44,6 +44,11 @@ final class SessionListExpansionAccessibilityTests: XCTestCase {
         )
         XCTAssertTrue(list.contains(".transition(.opacity)"))
         XCTAssertTrue(list.contains(".frame(maxWidth: .infinity)"))
+        XCTAssertTrue(
+            list.contains(
+                ".padding(.horizontal, SessionListLayout.expansionControlHorizontalPadding)"
+            )
+        )
         XCTAssertTrue(list.contains(".buttonStyle(.plain)\n        .contentShape(Rectangle())"))
         XCTAssertTrue(list.contains(#".accessibilityLabel("\(title) sessions in \(projectName)")"#))
         XCTAssertTrue(list.contains(".accessibilityHint(hint)"))

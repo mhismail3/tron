@@ -35,8 +35,8 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Shell/SettingsView.swift"),
             encoding: .utf8
         )
-        let connectionSettingsPage = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+        let engineServersSection = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/EngineServersSection.swift"),
             encoding: .utf8
         )
         let logViewer = try String(
@@ -79,11 +79,10 @@ extension SourceGuardTests {
         #expect(settingsView.contains("Button { showLogViewer = true }"))
         #expect(settingsView.contains("LogViewer()"))
         #expect(!settingsView.contains("#if DEBUG || BETA"))
-        #expect(connectionSettingsPage.contains("@State private var showLogs = false"))
-        #expect(connectionSettingsPage.contains("SettingsSectionHeader(title: ConnectionSettingsDiagnosticsCopy.sectionTitle)"))
-        #expect(connectionSettingsPage.contains("showLogs = true"))
-        #expect(connectionSettingsPage.contains("LogViewer()"))
-        #expect(!connectionSettingsPage.contains("AgentCockpitSheet("))
+        #expect(!engineServersSection.contains("showLogs"))
+        #expect(!engineServersSection.contains("LogViewer()"))
+        #expect(!engineServersSection.contains("logsSection"))
+        #expect(!engineServersSection.contains("AgentCockpitSheet("))
         #expect(!logViewer.hasPrefix("#if DEBUG || BETA"))
         #expect(!logViewer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
         #expect(!logViewer.contains("exportLogsToServer"))
@@ -115,11 +114,11 @@ extension SourceGuardTests {
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))
 
-        #expect(architectureDoc.contains("The settings toolbar and the Servers page Diagnostics section expose Logs in"))
+        #expect(architectureDoc.contains("The settings toolbar exposes Logs in"))
         #expect(architectureDoc.contains("client log ingestion service mirrors bounded client logs into the server"))
         #expect(architectureDoc.contains("`logs` table while connected"))
         #expect(architectureDoc.contains("Successful ingest transport chatter is filtered"))
-        #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration from the toolbar and the Servers page Diagnostics section"))
+        #expect(rootReadme.contains("Settings exposes the Logs sheet in every iOS build configuration from its toolbar"))
         #expect(rootReadme.contains("automatically ingests deduplicated client logs"))
         #expect(rootReadme.contains("self-feeding diagnostics loops"))
     }
