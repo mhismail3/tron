@@ -110,6 +110,21 @@ struct InputBarConfig {
     /// Whether a captured recording is being transcribed.
     let isTranscribing: Bool
 
+    /// Session Briefing yields its composer slot throughout the authoritative
+    /// voice lifecycle so capture/transcription status stays adjacent to the
+    /// trailing action.
+    var showsContextBriefingControl: Bool {
+        !isRecording && !isTranscribing
+    }
+
+    /// Voice capture owns the trailing composer action until recording and
+    /// transcription have both finished, even when a draft already has text
+    /// or attachments.
+    func canSend(hasContent: Bool) -> Bool {
+        guard agentPhase.isIdle, showsContextBriefingControl else { return false }
+        return hasContent && sendBlockReason == nil
+    }
+
     /// Why the send button would be unavailable even with non-empty input.
     /// `nil` means no async blocker; input emptiness is the only remaining gate.
     ///

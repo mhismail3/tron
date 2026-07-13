@@ -35,10 +35,17 @@ struct AgentCockpitStateTests {
         #expect(overview.packages.first?.packageId == "local.echo")
         #expect(overview.discovery.title == "Verified")
         #expect(overview.discovery.families.first?.id == "local.echo")
-        #expect(overview.discovery.groups.first?.title == "Other Capabilities")
-        #expect(overview.discovery.groups.first?.functionCount == 1)
+        #expect(overview.discovery.groups.isEmpty)
+        #expect(overview.discovery.engineGroups.first?.title == "Other Capabilities")
+        #expect(overview.discovery.engineGroups.first?.functionCount == 1)
+        #expect(overview.discovery.agentOperationCount == 0)
+        #expect(overview.discovery.engineFunctionCount == 1)
         #expect(overview.discovery.reports.first?.lifecycle == "passed")
         #expect(overview.activity.isEmpty)
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(summary.agentActions.value == nil)
+        #expect(summary.engineActions.value == nil)
+        #expect(summary.engineInterfaces == 1)
     }
 
     @Test("Projection renders server-owned module activity from resource facts")
@@ -63,6 +70,48 @@ struct AgentCockpitStateTests {
         #expect(overview.activity.first?.authorityLabels.contains("grant redacted") == true)
         #expect(overview.activity.first?.touchedResources.first?.label == "output refs")
         #expect(overview.moduleActivity?.projection.rawPayloadsReturned == false)
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(summary.statusKind == .awaitingApproval)
+        #expect(summary.title == "Needs You")
+        #expect(summary.recentActivityTitle == "Active")
+        #expect(summary.activeActivity == 1)
+    }
+
+    @Test("Dashboard prioritizes waiting work over routine active work")
+    func dashboardPrioritizesWaitingWork() {
+        var activity = sampleModuleActivityOverview()
+        activity.summary.total = 2
+        activity.summary.waiting = 1
+        activity.summary.detail = "One item needs your review while work continues."
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            moduleActivity: activity,
+            connectionState: .connected
+        )
+
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(summary.statusKind == .awaitingApproval)
+        #expect(summary.title == "Needs You")
+        #expect(summary.recentActivityTitle == "Needs you")
+        #expect(summary.activeActivity == 1)
+        #expect(summary.waitingActivity == 1)
+    }
+
+    @Test("Dashboard quiet state is concise and does not repeat Idle")
+    func dashboardQuietStateIsConcise() {
+        let summary = AgentCockpitPresentation.dashboardSummary(
+            for: .empty(connectionState: .connected)
+        )
+
+        #expect(summary.title == "All Systems Quiet")
+        #expect(summary.recentActivityTitle == "No recent work")
+        #expect(summary.agentActions.value == nil)
+        #expect(summary.engineActions.value == nil)
+        #expect(
+            AgentCockpitPresentation.verificationDetail(for: .empty)
+                == "Agent action inventory is unavailable."
+        )
     }
 
     @Test("Projection renders capability cockpit operation ownership and attempts without raw owner text")
@@ -83,11 +132,43 @@ struct AgentCockpitStateTests {
 
         #expect(overview.discovery.operationCount == 2)
         #expect(overview.modularityOperations.count == 2)
-        #expect(overview.invokableUnitCount == 1)
-        #expect(overview.invokableUnitLabel == "Agent operations")
         #expect(overview.discovery.agentOperationCount == 1)
         #expect(overview.discovery.engineOperationCount == 1)
         #expect(overview.discovery.engineFunctionCount == 1)
+        let dashboardSummary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(dashboardSummary.agentActions.value == 1)
+        #expect(dashboardSummary.agentActions.isComplete)
+        #expect(dashboardSummary.workers == 1)
+        #expect(dashboardSummary.triggers == 1)
+        #expect(dashboardSummary.engineActions.value == 1)
+        #expect(dashboardSummary.engineActions.isComplete)
+        #expect(dashboardSummary.engineInterfaces == 1)
+        #expect(dashboardSummary.verification == "Verified")
+        #expect(
+            dashboardSummary.agentActions.phrase(
+                singular: "agent action",
+                plural: "agent actions"
+            ) == "1 agent action"
+        )
+        #expect(
+            dashboardSummary.engineActions.phrase(
+                singular: "engine action",
+                plural: "engine actions"
+            ) == "1 engine action"
+        )
+        #expect(
+            AgentCockpitPresentation.countPhrase(
+                dashboardSummary.workers,
+                singular: "worker",
+                plural: "workers"
+            ) == "1 worker"
+        )
+        #expect(
+            AgentCockpitDashboardCount(value: 1, isComplete: false).phrase(
+                singular: "agent action",
+                plural: "agent actions"
+            ) == "1+ agent actions"
+        )
         let git = overview.modularityOperations.first { $0.name == "git_status" }
         #expect(git?.displayName == "Inspect Git Status")
         #expect(git?.description == "Inspects the current repository state without changing it.")
@@ -142,7 +223,7 @@ struct AgentCockpitStateTests {
         let engineGroup = overview.discovery.engineGroups.first { group in
             group.operations.contains { $0.name == "observe" }
         }
-        #expect(engineGroup?.ownerSummary == "1 locked operation")
+        #expect(engineGroup?.ownerSummary == "1 locked action")
         #expect(overview.discovery.engineGroups.contains { !$0.functions.isEmpty })
         #expect(overview.capabilityVisibility?.projection.rawResourceIdsReturned == false)
         #expect(overview.capabilityVisibility?.projection.rawAuthorityIdsReturned == false)
@@ -163,6 +244,62 @@ struct AgentCockpitStateTests {
         #expect(overview.activity.first?.status == "degraded")
         #expect(overview.activity.first?.systemImage == "exclamationmark.triangle")
         #expect(overview.moduleActivity?.summary.degraded == 1)
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(summary.statusKind == .degraded)
+        #expect(summary.recentActivityTitle == "Needs review")
+        #expect(summary.degradedActivity == 1)
+    }
+
+    @Test("Present empty capability projection stays authoritative")
+    func presentEmptyCapabilityProjectionStaysAuthoritative() {
+        var visibility = AgentCockpitViewModelTests.capabilityCockpitOverview()
+        visibility.operations = []
+        visibility.operationList.totalOperations = 0
+        visibility.operationList.returnedOperations = 0
+        visibility.operationList.complete = true
+        visibility.operationList.truncated = false
+        visibility.summary.totalOperations = 0
+        visibility.summary.returnedOperations = 0
+        visibility.summary.operationListComplete = true
+        visibility.summary.operationListTruncated = false
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(functionHealth: "Unhealthy"),
+            resources: [],
+            capabilityVisibility: visibility,
+            connectionState: .connected
+        )
+
+        #expect(overview.discovery.agentOperationCount == 0)
+        #expect(overview.discovery.groups.isEmpty)
+        #expect(overview.discovery.engineOperationCount == 0)
+        #expect(overview.discovery.engineFunctionCount == 1)
+        #expect(!overview.discovery.engineGroups.isEmpty)
+        #expect(overview.status.kind == .ready)
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(summary.agentActions.value == 0)
+        #expect(summary.agentActions.isComplete)
+        #expect(summary.engineInterfaces == 1)
+    }
+
+    @Test("Bounded capability projection labels action counts as lower bounds")
+    func boundedCapabilityProjectionLabelsActionCountsAsLowerBounds() {
+        var visibility = AgentCockpitViewModelTests.capabilityCockpitOverview()
+        visibility.operationList.complete = false
+        visibility.operationList.truncated = true
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: sampleCatalogSnapshot(),
+            resources: [],
+            capabilityVisibility: visibility,
+            connectionState: .connected
+        )
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+
+        #expect(!summary.agentActions.isComplete)
+        #expect(summary.agentActions.displayValue == "1+")
+        #expect(!summary.engineActions.isComplete)
+        #expect(summary.engineActions.displayValue == "1+")
     }
 
     @Test("Projection marks degraded worker/function health")
@@ -213,7 +350,7 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.title == "Schema Gaps")
         #expect(overview.discovery.missingSchemaCount == 1)
         #expect(overview.discovery.families.first?.missingSchemaCount == 1)
-        #expect(overview.discovery.groups.first?.missingSchemaCount == 1)
+        #expect(overview.discovery.engineGroups.first?.missingSchemaCount == 1)
     }
 
     @Test("Projection keeps internal catalog schema gaps out of operation cockpit status")
@@ -261,8 +398,6 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.missingSchemaCount == 0)
         #expect(overview.discovery.catalogDecodeIssueCount == 0)
         #expect(overview.discovery.groups.allSatisfy { $0.missingSchemaCount == 0 })
-        #expect(overview.invokableUnitLabel == "Agent operations")
-        #expect(overview.invokableUnitCount == 1)
         #expect(overview.discovery.agentOperationCount == 1)
         #expect(overview.discovery.engineOperationCount == 1)
         #expect(overview.discovery.engineFunctionCount == 1)
@@ -334,17 +469,26 @@ struct AgentCockpitStateTests {
         #expect(overview.status.kind == .idle)
         #expect(overview.discovery.title == "Verified")
         #expect(overview.discovery.missingSchemaCount == 0)
-        #expect(overview.discovery.groups.first?.missingSchemaCount == 0)
-        #expect(overview.invokableUnitCount == 1)
-        #expect(overview.invokableUnitLabel == "Functions")
+        #expect(overview.discovery.engineGroups.first?.missingSchemaCount == 0)
         #expect(overview.functions.first?.ownerWorker == "context_control")
         #expect(overview.functions.first?.effectClass == "PureRead")
         #expect(overview.functions.first?.riskLevel == "Low")
         #expect(overview.functions.first?.schemaComplete == true)
+        let summary = AgentCockpitPresentation.dashboardSummary(for: overview)
+        #expect(summary.agentActions.value == nil)
+        #expect(summary.agentActions.displayValue == "—")
+        #expect(
+            summary.agentActions.phrase(
+                singular: "agent action",
+                plural: "agent actions"
+            ) == "Agent actions unavailable"
+        )
+        #expect(summary.engineActions.value == nil)
+        #expect(summary.engineInterfaces == 1)
     }
 
-    @Test("Projection explains built-in operations without workers or triggers")
-    func projectionExplainsBuiltInOperationsWithoutWorkersOrTriggers() {
+    @Test("Projection explains built-in interfaces without workers or triggers")
+    func projectionExplainsBuiltInInterfacesWithoutWorkersOrTriggers() {
         let snapshot = CatalogWatchSnapshotDTO(
             changes: [],
             snapshot: CatalogSnapshotDTO(
@@ -376,10 +520,18 @@ struct AgentCockpitStateTests {
             connectionState: .connected
         )
 
-        let group = overview.discovery.groups.first
+        let group = overview.discovery.engineGroups.first
         #expect(group?.title == "Session & Context")
-        #expect(group?.ownerSummary == "Built-in engine operations")
-        #expect(group?.workerTriggerExplanation?.contains("built-in engine operations") == true)
+        #expect(group?.ownerSummary == "Built-in engine interfaces")
+        #expect(group?.workerTriggerExplanation?.contains("interfaces are built into the engine") == true)
+        #expect(
+            overview.discovery.detail
+                == "Agent action inventory unavailable; 1 engine interface remains inspectable"
+        )
+        #expect(
+            AgentCockpitPresentation.verificationDetail(for: overview.discovery)
+                == "Agent action inventory is unavailable. 1 engine interface remains visible for diagnostics."
+        )
     }
 
     @Test("Projection reports malformed catalog entries as degraded")
@@ -445,10 +597,21 @@ struct AgentCockpitStateTests {
             connectionState: .connected
         )
 
+        let dashboardSummary = AgentCockpitPresentation.dashboardSummary(for: overview)
         let topLevelStrings = [
-            AgentCockpitPresentation.verificationTitle(for: overview.discovery),
+            dashboardSummary.title,
+            dashboardSummary.detail,
+            dashboardSummary.agentActions.phrase(
+                singular: "agent action",
+                plural: "agent actions"
+            ),
+            dashboardSummary.engineActions.phrase(
+                singular: "engine action",
+                plural: "engine actions"
+            ),
+            dashboardSummary.recentActivityTitle,
             AgentCockpitPresentation.verificationDetail(for: overview.discovery),
-            AgentCockpitPresentation.verificationPhrase(for: overview.discovery.latestReport),
+            dashboardSummary.verification,
             AgentCockpitPresentation.verificationStatus(for: overview.discovery.latestReport),
             AgentCockpitPresentation.workKindLabel(overview.moduleActivity?.resources.first?.kind ?? ""),
             AgentCockpitPresentation.workStateLine(
@@ -458,7 +621,7 @@ struct AgentCockpitStateTests {
         ]
 
         #expect(AgentCockpitPresentation.hiddenTopLevelTerms(in: topLevelStrings).isEmpty)
-        #expect(topLevelStrings.contains("Operations verified"))
+        #expect(topLevelStrings.contains("Active"))
         #expect(topLevelStrings.contains("Verified"))
         #expect(topLevelStrings.contains("Runtime"))
         #expect(AgentCockpitPresentation.functionDisplayName("agent::abort_invocation") == "Abort Invocation Agent")

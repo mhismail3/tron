@@ -27,23 +27,6 @@ extension AgentCockpitSheet {
 
     private var capabilitiesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CapabilitiesSummaryCard(overview: viewModel.overview.discovery) {
-                Task {
-                    await viewModel.verifyCatalogDiscovery(
-                        repository: repository,
-                        sessionId: sessionId,
-                        workspaceId: workspaceId,
-                        connectionState: connectionState
-                    )
-                }
-            }
-            WorkerTriggerExplanationCard(
-                workers: viewModel.overview.workers.count,
-                triggers: viewModel.overview.triggers.count,
-                operations: viewModel.overview.modularityOperations.isEmpty
-                    ? viewModel.overview.functions.count
-                    : viewModel.overview.modularityOperations.count
-            )
             if !viewModel.overview.routeStories.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("What Changed")
@@ -65,15 +48,19 @@ extension AgentCockpitSheet {
             if viewModel.overview.discovery.groups.isEmpty {
                 CockpitEmptyState(
                     symbol: "questionmark.folder",
-                    title: "No capabilities",
-                    detail: "The connected engine has not published visible capabilities."
+                    title: viewModel.overview.capabilityVisibility == nil
+                        ? "Action inventory unavailable"
+                        : "No capabilities",
+                    detail: viewModel.overview.capabilityVisibility == nil
+                        ? "The engine did not return an authoritative agent-action projection."
+                        : "The connected engine has not published visible capabilities."
                 )
             } else {
                 ForEach(viewModel.overview.discovery.groups) { group in
                     Button {
                         selectedCapabilityGroup = group
                     } label: {
-                        CapabilityGroupCard(group: group)
+                        CapabilityGroupCard(group: group, scope: .capabilities)
                     }
                     .buttonStyle(.plain)
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -89,15 +76,15 @@ extension AgentCockpitSheet {
             if viewModel.overview.discovery.engineGroups.isEmpty {
                 CockpitEmptyState(
                     symbol: "lock.shield",
-                    title: "No engine functions",
-                    detail: "The connected engine has not published inspectable kernel or governance functions."
+                    title: "No engine interfaces",
+                    detail: "The connected engine has not published inspectable kernel or governance interfaces."
                 )
             } else {
                 ForEach(viewModel.overview.discovery.engineGroups) { group in
                     Button {
                         selectedCapabilityGroup = group
                     } label: {
-                        CapabilityGroupCard(group: group)
+                        CapabilityGroupCard(group: group, scope: .engine)
                     }
                     .buttonStyle(.plain)
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

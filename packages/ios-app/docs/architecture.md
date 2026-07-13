@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-13 (the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free glyph inside that surface; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination uses independently aligned disclosure controls; Dashboard separates agent capabilities, inspect-only engine functions, and activity/verification).
+> Last verified: 2026-07-13 (the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard bands share the session-row alignment grid; the Dashboard has one high-signal summary for capabilities, engine, activity, triggers, verification, and issues).
 
 ## Overview
 
@@ -86,7 +86,10 @@ and matching database/event/settings/dependency work.
   with the session status and date columns. The
   retained session actions include creation/fork/resume,
   a new-session workspace selector over the configured default workspace,
-  recent session workspaces, and manual Mac paths, prompt composer with a
+  recent session workspaces, and manual Mac paths. Its configured, default,
+  recent, and navigation actions share one compact, intrinsic-width,
+  single-line capsule geometry while retaining their distinct semantics. The
+  prompt composer has a
   local recent-input picker, a functional-only native attachment menu whose
   transparent icon-sized target preserves composer keyboard focus. The
   composed content row directly owns native interactive Liquid Glass, while
@@ -96,7 +99,12 @@ and matching database/event/settings/dependency work.
   one composer surface with an embedded left
   attachment action plus a right-side, background-free proportional context
   ring and state action that becomes voice, send, transcribing, or stop as
-  needed. Message rendering
+  needed. The context ring yields its slot while recorder-owned capture or
+  coordinator-owned transcription is active, placing the waveform/status
+  immediately beside the trailing stop/progress action, and returns only after
+  both lifecycle states end. Recording/transcription also owns the trailing
+  action even when draft content exists; sending resumes only after both voice
+  states clear. Message rendering
   preserves ordered/unordered list nesting and includes quiet blank
   empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
@@ -202,11 +210,13 @@ with an explicit failed-refresh status.
 
 `WorkspaceSelector` is a narrow server-backed workspace browser, not the old
 general filesystem tool surface. Its hierarchy is navigation-first: configured
-quick/default and recent workspace shortcuts are compact horizontal chips,
-navigation actions are separate compact intrinsic-width single-line capsule
-controls, the current folder is listed as a plain left-aligned path, and
-existing server directories own the main list. It browses
-the paired Mac through `WorkspaceBrowserRepository` over
+quick/default and recent workspace shortcuts plus the Go Up, New Folder, and
+Hidden actions share one compact, intrinsic-width, single-line capsule
+presentation. One primitive owns their icon slot, padding, shape, and
+interactive Liquid Glass geometry while selection and action semantics remain
+distinct. The current folder is listed as a plain left-aligned path, and
+existing server directories own the main list. It browses the paired Mac
+through `WorkspaceBrowserRepository` over
 `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`. Hidden folders are toggled from the compact action
 row, and inline folder creation selects the created folder. The selector must
@@ -246,7 +256,7 @@ remove the old video input before validating and attaching the replacement
 input so the old input does not make `canAddInput` fail.
 
 The shell mounts `ContentView` even before onboarding is complete.
-`TronMobileApp` owns one onboarding presenter for first-run setup, Server-page
+`TronMobileApp` owns one onboarding presenter for first-run setup, Engine → Servers
 pairing, and pairing URLs. `OnboardingSheetPresentation` starts that flow on a
 medium detent, allows expansion to large when content needs more room, and uses
 compact iPad sizing so the connect form, QR-first pairing card, and setup pages
@@ -364,7 +374,7 @@ The chat timeline owns only truthful local/session presentation state:
   stay compact; detail sheets read as a progressive briefing: what happened,
   what needs attention, the concise request, the useful result, then evidence.
   Detail cards use the same liquid-glass progressive disclosure language as
-  Dashboard: high-level narrative and compact metric strips first,
+  Dashboard: high-level narrative and compact summary facts first,
   invocation list rows with dividers next, and full invocation refs/raw payloads
   only inside disclosure rows so top-level sheets do not lead with raw IDs,
   grants, paths, or JSON.
@@ -560,12 +570,28 @@ payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
-The Dashboard opens from the session list, not Settings. Its compact band
-and compact equal-height sheet-header metrics are the core engine summary: connection
-state, visible invokable operation count, issue count, and plain verification
-state from server-owned facts. The sheet orders Capabilities, Engine, then
-Activity, grouping
-agent-facing operations into user-facing areas before drilling into
+The Dashboard opens from the session list, not Settings.
+`AgentCockpitPresentation.dashboardSummary(for:)` is the single presentation
+boundary for its compact band and large sheet summary card. The compact band and
+the Agent Briefing band use the session-row icon width, icon-to-text spacing,
+and horizontal content inset so their icons, titles, and descriptions share the
+same visual columns as session rows. The sheet starts with one larger aggregate
+summary card derived from that presentation model. One neutral, untinted glass
+surface uses dividers instead of nested tinted cards, with one status header and
+concise Capabilities, Engine, and Recent activity rows. Quiet state is expressed
+once as “All Systems Quiet”; the activity row says “No recent work” and omits
+zero-valued activity facts. The status header and all three rows share one icon
+column and one text column. The rows cover qualified action/interface counts,
+workers, triggers, verification, and activity while the header owns the global
+issue count. The capability check action sits beside the complete fact stack,
+not inside its title line, so the button cannot inflate title-to-value spacing.
+Bounded action projections render returned counts as lower bounds,
+and missing projections render action counts as unavailable instead of
+relabeling catalog interfaces. The previous duplicate capability-verification
+summary, top-level worker/trigger explainer, nested green fills, and area-count
+metrics remain absent. The sheet
+orders Capabilities, Engine, then Activity, grouping agent-facing actions into
+user-facing areas before drilling into
 server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
 bounded resource-scan state, locked/built-in/module status, redacted
@@ -576,14 +602,19 @@ replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 active route state, route events, routed invocations,
 failed-closed/disabled/rolled-back route state, rollback/disable/abort
 availability, effect/risk, schema-health, worker, trigger, tags,
-request/response schema bodies, and safe verification details. Top-level area
-cards contain one title, one concise description, and one metric row; healthy
-cards do not repeat status badges or worker boilerplate. Operation rows and
+request/response schema bodies, and safe verification details. Top-level
+Capabilities cards contain one title, one concise description, and only their
+meaningful Actions and Ownership facts, all aligned in the title text column;
+Engine cards may additionally show qualified engine-interface and worker facts.
+Healthy cards do not repeat status badges or worker boilerplate. Operation rows and
 detail summaries lead with server-owned friendly names and concise behavior
 descriptions while retaining canonical identifiers as secondary technical
-detail, with the canonical operation ID on its own final technical row. The Engine tab labels live typed catalog definitions “Functions” and
-explains that these are interfaces used by Tron and its clients, distinct from
-actions the agent can invoke. The shared issue count covers degraded workers,
+detail, with the canonical operation ID on its own final technical row. User-facing
+Dashboard copy calls provider/model-facing `capability::execute` operations
+“Actions” and calls lower-level typed catalog functions “Engine interfaces.”
+The latter are contracts used by Tron and its clients and are not presented as
+an additive agent-capability count; canonical Operation ID and Function ID
+labels remain in technical drill-down. The shared issue count covers degraded workers,
 deduplicated blocked or degraded module activity, malformed operation
 classification, failed-closed routes, incomplete operation/evidence
 projections, failed verification evidence, and Dashboard refresh failures. It
@@ -656,10 +687,15 @@ settings snapshot is unavailable. Providers owns OAuth and API-key setup, and
 App owns local appearance and device behavior. Database logging, diagnostic
 retention, and storage-budget enforcement are fixed internal Engine safeguards,
 not mobile settings. Settings main does not grow a server-health dashboard;
-core engine visibility lives in the Dashboard.
+core engine visibility lives in the Dashboard. Its trailing destination copy
+stays to two or three short concepts: Servers/session defaults/context,
+OAuth/API keys, and appearance/notifications/behavior. It does not attempt to
+enumerate every control owned by the destination.
 Each main Settings destination or maintenance action renders as its own card;
 the sheet avoids grouped table dividers and chevrons because the card itself is
-the tap target and disclosure affordance.
+the tap target and disclosure affordance. Engine and Providers open directly
+on their owned sections; neither sheet builds or renders a duplicate summary
+hero above those controls.
 The Settings footer is a reserved bottom sibling owned by the Settings shell,
 so its left/right alignment matches the rows and it remains reachable at
 medium and large detents without content scrolling behind it. It does not

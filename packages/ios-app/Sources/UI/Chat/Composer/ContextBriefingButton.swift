@@ -14,7 +14,9 @@ struct ContextBriefingButton: View {
     var modelName: String?
     var onTap: (() -> Void)? = nil
 
-    private let ringSize: CGFloat = 17
+    /// Matches the mic glyph's perceived footprint while the button retains
+    /// the same full-size hit target as the other composer actions.
+    private let ringSize: CGFloat = 15
 
     static func boundedPercentage(for percentage: Int) -> Int {
         min(max(percentage, 0), 100)

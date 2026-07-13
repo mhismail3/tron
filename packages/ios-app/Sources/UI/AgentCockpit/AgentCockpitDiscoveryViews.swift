@@ -1,93 +1,5 @@
 import SwiftUI
 
-struct CapabilitiesSummaryCard: View {
-    let overview: AgentCockpitDiscoveryOverview
-    let onVerify: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: overview.systemImage)
-                    .foregroundStyle(statusColor)
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summaryTitle)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(summaryDetail)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button(action: onVerify) {
-                    Label("Check capabilities", systemImage: "checkmark.shield")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.18)).interactive(), in: .capsule)
-                }
-                .buttonStyle(.plain)
-            }
-            HStack(spacing: 8) {
-                capabilityMetric("Areas", overview.groups.count)
-                capabilityMetric("Agent operations", operationMetricCount)
-                capabilityMetric("Workers", overview.workerCount)
-                capabilityMetric("Triggers", overview.triggerCount)
-            }
-            if overview.latestReport != nil {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let checked = AgentCockpitPresentation.safeLastChecked(overview.latestReport) {
-                        Text("Last checked \(checked)")
-                    }
-                }
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            }
-        }
-        .padding(13)
-        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
-    }
-
-    private var summaryTitle: String {
-        AgentCockpitPresentation.verificationTitle(for: overview)
-    }
-
-    private var summaryDetail: String {
-        AgentCockpitPresentation.verificationDetail(for: overview)
-    }
-
-    private var operationMetricCount: Int {
-        overview.agentOperationCount
-    }
-
-    private var statusColor: Color {
-        switch overview.title {
-        case "Verified":
-            return .tronSuccess
-        case "Catalog Degraded", "Operations Need Review", "Schema Gaps", "Attention", "Report Failed", "Verification Needs Review":
-            return .tronWarning
-        default:
-            return .tronInfo
-        }
-    }
-
-    private func capabilityMetric(_ title: String, _ value: Int) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(value)")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 struct EngineCoreSummaryCard: View {
     let overview: AgentCockpitDiscoveryOverview
 
@@ -96,23 +8,25 @@ struct EngineCoreSummaryCard: View {
             Label("Engine Core", systemImage: "lock.shield")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
-            Text("Functions are typed interfaces used by Tron and its clients. Operations are actions the agent can invoke. Both stay inspectable here.")
+            Text("Agent actions are what the assistant can invoke. Engine interfaces are lower-level contracts used by Tron and its clients.")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
-                metric("Engine operations", overview.engineOperationCount)
-                metric("Functions", overview.engineFunctionCount)
-                metric("Areas", overview.engineGroups.count)
+                metric(
+                    "Engine actions",
+                    overview.capabilityVisibility == nil ? "—" : "\(overview.engineOperationCount)"
+                )
+                metric("Engine interfaces", "\(overview.engineFunctionCount)")
             }
         }
         .padding(13)
         .sectionFill(.tronInfo, cornerRadius: 12, subtle: true, interactive: false)
     }
 
-    private func metric(_ title: String, _ value: Int) -> some View {
+    private func metric(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("\(value)")
+            Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
             Text(title)
@@ -121,26 +35,6 @@ struct EngineCoreSummaryCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct WorkerTriggerExplanationCard: View {
-    let workers: Int
-    let triggers: Int
-    let operations: Int
-
-    var body: some View {
-        if operations > 0, workers == 0, triggers == 0 {
-            Label(
-                "Built-in engine operations can be invoked directly. Worker and trigger counts appear when modules publish autonomous runtime owners.",
-                systemImage: "info.circle"
-            )
-            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-            .foregroundStyle(.tronTextSecondary)
-            .padding(11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .sectionFill(.tronInfo, cornerRadius: 10, subtle: true, interactive: false)
-        }
     }
 }
 
@@ -234,15 +128,21 @@ struct RouteStoryCard: View {
     }
 }
 
+enum AgentCockpitGroupCardScope {
+    case capabilities
+    case engine
+}
+
 struct CapabilityGroupCard: View {
     let group: AgentCockpitCapabilityGroupRow
+    let scope: AgentCockpitGroupCardScope
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: group.hasIssues ? "exclamationmark.triangle" : "square.stack.3d.up")
-                    .foregroundStyle(group.hasIssues ? .tronWarning : .tronInfo)
-                    .frame(width: 20)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: group.hasIssues ? "exclamationmark.triangle" : "square.stack.3d.up")
+                .foregroundStyle(group.hasIssues ? .tronWarning : .tronInfo)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(group.title)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -252,23 +152,14 @@ struct CapabilityGroupCard: View {
                         .foregroundStyle(.tronTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+
+                LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 8) {
+                    ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
+                        compactMetric(metric.title, metric.value)
+                    }
+                }
             }
-            HStack(spacing: 8) {
-                compactMetric(
-                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .operations),
-                    group.operationCount > 0 ? group.operationCount : group.functionCount
-                )
-                compactMetric(
-                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .engineFunctions),
-                    group.functionCount
-                )
-                compactMetric(
-                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .workers),
-                    group.workerCount
-                )
-                compactSummaryMetric(group.ownerSummary)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -276,24 +167,47 @@ struct CapabilityGroupCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private func compactMetric(_ title: String, _ value: Int) -> some View {
-        HStack(spacing: 4) {
-            Text("\(value)")
+    private var metricColumns: [GridItem] {
+        [
+            GridItem(.flexible(), alignment: .leading),
+            GridItem(.flexible(), alignment: .leading),
+        ]
+    }
+
+    private var metrics: [(title: String, value: String)] {
+        switch scope {
+        case .capabilities:
+            return [
+                ("Actions", "\(group.operationCount)"),
+                ("Ownership", group.ownerSummary),
+            ]
+        case .engine:
+            var facts: [(title: String, value: String)] = []
+            if group.operationCount > 0 {
+                facts.append(("Engine actions", "\(group.operationCount)"))
+            }
+            if group.functionCount > 0 {
+                facts.append(("Engine interfaces", "\(group.functionCount)"))
+            }
+            if group.workerCount > 0 {
+                facts.append(("Workers", "\(group.workerCount)"))
+            }
+            facts.append(("Ownership", group.ownerSummary))
+            return facts
+        }
+    }
+
+    private func compactMetric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func compactSummaryMetric(_ value: String) -> some View {
-        Text(value)
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-            .foregroundStyle(.tronTextSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -411,10 +325,19 @@ struct CapabilityGroupDetailSheet: View {
                 .foregroundStyle(.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                detailMetric("Operations", group.operationCount)
-                detailMetric("Functions", group.functionCount)
-                detailMetric("Workers", group.workerCount)
-                detailMetric("Issues", group.degradedCount + group.missingSchemaCount)
+                detailMetric(
+                    group.operationCount > 0 ? "Actions" : "Engine interfaces",
+                    group.operationCount > 0 ? group.operationCount : group.functionCount
+                )
+                if !group.functions.isEmpty, group.operationCount > 0 {
+                    detailMetric("Engine interfaces", group.functionCount)
+                }
+                if !group.workerIds.isEmpty {
+                    detailMetric("Workers", group.workerCount)
+                }
+                if group.hasIssues {
+                    detailMetric("Issues", group.degradedCount + group.missingSchemaCount)
+                }
             }
         }
         .padding(13)

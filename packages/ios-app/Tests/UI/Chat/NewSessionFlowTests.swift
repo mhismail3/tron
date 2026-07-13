@@ -141,6 +141,33 @@ final class NewSessionFlowTests: XCTestCase {
         }
     }
 
+    func testWorkspaceSelectorActionsShareTheShortcutPillPresentation() throws {
+        let source = try String(
+            contentsOf: iosAppRoot()
+                .appendingPathComponent("Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift"),
+            encoding: .utf8
+        )
+        let quickStart = try XCTUnwrap(source.range(of: "struct WorkspaceQuickPathPill"))
+        let actionStart = try XCTUnwrap(source.range(of: "struct WorkspaceDirectoryActionPill"))
+        let sharedStart = try XCTUnwrap(source.range(of: "private struct WorkspaceCompactPillButton"))
+        let extensionStart = try XCTUnwrap(source.range(of: "private extension WorkspaceCompactPillButton"))
+        let quick = source[quickStart.lowerBound..<actionStart.lowerBound]
+        let action = source[actionStart.lowerBound..<sharedStart.lowerBound]
+        let shared = source[sharedStart.lowerBound..<extensionStart.lowerBound]
+
+        for owner in [quick, action] {
+            XCTAssertTrue(owner.contains("WorkspaceCompactPillButton("))
+            XCTAssertFalse(owner.contains(".contentShape(Capsule())"))
+            XCTAssertFalse(owner.contains(".glassEffect("))
+            XCTAssertFalse(owner.contains(".padding(.vertical"))
+        }
+        XCTAssertEqual(shared.components(separatedBy: ".contentShape(Capsule())").count - 1, 1)
+        XCTAssertTrue(shared.contains(".padding(.horizontal, 10)"))
+        XCTAssertTrue(shared.contains(".padding(.vertical, 7)"))
+        XCTAssertTrue(shared.contains(".glassEffect("))
+        XCTAssertFalse(source.contains(".frame(minHeight:"))
+    }
+
     func testFolderNameValidatorAllowsHiddenFoldersButRejectsPathSegments() {
         XCTAssertNil(FolderNameValidator.validationError(for: "Project"))
         XCTAssertNil(FolderNameValidator.validationError(for: ".config"))

@@ -297,7 +297,6 @@
 		5FE0392534145F90F108F5CE /* EngineProtocolTypes+Capability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F578D94C9A63136E142543 /* EngineProtocolTypes+Capability.swift */; };
 		5FEA34E3EB5AB89D977A8404 /* Comme-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2BFF5606F19446978F9B9BF5 /* Comme-Variable.ttf */; };
 		60144BD250F383DA31A3CEC2 /* EngineProtocolTypesAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3611DEC2F69FFE2D6FFFC38 /* EngineProtocolTypesAuthTests.swift */; };
-		60E6B8C927DC43999E18475B /* SettingsInfoCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB7C461C522BDDF573002FB /* SettingsInfoCard.swift */; };
 		61140583DFBB3B1098C4FA8C /* ThinkingRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97E7CC3E4B3ABF7B0A98E082 /* ThinkingRepository.swift */; };
 		619FF98ECC8C4A3C891894E5 /* NetworkDiagnosticsFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2A332D7535ECAC29456FC7 /* NetworkDiagnosticsFormatter.swift */; };
 		624388C8716F4476DBF4CF03 /* EngineConnection+Receiving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D00CB9CF8F8FE6E63792F1F /* EngineConnection+Receiving.swift */; };
@@ -947,7 +946,6 @@
 		3F3424657419D364EBAAB725 /* String+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Extensions.swift"; sourceTree = "<group>"; };
 		3F93FF12F0545917BAC7894F /* WrappingHStackLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappingHStackLayout.swift; sourceTree = "<group>"; };
 		3FA4ABAAE55BB7A882651BBD /* MessagingCoordinatorAuditRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagingCoordinatorAuditRegressionTests.swift; sourceTree = "<group>"; };
-		3FB7C461C522BDDF573002FB /* SettingsInfoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInfoCard.swift; sourceTree = "<group>"; };
 		4019AB89F8C0A3818E9669D4 /* EngineSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineSettingsPage.swift; sourceTree = "<group>"; };
 		4038955844E7FD2093830EC8 /* MarkdownBlockParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockParserTests.swift; sourceTree = "<group>"; };
 		403F4F02D91DC05CFA96E6C3 /* DependencyContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainer.swift; sourceTree = "<group>"; };
@@ -3007,7 +3005,6 @@
 				E2ED043EAF3B351F72BDFB84 /* FeedbackMailView.swift */,
 				637D02FAA29ED85F0DF1BCCC /* SettingsCaption.swift */,
 				12A4B686B0F6D853EF93D614 /* SettingsCard.swift */,
-				3FB7C461C522BDDF573002FB /* SettingsInfoCard.swift */,
 				97CF125BF3035AB8AE09D6CF /* SettingsPageContainer.swift */,
 				5148FA115DE109E5F8083A13 /* SettingsRow.swift */,
 				E08144519D445B92EE1FF9B1 /* SettingsRowDivider.swift */,
@@ -4141,7 +4138,6 @@
 				BB151900C3115B58E5758F05 /* SettingsCaption.swift in Sources */,
 				B249A2488B25952BC353A780 /* SettingsCard.swift in Sources */,
 				4CF2C059EB17CC02BD6D1CBE /* SettingsClient.swift in Sources */,
-				60E6B8C927DC43999E18475B /* SettingsInfoCard.swift in Sources */,
 				CB847BDEFD343D4F1EDB1EF4 /* SettingsPageContainer.swift in Sources */,
 				6D91811B82AD91063813C6F7 /* SettingsRow.swift in Sources */,
 				B01A53FBE70979498DE834A0 /* SettingsRowDivider.swift in Sources */,

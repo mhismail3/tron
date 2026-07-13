@@ -262,26 +262,6 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var nextRevision: UInt64?
     var refreshFailed: Bool
 
-    var invokableUnitCount: Int {
-        if capabilityVisibility != nil {
-            return discovery.agentOperationCount
-        }
-        if !modularityOperations.isEmpty {
-            return modularityOperations.count
-        }
-        return functions.count
-    }
-
-    var invokableUnitLabel: String {
-        if capabilityVisibility != nil {
-            return "Agent operations"
-        }
-        if !modularityOperations.isEmpty {
-            return "Operations"
-        }
-        return "Functions"
-    }
-
     static func empty(connectionState: ConnectionState) -> AgentCockpitOverview {
         AgentCockpitOverview(
             status: AgentCockpitProjection.status(
@@ -379,7 +359,7 @@ enum AgentCockpitProjection {
                 functions: functions,
                 packages: packages,
                 catalogDecodeIssues: catalogDecodeIssues,
-                hasOperationProjection: capabilityVisibility != nil && !modularityOperations.isEmpty,
+                hasOperationProjection: capabilityVisibility != nil,
                 operationClassificationIssues: operationClassificationIssues
             ),
             workers: workers,

@@ -49,9 +49,9 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .engine:
-            return "Server pairing, session defaults, context, and local transcription"
+            return "Servers, session defaults, context"
         case .providers:
-            return "Login with OAuth and configure API keys"
+            return "OAuth and API keys"
         }
     }
 }
@@ -109,9 +109,9 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         case .engine:
             return ServerSettingsCategory.engine.subtitle
         case .app:
-            return "Appearance, notifications, local behavior"
+            return "Appearance, notifications, behavior"
         case .providers:
-            return "OAuth login and API keys"
+            return ServerSettingsCategory.providers.subtitle
         }
     }
 
@@ -206,89 +206,6 @@ enum SettingsDangerZoneAction: CaseIterable, Hashable, Sendable {
     }
 }
 
-enum EngineSettingsSummary {
-    struct Context: Equatable, Sendable {
-        let isLoaded: Bool
-        let triggerTokenThreshold: Double
-        let preserveRecentCount: Int
-    }
-
-    static func title(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Load engine settings"
-        }
-
-        return "Server-owned Engine settings"
-    }
-
-    static func description(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Loading model defaults, context policy, and local transcription from the active server."
-        }
-
-        let threshold = Int((context.triggerTokenThreshold * 100).rounded())
-        return "Session defaults, compaction at \(threshold)%, and local transcription policy are mirrored from the server."
-    }
-}
-
-enum ProvidersSettingsSummary {
-    struct Context: Equatable, Sendable {
-        let isLoaded: Bool
-        let configuredModelProviderCount: Int
-        let totalModelProviderCount: Int
-        let configuredServiceCount: Int
-        let totalServiceCount: Int
-    }
-
-    static func title(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Load credential status"
-        }
-
-        return "Provider connections"
-    }
-
-    static func description(for context: Context) -> String {
-        guard context.isLoaded else {
-            return "Loading provider and service credential status from the active server."
-        }
-
-        let totalConfigured = context.configuredModelProviderCount + context.configuredServiceCount
-        guard totalConfigured > 0 else {
-            return "No model providers or services are configured. Add OAuth accounts or API keys; secrets stay on the Mac server."
-        }
-
-        let modelSummary = countSummary(
-            configured: context.configuredModelProviderCount,
-            total: context.totalModelProviderCount,
-            singular: "model provider",
-            plural: "model providers"
-        )
-        let serviceSummary = countSummary(
-            configured: context.configuredServiceCount,
-            total: context.totalServiceCount,
-            singular: "service",
-            plural: "services"
-        )
-        return sentenceCase("\(modelSummary) and \(serviceSummary) are configured. Secrets stay on the Mac server.")
-    }
-
-    private static func countSummary(configured: Int, total: Int, singular: String, plural: String) -> String {
-        let noun = configured == 1 ? singular : plural
-        if configured == 0 {
-            return "0 \(plural)"
-        }
-        if configured == total {
-            return "all \(total) \(plural)"
-        }
-        return "\(configured) \(noun)"
-    }
-
-    private static func sentenceCase(_ value: String) -> String {
-        guard let first = value.first else { return value }
-        return first.uppercased() + value.dropFirst()
-    }
-}
 
 enum ServerOnboardingLauncher {
     static let serverIdUserInfoKey = "serverId"

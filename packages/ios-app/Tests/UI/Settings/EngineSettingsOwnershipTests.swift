@@ -13,7 +13,7 @@ struct EngineSettingsOwnershipTests {
         ])
 
         #expect(ServerSettingsCategory.engine.title == "Engine")
-        #expect(ServerSettingsCategory.engine.subtitle == "Server pairing, session defaults, context, and local transcription")
+        #expect(ServerSettingsCategory.engine.subtitle == "Servers, session defaults, context")
         #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
         #expect(ServerSettingsCategory.providers.title == "Providers")
 
@@ -23,10 +23,11 @@ struct EngineSettingsOwnershipTests {
             .app,
         ])
         #expect(MainSettingsGridDestination.order.map(\.description) == [
-            "Server pairing, session defaults, context, and local transcription",
-            "OAuth login and API keys",
-            "Appearance, notifications, local behavior",
+            "Servers, session defaults, context",
+            "OAuth and API keys",
+            "Appearance, notifications, behavior",
         ])
+        #expect(MainSettingsGridDestination.engine.description.contains("transcription") == false)
         let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
         #expect(ServerSettingsCategory.allCases.map(\.title).allSatisfy { title in
             !deletedTitles.contains(title)
@@ -77,22 +78,4 @@ struct EngineSettingsOwnershipTests {
         ))
     }
 
-    @Test("engine summary describes server owned settings")
-    func engineSummaryDescribesServerOwnedSettings() {
-        let unloaded = EngineSettingsSummary.Context(
-            isLoaded: false,
-            triggerTokenThreshold: 0.70,
-            preserveRecentCount: 5
-        )
-        #expect(EngineSettingsSummary.title(for: unloaded) == "Load engine settings")
-        #expect(EngineSettingsSummary.description(for: unloaded) == "Loading model defaults, context policy, and local transcription from the active server.")
-
-        let loaded = EngineSettingsSummary.Context(
-            isLoaded: true,
-            triggerTokenThreshold: 0.65,
-            preserveRecentCount: 4
-        )
-        #expect(EngineSettingsSummary.title(for: loaded) == "Server-owned Engine settings")
-        #expect(EngineSettingsSummary.description(for: loaded) == "Session defaults, compaction at 65%, and local transcription policy are mirrored from the server.")
-    }
 }

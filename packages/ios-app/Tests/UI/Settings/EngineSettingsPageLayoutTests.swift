@@ -165,6 +165,21 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
     }
 
+    func testEngineAndProvidersSheetsDoNotMountSummaryHeroes() throws {
+        let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
+        let providers = try settingsPageSource(named: "ProvidersSettingsPage.swift")
+        let support = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
+
+        XCTAssertFalse(engine.contains("SettingsInfoCard("))
+        XCTAssertFalse(engine.contains("summaryCard"))
+        XCTAssertFalse(engine.contains("EngineSettingsSummary"))
+        XCTAssertFalse(providers.contains("SettingsInfoCard("))
+        XCTAssertFalse(providers.contains("providersInfoCard"))
+        XCTAssertFalse(providers.contains("ProvidersSettingsSummary"))
+        XCTAssertFalse(support.contains("EngineSettingsSummary"))
+        XCTAssertFalse(support.contains("ProvidersSettingsSummary"))
+    }
+
     func testEngineSettingsSurfacesActionableServerOwnedControlsInsideEnginePageOnly() throws {
         let engine = try settingsPageSource(named: "EngineSettingsPage.swift")
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])

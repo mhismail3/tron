@@ -39,49 +39,6 @@ struct ProvidersSettingsPageTests {
         #expect(ProvidersServicesSectionHeaderStyle.bottomPadding < 8)
     }
 
-    @Test("providers summary describes unloaded empty and configured states")
-    func providersSummaryDescribesCredentialState() {
-        let unloaded = ProvidersSettingsSummary.Context(
-            isLoaded: false,
-            configuredModelProviderCount: 0,
-            totalModelProviderCount: 5,
-            configuredServiceCount: 0,
-            totalServiceCount: 2
-        )
-        #expect(ProvidersSettingsSummary.title(for: unloaded) == "Load credential status")
-        #expect(ProvidersSettingsSummary.description(for: unloaded) == "Loading provider and service credential status from the active server.")
-
-        let empty = ProvidersSettingsSummary.Context(
-            isLoaded: true,
-            configuredModelProviderCount: 0,
-            totalModelProviderCount: 5,
-            configuredServiceCount: 0,
-            totalServiceCount: 2
-        )
-        #expect(ProvidersSettingsSummary.title(for: empty) == "Provider connections")
-        #expect(ProvidersSettingsSummary.description(for: empty) == "No model providers or services are configured. Add OAuth accounts or API keys; secrets stay on the Mac server.")
-
-        let configured = ProvidersSettingsSummary.Context(
-            isLoaded: true,
-            configuredModelProviderCount: 3,
-            totalModelProviderCount: 5,
-            configuredServiceCount: 1,
-            totalServiceCount: 2
-        )
-        #expect(ProvidersSettingsSummary.title(for: configured) == "Provider connections")
-        #expect(ProvidersSettingsSummary.description(for: configured) == "3 model providers and 1 service are configured. Secrets stay on the Mac server.")
-
-        let allConfigured = ProvidersSettingsSummary.Context(
-            isLoaded: true,
-            configuredModelProviderCount: 5,
-            totalModelProviderCount: 5,
-            configuredServiceCount: 2,
-            totalServiceCount: 2
-        )
-        #expect(ProvidersSettingsSummary.title(for: allConfigured) == "Provider connections")
-        #expect(ProvidersSettingsSummary.description(for: allConfigured) == "All 5 model providers and all 2 services are configured. Secrets stay on the Mac server.")
-    }
-
     @Test("credential row ids are stable and credential-type scoped")
     func credentialRowIdsAreStableAndCredentialTypeScoped() {
         let oauth = ProviderCredentialRowItem(kind: .oauth, label: "work")

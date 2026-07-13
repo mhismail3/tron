@@ -31,8 +31,7 @@ struct InputBar: View {
     // MARK: - Computed Properties
 
     private var canSend: Bool {
-        guard config.agentPhase.isIdle else { return false }
-        return state.hasContent && config.sendBlockReason == nil
+        config.canSend(hasContent: state.hasContent)
     }
 
     /// Show stop button while the agent is active.
@@ -78,13 +77,15 @@ struct InputBar: View {
 
                 inputField
 
-                if !config.readOnly {
+                if !config.readOnly, config.showsContextBriefingControl {
                     ContextBriefingButton(
                         contextPercentage: config.contextPercentage,
                         modelName: config.currentModelInfo?.name,
                         onTap: actions.onContextTap
                     )
+                }
 
+                if !config.readOnly {
                     ComposerTrailingButton(
                         showStop: showStop,
                         canSend: canSend,

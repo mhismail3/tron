@@ -61,14 +61,12 @@ struct EngineSettingsPage: View {
 
     @ViewBuilder
     private var stackedContent: some View {
-        summaryCard
         serversSection
         enginePolicyContent
     }
 
     private var landscapeContent: some View {
         VStack(spacing: 16) {
-            summaryCard
             serversSection
 
             HStack(alignment: .top, spacing: 16) {
@@ -86,14 +84,6 @@ struct EngineSettingsPage: View {
             .disabled(!settingsState.isLoaded)
             .opacity(settingsState.isLoaded ? 1 : 0.45)
         }
-    }
-
-    private var summaryCard: some View {
-        SettingsInfoCard(
-            icon: ServerSettingsCategory.engine.icon,
-            title: EngineSettingsSummary.title(for: summaryContext),
-            description: EngineSettingsSummary.description(for: summaryContext)
-        )
     }
 
     private var serversSection: some View {
@@ -133,14 +123,6 @@ struct EngineSettingsPage: View {
 
             SettingsCaption(text: "Loads local speech recognition when the active server restarts.")
         }
-    }
-
-    private var summaryContext: EngineSettingsSummary.Context {
-        EngineSettingsSummary.Context(
-            isLoaded: settingsState.isLoaded,
-            triggerTokenThreshold: settingsState.triggerTokenThreshold,
-            preserveRecentCount: settingsState.preserveRecentCount
-        )
     }
 
     private var defaultsSection: some View {

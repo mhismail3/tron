@@ -164,9 +164,9 @@ xcodebuild test -scheme Tron \
 
 ```
 
-For the interactive prompt-composer glass and background-free proportional
-Session Briefing context ring, run the focused presentation/source contracts
-and visual render:
+For the interactive prompt-composer glass, background-free proportional
+Session Briefing context ring, and voice-lifecycle slot/action ownership, run
+the focused presentation/source contracts and visual render:
 
 ```bash
 xcodebuild test -scheme Tron \
@@ -181,6 +181,16 @@ xcodebuild test -scheme Tron \
 xcodebuild test -scheme 'Tron UI Validation' \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
   -only-testing:TronMobileUITests/SessionBriefingUITests/testComposerGlassKeepsAttachmentMenuAndSessionBriefingInteractive
+```
+
+For the workspace selector's shared shortcut/action capsule geometry, run its
+focused source contract and visual render:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/NewSessionFlowTests/testWorkspaceSelectorActionsShareTheShortcutPillPresentation \
+  -only-testing:TronMobileTests/WorkspaceSelectorVisualRenderTests/testWorkspaceSelectorNavigationHierarchyRendersForVisualQA
 ```
 
 For dashboard session-list loading and per-workspace disclosure changes, run:
@@ -205,17 +215,33 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/AgentCockpitViewModelTests
 ```
 
-For presentation-only Dashboard card changes, run only the dedicated UI source
-contract. Issue aggregation has its own equally small state suite:
+For Dashboard presentation/model changes, run the dedicated source/model
+contracts and the single progressive-disclosure visual route. Issue aggregation
+has its own equally small state suite:
 
 ```bash
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/DashboardPresentationTests
+  -only-testing:TronMobileTests/DashboardPresentationTests \
+  -only-testing:TronMobileTests/AgentCockpitStateTests
 
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/AgentCockpitIssueStateTests
+
+xcodebuild test -scheme 'Tron UI Validation' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileUITests/DashboardHitTargetUITests/testEngineCockpitProgressiveDisclosurePath
+```
+
+For the main Settings destination copy or the Engine/Providers sheet hierarchy,
+run the focused ownership and no-summary-hero contracts:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/EngineSettingsOwnershipTests \
+  -only-testing:TronMobileTests/EngineSettingsPageLayoutTests/testEngineAndProvidersSheetsDoNotMountSummaryHeroes
 ```
 
 For the IOSTC thin-client closeout, the focused iOS 26.5 simulator set is:

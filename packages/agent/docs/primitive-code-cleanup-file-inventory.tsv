@@ -1034,7 +1034,6 @@ packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	retain	i
 packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRowDivider.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

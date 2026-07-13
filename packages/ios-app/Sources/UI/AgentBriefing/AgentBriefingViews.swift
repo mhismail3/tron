@@ -7,11 +7,14 @@ struct AgentBriefingDashboardBand: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: SessionListLayout.iconTextSpacing) {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(accent)
-                    .frame(width: 22, height: 22)
+                    .frame(
+                        width: SessionListLayout.iconColumnWidth,
+                        height: SessionListLayout.iconColumnWidth
+                    )
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
@@ -33,7 +36,8 @@ struct AgentBriefingDashboardBand: View {
                         .tint(accent)
                 }
             }
-            .padding(14)
+            .padding(.horizontal, SessionListLayout.rowContentHorizontalPadding)
+            .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .sectionFill(accent, cornerRadius: 12, subtle: true, interactive: true)

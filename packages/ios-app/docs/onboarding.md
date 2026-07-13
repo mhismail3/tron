@@ -1,10 +1,10 @@
 # Onboarding (iOS sheet)
 
-> Last verified: 2026-07-01 (medium-first onboarding sheet expansion and scroll policy; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IOSTC-3 pairing/auth custody and connection robustness; PCC-6 iOS source consolidation).
+> Last verified: 2026-07-13 (medium-first onboarding and pairing; Engine → Servers ownership; concise Settings destinations; Engine and Providers sheets start directly with their owned sections instead of duplicate summary heroes).
 
 The iOS app always opens to the normal session shell after initialization.
 `TronMobileApp` presents one medium-first onboarding sheet for first-run setup,
-Server-page pairing, and pairing URLs. Preparation and pairing pages stay compact;
+Engine → Servers pairing, and pairing URLs. Preparation and pairing pages stay compact;
 after the Mac is paired, form-heavy setup pages expand to the large detent so
 provider/settings cards do not clip against the bottom of the sheet. Page
 scrolling is disabled at the medium detent, the app hides native sheet drag
@@ -61,7 +61,7 @@ WindowGroup.task
 
 readyContent()
   ├─ always mounts ContentView
-  └─ presentOnboarding(first-run / Server settings / pairing URL)
+  └─ presentOnboarding(first-run / Engine → Servers / pairing URL)
        └─ OnboardingFlowView
             ├─ WelcomeOnboardingPage
             ├─ InstallTailscaleOnboardingPage
@@ -189,10 +189,11 @@ the model providers page refreshes even if the server event arrives later.
 Settings provider forms keep their local input until the auth engine protocol returns an
 updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
 fields visible for correction or retry.
-The Providers settings sheet starts with a dynamic summary card computed from
-the loaded `AuthState`. Each model provider then uses cards for current
-credential status and provider-specific details such as Google Cloud OAuth
-configuration, followed by leading-aligned OAuth/API-key buttons. OAuth login
+The Providers settings sheet starts directly with model-provider credential
+cards; it does not project the loaded `AuthState` into a duplicate summary
+hero. Each model provider uses cards for current credential status and
+provider-specific details such as Google Cloud OAuth configuration, followed
+by leading-aligned OAuth/API-key buttons. OAuth login
 buttons are hidden when the provider already has a usable or refreshable OAuth
 account, and reappear for expired non-refreshable accounts. API-key-only
 providers and search services use the same native Add API Key alert: provider
@@ -208,23 +209,19 @@ providers first, then search services.
 Provider credentials are written through `auth.*` engine invocations, so secrets land in
 `auth.json`, not profile settings.
 
-Server settings and app settings are intentionally separate. Server-backed
+Engine settings and app settings are intentionally separate. Server-backed
 settings live as sparse `[settings]` overrides in
 `~/.tron/profiles/user/profile.toml`; they remain behind the server-backed
-settings grid tiles and are enabled only after the active server connects and
-`settings.get` returns real values. The main Settings sheet starts at the medium detent and
-uses a compact launcher grid: App, Server, and Providers for settings surfaces;
-Agent and Context for primitive agent behavior; then Clear Prompt History,
-Archive All Sessions, and Reset All Settings as the red destructive row with no
-separate Danger Zone header. All tiles share the same compact icon size; the green
-surface and behavior tiles are slightly taller with left-aligned emerald titles,
-top-right icons, and short softer descriptive copy. A thin muted divider separates
-those destination rows from the destructive row, which sizes to its two-line red
-labels and top-right icons. When the paired server is unavailable or
-server-backed settings have not loaded, the launcher collapses to a two-column
-App and Server row, hides Providers, Agent, and Context, and shows the
-server-unavailable card immediately below that row before the destructive
-actions. That card labels its active-server-prefilled pairing action as
+settings controls and are enabled only after the active server connects and
+`settings.get` returns real values. The main Settings sheet starts at the
+medium detent and presents Engine, Providers, and App as separate destination
+cards. Their right-aligned descriptions stay to two or three short concepts:
+Servers/session defaults/context, OAuth/API keys, and
+appearance/notifications/behavior. A thin muted divider separates those
+destinations from the Archive All Sessions and Reset All Settings cards in the
+Danger Zone. When the paired server is unavailable or server-backed settings
+have not loaded, Providers is disabled and a server-unavailable card appears
+below the destination rows. That card labels its active-server-prefilled pairing action as
 `Re-pair this server`; `Connect to a new server` remains reserved for launches
 that do not prefill a paired server.
 Device-only preferences such as onboarding completion,
@@ -232,15 +229,14 @@ paired servers, active server id, appearance, shell presentation, and bearer
 tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app
 clears server-backed controls immediately and reloads them from the newly active
 Mac.
-The Servers sheet starts with a dynamic summary card, then groups settings as:
-header, one or more glass containers with control titles, and optional
-description text below each container. Its minimal Diagnostics section opens
-the local Logs sheet; feedback remains the persistent Settings footer action.
-Product update checks are not part of the primitive iOS shell.
-When the active paired server is unreachable, the Servers sheet keeps paired
-server rows visible for local switching and removal, turns the summary card
-warning-yellow with `<server name> not available`, and disables the Engine and
-Accounts settings rows until the Mac reconnects and `settings.get` succeeds.
+The Engine sheet starts directly with its Servers section, where paired-server
+rows support local switching, retry, setup, and removal alongside `Connect to a
+new server`. No summary hero or separate Diagnostics block precedes those real
+controls; feedback remains the persistent Settings footer action. Product
+update checks are not part of the primitive iOS shell. When the active paired
+server is unreachable, Engine remains available so those local server actions
+still work, while Providers stays disabled until the Mac reconnects and
+`settings.get` succeeds.
 The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
 and Forget. The main Settings sheet also disables destructive server-coupled
@@ -260,11 +256,13 @@ dismissing the banner. Normal reconnect keeps issuing short foreground probes
 at a bounded cadence until the server returns, the app backgrounds, or
 authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
-The Engine settings sheet follows the same top summary-card pattern and divides
-server settings by ownership. Engine owns the retained quick-session defaults
-that exist as actionable iOS controls: model and workspace.
-Context management remains session-scoped through the prompt composer's context
-ring and Session Briefing surfaces instead of Settings.
+The Engine settings sheet starts directly with Servers, followed by the
+server-owned Session Defaults, Context, and Transcription sections; it has no
+top summary hero or separate presentation projection. Engine owns the retained
+quick-session defaults that exist as actionable iOS controls: model and
+workspace. The Local Transcription toggle remains an Engine policy even though
+the concise main Settings row does not enumerate it. Session briefing remains
+session-scoped through the prompt composer's context ring and briefing surfaces.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a
@@ -322,8 +320,9 @@ Settings → Engine → Servers → menu → "Forget" is the local reset path fo
 paired server. It deletes the matching iOS Keychain bearer token and removes
 the server from `PairedServerStore`; server settings and sessions on the Mac
 are unchanged. If another paired server remains, iOS switches locally to it.
-If no paired servers remain, Settings hides server settings and shows the
-"Connect to a new server" CTA.
+If no paired servers remain, Engine remains available and its Servers section
+shows the "Connect to a new server" CTA. Providers remains disabled until a
+server is paired and server-backed settings hydrate.
 The paired-server ellipsis menu is scoped to the selected server row and offers
 "Reconnect", "Set Up", and "Forget"; the separate "Connect to a new server" CTA
 is only used for adding a fresh server. The menu hit target is overlaid outside

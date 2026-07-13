@@ -95,30 +95,25 @@ struct AgentCockpitSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Image(systemName: viewModel.overview.status.systemImage)
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                    .foregroundStyle(statusColor)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.overview.status.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                    Text(headerDetail)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextSecondary)
+            AgentCockpitDashboardSummaryCard(overview: viewModel.overview) {
+                Task {
+                    await viewModel.verifyCatalogDiscovery(
+                        repository: repository,
+                        sessionId: sessionId,
+                        workspaceId: workspaceId,
+                        connectionState: connectionState
+                    )
                 }
-                Spacer()
             }
             if viewModel.lastError != nil {
                 Label("Latest refresh could not complete. Low-level diagnostics stay in evidence detail.", systemImage: "exclamationmark.triangle")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.tronError)
+                    .padding(11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .sectionFill(.tronError, cornerRadius: 10, subtle: true, interactive: false)
             }
-            AgentCockpitMetricStrip(overview: viewModel.overview)
         }
-        .padding(14)
-        .sectionFill(.tronEmerald, cornerRadius: 12, interactive: false)
     }
 
     private var tabPicker: some View {
@@ -130,40 +125,6 @@ struct AgentCockpitSheet: View {
             ),
             accent: .tronEmerald
         )
-    }
-
-    private var headerDetail: String {
-        switch viewModel.overview.status.kind {
-        case .connecting:
-            return "Rebuilding the engine link."
-        case .degraded:
-            return "Open the cockpit sections for safe diagnostics and evidence."
-        case .awaitingApproval:
-            return "A server-owned item is waiting for your review."
-        case .running:
-            return "Engine or module work is currently active."
-        case .ready:
-            return "Core link is healthy and capabilities are available."
-        case .idle:
-            return "No engine or module work is currently active."
-        case .offline:
-            return "Connect a server to inspect core health."
-        }
-    }
-
-    private var statusColor: Color {
-        switch viewModel.overview.status.kind {
-        case .offline, .connecting:
-            return .tronTextMuted
-        case .idle, .ready:
-            return .tronInfo
-        case .running:
-            return .tronCyan
-        case .awaitingApproval:
-            return .tronWarning
-        case .degraded:
-            return .tronError
-        }
     }
 
     private func refresh() async {
@@ -210,7 +171,7 @@ struct WorkerCard: View {
             if !worker.namespaceClaims.isEmpty {
                 WrapRow(items: worker.namespaceClaims.map(AgentCockpitPresentation.displayLabel), tint: .tronInfo)
             }
-            ownedRows(title: "Functions", values: worker.functionIds)
+            ownedRows(title: "Engine interfaces", values: worker.functionIds)
             ownedRows(title: "Triggers", values: worker.triggerIds)
             Text("Server-governed owner · \(AgentCockpitPresentation.displayLabel(worker.ownerActor))")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))

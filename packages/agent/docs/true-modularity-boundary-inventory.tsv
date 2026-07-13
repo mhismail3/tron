@@ -908,7 +908,6 @@ packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	swift	im
 packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRowDivider.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract

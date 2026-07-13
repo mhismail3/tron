@@ -5,6 +5,7 @@ import Testing
 @Suite("Context Briefing Button")
 struct ContextBriefingButtonTests {
     @Test("Context ring fills in direct proportion to bounded usage")
+    @MainActor
     func testProgressFractionClampsAndScalesPercentage() {
         #expect(ContextBriefingButton.boundedPercentage(for: -1) == 0)
         #expect(ContextBriefingButton.boundedPercentage(for: 140) == 100)
@@ -13,6 +14,76 @@ struct ContextBriefingButtonTests {
         #expect(ContextBriefingButton.progressFraction(for: 50) == 0.5)
         #expect(ContextBriefingButton.progressFraction(for: 100) == 1)
         #expect(ContextBriefingButton.progressFraction(for: 140) == 1)
+    }
+
+    @Test("Context ring yields its slot for the complete voice lifecycle")
+    func testContextRingVisibilityUsesRecordingAndTranscriptionState() {
+        #expect(InputBarConfig().showsContextBriefingControl)
+        #expect(!InputBarConfig(isRecording: true).showsContextBriefingControl)
+        #expect(!InputBarConfig(isTranscribing: true).showsContextBriefingControl)
+        #expect(!InputBarConfig(isRecording: true, isTranscribing: true).showsContextBriefingControl)
+    }
+
+    @Test("Voice lifecycle owns the trailing action even with a nonempty draft")
+    func testVoiceLifecycleBlocksDraftSubmission() {
+        #expect(InputBarConfig().canSend(hasContent: true))
+        #expect(!InputBarConfig(isRecording: true).canSend(hasContent: true))
+        #expect(!InputBarConfig(isTranscribing: true).canSend(hasContent: true))
+        #expect(!InputBarConfig(isRecording: true, isTranscribing: true).canSend(hasContent: true))
+        #expect(!InputBarConfig().canSend(hasContent: false))
+    }
+
+    @Test("Trailing composer presentation and action share one voice-state precedence")
+    func testTrailingComposerModePrecedence() {
+        #expect(
+            ComposerTrailingMode(
+                showStop: true,
+                canSend: true,
+                isRecording: true,
+                isTranscribing: true
+            ) == .stopAgent
+        )
+        #expect(
+            ComposerTrailingMode(
+                showStop: false,
+                canSend: true,
+                isRecording: true,
+                isTranscribing: true
+            ) == .stopRecording
+        )
+        #expect(
+            ComposerTrailingMode(
+                showStop: false,
+                canSend: true,
+                isRecording: false,
+                isTranscribing: true
+            ) == .transcribing
+        )
+        #expect(
+            ComposerTrailingMode(
+                showStop: false,
+                canSend: true,
+                isRecording: false,
+                isTranscribing: false
+            ) == .send
+        )
+        #expect(
+            ComposerTrailingMode(
+                showStop: false,
+                canSend: false,
+                isRecording: false,
+                isTranscribing: false
+            ) == .record
+        )
+        #expect(ComposerTrailingMode.transcribing.accessibilityLabel == "Transcribing")
+        #expect(
+            ComposerTrailingMode.transcribing.accessibilityHint(micDisabled: false)
+                == "Wait for transcription to finish."
+        )
+        #expect(
+            ComposerTrailingMode.record.accessibilityHint(micDisabled: true)
+                == "Voice input is unavailable while the agent is active or disconnected."
+        )
     }
 
     @Test("Composer embeds a background-free ring beside its trailing action")
@@ -46,6 +117,7 @@ struct ContextBriefingButtonTests {
         #expect(inputSource.contains(".padding(.horizontal, 4)\n            .glassEffect("))
         #expect(inputSource.contains(".overlay(alignment: .bottomLeading)"))
         #expect(inputSource.contains(".interactive(!config.readOnly)"))
+        #expect(inputSource.contains("if !config.readOnly, config.showsContextBriefingControl"))
         #expect(!inputSource.contains(".background {"))
         #expect(!inputSource.contains("ContextStatusPill("))
         #expect(!inputSource.contains("shouldShowStatusPills"))
@@ -56,6 +128,8 @@ struct ContextBriefingButtonTests {
 
         #expect(buttonSource.contains(".trim(from: 0, to: progressFraction)"))
         #expect(buttonSource.contains(".rotationEffect(.degrees(-90))"))
+        #expect(buttonSource.contains("private let ringSize: CGFloat = 15"))
+        #expect(buttonSource.contains(".frame(width: 40, height: 40)"))
         #expect(!buttonSource.contains(".glassEffect("))
         #expect(!buttonSource.contains(".fill("))
         #expect(buttonSource.contains(".contentShape(Circle())"))
