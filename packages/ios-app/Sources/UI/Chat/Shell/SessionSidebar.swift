@@ -8,7 +8,7 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
-    @State private var workspaceExpansion = SessionListWorkspaceExpansion()
+    @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var agentBriefing = AgentBriefingViewModel()
     @State private var engineCockpit = AgentCockpitViewModel()
@@ -75,9 +75,10 @@ struct SessionSidebar: View {
 
                 ForEach(workspaceGroups) { group in
                     Section {
-                        if workspaceExpansion.isExpanded(group.id) {
+                        if workspaceDisclosure.shouldRenderRows(group.id) {
                             ForEach(sessionExpansion.visibleSessions(in: group)) { session in
                                 sessionRow(session)
+                                    .opacity(workspaceDisclosure.areRowsVisible(group.id) ? 1 : 0)
                             }
 
                             let canViewMore = sessionExpansion.canViewMore(
@@ -94,12 +95,12 @@ struct SessionSidebar: View {
                                     canViewLess: canViewLess,
                                     canViewMore: canViewMore,
                                     onViewLess: {
-                                        updateSessionListStructure {
+                                        updateSessionPagination {
                                             sessionExpansion.showLess(groupId: group.id)
                                         }
                                     },
                                     onViewMore: {
-                                        updateSessionListStructure {
+                                        updateSessionPagination {
                                             sessionExpansion.revealMore(
                                                 groupId: group.id,
                                                 totalCount: group.sessions.count
@@ -107,6 +108,7 @@ struct SessionSidebar: View {
                                         }
                                     }
                                 )
+                                .opacity(workspaceDisclosure.areRowsVisible(group.id) ? 1 : 0)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(SessionListLayout.rowInsets)
@@ -115,11 +117,9 @@ struct SessionSidebar: View {
                     } header: {
                         SessionWorkspaceHeader(
                             title: group.name,
-                            isExpanded: workspaceExpansion.isExpanded(group.id)
+                            isExpanded: workspaceDisclosure.isExpanded(group.id)
                         ) {
-                            updateSessionListStructure {
-                                workspaceExpansion.toggle(group.id)
-                            }
+                            toggleWorkspaceGroup(group.id)
                         }
                     }
                 }
@@ -161,6 +161,7 @@ struct SessionSidebar: View {
         }
         .onChange(of: workspaceGroupCounts, initial: true) { _, groupCounts in
             sessionExpansion.reconcile(groupCounts: groupCounts)
+            reconcileWorkspaceDisclosure(groupIds: Set(groupCounts.keys))
         }
         .task(id: briefingRefreshKey) {
             await refreshBriefing()
@@ -188,13 +189,39 @@ struct SessionSidebar: View {
         }
     }
 
-    private func updateSessionListStructure(_ mutation: () -> Void) {
+    private func updateSessionPagination(_ mutation: () -> Void) {
         // List renders each Liquid Glass row in its own compositing layer.
-        // Structural animation lets departing layers overlap relocating
-        // section headers, so row membership changes atomically. The header
-        // owns the only disclosure animation.
+        // Pagination swaps row membership atomically so existing rows do not
+        // pass through neighboring project headers.
         let transaction = Transaction(animation: nil)
         withTransaction(transaction, mutation)
+    }
+
+    private func toggleWorkspaceGroup(_ groupId: String) {
+        let direction = workspaceDisclosure.toggleDirection(for: groupId)
+        let beginAnimation = direction == .collapse
+            ? SessionListLayout.disclosureFadeOutAnimation
+            : SessionListLayout.expansionAnimation
+        let transition = withAnimation(beginAnimation) {
+            workspaceDisclosure.beginToggle(groupId)
+        }
+
+        Task { @MainActor in
+            let delay = transition.direction == .collapse
+                ? SessionListLayout.disclosureFadeOutDelay
+                : SessionListLayout.disclosureLayoutDelay
+            try? await Task.sleep(for: delay)
+            let completionAnimation = transition.direction == .collapse
+                ? SessionListLayout.expansionAnimation
+                : SessionListLayout.disclosureFadeInAnimation
+            _ = withAnimation(completionAnimation) {
+                workspaceDisclosure.complete(transition)
+            }
+        }
+    }
+
+    private func reconcileWorkspaceDisclosure(groupIds: Set<String>) {
+        workspaceDisclosure.reconcile(groupIds: groupIds)
     }
 
     private func refreshBriefing() async {

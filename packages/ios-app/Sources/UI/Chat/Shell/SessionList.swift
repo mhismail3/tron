@@ -33,19 +33,71 @@ struct SessionListWorkspaceGroup: Identifiable {
     }
 }
 
-struct SessionListWorkspaceExpansion: Equatable {
-    private(set) var collapsedGroupIds: Set<String> = []
+enum SessionListWorkspaceDisclosureDirection: Equatable {
+    case collapse
+    case expand
+}
 
-    func isExpanded(_ groupId: String) -> Bool {
-        !collapsedGroupIds.contains(groupId)
+struct SessionListWorkspaceDisclosureTransition: Equatable {
+    let groupId: String
+    let direction: SessionListWorkspaceDisclosureDirection
+    let generation: Int
+}
+
+struct SessionListWorkspaceDisclosure: Equatable {
+    private enum Phase: Equatable {
+        case expanded
+        case collapsing
+        case collapsed
+        case expanding
     }
 
-    mutating func toggle(_ groupId: String) {
-        if collapsedGroupIds.contains(groupId) {
-            collapsedGroupIds.remove(groupId)
-        } else {
-            collapsedGroupIds.insert(groupId)
+    private var phaseByGroupId: [String: Phase] = [:]
+    private var generationByGroupId: [String: Int] = [:]
+
+    func isExpanded(_ groupId: String) -> Bool {
+        switch phaseByGroupId[groupId] ?? .expanded {
+        case .expanded, .expanding:
+            true
+        case .collapsing, .collapsed:
+            false
         }
+    }
+
+    func shouldRenderRows(_ groupId: String) -> Bool {
+        phaseByGroupId[groupId] != .collapsed
+    }
+
+    func areRowsVisible(_ groupId: String) -> Bool {
+        (phaseByGroupId[groupId] ?? .expanded) == .expanded
+    }
+
+    func toggleDirection(for groupId: String) -> SessionListWorkspaceDisclosureDirection {
+        isExpanded(groupId) ? .collapse : .expand
+    }
+
+    mutating func beginToggle(_ groupId: String) -> SessionListWorkspaceDisclosureTransition {
+        let direction = toggleDirection(for: groupId)
+        let generation = (generationByGroupId[groupId] ?? 0) + 1
+        generationByGroupId[groupId] = generation
+        phaseByGroupId[groupId] = direction == .collapse ? .collapsing : .expanding
+        return SessionListWorkspaceDisclosureTransition(
+            groupId: groupId,
+            direction: direction,
+            generation: generation
+        )
+    }
+
+    @discardableResult
+    mutating func complete(_ transition: SessionListWorkspaceDisclosureTransition) -> Bool {
+        guard generationByGroupId[transition.groupId] == transition.generation else { return false }
+        phaseByGroupId[transition.groupId] = transition.direction == .collapse ? .collapsed : .expanded
+        return true
+    }
+
+    mutating func reconcile(groupIds: Set<String>) {
+        phaseByGroupId = phaseByGroupId.filter { groupIds.contains($0.key) }
+        generationByGroupId = generationByGroupId.filter { groupIds.contains($0.key) }
     }
 }
 
@@ -120,6 +172,10 @@ enum SessionListLayout {
         rowContainerHorizontalInset + rowContentHorizontalPadding
     }
     static let expansionAnimation = Animation.snappy(duration: 0.14)
+    static let disclosureFadeOutAnimation = Animation.easeOut(duration: 0.06)
+    static let disclosureFadeInAnimation = Animation.easeOut(duration: 0.10)
+    static let disclosureFadeOutDelay: Duration = .milliseconds(60)
+    static let disclosureLayoutDelay: Duration = .milliseconds(140)
 
     static var headerInsets: EdgeInsets {
         EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)

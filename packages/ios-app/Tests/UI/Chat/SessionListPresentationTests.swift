@@ -47,19 +47,57 @@ final class SessionListPresentationTests: XCTestCase {
     }
 
     func testWorkspaceExpansionTogglesGroupsIndependently() {
-        var expansion = SessionListWorkspaceExpansion()
+        var disclosure = SessionListWorkspaceDisclosure()
 
-        XCTAssertTrue(expansion.isExpanded("workspace"))
-        XCTAssertTrue(expansion.isExpanded("tron"))
+        XCTAssertTrue(disclosure.isExpanded("workspace"))
+        XCTAssertTrue(disclosure.isExpanded("tron"))
 
-        expansion.toggle("workspace")
+        let collapse = disclosure.beginToggle("workspace")
 
-        XCTAssertFalse(expansion.isExpanded("workspace"))
-        XCTAssertTrue(expansion.isExpanded("tron"))
+        XCTAssertEqual(collapse.direction, .collapse)
+        XCTAssertFalse(disclosure.isExpanded("workspace"))
+        XCTAssertTrue(disclosure.shouldRenderRows("workspace"))
+        XCTAssertFalse(disclosure.areRowsVisible("workspace"))
+        XCTAssertTrue(disclosure.isExpanded("tron"))
 
-        expansion.toggle("workspace")
+        XCTAssertTrue(disclosure.complete(collapse))
+        XCTAssertFalse(disclosure.shouldRenderRows("workspace"))
 
-        XCTAssertTrue(expansion.isExpanded("workspace"))
+        let expand = disclosure.beginToggle("workspace")
+
+        XCTAssertEqual(expand.direction, .expand)
+        XCTAssertTrue(disclosure.isExpanded("workspace"))
+        XCTAssertTrue(disclosure.shouldRenderRows("workspace"))
+        XCTAssertFalse(disclosure.areRowsVisible("workspace"))
+        XCTAssertTrue(disclosure.complete(expand))
+        XCTAssertTrue(disclosure.areRowsVisible("workspace"))
+    }
+
+    func testWorkspaceDisclosureIgnoresStaleCompletionAfterRapidReversal() {
+        var disclosure = SessionListWorkspaceDisclosure()
+        let collapse = disclosure.beginToggle("workspace")
+        let expand = disclosure.beginToggle("workspace")
+
+        XCTAssertFalse(disclosure.complete(collapse))
+        XCTAssertTrue(disclosure.isExpanded("workspace"))
+        XCTAssertTrue(disclosure.shouldRenderRows("workspace"))
+        XCTAssertFalse(disclosure.areRowsVisible("workspace"))
+
+        XCTAssertTrue(disclosure.complete(expand))
+        XCTAssertTrue(disclosure.areRowsVisible("workspace"))
+    }
+
+    func testWorkspaceDisclosureReconcilesRemovedGroups() {
+        var disclosure = SessionListWorkspaceDisclosure()
+        let collapse = disclosure.beginToggle("workspace")
+        XCTAssertTrue(disclosure.complete(collapse))
+        XCTAssertFalse(disclosure.shouldRenderRows("workspace"))
+
+        disclosure.reconcile(groupIds: ["tron"])
+
+        XCTAssertTrue(disclosure.isExpanded("workspace"))
+        XCTAssertTrue(disclosure.shouldRenderRows("workspace"))
+        XCTAssertTrue(disclosure.areRowsVisible("workspace"))
     }
 
     func testEachProjectShowsExactlyTenSessionsByDefault() {
@@ -120,7 +158,7 @@ final class SessionListPresentationTests: XCTestCase {
         var sessions = makeSessions(count: 25, project: "Workspace")
         var group = SessionListWorkspaceGroup.groups(from: sessions)[0]
         var sessionExpansion = SessionListSessionExpansion()
-        var workspaceExpansion = SessionListWorkspaceExpansion()
+        var workspaceDisclosure = SessionListWorkspaceDisclosure()
         sessionExpansion.revealMore(groupId: group.id, totalCount: group.sessions.count)
 
         let newSession = makeSession(
@@ -139,11 +177,13 @@ final class SessionListPresentationTests: XCTestCase {
         XCTAssertEqual(sessionExpansion.visibleSessions(in: group).count, 20)
         XCTAssertEqual(Set(sessionExpansion.visibleSessions(in: group).map(\.id)).count, 20)
 
-        workspaceExpansion.toggle(group.id)
-        XCTAssertFalse(workspaceExpansion.isExpanded(group.id))
+        let collapse = workspaceDisclosure.beginToggle(group.id)
+        XCTAssertTrue(workspaceDisclosure.complete(collapse))
+        XCTAssertFalse(workspaceDisclosure.isExpanded(group.id))
         XCTAssertTrue(sessionExpansion.canViewLess(groupId: group.id, totalCount: group.sessions.count))
-        workspaceExpansion.toggle(group.id)
-        XCTAssertTrue(workspaceExpansion.isExpanded(group.id))
+        let expand = workspaceDisclosure.beginToggle(group.id)
+        XCTAssertTrue(workspaceDisclosure.complete(expand))
+        XCTAssertTrue(workspaceDisclosure.isExpanded(group.id))
         XCTAssertEqual(sessionExpansion.visibleSessions(in: group).count, 20)
 
         sessionExpansion.reconcile(groupCounts: [group.id: 9])
