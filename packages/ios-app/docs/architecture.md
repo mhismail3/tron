@@ -485,7 +485,9 @@ Glass row is its own compositing layer. Collapse fades child rows out before an
 animated layout removal, ordered from the last visible row upward; expansion
 inserts invisible rows, animates project headers into place, and then reveals
 rows from the first visible row downward. The total stagger is bounded so large
-projects remain responsive. Generation-checked phases make rapid direction
+projects remain responsive; its short window starts nearby feedback promptly,
+while a smooth layout curve keeps the relocation measured rather than abrupt.
+Generation-checked phases make rapid direction
 changes deterministic without stale completion tasks.
 Pagination still changes row membership atomically so existing rows cannot pass
 through neighboring project headers.

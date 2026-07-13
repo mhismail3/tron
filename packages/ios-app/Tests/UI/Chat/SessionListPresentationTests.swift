@@ -133,8 +133,9 @@ final class SessionListPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             SessionListLayout.disclosureCollapseDelay(itemCount: itemCount),
-            .milliseconds(200)
+            .milliseconds(190)
         )
+        XCTAssertLessThanOrEqual(SessionListLayout.disclosureMaximumStaggerDuration, 0.06)
     }
 
     func testEachProjectShowsExactlyTenSessionsByDefault() {

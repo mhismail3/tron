@@ -171,10 +171,10 @@ enum SessionListLayout {
     static var expansionControlHorizontalPadding: CGFloat {
         rowContainerHorizontalInset + rowContentHorizontalPadding
     }
-    static let expansionAnimation = Animation.snappy(duration: 0.14)
-    static let disclosureRowFadeDuration: TimeInterval = 0.08
-    static let disclosureMaximumStaggerDuration: TimeInterval = 0.12
-    static let disclosureLayoutDelay: Duration = .milliseconds(140)
+    static let expansionAnimation = Animation.smooth(duration: 0.18)
+    static let disclosureRowFadeDuration: TimeInterval = 0.13
+    static let disclosureMaximumStaggerDuration: TimeInterval = 0.06
+    static let disclosureLayoutDelay: Duration = .milliseconds(180)
 
     static func disclosureRowDelay(
         index: Int,
