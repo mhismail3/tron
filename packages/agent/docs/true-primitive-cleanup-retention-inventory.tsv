@@ -1033,7 +1033,7 @@ packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	im
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet+Sections.swift	implementation	ios_ui	TPC-8	model-picker provider, family, model, and reasoning sections split from the sheet root
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Settings/Pages/EngineServersSection.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/GoogleCloudRows.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ModelProviderSection.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1050,7 +1050,6 @@ packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	implemen
 packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Settings/Shell/SettingsCycleToggle.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1414,6 +1413,7 @@ scripts/tron	support	scripts	TPC-9	manual contributor, runtime, release, or veri
 scripts/tron-agent.entitlements	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron-cli	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron-ios-beta	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
+scripts/tron-ios-simulator	support	scripts	TPC-9	manual contributor iOS simulator build, install, launch, and verification helper
 scripts/tron-lib.d/auth.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron-lib.d/bundle.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron-lib.d/logs.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
@@ -1651,9 +1651,11 @@ packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	i
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	implementation	ios_ui	Phase2-Slice1	Agent cockpit discovery card and report views retained under UI ownership.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift	implementation	ios_ui	TPC-hardening	capability operation drill-down sheets split from the cockpit discovery summary owner
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Chat/Composer/RecordingLevelWaveform.swift	implementation	ios_ui	Phase1-closeout	Phase 1 composer waveform retains only bounded normalized microphone-level history.
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Shell/SessionList.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Chat/Shell/SessionListPagination.swift	implementation	ios_ui	Phase1-closeout	Phase 1 session-list pagination state retains visible-count and stale-transition ownership.
 packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowPresentation.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTranscriptionTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
@@ -2038,6 +2040,19 @@ packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_modul
 packages/agent/src/domains/model/providers/anthropic/stream_handler/tests/stream_handler_content_block_start_tests.rs	test	test_harness	TPC-10/AHA-9	Anthropic stream content-block-start regression coverage retained after dead-code cleanup
 packages/agent/src/domains/tool_sources/service/write_fixtures.rs	test	test_harness	TPC-10/P2AER-S9A	tool-source write-operation test fixtures retained after service fixture split
 packages/agent/tests/documentation_evidence_scorecard_integrity/branch_handoff.rs	test	test_harness	TPC-10/DESI-10	documentation evidence branch-handoff static coverage retained after DESI split
+packages/agent/src/domains/device/handlers.rs	implementation	device	APNS-DELIVERY	Transport-only device operation bindings delegate to deterministic service seams.
+packages/agent/src/domains/model/routing/attachments.rs	implementation	model	MEDIA-POLICY	Provider attachment limits remain server-owned and model-specific.
+packages/agent/src/platform/apns/mod.rs	support	platform	APNS-DELIVERY	Private APNs transport composition remains isolated from notification policy.
+packages/agent/src/platform/apns/relay.rs	support	platform	APNS-DELIVERY	HMAC-authenticated HTTPS relay is the only live APNs network adapter.
+packages/agent/src/platform/apns/store.rs	support	platform	APNS-DELIVERY	Atomic private token storage stays outside provider-visible resources.
+packages/agent/src/platform/apns/types.rs	support	platform	APNS-DELIVERY	Transport-neutral APNs request and result records support injected delivery testing.
+packages/ios-app/Sources/Session/Attachments/AttachmentImagePreparer.swift	implementation	ios_session	MEDIA-POLICY	One canonical provider-policy image transform produces the unified Attachment primitive.
+packages/ios-app/Sources/Support/Foundation/Notifications/APNsEnvironment.swift	support	ios_support	APNS-DELIVERY	Bundle identity deterministically selects development or production APNs registration.
+packages/ios-app/Sources/Support/Foundation/Notifications/PushNotificationService.swift	support	ios_support	APNS-DELIVERY	OS device-token lifecycle delegates trusted registration to the active server.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift	implementation	ios_ui	COCKPIT-UI	Capability, engine, and activity tabs remain a view-only composition boundary.
+packages/ios-app/Tests/Session/Attachments/AttachmentImagePreparerTests.swift	test	test_harness	MEDIA-POLICY	Provider-policy image transformation tests retain bounded unified-attachment coverage.
+packages/ios-app/Tests/Support/Foundation/Notifications/APNsEnvironmentTests.swift	test	test_harness	APNS-DELIVERY	Bundle-derived APNs environment tests retain trusted registration coverage.
+packages/ios-app/docs/apns.md	docs	docs/static gates	APNS-DELIVERY	Current APNs registration, relay, token-custody, and validation documentation.
 packages/agent/src/engine/durability/resources/context_control_definitions.rs	implementation	resource_kernel	TPC-10/context-control	built-in context-control snapshot action and epoch resource schemas for metadata-only context custody
 packages/ios-app/Sources/Engine/Transport/Clients/ContextControlClient.swift	implementation	ios_chat_ui	TPC-10/context-control	first-party context-control transport client for snapshot compact clear action list and inspect calls
 packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheet.swift	implementation	ios_chat_ui	TPC-10/context-control	context-control mobile sheet surface with compact clear composition memory and audit drill-in

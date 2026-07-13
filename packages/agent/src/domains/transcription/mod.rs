@@ -17,8 +17,8 @@
 //!
 //! ## Invariants
 //!
-//! Transcription is a local server capability gated by
-//! `settings.server.transcription.enabled`. The sidecar may create a Python
+//! Transcription is a local server capability gated by the engine-owned
+//! `settings.server.transcription.enabled` policy. The sidecar may create a Python
 //! venv and model cache under `~/.tron/internal/transcription/`, but it must
 //! not persist user audio beyond temporary files used for one request. Voice
 //! notes and media storage remain Phase 2 work.

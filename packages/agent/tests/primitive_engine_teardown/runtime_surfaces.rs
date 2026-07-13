@@ -103,7 +103,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
             "packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift",
         ),
         read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift"),
-        read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+        read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift"),
         read_repo_file("packages/agent/docs/project-reference.md"),
     ]
     .join("\n");
@@ -147,7 +147,6 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
             "packages/ios-app/Sources/Engine/Protocol/System/EngineProtocolTypes+System.swift",
         ),
         read_repo_file("packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift"),
-        read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
         read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/EngineSettingsPage.swift"),
     ]
     .join("\n");
@@ -163,8 +162,9 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         "retained iOS diagnostics settings surface",
     );
     assert!(
-        ios_surface.contains("evidencePolicySection"),
-        "iOS settings should render the one retained evidence section directly"
+        !ios_surface.contains("evidencePolicySection")
+            && ios_surface.contains("updateServerSetting(.transcriptionEnabled(enabled))"),
+        "iOS settings must keep diagnostics policy out of Engine while retaining local transcription as Engine policy"
     );
 }
 

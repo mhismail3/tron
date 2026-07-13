@@ -1,4 +1,4 @@
-//! Settings type definitions.
+//! Core settings type definitions.
 //!
 //! All types use `#[serde(rename_all = "camelCase")]` to match the TypeScript
 //! JSON wire format. Each type implements [`Default`] with the emergency
@@ -53,12 +53,6 @@ pub struct TronSettings {
     pub context: ContextSettings,
     /// Agent runtime settings (max turns, timeouts).
     pub agent: AgentRuntimeSettings,
-    /// Logging configuration.
-    pub logging: LoggingSettings,
-    /// Engine observability and payload-capture settings.
-    pub observability: ObservabilitySettings,
-    /// Unified storage retention and size settings.
-    pub storage: StorageSettings,
     /// Server network settings.
     pub server: ServerSettings,
     /// Tmux integration settings.
@@ -78,9 +72,6 @@ impl Default for TronSettings {
             retry: RetrySettings::default(),
             context: ContextSettings::default(),
             agent: AgentRuntimeSettings::default(),
-            logging: LoggingSettings::default(),
-            observability: ObservabilitySettings::default(),
-            storage: StorageSettings::default(),
             server: ServerSettings::default(),
             tmux: TmuxSettings::default(),
             session: SessionSettings::default(),
@@ -192,8 +183,12 @@ mod tests {
         // Root fields are camelCase
         assert!(json.get("version").is_some());
         assert!(json.get("api").is_some());
+        assert_eq!(json["server"]["transcription"]["enabled"], false);
 
         assert!(json.get("models").is_none());
+        assert!(json.get("logging").is_none());
+        assert!(json.get("observability").is_none());
+        assert!(json.get("storage").is_none());
 
         // Nested fields are camelCase
         let server = json.get("server").unwrap();
@@ -291,6 +286,17 @@ mod tests {
         let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
 
         assert!(err.to_string().contains(&unsupported_policy_key));
+    }
+
+    #[test]
+    fn settings_reject_retired_diagnostic_and_storage_policy() {
+        for retired in ["logging", "observability", "storage"] {
+            let error = serde_json::from_value::<TronSettings>(serde_json::json!({
+                (retired): {}
+            }))
+            .unwrap_err();
+            assert!(error.to_string().contains(retired));
+        }
     }
 
     // ── validate ───────────────────────────────────────────────────

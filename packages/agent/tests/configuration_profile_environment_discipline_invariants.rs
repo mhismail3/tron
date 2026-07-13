@@ -107,18 +107,18 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
 }
 
 fn key_configuration_jsonc() -> String {
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-    let section = readme
+    let reference = read_repo_file("packages/agent/docs/project-reference.md");
+    let section = reference
         .split("### Key Configuration")
         .nth(1)
-        .expect("README must contain Key Configuration section");
+        .expect("project reference must contain Key Configuration section");
     let block = section
         .split("```jsonc")
         .nth(1)
-        .expect("README Key Configuration must contain a jsonc block")
+        .expect("project-reference Key Configuration must contain a jsonc block")
         .split("```")
         .next()
-        .expect("README Key Configuration jsonc block must terminate");
+        .expect("project-reference Key Configuration jsonc block must terminate");
     block
         .lines()
         .map(|line| line.split("//").next().unwrap_or("").trim_end())
@@ -164,8 +164,8 @@ fn flatten_json(prefix: &str, value: &serde_json::Value, out: &mut BTreeMap<Stri
 
 fn flattened_key_configuration() -> BTreeMap<String, String> {
     let jsonc = key_configuration_jsonc();
-    let value: serde_json::Value =
-        serde_json::from_str(&jsonc).expect("README Key Configuration jsonc must parse as JSON");
+    let value: serde_json::Value = serde_json::from_str(&jsonc)
+        .expect("project-reference Key Configuration jsonc must parse as JSON");
     let mut flattened = BTreeMap::new();
     flatten_json("", &value, &mut flattened);
     flattened
@@ -244,22 +244,6 @@ fn source_backed_key_configuration_catalog() -> BTreeMap<String, String> {
             defaults.context.compactor.preserve_recent_count.to_string(),
         ),
         (
-            "observability.logLevel".to_owned(),
-            defaults.observability.log_level.as_filter_str().to_owned(),
-        ),
-        (
-            "observability.verboseRetentionDays".to_owned(),
-            defaults.observability.verbose_retention_days.to_string(),
-        ),
-        (
-            "storage.retentionEnabled".to_owned(),
-            defaults.storage.retention_enabled.to_string(),
-        ),
-        (
-            "storage.maxDatabaseMb".to_owned(),
-            defaults.storage.max_database_mb.to_string(),
-        ),
-        (
             "retry.maxRetries".to_owned(),
             defaults.retry.max_retries.to_string(),
         ),
@@ -279,7 +263,7 @@ fn cpe_artifacts_and_static_gate_wiring_exist() {
         assert!(repo_path(path).exists(), "missing CPE artifact: {path}");
     }
 
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
+    let reference = read_repo_file("packages/agent/docs/project-reference.md");
     for required in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -289,8 +273,8 @@ fn cpe_artifacts_and_static_gate_wiring_exist() {
         TARGET_NAME,
     ] {
         assert!(
-            readme.contains(required),
-            "README must mention CPE artifact or target: {required}"
+            reference.contains(required),
+            "project reference must mention CPE artifact or target: {required}"
         );
     }
 
@@ -473,12 +457,12 @@ fn managed_default_profile_cannot_drift_from_compiled_settings_defaults() {
 }
 
 #[test]
-fn readme_key_configuration_catalog_matches_settings_defaults() {
+fn project_reference_key_configuration_catalog_matches_settings_defaults() {
     let documented = flattened_key_configuration();
     let expected = source_backed_key_configuration_catalog();
     assert_eq!(
         documented, expected,
-        "README Key Configuration must stay in parity with source-backed settings defaults"
+        "project-reference Key Configuration must stay in parity with source-backed settings defaults"
     );
 }
 
@@ -591,8 +575,7 @@ fn ios_settings_decode_is_server_authoritative_and_ui_wired() {
     );
     assert!(dto.contains("defaultModel = try serverContainer.decode(String.self"));
     assert!(dto.contains("compaction = try contextContainer.decode"));
-    assert!(dto.contains("observabilityLogLevel = try observabilityContainer.decode"));
-    assert!(dto.contains("storageRetentionEnabled = try storageContainer.decode"));
+    assert!(dto.contains("transcriptionEnabled = try transcriptionContainer.decode"));
     for forbidden in [
         "try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel",
         "?? \"claude-sonnet-4-6\"",
@@ -625,8 +608,7 @@ fn ios_settings_decode_is_server_authoritative_and_ui_wired() {
         "quickSessionWorkspace",
         "preserveRecentCount",
         "triggerTokenThreshold",
-        "observabilityLogLevel",
-        "storageMaxDatabaseMb",
+        "transcriptionEnabled",
     ] {
         assert!(
             parity.contains(required),
@@ -680,48 +662,16 @@ fn ios_user_editable_settings_have_decode_update_state_and_ui_coverage() {
             parity_marker: "\"triggerTokenThreshold\"",
         },
         EditableSetting {
-            rust_path: "observability.logLevel",
-            dto_marker: "let observabilityLogLevel: String",
-            update_marker: "case .observabilityLogLevel(let level)",
-            state_marker: "var observabilityLogLevel: String",
-            ui_marker: "updateServerSetting(.observabilityLogLevel(newValue))",
-            parity_marker: "\"observabilityLogLevel\"",
-        },
-        EditableSetting {
-            rust_path: "observability.verboseRetentionDays",
-            dto_marker: "let observabilityVerboseRetentionDays: UInt64",
-            update_marker: "case .observabilityVerboseRetentionDays(let days)",
-            state_marker: "var observabilityVerboseRetentionDays: UInt64",
-            ui_marker: "updateServerSetting(.observabilityVerboseRetentionDays(clamped))",
-            parity_marker: "\"observabilityVerboseRetentionDays\"",
-        },
-        EditableSetting {
-            rust_path: "storage.retentionEnabled",
-            dto_marker: "let storageRetentionEnabled: Bool",
-            update_marker: "case .storageRetentionEnabled(let enabled)",
-            state_marker: "var storageRetentionEnabled: Bool",
-            ui_marker: "updateServerSetting(.storageRetentionEnabled(newValue))",
-            parity_marker: "\"storageRetentionEnabled\"",
-        },
-        EditableSetting {
-            rust_path: "storage.maxDatabaseMb",
-            dto_marker: "let storageMaxDatabaseMb: UInt64",
-            update_marker: "case .storageMaxDatabaseMb(let megabytes)",
-            state_marker: "var storageMaxDatabaseMb: UInt64",
-            ui_marker: "updateServerSetting(.storageMaxDatabaseMb(clamped))",
-            parity_marker: "\"storageMaxDatabaseMb\"",
-        },
-        EditableSetting {
             rust_path: "server.transcription.enabled",
             dto_marker: "let transcriptionEnabled: Bool",
             update_marker: "case .transcriptionEnabled(let enabled)",
             state_marker: "var transcriptionEnabled: Bool",
-            ui_marker: "updateServerSetting(.transcriptionEnabled(newValue))",
+            ui_marker: "updateServerSetting(.transcriptionEnabled(enabled))",
             parity_marker: "\"transcriptionEnabled\"",
         },
     ];
 
-    let readme_catalog = source_backed_key_configuration_catalog();
+    let reference_catalog = source_backed_key_configuration_catalog();
     let dto = read_repo_file(
         "packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift",
     );
@@ -736,8 +686,8 @@ fn ios_user_editable_settings_have_decode_update_state_and_ui_coverage() {
         read_repo_file("packages/ios-app/Tests/Session/Chat/State/SettingsParityTests.swift");
     for setting in editable_settings {
         assert!(
-            readme_catalog.contains_key(setting.rust_path),
-            "user-editable setting {} must be documented in the source-backed README catalog",
+            reference_catalog.contains_key(setting.rust_path),
+            "user-editable setting {} must be documented in the source-backed project-reference catalog",
             setting.rust_path
         );
         assert!(

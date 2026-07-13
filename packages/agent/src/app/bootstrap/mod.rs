@@ -199,8 +199,6 @@ pub(crate) fn init_engine_host(db_path: &Path) -> Result<crate::engine::EngineHo
 /// Initialize tracing with SQLite persistence and start the periodic flush task.
 fn init_logging(
     db_path: &std::path::Path,
-    settings: &crate::domains::settings::TronSettings,
-    log_level_override: Option<&str>,
     stderr_enabled: bool,
 ) -> Result<(
     crate::shared::observability::TransportHandle,
@@ -212,20 +210,8 @@ fn init_logging(
         rusqlite::Connection::open(db_path).context("Failed to open logging DB connection")?;
     crate::shared::storage::apply_runtime_pragmas(&log_conn)
         .context("Failed to set logging connection pragmas")?;
-    let module_overrides: Vec<(String, &str)> = settings
-        .logging
-        .module_overrides
-        .iter()
-        .map(|(m, lvl)| (m.clone(), lvl.as_filter_str()))
-        .collect();
-    let effective_log_level =
-        log_level_override.unwrap_or_else(|| settings.observability.log_level.as_filter_str());
-    let log_handle = crate::shared::observability::init_subscriber_with_sqlite(
-        effective_log_level,
-        &module_overrides,
-        log_conn,
-        stderr_enabled,
-    );
+    let log_handle =
+        crate::shared::observability::init_subscriber_with_sqlite(log_conn, stderr_enabled);
     let flush_task = crate::shared::observability::spawn_flush_task(log_handle.clone());
     Ok((log_handle, flush_task))
 }
@@ -423,49 +409,41 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let settings = profile_runtime.current().settings.clone();
     crate::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);
-    let (log_handle, flush_task) =
-        init_logging(&db_path, &settings, args.log_level.as_deref(), !args.quiet)?;
-    if settings.storage.retention_enabled {
-        match crate::shared::storage::StorageRuntime::new(db_path.clone())
-            .retention_run(false, settings.observability.verbose_retention_days)
-        {
-            Ok(report) => tracing::debug!(
-                rows_deleted = report.rows_deleted,
-                blobs_deleted = report.blobs_deleted,
-                verbose_retention_days = report.verbose_retention_days,
-                "storage retention completed on startup"
-            ),
-            Err(error) => tracing::warn!(error = %error, "storage retention failed on startup"),
+    let (log_handle, flush_task) = init_logging(&db_path, !args.quiet)?;
+    match crate::shared::storage::StorageRuntime::new(db_path.clone()).retention_run(false) {
+        Ok(report) => tracing::debug!(
+            rows_deleted = report.rows_deleted,
+            blobs_deleted = report.blobs_deleted,
+            diagnostic_retention_days = report.diagnostic_retention_days,
+            "diagnostic storage retention completed on startup"
+        ),
+        Err(error) => {
+            tracing::warn!(error = %error, "diagnostic storage retention failed on startup")
         }
     }
-    if settings.storage.max_database_mb > 0 {
-        match crate::shared::storage::StorageRuntime::new(db_path.clone()).enforce_size_budget(
-            settings.storage.max_database_mb,
-            settings.observability.verbose_retention_days,
-        ) {
-            Ok(report) if report.over_limit => tracing::warn!(
-                max_database_bytes = report.max_database_bytes,
-                before_total_bytes = report.before_total_bytes,
-                after_total_bytes = report.after_total_bytes,
-                retention_rows_deleted = report
-                    .retention
-                    .as_ref()
-                    .map(|retention| retention.rows_deleted)
-                    .unwrap_or_default(),
-                retention_blobs_deleted = report
-                    .retention
-                    .as_ref()
-                    .map(|retention| retention.blobs_deleted)
-                    .unwrap_or_default(),
-                "storage soft size budget exceeded; safe retention and checkpoint completed"
-            ),
-            Ok(_) => {}
-            Err(error) => tracing::warn!(
-                error = %error,
-                max_database_mb = settings.storage.max_database_mb,
-                "storage soft size budget check failed"
-            ),
-        }
+    match crate::shared::storage::StorageRuntime::new(db_path.clone()).enforce_size_budget() {
+        Ok(report) if report.over_limit => tracing::warn!(
+            max_database_bytes = report.max_database_bytes,
+            before_total_bytes = report.before_total_bytes,
+            after_total_bytes = report.after_total_bytes,
+            retention_rows_deleted = report
+                .retention
+                .as_ref()
+                .map(|retention| retention.rows_deleted)
+                .unwrap_or_default(),
+            retention_blobs_deleted = report
+                .retention
+                .as_ref()
+                .map(|retention| retention.blobs_deleted)
+                .unwrap_or_default(),
+            "storage soft size budget exceeded; safe retention and checkpoint completed"
+        ),
+        Ok(_) => {}
+        Err(error) => tracing::warn!(
+            error = %error,
+            max_database_mb = crate::shared::storage::DATABASE_STORAGE_BUDGET_MB,
+            "storage soft size budget check failed"
+        ),
     }
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;

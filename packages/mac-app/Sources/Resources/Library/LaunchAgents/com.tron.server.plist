@@ -31,10 +31,7 @@
     <integer>10</integer>
 
     <key>EnvironmentVariables</key>
-    <dict>
-        <key>RUST_LOG</key>
-        <string>info</string>
-    </dict>
+    <dict/>
 
     <key>SoftResourceLimits</key>
     <dict>

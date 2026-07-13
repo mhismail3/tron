@@ -37,14 +37,7 @@ xml_escape() {
 }
 
 create_dev_launchd_plist() {
-    local log_level="${1:-}"
-    local log_level_xml=""
     local relay_environment_xml=""
-    if [ -n "$log_level" ]; then
-        log_level_xml="
-        <string>--log-level</string>
-        <string>$log_level</string>"
-    fi
     if [ -n "${TRON_RELAY_URL:-}" ]; then
         relay_environment_xml="
         <key>TRON_RELAY_URL</key>
@@ -69,7 +62,7 @@ create_dev_launchd_plist() {
         <string>tron-dev-wrapper</string>
         <string>--port</string>
         <string>$PROD_PORT</string>
-        <string>--quiet</string>$log_level_xml
+        <string>--quiet</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -83,8 +76,6 @@ create_dev_launchd_plist() {
         <string>$TRON_HOME</string>
         <key>TRON_REPO_ROOT</key>
         <string>$RUST_WORKSPACE</string>
-        <key>RUST_LOG</key>
-        <string>${RUST_LOG:-info,ort=error}</string>
         <key>TRON_DEV_BINARY</key>
         <string>$DEV_BINARY</string>
         $relay_environment_xml
@@ -109,14 +100,12 @@ cmd_dev() {
     local do_background=false
     local output_json=false
     local wait_seconds=30
-    local log_level=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -b|--build)   do_build=true; shift ;;
             -t|--test)    do_test=true; shift ;;
             -d|--background) do_background=true; shift ;;
-            -l|--log-level) log_level="$2"; shift 2 ;;
             --json)       output_json=true; shift ;;
             --wait)        wait_seconds="${2:-30}"; shift 2 ;;
             -bt|-tb)      do_build=true; do_test=true; shift ;;
@@ -139,7 +128,6 @@ cmd_dev() {
                 echo "  -b, --build       Build before starting (dev-server profile)"
                 echo "  -t, --test        Run tests before starting"
                 echo "  -d, --background  Run in background (logs to database and $DEV_BACKGROUND_LOG)"
-                echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
                 echo "  --json            Emit final machine-readable server status on stdout"
                 echo "  --wait SECONDS    Max health wait for background starts (default: 30)"
                 echo "  --stop            Stop dev server and restart the installed service"
@@ -159,7 +147,7 @@ cmd_dev() {
                 echo ""
                 return 0
                 ;;
-            *) shift ;;
+            *) print_error "Unknown tron dev option: $1"; return 2 ;;
         esac
     done
 
@@ -231,8 +219,7 @@ dev_start_foreground() {
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
 
-    RUST_LOG="${RUST_LOG:-info,ort=error}" "$DEV_BINARY" \
-        --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
+    RUST_LOG="${RUST_LOG:-info,ort=error}" "$DEV_BINARY" --port "$PROD_PORT"
 }
 
 dev_start_background() {
@@ -282,10 +269,9 @@ dev_start_background() {
         echo "=== tron dev background start $(date -u +"%Y-%m-%dT%H:%M:%SZ") ==="
         echo "binary=$DEV_BINARY"
         echo "port=$PROD_PORT"
-        echo "rust_log=${RUST_LOG:-info,ort=error}"
     } > "$dev_log"
 
-    create_dev_launchd_plist "$log_level"
+    create_dev_launchd_plist
     if ! launchctl bootstrap "gui/$(id -u)" "$DEV_PLIST_PATH" 2>>"$dev_log"; then
         print_error "Failed to load dev takeover LaunchAgent: $DEV_PLIST_PATH"
         if [ -s "$dev_log" ]; then

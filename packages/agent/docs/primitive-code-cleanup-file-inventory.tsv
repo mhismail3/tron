@@ -1017,7 +1017,7 @@ packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.
 packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/UI/Settings/Pages/EngineServersSection.swift	retain	ios ui	PCC-10/AHA-9	Engine settings owns device-local server selection, pairing repair, and removal actions.
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/GoogleCloudRows.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ModelProviderSection.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1034,7 +1034,6 @@ packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	retain	i
 packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Settings/Shell/SettingsCycleToggle.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1412,6 +1411,7 @@ scripts/tron	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-
 scripts/tron-agent.entitlements	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron-cli	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron-ios-beta	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+scripts/tron-ios-simulator	retain	script	Phase1-closeout	Local simulator helper retains one beta app container across build, install, and launch validation.
 scripts/tron-lib.d/auth.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron-lib.d/bundle.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron-lib.d/logs.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1714,9 +1714,11 @@ packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	retain	ios audio support	Phase1-closeout	Composer mic recorder retained as the AVFoundation boundary for temporary local audio.
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	retain	ios audio support	Phase1-closeout	Microphone availability monitor retained for local readiness and permission-safe composer affordances.
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	retain	ios chat ui	Phase1-closeout	Recent input sheet retained as the approved local prompt-history affordance.
+packages/ios-app/Sources/UI/Chat/Composer/RecordingLevelWaveform.swift	retain	ios chat ui	Phase1-closeout	Bounded microphone-level waveform retained as composer-owned visual feedback without raw audio state.
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	retain	ios chat ui	Phase1-closeout	Local error detail sheet retained for user-inspectable local chat failures.
 packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	retain	ios chat shell	Phase1-closeout	Floating new-session button retained after session-list shell simplification.
 packages/ios-app/Sources/UI/Chat/Shell/SessionList.swift	retain	ios chat shell	Phase1-closeout	Session list retained as the minimal grouped first-screen chat shell surface.
+packages/ios-app/Sources/UI/Chat/Shell/SessionListPagination.swift	retain	ios chat shell	Phase1-closeout	Session-list pagination state retains bounded visible counts and rejects stale transition completions.
 packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowPresentation.swift	retain	ios onboarding ui	Phase1-closeout	Onboarding presentation helper retained for shared first-run and server-repair pairing sheets.
 packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTranscriptionTests.swift	retain	ios test	Phase1-closeout	Transcription DTO tests retained for protocol decoding coverage.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ChatAffordanceStatus.swift	retain	ios guard test	Phase1-closeout	Chat affordance source guards retained to keep passive cockpit, loading row, and custom row fallback code out.

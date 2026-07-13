@@ -32,6 +32,8 @@ final class ChatViewModel {
     var isLoadingMoreMessages = false
     /// Composer microphone recording state.
     var isRecording = false
+    /// Smoothed microphone energy for the recording affordance (0...1).
+    var recordingAudioLevel: Double = 0
     /// Composer audio is being sent to local transcription.
     var isTranscribing = false
 
@@ -290,6 +292,10 @@ final class ChatViewModel {
 
         observationTasks.append(Self.observeLoop({ self.micRecorder.isRecording }) { [self] recording in
             self.isRecording = recording
+        })
+
+        observationTasks.append(Self.observeLoop({ self.micRecorder.audioLevel }) { [self] level in
+            self.recordingAudioLevel = level
         })
     }
 

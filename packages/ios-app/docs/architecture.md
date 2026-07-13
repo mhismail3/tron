@@ -74,7 +74,7 @@ and matching database/event/settings/dependency work.
 - Connection, strict pairing host validation, onboarding, and local paired-server
   selection.
 - Settings needed to reach the server, configure providers, choose models, tune
-  server-owned context/evidence policy, and inspect local diagnostics.
+  server-owned context policy, configure voice input, and inspect local diagnostics.
 - Grouped session dashboard with scoped Agent Briefing and Engine Cockpit bands, collapsible
   workspace headers and compact
   inset liquid-glass one-line session rows. Each workspace shows its latest 10
@@ -156,7 +156,7 @@ icon catalog, or fork-row state model.
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar
 Attach:  model.list attachmentPolicy -> camera/photo/file data -> AttachmentImagePreparer -> Attachment -> hello.maxMessageSize preflight -> agent::prompt policy validation
-Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup -> cancellable transcription::audio -> InputBar
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> cancellation-aware ComposerMicRecorder startup + bounded RMS meter -> cancellable transcription::audio -> InputBar
 Push:    AppDelegate token -> observable PushNotificationService -> system device::register (install + bundle + environment identity) -> private APNs custody; notification_send -> policy/evidence -> relay -> APNs
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
@@ -169,7 +169,11 @@ Cockpit: SessionSidebar -> WorkerLifecycleRepository -> catalog/resource/module_
 
 Transient composer failures use the shared one-line local notification pill.
 The timeline keeps the notice compact while its tap-through detail and
-accessibility label retain the complete title and message.
+accessibility label retain the complete title and message. Tap-through local
+errors use the same compact adaptive sheet chrome and glass detail treatment as
+the rest of the chat. While recording, the capture owner publishes only a
+normalized microphone-energy value; the composer keeps a bounded rolling
+waveform locally so no audio samples become view state.
 
 Prompt submission is transactional at the composer boundary. Text,
 attachments, selected-photo state, the optimistic user row, and the persisted
@@ -475,9 +479,10 @@ Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
 prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
 composes the dashboard surface and shell actions; `SessionList.swift` owns
-workspace grouping, per-workspace header collapse and session-row expansion as
-separate state, row status mapping, interactive row liquid-glass containers,
-and header/row presentation metrics. Session expansion is count-based and
+workspace grouping, per-workspace header collapse, row status mapping,
+interactive row liquid-glass containers, and presentation metrics, while
+`SessionListPagination.swift` owns page counts and transition generations.
+Session expansion is count-based and
 derived from each refreshed server group, so new or archived rows cannot leave
 stale counts; disappearing or <=10-row groups shed obsolete expansion state.
 Workspace disclosure is a staged state machine because each interactive Liquid
@@ -489,8 +494,11 @@ projects remain responsive; its short window starts nearby feedback promptly,
 while a smooth layout curve keeps the relocation measured rather than abrupt.
 Generation-checked phases make rapid direction
 changes deterministic without stale completion tasks.
-Pagination still changes row membership atomically so existing rows cannot pass
-through neighboring project headers.
+Pagination uses the same staged contract without disturbing existing rows:
+`View more` inserts only the next page invisibly, settles layout, then reveals
+that page from top to bottom; `View less` fades only rows beyond the default ten
+from bottom to top before removing them. Controls are briefly disabled while a
+generation-owned transition is active, preventing concurrent page mutations.
 `NewSessionFlow` owns the new-session sheet workflow and presents with medium
 and large detents so the sheet starts compactly while still allowing expansion
 for workspace and model selection.
@@ -500,7 +508,7 @@ Server settings shown in the iOS settings UI are snapshots from
 server and roll back a failed in-flight edit to the last loaded snapshot.
 Pairing is device-local `UserDefaults` state, injected at the production
 composition root so tests use isolated persistence domains and cannot alter the
-installed app's active server. Bearer tokens are per-server
+installed app's active server; bearer tokens are per-server
 Keychain secrets, drafts and input history are local workflow state, pending
 share content is App Group handoff state cleared after consumption, and
 MetricKit payloads are bounded Application Support diagnostics buffers.
@@ -612,17 +620,21 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 
 Settings main exposes three destinations without category headers: Engine,
 Providers, and App. Engine owns local server pairing alongside actionable
-server-mirrored defaults, context compaction, transcription, log level, and
-storage retention policy; only the pairing section remains active while a
-server policy snapshot is unavailable. Providers owns OAuth and API-key setup,
-and App owns local appearance and device behavior. Settings main does not grow
-a server-health dashboard; core engine visibility lives on the dashboard Engine Cockpit.
+server-mirrored session defaults, context compaction, and the Local
+Transcription policy; only the pairing section remains active while a server
+settings snapshot is unavailable. Providers owns OAuth and API-key setup, and
+App owns local appearance and device behavior. Database logging, diagnostic
+retention, and storage-budget enforcement are fixed internal Engine safeguards,
+not mobile settings. Settings main does not grow a server-health dashboard;
+core engine visibility lives on the dashboard Engine Cockpit.
 Each main Settings destination or maintenance action renders as its own card;
 the sheet avoids grouped table dividers and chevrons because the card itself is
 the tap target and disclosure affordance.
-The Settings footer stays in the sheet content flow after the maintenance
-actions. It uses a subtle material fade, but it is not a pinned overlay; the
-footer appears naturally when the sheet is expanded or scrolled to the bottom.
+The Settings footer is a reserved bottom sibling owned by the Settings shell,
+so its left/right alignment matches the rows and it remains reachable at
+medium and large detents without content scrolling behind it. It does not
+paint a material or gradient backdrop; the tagline and feedback control sit
+directly on the native sheet surface.
 
 Chat compaction notifications display token savings and label the percentage as
 reduction. The percentage is not a context-window usage value; durable compact

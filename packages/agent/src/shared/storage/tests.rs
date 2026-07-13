@@ -4,6 +4,21 @@ use rusqlite::{Connection, params};
 use std::fs;
 
 #[test]
+fn managed_hygiene_policy_uses_bounded_diagnostic_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(UNIFIED_DB_FILENAME);
+    let runtime = StorageRuntime::new(path);
+
+    let retention = runtime.retention_run(true).unwrap();
+    let budget = runtime.enforce_size_budget().unwrap();
+
+    assert_eq!(retention.diagnostic_retention_days, 7);
+    assert_eq!(DIAGNOSTIC_RETENTION_DAYS, 7);
+    assert_eq!(DATABASE_STORAGE_BUDGET_MB, 512);
+    assert_eq!(budget.max_database_bytes, 512 * 1024 * 1024);
+}
+
+#[test]
 fn non_current_active_database_is_archived_for_modular_engine_generation() {
     let dir = tempfile::tempdir().unwrap();
     let active = dir.path().join(UNIFIED_DB_FILENAME);
@@ -296,7 +311,7 @@ fn retention_prunes_verbose_ios_logs_and_unowned_blobs_but_keeps_owned_blobs() {
     .unwrap();
     drop(conn);
 
-    let report = runtime.retention_run(false, 1).unwrap();
+    let report = maintenance::retention_run(&path, false, 1).unwrap();
     assert_eq!(report.rows_deleted, 1);
     assert_eq!(report.blobs_deleted, 1);
     assert_eq!(report.payload_refs_deleted, 0);
@@ -325,7 +340,7 @@ fn retention_prunes_expired_payload_refs_and_their_now_unowned_blobs() {
     assert!(stored.contains(PAYLOAD_REF_ENVELOPE_KEY));
     drop(conn);
 
-    let report = runtime.retention_run(false, 7).unwrap();
+    let report = runtime.retention_run(false).unwrap();
 
     assert_eq!(report.payload_refs_deleted, 1);
     assert_eq!(report.blobs_deleted, 1);
@@ -384,7 +399,7 @@ fn size_budget_runs_safe_retention_and_checkpoint_without_dropping_audit_refs() 
     assert!(owned.contains(PAYLOAD_REF_ENVELOPE_KEY));
     drop(conn);
 
-    let report = runtime.enforce_size_budget(1, 1).unwrap();
+    let report = maintenance::enforce_size_budget(&path, 1, 1).unwrap();
     assert!(report.over_limit);
     assert!(report.retention.is_some());
     assert!(report.checkpoint.is_some());

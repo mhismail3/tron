@@ -89,22 +89,22 @@ struct SettingsView: View {
     }
 
     private var settingsBaseView: some View {
-        SettingsPageContainer(
-            title: "Settings",
-            leadingToolbar: {
-                Button { showLogViewer = true } label: {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(.tronEmerald)
+        VStack(spacing: 0) {
+            SettingsPageContainer(
+                title: "Settings",
+                leadingToolbar: {
+                    Button { showLogViewer = true } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
-            }
-        ) {
-            VStack(alignment: .leading, spacing: MainSettingsListLayout.rowSpacing) {
+            ) {
                 mainSettingsSection
                     .cardEntrance(visible: cardsVisible, index: 0)
-
-                settingsFooterDockView
             }
+
+            settingsFooterDockView
         }
     }
 

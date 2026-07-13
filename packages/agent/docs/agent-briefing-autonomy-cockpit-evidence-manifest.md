@@ -11,7 +11,7 @@ Last updated: 2026-07-05
 | Dashboard UI | `packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift` mounts `AgentBriefingDashboardBand` above existing workspace groups. |
 | Full briefing sheet | `packages/ios-app/Sources/UI/AgentBriefing/AgentBriefingViews.swift` renders sections, evidence drill-down, empty states, and degraded state. |
 | Session Briefing | `packages/ios-app/Sources/UI/Chat/Sheets/ContextControlSheet.swift` reframes the context/model pill sheet as Session Briefing while retaining model picker, context breakdown, compact, clear, memory status, and action audit. |
-| Diagnostics retained | `packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift` still owns `AgentCockpitSheet` under Runtime Cockpit diagnostics. |
+| Diagnostics retained | `packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift` owns the dashboard band that opens `AgentCockpitSheet`. |
 
 ## Validation Evidence
 

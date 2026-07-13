@@ -105,6 +105,8 @@ struct InputBarConfig {
     var isProcessing: Bool { agentPhase.isProcessing }
     /// Whether composer audio is currently recording.
     let isRecording: Bool
+    /// Normalized microphone energy owned by the recorder (0...1).
+    let recordingAudioLevel: Double
     /// Whether a captured recording is being transcribed.
     let isTranscribing: Bool
 
@@ -162,6 +164,7 @@ struct InputBarConfig {
         isCompacting: Bool = false,
         isConnected: Bool = true,
         isRecording: Bool = false,
+        recordingAudioLevel: Double = 0,
         isTranscribing: Bool = false,
         placeholderText: String = "Type here",
         placeholderShowsProgress: Bool = false,
@@ -179,6 +182,7 @@ struct InputBarConfig {
         self.isCompacting = isCompacting
         self.isConnected = isConnected
         self.isRecording = isRecording
+        self.recordingAudioLevel = min(max(recordingAudioLevel, 0), 1)
         self.isTranscribing = isTranscribing
         self.placeholderText = placeholderText
         self.placeholderShowsProgress = placeholderShowsProgress

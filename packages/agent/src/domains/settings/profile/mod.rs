@@ -36,7 +36,7 @@
 //! |--------|---------|
 //! | [`storage`] | Profile file paths, default seeding, sparse overlay loading, and deep merge |
 //! | [`store`] | Atomic sparse settings writes and runtime reloads |
-//! | [`types`] | Server settings schema mirrored by iOS |
+//! | [`types`] | Strict profile schema mirrored by iOS, including Engine-owned local transcription policy |
 //! | `operations` | Canonical settings capability operations |
 //! | [`db_path_policy`] | Database path guardrails |
 //! | [`errors`] | Settings error hierarchy |
@@ -60,6 +60,10 @@
 //!
 //! - Server settings are authoritative and sparse user overrides stay in
 //!   `profiles/user/profile.toml`.
+//! - Local transcription remains a server-owned Engine policy at
+//!   `server.transcription.enabled` and is mirrored by the iOS Engine page.
+//! - Diagnostics verbosity, diagnostic retention, and database budgets are
+//!   engine-managed policy, not mutable profile settings.
 //! - Malformed settings and unknown nested settings keys fail fast instead of
 //!   being silently repaired or ignored.
 //! - JSON encode/decode implementation errors are mapped to [`SettingsError`]

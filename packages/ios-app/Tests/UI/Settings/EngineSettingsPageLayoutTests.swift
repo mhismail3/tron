@@ -44,7 +44,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertNotNil(landscapeContent.range(of: "serversSection"))
         XCTAssertNotNil(landscapeContent.range(of: "defaultsSection"))
         XCTAssertNotNil(landscapeContent.range(of: "contextSection"))
-        XCTAssertNotNil(landscapeContent.range(of: "evidencePolicySection"))
+        XCTAssertNotNil(landscapeContent.range(of: "transcriptionSection"))
+        XCTAssertNil(landscapeContent.range(of: "evidencePolicySection"))
         XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(
             landscapeContent.contains("protected" + "Branches" + "Section"),
@@ -57,7 +58,15 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
 
         XCTAssertTrue(content.contains("defaultsSection"))
         XCTAssertTrue(content.contains("contextSection"))
-        XCTAssertTrue(content.contains("evidencePolicySection"))
+        XCTAssertFalse(content.contains("evidencePolicySection"))
+        XCTAssertFalse(content.contains("Log level"))
+        XCTAssertFalse(content.contains("Verbose days"))
+        XCTAssertFalse(content.contains("label: \"Retention\""))
+        XCTAssertFalse(content.contains("Storage cap"))
+        XCTAssertFalse(content.contains("observabilityLogLevel"))
+        XCTAssertFalse(content.contains("observabilityVerboseRetentionDays"))
+        XCTAssertFalse(content.contains("storageRetentionEnabled"))
+        XCTAssertFalse(content.contains("storageMaxDatabaseMb"))
         XCTAssertFalse(content.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(content.contains("autonomy" + "Section"))
         XCTAssertFalse(content.contains("guard" + "rails" + "Section"))
@@ -163,7 +172,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(engine.contains("label: \"Model\""))
         XCTAssertTrue(engine.contains("updateServerSetting(.defaultModel(model.id))"))
         XCTAssertTrue(engine.contains("updateServerSetting(.compactionTriggerTokenThreshold(newValue))"))
-        XCTAssertTrue(engine.contains("updateServerSetting(.observabilityLogLevel(newValue))"))
+        XCTAssertTrue(engine.contains("updateServerSetting(.transcriptionEnabled(enabled))"))
+        XCTAssertTrue(engine.contains("EngineSettingsSection.transcription.rawValue"))
         XCTAssertTrue(settingsMain.contains("MainSettingsGridDestination.order"))
         XCTAssertFalse(settingsMain.contains("Server-Owned"))
         XCTAssertFalse(settingsMain.contains("This iPhone"))
@@ -198,7 +208,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
     }
 
-    func testSettingsFooterStaysInSheetContentFlow() throws {
+    func testSettingsFooterIsPinnedWithoutAFullWidthBackdrop() throws {
         let settingsView = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
         let pageContainer = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsPageContainer.swift"])
         let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
@@ -206,14 +216,14 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         let support = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
 
         XCTAssertTrue(
-            settingsView.contains("mainSettingsSection")
-                && settingsView.contains("settingsFooterDockView")
-                && settingsView.range(of: "mainSettingsSection")!.lowerBound < settingsView.range(of: "settingsFooterDockView")!.lowerBound,
-            "The Settings footer should live in the sheet content after actionable rows"
+            settingsView.contains("VStack(spacing: 0)")
+                && settingsView.contains("SettingsPageContainer(")
+                && settingsView.contains("settingsFooterDockView"),
+            "The Settings footer should stay anchored to the sheet bottom at every detent"
         )
         XCTAssertFalse(
             settingsView.contains(".safeAreaInset(edge: .bottom"),
-            "The Settings footer should not be a pinned overlay that can cover Danger Zone rows"
+            "A transparent safe-area overlay would allow Danger Zone content to remain legible behind the footer"
         )
         XCTAssertFalse(
             pageContainer.contains("safeAreaInset") || pageContainer.contains("footer:"),
@@ -221,25 +231,21 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         )
         XCTAssertTrue(
             settingsMain.contains("var settingsFooterDockView: some View")
-                && settingsMain.contains("SettingsFooterBackdrop()"),
-            "The inline footer dock should render through the footer support backdrop"
+                && settingsMain.contains(".padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)")
+                && settingsMain.contains(".padding(.leading, MainSettingsFooterLayout.taglineLeadingPadding)"),
+            "The pinned footer should align its content with the Settings rows"
+        )
+        XCTAssertFalse(
+            settingsMain.contains("SettingsFooterBackdrop()")
+                || footerSupport.contains("struct SettingsFooterBackdrop"),
+            "The footer should sit directly on the sheet instead of painting a rectangular material layer"
         )
         XCTAssertTrue(
-            settingsMain.contains(".frame(height: MainSettingsFooterLayout.dockHeight)"),
-            "The inline footer dock should keep a stable touch and visual region"
-        )
-        XCTAssertTrue(
-            footerSupport.contains("struct SettingsFooterBackdrop"),
-            "The footer blur/fade should live in reusable footer support, not inline in the main settings list"
-        )
-        XCTAssertTrue(
-            footerSupport.contains(".fill(.thinMaterial)")
-                && footerSupport.contains("Color.tronBackground")
-                && footerSupport.contains(".mask("),
-            "The footer backdrop should use a subtle material fade instead of a heavy masking gradient"
-        )
-        XCTAssertTrue(
-            support.contains("static let dockHeight") && !support.contains("contentBottomClearance"),
+            support.contains("static let horizontalPadding")
+                && support.contains("static let taglineLeadingPadding")
+                && support.contains("static let verticalPadding")
+                && !support.contains("textLeadingPadding")
+                && !support.contains("dockHeight"),
             "Footer spacing constants should be centralized with the other Settings layout values"
         )
     }

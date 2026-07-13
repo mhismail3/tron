@@ -49,7 +49,7 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .engine:
-            return "Server-owned defaults, context, and evidence policy"
+            return "Server pairing, session defaults, context, and local transcription"
         case .providers:
             return "Login with OAuth and configure API keys"
         }
@@ -129,10 +129,8 @@ enum MainSettingsGridDestination: Hashable, Sendable {
 
 enum MainSettingsFooterLayout {
     static let horizontalPadding: CGFloat = 20
-    static let textLeadingPadding: CGFloat = 8
-    static let topPadding: CGFloat = 10
-    static let bottomPadding: CGFloat = 10
-    static let dockHeight: CGFloat = 58
+    static let taglineLeadingPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 10
     static let feedbackButtonCornerRadius: CGFloat = 13
     static let feedbackButtonGlassTintOpacity = 0.14
 }
@@ -140,7 +138,7 @@ enum MainSettingsFooterLayout {
 enum EngineSettingsSection: String, CaseIterable, Sendable {
     case defaults = "Session Defaults"
     case context = "Context"
-    case evidence = "Evidence Policy"
+    case transcription = "Transcription"
 }
 
 enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
@@ -220,16 +218,16 @@ enum EngineSettingsSummary {
             return "Load engine settings"
         }
 
-        return "Server-owned engine policy"
+        return "Server-owned Engine settings"
     }
 
     static func description(for context: Context) -> String {
         guard context.isLoaded else {
-            return "Loading model defaults, context, and evidence policy from the active server."
+            return "Loading model defaults, context policy, and local transcription from the active server."
         }
 
         let threshold = Int((context.triggerTokenThreshold * 100).rounded())
-        return "Defaults, compaction at \(threshold)%, and evidence retention are mirrored from the server."
+        return "Session defaults, compaction at \(threshold)%, and local transcription policy are mirrored from the server."
     }
 }
 

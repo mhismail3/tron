@@ -29,14 +29,6 @@ enum ServerSettingsFixture {
                     "preserveRecentCount": 5,
                     "triggerTokenThreshold": 0.70
                 }
-            },
-            "observability": {
-                "logLevel": "info",
-                "verboseRetentionDays": 7
-            },
-            "storage": {
-                "retentionEnabled": true,
-                "maxDatabaseMb": 512
             }
         }
         """

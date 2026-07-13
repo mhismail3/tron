@@ -169,6 +169,52 @@ final class SessionListPresentationTests: XCTestCase {
         XCTAssertFalse(expansion.canViewLess(groupId: group.id, totalCount: 25))
     }
 
+    func testPaginationStagesNewRowsThenHidesOnlyExcessRows() throws {
+        let groupId = "workspace"
+        var expansion = SessionListSessionExpansion()
+
+        let reveal = try XCTUnwrap(expansion.beginRevealMore(groupId: groupId, totalCount: 25))
+        XCTAssertEqual(reveal.direction, .reveal)
+        XCTAssertEqual(reveal.stableCount, 10)
+        XCTAssertEqual(reveal.renderedCount, 20)
+        XCTAssertEqual(reveal.affectedCount, 10)
+        XCTAssertEqual(expansion.visibleCount(for: groupId, totalCount: 25), 20)
+        XCTAssertTrue(expansion.isRowVisible(groupId: groupId, index: 9))
+        XCTAssertFalse(expansion.isRowVisible(groupId: groupId, index: 10))
+        XCTAssertTrue(expansion.isTransitioning(groupId: groupId))
+
+        XCTAssertTrue(expansion.beginRevealRows(reveal))
+        XCTAssertTrue(expansion.isRowVisible(groupId: groupId, index: 10))
+        XCTAssertTrue(expansion.isRowVisible(groupId: groupId, index: 19))
+        XCTAssertTrue(expansion.finish(reveal))
+        XCTAssertFalse(expansion.isTransitioning(groupId: groupId))
+
+        let hide = try XCTUnwrap(expansion.beginShowLess(groupId: groupId, totalCount: 25))
+        XCTAssertEqual(hide.direction, .hide)
+        XCTAssertEqual(hide.stableCount, 10)
+        XCTAssertTrue(expansion.isRowVisible(groupId: groupId, index: 9))
+        XCTAssertFalse(expansion.isRowVisible(groupId: groupId, index: 10))
+        XCTAssertFalse(expansion.isRowVisible(groupId: groupId, index: 19))
+        XCTAssertEqual(expansion.visibleCount(for: groupId, totalCount: 25), 20)
+
+        XCTAssertTrue(expansion.finish(hide))
+        XCTAssertEqual(expansion.visibleCount(for: groupId, totalCount: 25), 10)
+        XCTAssertFalse(expansion.isTransitioning(groupId: groupId))
+    }
+
+    func testPaginationRejectsConcurrentAndStaleTransitions() throws {
+        let groupId = "workspace"
+        var expansion = SessionListSessionExpansion()
+        let reveal = try XCTUnwrap(expansion.beginRevealMore(groupId: groupId, totalCount: 25))
+
+        XCTAssertNil(expansion.beginRevealMore(groupId: groupId, totalCount: 25))
+        XCTAssertNil(expansion.beginShowLess(groupId: groupId, totalCount: 25))
+        XCTAssertTrue(expansion.beginRevealRows(reveal))
+        XCTAssertTrue(expansion.finish(reveal))
+        XCTAssertFalse(expansion.beginRevealRows(reveal))
+        XCTAssertFalse(expansion.finish(reveal))
+    }
+
     func testNoExpansionControlAtTenOrFewerSessions() {
         let expansion = SessionListSessionExpansion()
 

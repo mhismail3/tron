@@ -42,10 +42,10 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 113 |
-| implementation | 879 |
-| support | 385 |
-| test | 611 |
-| docs | 150 |
+| implementation | 884 |
+| support | 392 |
+| test | 613 |
+| docs | 152 |
 | delete | 0 |
 
 ## Owner Summary
@@ -61,9 +61,9 @@ The TSV covers tracked and newly introduced files under:
 | `capability_execute` | 38 |
 | `catalog_discovery` | 8 |
 | `context_control` | 9 |
-| `device` | 6 |
+| `device` | 7 |
 | `docs` | 5 |
-| `docs/static gates` | 137 |
+| `docs/static gates` | 139 |
 | `domain_worker` | 7 |
 | `engine` | 110 |
 | `filesystem` | 7 |
@@ -76,12 +76,14 @@ The TSV covers tracked and newly introduced files under:
 | `ios_chat_ui` | 4 |
 | `ios_engine` | 139 |
 | `ios_events` | 8 |
-| `ios_session` | 76 |
-| `ios_ui` | 140 |
+| `ios_session` | 77 |
+| `ios_support` | 2 |
+| `ios_ui` | 142 |
 | `jobs` | 8 |
 | `mac` | 76 |
 | `media` | 6 |
 | `memory` | 12 |
+| `model` | 1 |
 | `model_provider` | 78 |
 | `module_activity` | 4 |
 | `module_authoring` | 6 |
@@ -92,7 +94,7 @@ The TSV covers tracked and newly introduced files under:
 | `module_runtime` | 8 |
 | `module_validation` | 6 |
 | `notifications` | 7 |
-| `platform` | 2 |
+| `platform` | 6 |
 | `pmc_docs` | 4 |
 | `procedural` | 3 |
 | `program_execution` | 6 |
@@ -103,7 +105,7 @@ The TSV covers tracked and newly introduced files under:
 | `resource_kernel` | 25 |
 | `rust_crate` | 2 |
 | `scheduler` | 7 |
-| `scripts` | 22 |
+| `scripts` | 23 |
 | `server_errors` | 1 |
 | `session` | 1 |
 | `session_storage` | 63 |
@@ -112,7 +114,7 @@ The TSV covers tracked and newly introduced files under:
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
 | `subagents` | 5 |
-| `test_harness` | 609 |
+| `test_harness` | 611 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `update_diagnostics` | 6 |

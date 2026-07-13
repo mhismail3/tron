@@ -93,7 +93,7 @@ struct InstallPlannerTests {
         )
         #expect(decoded["BundleProgram"] as? String == "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron")
         #expect(decoded["ProgramArguments"] as? [String] == ["tron", "--port", "9847", "--quiet"])
-        #expect((decoded["EnvironmentVariables"] as? [String: String]) == ["RUST_LOG": "info"])
+        #expect((decoded["EnvironmentVariables"] as? [String: String]) == [:])
         #expect(decoded["AssociatedBundleIdentifiers"] as? [String] == [
             "com.tron.mac",
             "com.tron.mac.dev",
@@ -109,7 +109,7 @@ struct InstallPlannerTests {
             helperName: "Tron Server Dev.app",
             label: "com.tron.server.dev",
             port: 9848,
-            environmentVariables: ["RUST_LOG": "info", "TRON_HOME_NAME": ".tron-dev"],
+            environmentVariables: ["TRON_HOME_NAME": ".tron-dev"],
             associatedBundleIDs: ["com.tron.mac.dev", "com.tron.mac"]
         )
 
@@ -123,7 +123,6 @@ struct InstallPlannerTests {
         #expect(decoded["BundleProgram"] as? String == "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron")
         #expect(decoded["ProgramArguments"] as? [String] == ["tron", "--port", "9848", "--quiet"])
         #expect((decoded["EnvironmentVariables"] as? [String: String]) == [
-            "RUST_LOG": "info",
             "TRON_HOME_NAME": ".tron-dev",
         ])
         #expect(decoded["AssociatedBundleIdentifiers"] as? [String] == [
@@ -137,7 +136,7 @@ struct InstallPlannerTests {
         helperName: String = "Tron Server.app",
         label: String = "com.tron.server",
         port: Int = 9847,
-        environmentVariables: [String: String] = ["RUST_LOG": "info"],
+        environmentVariables: [String: String] = [:],
         associatedBundleIDs: [String] = ["com.tron.mac", "com.tron.mac.dev"]
     ) -> InstallPlanner.TargetPaths {
         let app = tmp.appendingPathComponent("Tron.app", isDirectory: true)

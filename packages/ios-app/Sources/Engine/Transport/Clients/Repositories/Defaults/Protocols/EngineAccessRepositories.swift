@@ -37,10 +37,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     let defaultWorkspace: String?
     let compactionPreserveRecentCount: Int
     let compactionTriggerTokenThreshold: Double
-    let observabilityLogLevel: String
-    let observabilityVerboseRetentionDays: UInt64
-    let storageRetentionEnabled: Bool
-    let storageMaxDatabaseMb: UInt64
     let transcriptionEnabled: Bool
 
     init(
@@ -48,20 +44,12 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         defaultWorkspace: String?,
         compactionPreserveRecentCount: Int,
         compactionTriggerTokenThreshold: Double,
-        observabilityLogLevel: String,
-        observabilityVerboseRetentionDays: UInt64,
-        storageRetentionEnabled: Bool,
-        storageMaxDatabaseMb: UInt64,
         transcriptionEnabled: Bool
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
         self.compactionTriggerTokenThreshold = compactionTriggerTokenThreshold
-        self.observabilityLogLevel = observabilityLogLevel
-        self.observabilityVerboseRetentionDays = observabilityVerboseRetentionDays
-        self.storageRetentionEnabled = storageRetentionEnabled
-        self.storageMaxDatabaseMb = storageMaxDatabaseMb
         self.transcriptionEnabled = transcriptionEnabled
     }
 
@@ -71,10 +59,6 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             defaultWorkspace: settings.defaultWorkspace,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
             compactionTriggerTokenThreshold: settings.compaction.triggerTokenThreshold,
-            observabilityLogLevel: settings.observabilityLogLevel,
-            observabilityVerboseRetentionDays: settings.observabilityVerboseRetentionDays,
-            storageRetentionEnabled: settings.storageRetentionEnabled,
-            storageMaxDatabaseMb: settings.storageMaxDatabaseMb,
             transcriptionEnabled: settings.transcriptionEnabled
         )
     }
@@ -87,10 +71,6 @@ enum SettingsMutation {
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)
     case compactionPreserveRecentCount(Int)
-    case observabilityLogLevel(String)
-    case observabilityVerboseRetentionDays(UInt64)
-    case storageRetentionEnabled(Bool)
-    case storageMaxDatabaseMb(UInt64)
     case transcriptionEnabled(Bool)
 }
 

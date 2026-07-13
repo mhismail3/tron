@@ -101,44 +101,6 @@ struct SessionListWorkspaceDisclosure: Equatable {
     }
 }
 
-struct SessionListSessionExpansion: Equatable {
-    static let pageSize = 10
-
-    private(set) var visibleCountsByGroupId: [String: Int] = [:]
-
-    func visibleCount(for groupId: String, totalCount: Int) -> Int {
-        min(totalCount, visibleCountsByGroupId[groupId] ?? Self.pageSize)
-    }
-
-    func visibleSessions(in group: SessionListWorkspaceGroup) -> [CachedSession] {
-        Array(group.sessions.prefix(visibleCount(for: group.id, totalCount: group.sessions.count)))
-    }
-
-    func canViewMore(groupId: String, totalCount: Int) -> Bool {
-        visibleCount(for: groupId, totalCount: totalCount) < totalCount
-    }
-
-    func canViewLess(groupId: String, totalCount: Int) -> Bool {
-        visibleCountsByGroupId[groupId] != nil && totalCount > Self.pageSize
-    }
-
-    mutating func revealMore(groupId: String, totalCount: Int) {
-        let currentCount = visibleCount(for: groupId, totalCount: totalCount)
-        visibleCountsByGroupId[groupId] = min(totalCount, currentCount + Self.pageSize)
-    }
-
-    mutating func showLess(groupId: String) {
-        visibleCountsByGroupId.removeValue(forKey: groupId)
-    }
-
-    mutating func reconcile(groupCounts: [String: Int]) {
-        let validGroupIds = Set(groupCounts.keys)
-        visibleCountsByGroupId = visibleCountsByGroupId.filter { groupId, _ in
-            validGroupIds.contains(groupId) && (groupCounts[groupId] ?? 0) > Self.pageSize
-        }
-    }
-}
-
 enum SessionListLayout {
     static let rowContainerHorizontalInset: CGFloat = 16
     static let rowContentHorizontalPadding: CGFloat = 12
@@ -168,9 +130,10 @@ enum SessionListLayout {
     static let rowTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionControlTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionControlMinimumHeight: CGFloat = 44
-    static var expansionControlHorizontalPadding: CGFloat {
-        rowContainerHorizontalInset + rowContentHorizontalPadding
-    }
+    // List row insets already supply the outer margin. These inner anchors
+    // match the session row's status icon and trailing date.
+    static let expansionControlLeadingPadding = rowContentHorizontalPadding
+    static let expansionControlTrailingPadding = rowContentHorizontalPadding
     static let expansionAnimation = Animation.smooth(duration: 0.18)
     static let disclosureRowFadeDuration: TimeInterval = 0.13
     static let disclosureMaximumStaggerDuration: TimeInterval = 0.06
@@ -381,6 +344,7 @@ struct SessionListExpansionControls: View {
     let projectName: String
     let canViewLess: Bool
     let canViewMore: Bool
+    let isEnabled: Bool
     let onViewLess: () -> Void
     let onViewMore: () -> Void
 
@@ -408,7 +372,9 @@ struct SessionListExpansionControls: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, SessionListLayout.expansionControlHorizontalPadding)
+        .padding(.leading, SessionListLayout.expansionControlLeadingPadding)
+        .padding(.trailing, SessionListLayout.expansionControlTrailingPadding)
+        .disabled(!isEnabled)
     }
 
     private func expansionButton(

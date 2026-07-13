@@ -139,13 +139,13 @@ struct ExistingInstallDetectorTests {
             label: "com.tron.server",
             port: 9847,
             bundleProgram: "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
-            environmentVariables: ["RUST_LOG": "info"],
+            environmentVariables: [:],
             associatedBundleIDs: ["com.tron.mac", "com.tron.mac.dev"]
         ))
     }
 
-    @Test("LaunchAgent plist requires current environment variables")
-    func launchAgentPlistRequiresCurrentEnvironment() throws {
+    @Test("LaunchAgent plist rejects retired log environment overrides")
+    func launchAgentPlistRejectsRetiredLogEnvironmentOverride() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let plist = tmp.appendingPathComponent("com.tron.server.plist")
@@ -162,7 +162,6 @@ struct ExistingInstallDetectorTests {
         defer { TestTempDir.cleanup(tmp) }
         let plist = tmp.appendingPathComponent("com.tron.server.dev.plist")
         let environment = [
-            "RUST_LOG": "info",
             TronPaths.tronHomeNameEnv: ".tron-dev",
         ]
         try InstallPlanner.renderPlist(
@@ -229,7 +228,7 @@ struct ExistingInstallDetectorTests {
         helperName: String = "Tron Server.app",
         label: String = "com.tron.server",
         port: Int = 9847,
-        environmentVariables: [String: String] = ["RUST_LOG": "info"],
+        environmentVariables: [String: String] = [:],
         associatedBundleIDs: [String] = ["com.tron.mac", "com.tron.mac.dev"]
     ) -> InstallPlanner.TargetPaths {
         let app = tmp.appendingPathComponent("Tron.app", isDirectory: true)

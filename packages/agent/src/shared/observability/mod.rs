@@ -2,7 +2,7 @@
 //!
 //! This module provides:
 //! - [`LogLevel`] enum with numeric values matching the TypeScript logging system
-//! - [`init_subscriber`] for setting up the `tracing` subscriber
+//! - managed `tracing` subscriber setup for terminal and database diagnostics
 //!
 //! # Architecture
 //!
@@ -17,93 +17,118 @@
 //! log durable IDs, counts, statuses, and hashes instead of prompt/output/file
 //! content; transport redaction is the boundary backstop, not a reason to log
 //! raw content.
+//! Persisted database diagnostics use a managed `info` level and managed
+//! dependency filters. Optional terminal output may honor `RUST_LOG`, but
+//! neither ambient environment nor settings updates can alter persisted
+//! evidence filtering.
 //!
 //! [`Layer`]: tracing_subscriber::Layer
 
 pub mod test_utils;
-pub mod transport;
-pub mod types;
+mod transport;
+mod types;
 
 pub use test_utils::{CapturedLogs, capture_logs};
-pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
-pub use types::LogLevel;
+pub(crate) use transport::TransportHandle;
+use transport::{SqliteTransport, TransportConfig};
+pub(crate) use types::LogLevel;
 
-/// Initialize the global tracing subscriber with stderr output only.
-///
-/// Call once at application startup. Subsequent calls are no-ops.
-/// The subscriber writes human-readable output to stderr.
-///
-/// # Arguments
-///
-/// * `level` - Minimum log level to display. Defaults to `"warn"`.
-pub fn init_subscriber(level: &str) {
-    use tracing_subscriber::EnvFilter;
+/// Managed default verbosity for persisted engine diagnostics.
+pub const DEFAULT_DATABASE_LOG_LEVEL: &str = "info";
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
+/// Managed per-module filters required for stable runtime diagnostics.
+pub const MANAGED_MODULE_OVERRIDES: &[(&str, &str)] = &[("ort", "error")];
 
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .with_writer(std::io::stderr)
-        .compact();
+fn managed_database_filter_directives() -> String {
+    use std::fmt::Write;
 
-    let _ = subscriber.try_init();
+    let mut directives = DEFAULT_DATABASE_LOG_LEVEL.to_owned();
+    for (module, level) in MANAGED_MODULE_OVERRIDES {
+        let _ = write!(directives, ",{module}={level}");
+    }
+    directives
+}
+
+fn managed_database_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::new(managed_database_filter_directives())
+}
+
+fn terminal_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| managed_database_filter())
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn managed_diagnostics_preserve_runtime_defaults() {
+        assert_eq!(DEFAULT_DATABASE_LOG_LEVEL, "info");
+        assert_eq!(MANAGED_MODULE_OVERRIDES, &[("ort", "error")]);
+        assert_eq!(managed_database_filter_directives(), "info,ort=error");
+    }
+
+    #[test]
+    fn database_filter_cannot_read_terminal_environment_policy() {
+        let source = include_str!("mod.rs");
+        let database_filter_body = source
+            .split("fn managed_database_filter()")
+            .nth(1)
+            .unwrap()
+            .split("fn terminal_filter()")
+            .next()
+            .unwrap();
+
+        assert!(!database_filter_body.contains("try_from_default_env"));
+        assert!(source.contains("let database_filter = managed_database_filter();"));
+        assert!(source.contains("let terminal_filter = terminal_filter();"));
+    }
 }
 
 /// Initialize the global tracing subscriber with optional stderr output AND `SQLite` persistence.
 ///
-/// Composes an optional `fmt` layer (stderr) with [`SqliteTransport`] (database) on a
-/// shared [`tracing_subscriber::Registry`]. Call once at application startup.
+/// Composes an optional `fmt` layer (stderr) with [`SqliteTransport`] (database)
+/// on a shared [`tracing_subscriber::Registry`]. The database layer always uses
+/// the managed filter; `RUST_LOG` applies only to the optional terminal layer.
+/// Call once at application startup.
 ///
 /// Returns a [`TransportHandle`] for manual flushing and shutdown cleanup.
 ///
 /// # Arguments
 ///
-/// * `level` - Minimum log level to display/persist.
-/// * `module_overrides` - Per-module level overrides (e.g. `{"ort": "warn"}`).
 /// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
 /// * `enable_fmt` - When `true`, also writes human-readable logs to stderr.
 ///   Pass `false` for background/daemon mode where only DB persistence is needed.
-pub fn init_subscriber_with_sqlite(
-    level: &str,
-    module_overrides: &[(String, &str)],
+pub(crate) fn init_subscriber_with_sqlite(
     conn: rusqlite::Connection,
     enable_fmt: bool,
 ) -> TransportHandle {
-    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    // Build filter: "info,ort=warn,other_crate=error"
-    let mut filter_str = level.to_string();
-    for (module, lvl) in module_overrides {
-        use std::fmt::Write;
-        let _ = write!(filter_str, ",{module}={lvl}");
-    }
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter_str));
+    let database_filter = managed_database_filter();
 
-    let fmt_layer = if enable_fmt {
-        Some(
-            tracing_subscriber::fmt::layer()
-                .with_target(true)
-                .with_writer(std::io::stderr)
-                .compact(),
-        )
-    } else {
-        None
-    };
+    let fmt_layer = enable_fmt.then(|| {
+        let terminal_filter = terminal_filter();
+        tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_writer(std::io::stderr)
+            .compact()
+            .with_filter(terminal_filter)
+    });
 
     let config = TransportConfig {
-        min_level: LogLevel::from_str_lossy(level).as_num(),
+        min_level: LogLevel::from_str_lossy(DEFAULT_DATABASE_LOG_LEVEL).as_num(),
         ..Default::default()
     };
     let transport = SqliteTransport::new(conn, config);
     let handle = transport.handle();
 
     let _ = tracing_subscriber::registry()
-        .with(filter)
         .with(fmt_layer)
-        .with(transport)
+        .with(transport.with_filter(database_filter))
         .try_init();
 
     handle
@@ -114,7 +139,7 @@ pub fn init_subscriber_with_sqlite(
 /// Flushes pending log entries to `SQLite` at the configured interval (default 1s).
 /// Returns a [`tokio::task::JoinHandle`] — abort it on shutdown after a final
 /// [`TransportHandle::flush`].
-pub fn spawn_flush_task(handle: TransportHandle) -> tokio::task::JoinHandle<()> {
+pub(crate) fn spawn_flush_task(handle: TransportHandle) -> tokio::task::JoinHandle<()> {
     let interval_ms = TransportConfig::default().flush_interval_ms;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(interval_ms));
@@ -123,19 +148,4 @@ pub fn spawn_flush_task(handle: TransportHandle) -> tokio::task::JoinHandle<()> 
             handle.flush();
         }
     })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_subscriber_does_not_panic() {
-        init_subscriber("warn");
-        init_subscriber("debug");
-    }
 }

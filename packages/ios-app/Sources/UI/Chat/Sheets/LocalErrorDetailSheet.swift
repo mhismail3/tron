@@ -5,41 +5,54 @@ struct LocalErrorDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(data.title, systemImage: "exclamationmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .bold))
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("What happened")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronError)
 
-                    Text(data.message)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronTextPrimary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if let suggestion = data.suggestion?.nilIfEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Suggestion")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                            .foregroundStyle(.tronTextMuted)
-                            .textCase(.uppercase)
-
-                        Text(suggestion)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.tronTextSecondary)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(data.message)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronTextPrimary)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        if let suggestion = data.suggestion?.nilIfEmpty {
+                            Divider()
+                                .overlay(Color.tronError.opacity(0.18))
+
+                            Label(suggestion, systemImage: "arrow.clockwise")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronTextSecondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(16)
+                    .sectionFill(.tronError, cornerRadius: 12, subtle: true, interactive: false)
+                }
+                .padding(.horizontal)
+                .padding(.vertical)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .foregroundStyle(.tronError)
+                        SheetTitle(title: data.title, color: .tronError)
                     }
                 }
-
-                Spacer(minLength: 0)
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronError)
+                }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.tronBackground)
-            .navigationTitle("Error Details")
-            .navigationBarTitleDisplayMode(.inline)
         }
+        .adaptivePresentationDetents([.medium], ipadSizing: .compactForm)
+        .tint(.tronError)
     }
 }

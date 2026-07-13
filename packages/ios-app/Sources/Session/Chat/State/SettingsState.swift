@@ -16,12 +16,8 @@ final class SettingsState {
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
 
-    // MARK: - Observability And Storage
+    // MARK: - Engine Policy
 
-    var observabilityLogLevel: String = "info"
-    var observabilityVerboseRetentionDays: UInt64 = 7
-    var storageRetentionEnabled: Bool = true
-    var storageMaxDatabaseMb: UInt64 = 512
     var transcriptionEnabled: Bool = false
 
     @ObservationIgnored
@@ -127,19 +123,14 @@ final class SettingsState {
     ///
     /// Every field is overwritten from the active server's effective settings.
     /// That keeps the iOS UI honest when switching between Macs: a value that
-        /// was present on server A cannot linger after server B reports its own
-        /// default or a missing optional field.
+    /// was present on server A cannot linger after server B reports its own
+    /// default or a missing optional field.
     func applyServerSettings(_ settings: ServerSettingsSnapshot) {
         lastLoadedSettings = settings
         defaultModel = settings.defaultModel
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        observabilityLogLevel = settings.observabilityLogLevel
-        observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays
-        storageRetentionEnabled = settings.storageRetentionEnabled
-        storageMaxDatabaseMb = settings.storageMaxDatabaseMb
         transcriptionEnabled = settings.transcriptionEnabled
-
     }
 }

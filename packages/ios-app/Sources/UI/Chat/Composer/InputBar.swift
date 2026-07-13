@@ -247,8 +247,20 @@ struct InputBar: View {
                 }
         }
         .frame(minHeight: actionButtonSize)
+        .overlay(alignment: .trailing) {
+            if config.isRecording {
+                GeometryReader { geometry in
+                    RecordingLevelWaveform(level: config.recordingAudioLevel)
+                        .frame(width: max(52, geometry.size.width * 0.22), height: 24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
         .animation(.easeOut(duration: 0.18), value: config.placeholderText)
         .animation(.easeOut(duration: 0.18), value: config.placeholderShowsProgress)
+        .animation(.easeOut(duration: 0.18), value: config.isRecording)
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {

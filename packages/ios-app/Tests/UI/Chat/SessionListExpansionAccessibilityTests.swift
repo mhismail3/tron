@@ -17,13 +17,19 @@ final class SessionListExpansionAccessibilityTests: XCTestCase {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
             encoding: .utf8
         )
+        let pagination = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionListPagination.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(sidebar.contains("sessionExpansion.visibleSessions(in: group)"))
         XCTAssertTrue(sidebar.contains("SessionListExpansionControls("))
-        XCTAssertTrue(sidebar.contains("sessionExpansion.revealMore("))
-        XCTAssertTrue(sidebar.contains("sessionExpansion.showLess(groupId: group.id)"))
-        XCTAssertTrue(sidebar.contains("updateSessionPagination"))
-        XCTAssertTrue(sidebar.contains("Transaction(animation: nil)"))
+        XCTAssertTrue(sidebar.contains("beginPaginationReveal(group)"))
+        XCTAssertTrue(sidebar.contains("beginPaginationHide(group)"))
+        XCTAssertTrue(sidebar.contains("sessionExpansion.beginRevealMore("))
+        XCTAssertTrue(sidebar.contains("sessionExpansion.beginShowLess("))
+        XCTAssertTrue(sidebar.contains("sessionExpansion.beginRevealRows(transition)"))
+        XCTAssertTrue(sidebar.contains("isEnabled: !paginationIsTransitioning"))
         XCTAssertTrue(sidebar.contains("toggleWorkspaceGroup"))
         XCTAssertTrue(sidebar.contains("workspaceDisclosure.beginToggle(groupId)"))
         XCTAssertTrue(sidebar.contains("workspaceDisclosure.complete(transition)"))
@@ -35,7 +41,7 @@ final class SessionListExpansionAccessibilityTests: XCTestCase {
         XCTAssertTrue(list.contains("disclosureLayoutDelay"))
         XCTAssertTrue(sidebar.contains("ForEach(Array(visibleSessions.enumerated())"))
         XCTAssertTrue(list.contains(".animation(SessionListLayout.expansionAnimation, value: isExpanded)"))
-        XCTAssertTrue(list.contains("static let pageSize = 10"))
+        XCTAssertTrue(pagination.contains("static let pageSize = 10"))
         XCTAssertTrue(list.contains(#"title: "View more""#))
         XCTAssertTrue(list.contains(#"title: "View less""#))
         let viewMore = try XCTUnwrap(list.range(of: #"title: "View more""#))
@@ -59,10 +65,18 @@ final class SessionListExpansionAccessibilityTests: XCTestCase {
         XCTAssertTrue(list.contains(".frame(maxWidth: .infinity)"))
         XCTAssertTrue(
             list.contains(
-                ".padding(.horizontal, SessionListLayout.expansionControlHorizontalPadding)"
+                ".padding(.leading, SessionListLayout.expansionControlLeadingPadding)"
             )
         )
+        XCTAssertTrue(
+            list.contains(
+                ".padding(.trailing, SessionListLayout.expansionControlTrailingPadding)"
+            )
+        )
+        XCTAssertTrue(list.contains("static let expansionControlLeadingPadding = rowContentHorizontalPadding"))
+        XCTAssertTrue(list.contains("static let expansionControlTrailingPadding = rowContentHorizontalPadding"))
         XCTAssertTrue(list.contains(".buttonStyle(.plain)\n        .contentShape(Rectangle())"))
+        XCTAssertTrue(list.contains(".disabled(!isEnabled)"))
         XCTAssertTrue(list.contains(#".accessibilityLabel("\(title) sessions in \(projectName)")"#))
         XCTAssertTrue(list.contains(".accessibilityHint(hint)"))
     }

@@ -4,20 +4,34 @@ import Foundation
 final class ComposerMicCaptureBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var chunks: [Data] = []
+    private var normalizedLevel: Double = 0
 
-    func append(_ data: Data) {
-        lock.withLock { chunks.append(data) }
+    func append(_ data: Data, normalizedLevel: Double) {
+        lock.withLock {
+            chunks.append(data)
+            self.normalizedLevel = normalizedLevel
+        }
+    }
+
+    func currentLevel() -> Double {
+        lock.withLock { normalizedLevel }
     }
 
     func drain() -> Data {
         lock.withLock {
-            defer { chunks = [] }
+            defer {
+                chunks = []
+                normalizedLevel = 0
+            }
             return chunks.reduce(into: Data()) { $0.append($1) }
         }
     }
 
     func discard() {
-        lock.withLock { chunks = [] }
+        lock.withLock {
+            chunks = []
+            normalizedLevel = 0
+        }
     }
 }
 
@@ -31,6 +45,10 @@ final class ComposerMicCaptureEngine {
     private var engine: AVAudioEngine?
     private let captureBuffer = ComposerMicCaptureBuffer()
     private var simulatorRecordingStartedAt: Date?
+
+    var currentLevel: Double {
+        captureBuffer.currentLevel()
+    }
 
     nonisolated static var usesSimulatorSafeCaptureBackend: Bool {
         #if targetEnvironment(simulator)
@@ -135,6 +153,7 @@ final class ComposerMicCaptureEngine {
             guard frameCount > 0, channels > 0 else { return }
 
             var int16Data = Data(count: frameCount * 2)
+            var squaredAmplitude: Float = 0
             int16Data.withUnsafeMutableBytes { rawBuffer in
                 let samples = rawBuffer.bindMemory(to: Int16.self)
                 for i in 0..<frameCount {
@@ -145,11 +164,20 @@ final class ComposerMicCaptureEngine {
                         sample = floatData[0][i]
                     }
                     let clamped = max(-1.0, min(1.0, sample))
+                    squaredAmplitude += clamped * clamped
                     samples[i] = Int16(clamped * 32767.0)
                 }
             }
-            buffer.append(int16Data)
+            let rms = sqrt(squaredAmplitude / Float(frameCount))
+            buffer.append(int16Data, normalizedLevel: normalizedMeterLevel(forRMS: rms))
         }
+    }
+
+    nonisolated static func normalizedMeterLevel(forRMS rms: Float) -> Double {
+        let floorDecibels: Float = -60
+        let decibels = 20 * log10(max(rms, 0.000_001))
+        let linear = min(max((decibels - floorDecibels) / -floorDecibels, 0), 1)
+        return Double(pow(linear, 1.35))
     }
 
     static func writeWAVFile(pcmData: Data, sampleRate: Double) -> URL? {

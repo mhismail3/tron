@@ -104,22 +104,6 @@ private extension SettingsMutation {
             return ServerSettingsUpdate(context: .init(compactor: .init(triggerTokenThreshold: threshold)))
         case .compactionPreserveRecentCount(let count):
             return ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: count)))
-        case .observabilityLogLevel(let level):
-            var update = ServerSettingsUpdate()
-            update.observability = .init(logLevel: level)
-            return update
-        case .observabilityVerboseRetentionDays(let days):
-            var update = ServerSettingsUpdate()
-            update.observability = .init(verboseRetentionDays: days)
-            return update
-        case .storageRetentionEnabled(let enabled):
-            var update = ServerSettingsUpdate()
-            update.storage = .init(retentionEnabled: enabled)
-            return update
-        case .storageMaxDatabaseMb(let megabytes):
-            var update = ServerSettingsUpdate()
-            update.storage = .init(maxDatabaseMb: megabytes)
-            return update
         case .transcriptionEnabled(let enabled):
             return ServerSettingsUpdate(server: .init(transcription: .init(enabled: enabled)))
         }

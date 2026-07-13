@@ -70,9 +70,8 @@ fn cli_default_port() {
 }
 
 #[test]
-fn cli_parses_log_level_flag() {
-    let cli = Cli::parse_from(["tron", "--log-level", "debug"]);
-    assert_eq!(cli.log_level.as_deref(), Some("debug"));
+fn cli_rejects_database_log_level_override() {
+    assert!(Cli::try_parse_from(["tron", "--log-level", "debug"]).is_err());
 }
 
 #[test]
@@ -85,11 +84,6 @@ fn shutdown_signal_surface_includes_process_manager_stop_signal() {
     );
 }
 
-#[test]
-fn cli_log_level_is_optional() {
-    let cli = Cli::parse_from(["tron"]);
-    assert!(cli.log_level.is_none());
-}
 // ── CLI subcommand dispatch ──────────────────────────────────────────
 //
 // These tests cover Phase 2.7 — the `tron auth rotate` surface. The

@@ -98,10 +98,9 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
     fn storage_retention_run(
         &self,
         dry_run: bool,
-        verbose_retention_days: u64,
     ) -> Result<crate::shared::storage::StorageRetentionReport> {
         self.storage_runtime()?
-            .retention_run(dry_run, verbose_retention_days)
+            .retention_run(dry_run)
             .map_err(storage_error)
     }
 }

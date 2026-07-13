@@ -132,9 +132,9 @@ enum TronPaths {
 
     static func launchAgentEnvironmentVariables(environment: [String: String]) -> [String: String] {
         if isIsolatedInstallMode(environment: environment) {
-            return ["RUST_LOG": "info", tronHomeNameEnv: ".tron-dev"]
+            return [tronHomeNameEnv: ".tron-dev"]
         }
-        return ["RUST_LOG": "info"]
+        return [:]
     }
 
     static var canManageLaunchAgent: Bool {

@@ -63,7 +63,6 @@ struct TronPathsTests {
         #expect(TronPaths.agentBundleName(environment: environment) == "Tron Server Dev")
         #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron")
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
-            "RUST_LOG": "info",
             TronPaths.tronHomeNameEnv: ".tron-dev",
         ])
         #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))

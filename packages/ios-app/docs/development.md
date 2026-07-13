@@ -106,6 +106,29 @@ the production app icon, production bundle IDs, and production entitlements, but
 keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and `ONLY_ACTIVE_ARCH=YES` like the
 beta debug build.
 
+### Persistent Paired Simulator
+
+Use `scripts/tron-ios-simulator` for local app-path testing. The helper remembers
+one simulator UUID in `~/.tron/internal/run/ios-simulator-udid`, always uses the
+`Tron Beta` bundle, and installs over the existing app without uninstalling or
+erasing its data container:
+
+```bash
+# Select the current Simulator device once and retain its pairing.
+scripts/tron-ios-simulator remember
+
+# Later launches reuse that exact simulator and paired app container.
+scripts/tron-ios-simulator start
+
+# Rebuild only when iOS code changed; pairing remains intact.
+scripts/tron-ios-simulator install
+```
+
+Pairing is scoped to both the simulator UUID and bundle ID. Avoid name-only
+destinations when multiple iOS runtimes contain an identically named device,
+and do not uninstall, erase, or switch to the production bundle for simulator
+testing.
+
 ## Running Tests
 
 ### Command Line

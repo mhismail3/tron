@@ -36,10 +36,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub(crate) db_path: Option<PathBuf>,
 
-    /// Override database log level (trace, debug, info, warn, error).
-    #[arg(long, global = true)]
-    pub(crate) log_level: Option<String>,
-
     /// Suppress stderr logging (logs still persist to database).
     #[arg(long, global = true)]
     pub(crate) quiet: bool,

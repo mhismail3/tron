@@ -32,8 +32,6 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <key>RUST_LOG</key>
-        <string>info</string>
         <key>TRON_HOME_NAME</key>
         <string>.tron-dev</string>
     </dict>

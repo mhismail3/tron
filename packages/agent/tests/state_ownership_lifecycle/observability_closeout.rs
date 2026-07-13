@@ -87,7 +87,7 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
             "struct TransportInner",
             "batch: Vec<PendingEntry>",
             "conn: Connection",
-            "pub fn handle(&self) -> TransportHandle",
+            "pub(super) fn handle(&self) -> TransportHandle",
             "fn flush_batch",
             "write_batch(&guard.conn, &entries)",
         ],
@@ -175,20 +175,23 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
         "fn storage_stats(host: &dyn PrimitiveRuntimeHost)",
         "host.storage_stats()?",
         "fn storage_retention_run(",
-        "verboseRetentionDays",
-        "host.storage_retention_run(dry_run, verbose_retention_days)?",
+        "host.storage_retention_run(dry_run)?",
     ] {
         assert!(
             primitive_runtime.contains(required),
             "storage primitive runtime dispatch missing `{required}`"
         );
     }
+    assert!(
+        !primitive_runtime.contains("verboseRetentionDays"),
+        "storage retention horizon must remain managed owner policy"
+    );
     let maintenance = read_repo_file("packages/agent/src/shared/storage/maintenance.rs");
     assert_contains_in_order(
         "retention observability lifecycle",
         &maintenance,
         &[
-            "pub fn retention_run",
+            "pub(super) fn retention_run",
             "let started_at",
             "let rows_deleted = count_verbose_logs",
             "DELETE FROM logs",
@@ -213,9 +216,9 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
         "SELECT COUNT(*) FROM storage_payload_refs",
         "fn count_unowned_blobs",
         "SELECT COUNT(*) FROM blobs",
-        "pub fn enforce_size_budget",
+        "pub(super) fn enforce_size_budget",
         "let before = storage_stats(path)?",
-        "let retention = retention_run(path, false, verbose_retention_days)?",
+        "let retention = retention_run(path, false, diagnostic_retention_days)?",
         "let checkpoint = checkpoint_database(path)?",
     ] {
         assert!(

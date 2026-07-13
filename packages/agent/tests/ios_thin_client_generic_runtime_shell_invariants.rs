@@ -112,6 +112,7 @@ fn ios_swift_files() -> Vec<String> {
                 && (path.starts_with("packages/ios-app/Sources/")
                     || path.starts_with("packages/ios-app/Tests/"))
         })
+        .filter(|path| repo_path(path).is_file())
         .collect()
 }
 
@@ -455,31 +456,10 @@ fn settings_parity_sparse_update_and_decode_exception_are_source_guarded() {
             "EngineSettingsPage.swift",
         ),
         (
-            "logLevel",
-            "observabilityLogLevel",
-            "observabilityLogLevel",
-            "observabilityLogLevel",
-            "EngineSettingsPage.swift",
-        ),
-        (
-            "verboseRetentionDays",
-            "observabilityVerboseRetentionDays",
-            "observabilityVerboseRetentionDays",
-            "observabilityVerboseRetentionDays",
-            "EngineSettingsPage.swift",
-        ),
-        (
-            "retentionEnabled",
-            "storageRetentionEnabled",
-            "storageRetentionEnabled",
-            "storageRetentionEnabled",
-            "EngineSettingsPage.swift",
-        ),
-        (
-            "maxDatabaseMb",
-            "storageMaxDatabaseMb",
-            "storageMaxDatabaseMb",
-            "storageMaxDatabaseMb",
+            "transcription",
+            "transcriptionEnabled",
+            "transcriptionEnabled",
+            "transcriptionEnabled",
             "EngineSettingsPage.swift",
         ),
     ];
@@ -517,9 +497,11 @@ fn settings_parity_sparse_update_and_decode_exception_are_source_guarded() {
 
     for required in [
         "ServerSettings decoder rejects malformed server field type",
+        "ServerSettings decoder rejects missing server transcription policy",
         "ServerSettingsUpdate encodes primitive structure",
+        "transcription-only update encodes exact nested server shape",
         r#"#expect(json["session"] == nil)"#,
-        "missingRetiredPolicyBlocksAccepted",
+        "decodesWithoutDiagnosticPolicyBlocks",
     ] {
         assert!(
             settings_tests.contains(required),

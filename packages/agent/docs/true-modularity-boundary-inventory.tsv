@@ -891,7 +891,7 @@ packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	sw
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet+Sections.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/EngineServersSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/GoogleCloudRows.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ModelProviderSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
@@ -908,7 +908,6 @@ packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	swift	im
 packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
-packages/ios-app/Sources/UI/Settings/Shell/SettingsCycleToggle.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
@@ -987,9 +986,11 @@ packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitModuleActivityViews.swift	s
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift	swift	implementation	ios:ui	owner-private operation drill-down sheet rendering; callers enter through AgentCockpit discovery selection state
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/RecordingLevelWaveform.swift	swift	implementation	ios:ui	owner-private normalized-level renderer; raw audio remains in the audio support owner
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Shell/SessionList.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/SessionListPagination.swift	swift	implementation	ios:ui	owner-private pagination and stale-transition state; callers enter through SessionList
 packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowPresentation.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/mac-app/Sources/App/CommandMode/MacCommandLineMode.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
 packages/mac-app/Sources/App/CommandMode/MacCommandModeServerStarter.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
@@ -1442,3 +1443,13 @@ packages/agent/src/domains/capability_binding/route.rs	rust	implementation	rust:
 packages/ios-app/Sources/Engine/Persistence/Sync/SessionListPageLoader.swift	swift	implementation	ios:engine-persistence	owner-private exact cursor pagination and page loading policy
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationBriefPresentation.swift	swift	implementation	ios:session	owner-private high-signal invocation presentation projection
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationGrouping.swift	swift	implementation	ios:session	owner-private deterministic adjacent invocation grouping policy
+packages/agent/src/domains/device/handlers.rs	rust	adapter	rust:domain-device	transport-only device operation bindings delegate to owner-private deterministic service seams
+packages/agent/src/domains/model/routing/attachments.rs	rust	implementation	rust:domain-model	owner-private provider attachment-limit policy; callers enter through model routing
+packages/agent/src/platform/apns/mod.rs	rust	facade	rust:platform-apns	private APNs transport composition facade; notification policy depends only on its injected contract
+packages/agent/src/platform/apns/relay.rs	rust	adapter	rust:platform-apns	owner-private HMAC-authenticated HTTPS relay adapter; callers enter through the APNs sender contract
+packages/agent/src/platform/apns/store.rs	rust	implementation	rust:platform-apns	owner-private atomic raw-token custody; callers enter through the APNs composition facade
+packages/agent/src/platform/apns/types.rs	rust	contract	rust:platform-apns	transport-neutral APNs request and result values may cross the private transport boundary
+packages/ios-app/Sources/Session/Attachments/AttachmentImagePreparer.swift	swift	implementation	ios:session	owner-private provider-policy image transform; callers consume unified Attachment values
+packages/ios-app/Sources/Support/Foundation/Notifications/APNsEnvironment.swift	swift	implementation	ios:support	owner-private bundle-to-APNs-environment mapping used by the notification service
+packages/ios-app/Sources/Support/Foundation/Notifications/PushNotificationService.swift	swift	implementation	ios:support	owner-private OS token lifecycle and trusted server-registration coordinator
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift	swift	implementation	ios:ui	owner-private capability engine and activity tab composition; state remains in the cockpit view model

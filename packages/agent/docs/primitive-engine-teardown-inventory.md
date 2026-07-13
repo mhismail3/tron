@@ -286,7 +286,7 @@ server settings shape and iOS controls together.
 | `update.rs` | delete | PET-11 deleted the user-mode updater settings enums/schema. Product update checks are not needed before the first model call and are not primitive loop infrastructure. |
 | `SettingsState.swift` | retain | Keep only fields matching retained server settings. |
 | `EngineProtocolTypes+Settings.swift` | retain | Decode/update only retained server settings. |
-| `ConnectionSettingsPage.swift` | retain | Keep server pairing/provider/bootstrap controls. |
+| `EngineServersSection.swift` | retain | Keep device-local server selection, pairing repair, and removal controls inside Engine settings. |
 | `EngineSettingsPage.swift` | retain | Retain only effective server-owned defaults and engine policy controls. |
 | `SettingsView` and shared setting components | retain | Keep shell navigation/components after product pages are removed. |
 

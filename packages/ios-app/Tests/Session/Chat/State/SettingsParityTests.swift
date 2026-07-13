@@ -3,11 +3,11 @@ import XCTest
 
 /// Settings parity meta-test.
 ///
-/// CLAUDE.md codifies a rule that every server setting decoded into
+/// AGENTS.md codifies a rule that every server setting decoded into
 /// `ServerSettings` must have a 1-to-1 control in the iOS settings UI.
 /// There is no Swift reflection path from the `ServerSettings` struct
-/// because its fields are read from JSON via `decodeIfPresent`, not
-/// codable synthesis. Instead, this test walks `SettingsState`'s
+/// because it uses a custom strict decoder rather than Codable synthesis.
+/// Instead, this test walks `SettingsState`'s
 /// runtime fields via `Mirror` — every field on the observable
 /// projection is expected to either be part of the user-editable
 /// surface (covered by `KNOWN_UI_FIELDS`) or on `WAIVER` with an
@@ -20,7 +20,7 @@ import XCTest
 final class SettingsParityTests: XCTestCase {
 
     /// Fields that are wired to a UI control somewhere under
-    /// `Views/Settings/Pages/`. Adding a field here requires a real
+    /// `Sources/UI/Settings/Pages/`. Adding a field here requires a real
     /// UI control — the test only asserts the field is accounted for,
     /// not that it's actually displayed, but the intent is explicit.
     private let KNOWN_UI_FIELDS: Set<String> = [
@@ -30,11 +30,7 @@ final class SettingsParityTests: XCTestCase {
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
-        // Engine diagnostics
-        "observabilityLogLevel",
-        "observabilityVerboseRetentionDays",
-        "storageRetentionEnabled",
-        "storageMaxDatabaseMb",
+        // Engine transcription policy
         "transcriptionEnabled",
     ]
 
@@ -79,7 +75,7 @@ final class SettingsParityTests: XCTestCase {
             orphans.isEmpty,
             """
             SettingsState fields without a UI control or waiver: \(orphans).
-            Either add a UI control in Views/Settings/Pages/ and register
+            Either add a UI control in Sources/UI/Settings/Pages/ and register
             the field in KNOWN_UI_FIELDS, or add an entry to WAIVER with
             a justification.
             """

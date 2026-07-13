@@ -189,15 +189,10 @@ extension SettingsView {
     }
 
     var settingsFooterDockView: some View {
-        ZStack(alignment: .bottom) {
-            SettingsFooterBackdrop()
-            footerView
-                .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
-                .padding(.top, MainSettingsFooterLayout.topPadding)
-                .padding(.bottom, MainSettingsFooterLayout.bottomPadding)
-        }
+        footerView
+            .padding(.horizontal, MainSettingsFooterLayout.horizontalPadding)
+            .padding(.vertical, MainSettingsFooterLayout.verticalPadding)
             .frame(maxWidth: .infinity)
-            .frame(height: MainSettingsFooterLayout.dockHeight)
             .cardEntrance(visible: cardsVisible, index: 1)
     }
 
@@ -215,9 +210,9 @@ extension SettingsView {
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, MainSettingsFooterLayout.taglineLeadingPadding)
             .lineLimit(1)
             .minimumScaleFactor(0.92)
-            .padding(.leading, MainSettingsFooterLayout.textLeadingPadding)
     }
 
     var feedbackFooterButton: some View {

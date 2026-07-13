@@ -41,7 +41,6 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn storage_retention_run(
         &self,
         dry_run: bool,
-        verbose_retention_days: u64,
     ) -> Result<crate::shared::storage::StorageRetentionReport>;
 }
 
@@ -232,10 +231,8 @@ fn storage_retention_run(
         .get("dryRun")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let verbose_retention_days =
-        optional_u64(invocation.payload.get("verboseRetentionDays"))?.unwrap_or(7);
     Ok(json!({
-        "retention": host.storage_retention_run(dry_run, verbose_retention_days)?
+        "retention": host.storage_retention_run(dry_run)?
     }))
 }
 
@@ -306,19 +303,6 @@ pub(in crate::engine::primitives) fn optional_string(
         Some(Value::String(value)) => Ok(Some(value.clone())),
         Some(other) => Err(EngineError::PolicyViolation(format!(
             "expected string, got {other}"
-        ))),
-    }
-}
-
-pub(in crate::engine::primitives) fn optional_u64(value: Option<&Value>) -> Result<Option<u64>> {
-    match value {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(number)) => number
-            .as_u64()
-            .map(Some)
-            .ok_or_else(|| EngineError::PolicyViolation("expected unsigned integer".to_owned())),
-        Some(other) => Err(EngineError::PolicyViolation(format!(
-            "expected integer, got {other}"
         ))),
     }
 }

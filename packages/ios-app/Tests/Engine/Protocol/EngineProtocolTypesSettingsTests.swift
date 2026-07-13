@@ -17,14 +17,6 @@ struct ServerSettingsTests {
             },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
-            },
-            "observability": {
-                "logLevel": "debug",
-                "verboseRetentionDays": 3
-            },
-            "storage": {
-                "retentionEnabled": false,
-                "maxDatabaseMb": 256
             }
         }
         """
@@ -36,10 +28,6 @@ struct ServerSettingsTests {
         #expect(settings.transcriptionEnabled == true)
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
-        #expect(settings.observabilityLogLevel == "debug")
-        #expect(settings.observabilityVerboseRetentionDays == 3)
-        #expect(settings.storageRetentionEnabled == false)
-        #expect(settings.storageMaxDatabaseMb == 256)
     }
 
     @Test("decode fixture server payload uses primitive defaults")
@@ -51,10 +39,6 @@ struct ServerSettingsTests {
         #expect(settings.transcriptionEnabled == false)
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
-        #expect(settings.observabilityLogLevel == "info")
-        #expect(settings.observabilityVerboseRetentionDays == 7)
-        #expect(settings.storageRetentionEnabled == true)
-        #expect(settings.storageMaxDatabaseMb == 512)
     }
 
     @Test("server key present with only default model")
@@ -65,8 +49,8 @@ struct ServerSettingsTests {
         #expect(settings.transcriptionEnabled == false)
     }
 
-    @Test("missing retired policy blocks are accepted")
-    func missingRetiredPolicyBlocksAccepted() throws {
+    @Test("settings payload decodes without diagnostic policy blocks")
+    func decodesWithoutDiagnosticPolicyBlocks() throws {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
@@ -86,21 +70,33 @@ struct ServerSettingsTests {
         }
     }
 
+    @Test("ServerSettings decoder rejects missing server transcription policy")
+    func serverSettingsDecoderRejectsMissingTranscriptionPolicy() throws {
+        let json = """
+        {
+            "server": {
+                "defaultModel": "claude-opus-4-6"
+            },
+            "context": {
+                "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
+            }
+        }
+        """
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
+        }
+    }
+
     @Test("ServerSettings decoder rejects malformed server field type")
     func serverSettingsDecoderRejectsMalformedTypes() throws {
         let json = """
         {
-            "server": { "defaultModel": 42 },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
             },
-            "observability": {
-                "logLevel": "debug",
-                "verboseRetentionDays": 3
-            },
-            "storage": {
-                "retentionEnabled": false,
-                "maxDatabaseMb": 256
+            "server": {
+                "defaultModel": 42,
+                "transcription": { "enabled": false }
             }
         }
         """
@@ -111,7 +107,7 @@ struct ServerSettingsTests {
 
     @Test("ServerSettings decoder rejects malformed transcription setting")
     func serverSettingsDecoderRejectsMalformedTranscriptionSetting() throws {
-        let json = #"{"server":{"defaultModel":"claude-opus-4-6","transcription":"yes"}}"#
+        let json = #"{"server":{"transcription":"yes"}}"#
         #expect(throws: DecodingError.self) {
             _ = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         }
@@ -120,10 +116,10 @@ struct ServerSettingsTests {
     @Test("ServerSettingsUpdate encodes primitive structure")
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
-        update.server = .init(defaultModel: "claude-opus-4-6")
-        update.observability = .init(logLevel: "debug")
-        update.storage = .init(retentionEnabled: false)
-        update.server?.transcription = .init(enabled: true)
+        update.server = .init(
+            defaultModel: "claude-opus-4-6",
+            transcription: .init(enabled: true)
+        )
 
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -134,12 +130,27 @@ struct ServerSettingsTests {
         #expect(transcription?["enabled"] as? Bool == true)
 
         #expect(json["session"] == nil)
+        #expect(json["observability"] == nil)
+        #expect(json["storage"] == nil)
+        #expect(json["transcription"] == nil)
+    }
 
-        let observability = json["observability"] as? [String: Any]
-        #expect(observability?["logLevel"] as? String == "debug")
+    @Test("transcription-only update encodes exact nested server shape")
+    func transcriptionOnlyUpdateEncode() throws {
+        let update = ServerSettingsUpdate(
+            server: .init(transcription: .init(enabled: true))
+        )
 
-        let storage = json["storage"] as? [String: Any]
-        #expect(storage?["retentionEnabled"] as? Bool == false)
+        let data = try JSONEncoder().encode(update)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(Set(json.keys) == Set(["server"]))
+
+        let server = json["server"] as? [String: Any]
+        #expect(server.map { Set($0.keys) } == Set(["transcription"]))
+
+        let transcription = server?["transcription"] as? [String: Any]
+        #expect(transcription.map { Set($0.keys) } == Set(["enabled"]))
+        #expect(transcription?["enabled"] as? Bool == true)
     }
 
 }

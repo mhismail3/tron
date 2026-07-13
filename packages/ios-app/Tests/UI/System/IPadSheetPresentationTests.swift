@@ -117,6 +117,10 @@ final class IPadSheetPresentationTests: XCTestCase {
             (
                 ["Sources", "UI", "System", "ProviderErrorDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
+            ),
+            (
+                ["Sources", "UI", "Chat", "Sheets", "LocalErrorDetailSheet.swift"],
+                ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             )
         ]
 

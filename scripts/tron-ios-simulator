@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# Reuse one local iPhone simulator and preserve the paired Tron Beta app container.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IOS_DIR="$ROOT_DIR/packages/ios-app"
+STATE_DIR="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}"
+STATE_FILE="$STATE_DIR/ios-simulator-udid"
+SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
+SIMULATOR_NAME="${TRON_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
+DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-/tmp/tron-ios-beta-derived}"
+BUNDLE_ID="com.tron.mobile.beta"
+
+usage() {
+    cat <<'USAGE'
+Usage:
+  scripts/tron-ios-simulator start
+  scripts/tron-ios-simulator install
+  scripts/tron-ios-simulator status
+  scripts/tron-ios-simulator remember [SIMULATOR_ID]
+
+Commands:
+  start      Boot the remembered simulator and launch its existing Tron Beta app.
+  install    Build/install Tron Beta without erasing its paired app container.
+  status     Show the remembered simulator and whether Tron Beta is installed.
+  remember   Save an explicit simulator ID, or the Simulator app's current device.
+
+Environment overrides:
+  TRON_IOS_SIMULATOR_ID            Simulator UUID to use and remember
+  TRON_IOS_SIMULATOR_NAME          Fallback device name (default: iPhone 17 Pro)
+  TRON_IOS_SIMULATOR_STATE_DIR     Local state directory
+  TRON_IOS_SIMULATOR_DERIVED_DATA  Stable DerivedData path
+
+This helper intentionally uses the beta bundle ID and never uninstalls or erases
+the app. Pairing is stored in that bundle's data container on the remembered
+simulator, so changing simulator UUIDs, bundle IDs, or erasing data requires a
+new pairing.
+USAGE
+}
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+available_device_line() {
+    local simulator_id="$1"
+    xcrun simctl list devices available | grep -F "$simulator_id" | head -1
+}
+
+current_simulator_id() {
+    defaults read com.apple.iphonesimulator CurrentDeviceUDID 2>/dev/null || true
+}
+
+latest_named_simulator_id() {
+    xcrun simctl list devices available \
+        | awk -v name="$SIMULATOR_NAME" '
+            index($0, name) && $0 !~ /unavailable/ {
+                if (match($0, /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/)) {
+                    id = substr($0, RSTART, RLENGTH)
+                }
+            }
+            END { print id }
+        '
+}
+
+remember_simulator_id() {
+    local simulator_id="$1"
+    [ -n "$(available_device_line "$simulator_id")" ] \
+        || die "simulator is unavailable: $simulator_id"
+    mkdir -p "$STATE_DIR"
+    printf '%s\n' "$simulator_id" > "$STATE_FILE"
+}
+
+resolve_simulator_id() {
+    local candidate=""
+
+    if [ -n "$SIMULATOR_ID" ]; then
+        candidate="$SIMULATOR_ID"
+    elif [ -s "$STATE_FILE" ]; then
+        candidate="$(head -1 "$STATE_FILE")"
+    else
+        candidate="$(current_simulator_id)"
+    fi
+
+    if [ -z "$candidate" ] || [ -z "$(available_device_line "$candidate")" ]; then
+        candidate="$(latest_named_simulator_id)"
+    fi
+
+    [ -n "$candidate" ] || die "no available simulator matched '$SIMULATOR_NAME'"
+    remember_simulator_id "$candidate"
+    printf '%s\n' "$candidate"
+}
+
+boot_simulator() {
+    local simulator_id="$1"
+    local line
+    line="$(available_device_line "$simulator_id")"
+    if [[ "$line" != *"(Booted)"* ]]; then
+        xcrun simctl boot "$simulator_id"
+    fi
+    open -a Simulator --args -CurrentDeviceUDID "$simulator_id"
+    xcrun simctl bootstatus "$simulator_id" -b
+}
+
+launch_beta() {
+    local simulator_id="$1"
+    xcrun simctl launch "$simulator_id" "$BUNDLE_ID" >/dev/null \
+        || die "Tron Beta is not installed; run scripts/tron-ios-simulator install"
+}
+
+install_beta() {
+    local simulator_id="$1"
+    boot_simulator "$simulator_id"
+    (
+        cd "$IOS_DIR"
+        xcodegen generate
+        xcodebuild build \
+            -project TronMobile.xcodeproj \
+            -scheme "Tron Beta" \
+            -configuration Beta \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath "$DERIVED_DATA"
+    )
+
+    local app="$DERIVED_DATA/Build/Products/Beta-iphonesimulator/TronMobile.app"
+    [ -d "$app" ] || die "expected simulator app not found: $app"
+    xcrun simctl terminate "$simulator_id" "$BUNDLE_ID" 2>/dev/null || true
+    xcrun simctl install "$simulator_id" "$app"
+    launch_beta "$simulator_id"
+}
+
+show_status() {
+    local simulator_id="$1"
+    echo "Remembered simulator: $(available_device_line "$simulator_id")"
+    echo "State file: $STATE_FILE"
+    if xcrun simctl get_app_container "$simulator_id" "$BUNDLE_ID" data >/dev/null 2>&1; then
+        echo "Tron Beta: installed (pairing container preserved)"
+    else
+        echo "Tron Beta: not installed"
+    fi
+}
+
+command="${1:-start}"
+case "$command" in
+    start)
+        simulator_id="$(resolve_simulator_id)"
+        boot_simulator "$simulator_id"
+        launch_beta "$simulator_id"
+        ;;
+    install)
+        simulator_id="$(resolve_simulator_id)"
+        install_beta "$simulator_id"
+        ;;
+    status)
+        simulator_id="$(resolve_simulator_id)"
+        show_status "$simulator_id"
+        ;;
+    remember)
+        simulator_id="${2:-$(current_simulator_id)}"
+        [ -n "$simulator_id" ] || die "pass a simulator ID or select one in Simulator first"
+        remember_simulator_id "$simulator_id"
+        show_status "$simulator_id"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        usage >&2
+        die "unknown command: $command"
+        ;;
+esac

@@ -228,10 +228,7 @@ cat > "$LAUNCH_AGENT_PLIST" <<'PLIST'
     <integer>10</integer>
 
     <key>EnvironmentVariables</key>
-    <dict>
-        <key>RUST_LOG</key>
-        <string>info</string>
-    </dict>
+    <dict/>
 
     <key>SoftResourceLimits</key>
     <dict>
@@ -283,8 +280,6 @@ cat > "$DEV_LAUNCH_AGENT_PLIST" <<'PLIST'
 
     <key>EnvironmentVariables</key>
     <dict>
-        <key>RUST_LOG</key>
-        <string>info</string>
         <key>TRON_HOME_NAME</key>
         <string>.tron-dev</string>
     </dict>

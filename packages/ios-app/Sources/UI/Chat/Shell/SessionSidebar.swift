@@ -86,11 +86,26 @@ struct SessionSidebar: View {
                     let hasExpansionControls = canViewMore || canViewLess
                     let disclosureItemCount = visibleSessions.count + (hasExpansionControls ? 1 : 0)
                     let rowsAreVisible = workspaceDisclosure.areRowsVisible(group.id)
+                    let paginationTransition = sessionExpansion.transition(for: group.id)
+                    let paginationIsTransitioning = sessionExpansion.isTransitioning(groupId: group.id)
 
                     Section {
                         if workspaceDisclosure.shouldRenderRows(group.id) {
                             ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
+                                let paginationRowIsVisible = sessionExpansion.isRowVisible(
+                                    groupId: group.id,
+                                    index: index
+                                )
                                 sessionRow(session)
+                                    .opacity(paginationRowIsVisible ? 1 : 0)
+                                    .animation(
+                                        paginationRowAnimation(
+                                            transition: paginationTransition,
+                                            index: index,
+                                            isVisible: paginationRowIsVisible
+                                        ),
+                                        value: paginationRowIsVisible
+                                    )
                                     .opacity(rowsAreVisible ? 1 : 0)
                                     .animation(
                                         SessionListLayout.disclosureRowAnimation(
@@ -107,18 +122,12 @@ struct SessionSidebar: View {
                                     projectName: group.name,
                                     canViewLess: canViewLess,
                                     canViewMore: canViewMore,
+                                    isEnabled: !paginationIsTransitioning,
                                     onViewLess: {
-                                        updateSessionPagination {
-                                            sessionExpansion.showLess(groupId: group.id)
-                                        }
+                                        beginPaginationHide(group)
                                     },
                                     onViewMore: {
-                                        updateSessionPagination {
-                                            sessionExpansion.revealMore(
-                                                groupId: group.id,
-                                                totalCount: group.sessions.count
-                                            )
-                                        }
+                                        beginPaginationReveal(group)
                                     }
                                 )
                                 .opacity(rowsAreVisible ? 1 : 0)
@@ -210,14 +219,6 @@ struct SessionSidebar: View {
         }
     }
 
-    private func updateSessionPagination(_ mutation: () -> Void) {
-        // List renders each Liquid Glass row in its own compositing layer.
-        // Pagination swaps row membership atomically so existing rows do not
-        // pass through neighboring project headers.
-        let transaction = Transaction(animation: nil)
-        withTransaction(transaction, mutation)
-    }
-
     private func toggleWorkspaceGroup(_ groupId: String, itemCount: Int) {
         let direction = workspaceDisclosure.toggleDirection(for: groupId)
         let transition: SessionListWorkspaceDisclosureTransition
@@ -247,6 +248,50 @@ struct SessionSidebar: View {
 
     private func reconcileWorkspaceDisclosure(groupIds: Set<String>) {
         workspaceDisclosure.reconcile(groupIds: groupIds)
+    }
+
+    private func paginationRowAnimation(
+        transition: SessionListPaginationTransition?,
+        index: Int,
+        isVisible: Bool
+    ) -> Animation? {
+        guard let transition, index >= transition.stableCount else { return nil }
+        return SessionListLayout.disclosureRowAnimation(
+            index: index - transition.stableCount,
+            itemCount: transition.affectedCount,
+            isVisible: isVisible
+        )
+    }
+
+    private func beginPaginationReveal(_ group: SessionListWorkspaceGroup) {
+        guard let transition = withAnimation(SessionListLayout.expansionAnimation, {
+            sessionExpansion.beginRevealMore(groupId: group.id, totalCount: group.sessions.count)
+        }) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: SessionListLayout.disclosureLayoutDelay)
+            guard sessionExpansion.beginRevealRows(transition) else { return }
+            try? await Task.sleep(
+                for: SessionListLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            sessionExpansion.finish(transition)
+        }
+    }
+
+    private func beginPaginationHide(_ group: SessionListWorkspaceGroup) {
+        guard let transition = sessionExpansion.beginShowLess(
+            groupId: group.id,
+            totalCount: group.sessions.count
+        ) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(
+                for: SessionListLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            _ = withAnimation(SessionListLayout.expansionAnimation) {
+                sessionExpansion.finish(transition)
+            }
+        }
     }
 
     private func refreshBriefing() async {

@@ -1,10 +1,9 @@
-//! Server, agent, logging, session, and tmux settings.
+//! Server, agent, session, and tmux settings.
 //!
 //! These are grouped here because they are all relatively small and
 //! server-oriented.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Server network and runtime settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,7 +24,7 @@ pub struct ServerSettings {
     /// 100.x.y.z" without shelling out to the `tailscale` binary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tailscale_ip: Option<String>,
-    /// Local speech-to-text sidecar settings.
+    /// Local speech-to-text sidecar policy.
     pub transcription: TranscriptionSettings,
 }
 
@@ -38,6 +37,20 @@ impl Default for ServerSettings {
             tailscale_ip: None,
             transcription: TranscriptionSettings::default(),
         }
+    }
+}
+
+/// Local speech-to-text sidecar settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct TranscriptionSettings {
+    /// Whether startup loads the local Parakeet MLX sidecar.
+    pub enabled: bool,
+}
+
+impl Default for TranscriptionSettings {
+    fn default() -> Self {
+        Self { enabled: false }
     }
 }
 
@@ -64,20 +77,6 @@ impl ServerSettings {
     }
 }
 
-/// Local speech-to-text sidecar settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct TranscriptionSettings {
-    /// Whether startup loads the local Parakeet MLX sidecar.
-    pub enabled: bool,
-}
-
-impl Default for TranscriptionSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
 /// Agent runtime settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
@@ -89,93 +88,6 @@ pub struct AgentRuntimeSettings {
 impl Default for AgentRuntimeSettings {
     fn default() -> Self {
         Self { max_turns: 250 }
-    }
-}
-
-/// Log level for database logging.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LogLevel {
-    /// Trace-level (most verbose).
-    Trace,
-    /// Debug-level.
-    Debug,
-    /// Info-level (default).
-    #[default]
-    Info,
-    /// Warning-level.
-    Warn,
-    /// Error-level.
-    Error,
-    /// Fatal-level (least verbose).
-    Fatal,
-}
-
-impl LogLevel {
-    /// Convert to a tracing filter string.
-    pub fn as_filter_str(&self) -> &'static str {
-        match self {
-            Self::Trace => "trace",
-            Self::Debug => "debug",
-            Self::Info => "info",
-            Self::Warn => "warn",
-            Self::Error | Self::Fatal => "error",
-        }
-    }
-}
-
-/// Logging configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct LoggingSettings {
-    /// Per-module log level overrides. Keys are Rust module/crate names.
-    /// Example: `{"ort": "warn"}` suppresses ONNX Runtime info spam.
-    pub module_overrides: HashMap<String, LogLevel>,
-}
-
-impl Default for LoggingSettings {
-    fn default() -> Self {
-        Self {
-            module_overrides: HashMap::from([("ort".to_string(), LogLevel::Error)]),
-        }
-    }
-}
-
-/// Engine observability configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct ObservabilitySettings {
-    /// Minimum observability verbosity for structured engine diagnostics.
-    pub log_level: LogLevel,
-    /// Retention window for verbose diagnostics.
-    pub verbose_retention_days: u64,
-}
-
-impl Default for ObservabilitySettings {
-    fn default() -> Self {
-        Self {
-            log_level: LogLevel::Info,
-            verbose_retention_days: 7,
-        }
-    }
-}
-
-/// Unified SQLite storage policy.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct StorageSettings {
-    /// Whether automatic retention may prune low-signal diagnostics.
-    pub retention_enabled: bool,
-    /// Soft cap used by retention reports and future background compaction.
-    pub max_database_mb: u64,
-}
-
-impl Default for StorageSettings {
-    fn default() -> Self {
-        Self {
-            retention_enabled: true,
-            max_database_mb: 512,
-        }
     }
 }
 
@@ -253,16 +165,6 @@ mod tests {
         let json = serde_json::to_value(&s).unwrap();
         assert!(json.get("heartbeatIntervalMs").is_some());
         assert!(json.get("defaultModel").is_some());
-        assert!(json.get("transcription").is_some());
-    }
-
-    #[test]
-    fn transcription_settings_decode_nested_enabled() {
-        let json = serde_json::json!({
-            "transcription": { "enabled": true }
-        });
-        let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert!(s.transcription.enabled);
     }
 
     #[test]
@@ -283,39 +185,21 @@ mod tests {
     }
 
     #[test]
+    fn transcription_setting_decodes_enabled() {
+        let settings = serde_json::from_value::<ServerSettings>(serde_json::json!({
+            "transcription": { "enabled": true }
+        }))
+        .unwrap();
+        assert!(settings.transcription.enabled);
+    }
+
+    #[test]
     fn unknown_auth_setting_is_rejected() {
         let json = serde_json::json!({
             "auth": { "enforced": true }
         });
         let err = serde_json::from_value::<ServerSettings>(json).unwrap_err();
         assert!(err.to_string().contains("unknown field"));
-    }
-
-    #[test]
-    fn log_level_serde() {
-        for (level, expected) in [
-            (LogLevel::Trace, "\"trace\""),
-            (LogLevel::Debug, "\"debug\""),
-            (LogLevel::Info, "\"info\""),
-            (LogLevel::Warn, "\"warn\""),
-            (LogLevel::Error, "\"error\""),
-            (LogLevel::Fatal, "\"fatal\""),
-        ] {
-            let json = serde_json::to_string(&level).unwrap();
-            assert_eq!(json, expected);
-            let back: LogLevel = serde_json::from_str(&json).unwrap();
-            assert_eq!(back, level);
-        }
-    }
-
-    #[test]
-    fn log_level_as_filter_str() {
-        assert_eq!(LogLevel::Trace.as_filter_str(), "trace");
-        assert_eq!(LogLevel::Debug.as_filter_str(), "debug");
-        assert_eq!(LogLevel::Info.as_filter_str(), "info");
-        assert_eq!(LogLevel::Warn.as_filter_str(), "warn");
-        assert_eq!(LogLevel::Error.as_filter_str(), "error");
-        assert_eq!(LogLevel::Fatal.as_filter_str(), "error");
     }
 
     #[test]
@@ -332,16 +216,6 @@ mod tests {
 
         let roundtrip = serde_json::to_value(&a).unwrap();
         assert_eq!(roundtrip["maxTurns"], 250);
-    }
-
-    #[test]
-    fn default_logging_suppresses_ort() {
-        let settings = LoggingSettings::default();
-        assert_eq!(
-            settings.module_overrides.get("ort"),
-            Some(&LogLevel::Error),
-            "ort default should be Error to suppress ONNX Runtime log spam"
-        );
     }
 
     #[test]

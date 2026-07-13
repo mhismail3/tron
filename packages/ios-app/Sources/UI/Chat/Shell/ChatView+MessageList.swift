@@ -14,6 +14,7 @@ extension ChatView {
                         isCompacting: viewModel.isCompacting,
                         isConnected: viewModel.connectionState == .connected,
                         isRecording: viewModel.isRecording,
+                        recordingAudioLevel: viewModel.recordingAudioLevel,
                         isTranscribing: viewModel.isTranscribing,
                         placeholderText: initialLoadComplete ? "Type here" : "Loading latest messages",
                         placeholderShowsProgress: !initialLoadComplete,

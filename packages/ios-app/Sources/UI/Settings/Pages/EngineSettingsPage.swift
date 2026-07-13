@@ -79,7 +79,7 @@ struct EngineSettingsPage: View {
 
                 VStack(spacing: 16) {
                     contextSection
-                    evidencePolicySection
+                    transcriptionSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -104,10 +104,35 @@ struct EngineSettingsPage: View {
         Group {
             defaultsSection
             contextSection
-            evidencePolicySection
+            transcriptionSection
         }
         .disabled(!settingsState.isLoaded)
         .opacity(settingsState.isLoaded ? 1 : 0.45)
+    }
+
+    private var transcriptionSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: EngineSettingsSection.transcription.rawValue)
+
+            SettingsCard {
+                SettingsRow(icon: "mic", label: "Local transcription") {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { settingsState.transcriptionEnabled },
+                            set: { enabled in
+                                settingsState.transcriptionEnabled = enabled
+                                updateServerSetting(.transcriptionEnabled(enabled))
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: "Loads local speech recognition when the active server restarts.")
+        }
     }
 
     private var summaryContext: EngineSettingsSummary.Context {
@@ -199,92 +224,6 @@ struct EngineSettingsPage: View {
                     }
                 }
             }
-        }
-    }
-
-    private var evidencePolicySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: EngineSettingsSection.evidence.rawValue)
-
-            SettingsCard {
-                SettingsRow(icon: "waveform.path.ecg", label: "Log level") {
-                    SettingsCycleToggle(
-                        options: [
-                            ("info", "Info"),
-                            ("debug", "Debug"),
-                            ("trace", "Trace"),
-                            ("warn", "Warn"),
-                            ("error", "Error"),
-                        ],
-                        current: settingsState.observabilityLogLevel
-                    ) { newValue in
-                        settingsState.observabilityLogLevel = newValue
-                        updateServerSetting(.observabilityLogLevel(newValue))
-                    }
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "calendar", label: "Verbose days") {
-                    Stepper(value: Binding(
-                        get: { Int(settingsState.observabilityVerboseRetentionDays) },
-                        set: { newValue in
-                            let clamped = UInt64(min(max(newValue, 1), 90))
-                            settingsState.observabilityVerboseRetentionDays = clamped
-                            updateServerSetting(.observabilityVerboseRetentionDays(clamped))
-                        }
-                    ), in: 1...90) {
-                        Text("\(settingsState.observabilityVerboseRetentionDays)d")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "mic", label: "Local transcription") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.transcriptionEnabled },
-                            set: { newValue in
-                                settingsState.transcriptionEnabled = newValue
-                                updateServerSetting(.transcriptionEnabled(newValue))
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "externaldrive", label: "Retention") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.storageRetentionEnabled },
-                            set: { newValue in
-                                settingsState.storageRetentionEnabled = newValue
-                                updateServerSetting(.storageRetentionEnabled(newValue))
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "internaldrive", label: "Storage cap") {
-                    Stepper(value: Binding(
-                        get: { Int(settingsState.storageMaxDatabaseMb) },
-                        set: { newValue in
-                            let clamped = UInt64(min(max(newValue, 64), 8192))
-                            settingsState.storageMaxDatabaseMb = clamped
-                            updateServerSetting(.storageMaxDatabaseMb(clamped))
-                        }
-                    ), in: 64...8192, step: 64) {
-                        Text("\(settingsState.storageMaxDatabaseMb) MB")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                }
-            }
-
-            SettingsCaption(text: "The server owns trace records, retained logs, compression, and storage cleanup. iOS only requests the policy.")
         }
     }
 

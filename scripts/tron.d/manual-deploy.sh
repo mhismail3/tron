@@ -47,8 +47,6 @@ create_launchd_plist() {
         <string>$TRON_HOME</string>
         <key>TRON_REPO_ROOT</key>
         <string>$RUST_WORKSPACE</string>
-        <key>RUST_LOG</key>
-        <string>info</string>
     </dict>
 
     <key>SoftResourceLimits</key>
