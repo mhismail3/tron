@@ -4,7 +4,7 @@ Status: **complete**
 
 Current score: **100/100**
 
-The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Engine Cockpit visibility are source-backed. The first scoped `git_status` route now revalidates and replays accepted provider-safe shadow evidence; it does not execute live module code. Broader operation coverage stays governed by the dynamic replacement scorecard.
+The modularity measurement slice is complete: inventory coverage is 188/188, kernel boundary lockdown, binding-policy evidence, adapter seam requirements, the first metadata-only shadow replacement trial, governed route records, context policy records, and Dashboard visibility are source-backed. The first scoped `git_status` route now revalidates and replays accepted provider-safe shadow evidence; it does not execute live module code. Broader operation coverage stays governed by the dynamic replacement scorecard.
 
 Source of truth: `packages/agent/src/domains/capability/operations/operation_contract/mod.rs`
 
@@ -171,15 +171,15 @@ projection as the unsafe route result.
 
 ## Cockpit Visibility Evidence
 
-The Cockpit Visibility slice makes the scorecard inspectable from Engine Cockpit without exposing internal material or adding autonomy behavior.
+The Cockpit Visibility slice makes the scorecard inspectable from the Dashboard without exposing internal material or adding autonomy behavior.
 
 | Projection | Evidence |
 |---|---|
 | `capability_binding::cockpit_overview` | System-visible pure-read function registered by the `capability_binding` domain with `capability_binding.read`, low risk, and no write capability. |
-| Operation ownership | Joins `OperationId::ALL_NAMES` and authoritative `operation_binding_metadata` with scoped binding/shadow-trial resources, so each operation reports a redacted current owner label, ownership status, built-in/module/locked flags, replacement/shadow/extension eligibility, redacted replacement target, readiness/next-action labels, and governance boundary from server truth. `capability_binding` is identified only as the cockpit projection source, not as the operation owner. |
+| Operation ownership | Joins `OperationId::ALL_NAMES`, exhaustive server-owned friendly names and concise descriptions, and authoritative `operation_binding_metadata` with scoped binding/shadow-trial resources, so each operation reports a user-facing summary, redacted current owner label, ownership status, built-in/module/locked flags, replacement/shadow/extension eligibility, redacted replacement target, readiness/next-action labels, and governance boundary from server truth. `capability_binding` is identified only as the Dashboard projection source, not as the operation owner. |
 | Scoped activity | Counts current-session/workspace binding requests, approvals, rejections, active policies, failed replacement attempts, shadow requests/approvals/rejections/runs/results, active route state, route events, routed invocations, failed-closed routes, route rollbacks, and rollback/disable/abort controls without returning raw resource IDs. The response separately reports total operations, returned operations, operation-list truncation, and bounded resource-scan completeness so small limits and capped scans cannot appear complete. |
 | Redaction and side effects | Response policy declares projection-only, metadata-only, server-owned truth with no dispatch-table mutation, hot swap, module activation/execution, package-manager, dependency, network, raw local material, grants, authority IDs, trace IDs, invocation IDs, token-like material, or hidden chain-of-thought. |
-| iOS rendering | Engine Cockpit keeps top-level summary compact and shows owner/status, replacement, attempts, rollback, and verification details only inside capability group and operation detail drill-down. |
+| iOS rendering | Dashboard keeps top-level area cards to title, description, and one metric row; operation drill-down leads with the server-owned friendly name and behavior summary, while owner/status, replacement, attempts, rollback, and verification details remain below. |
 
 ## Adapter Seam Hardening Evidence
 
@@ -213,4 +213,4 @@ The Adapter Seam Hardening slice records source-backed replacement prerequisites
 2. Capability Binding Policy: complete. Metadata-only binding request, decision, policy, and history records now make future replacement proposals measurable without routing.
 3. Adapter Seam Hardening: complete. Source-backed invariants now lock seam prerequisites for filesystem, Git, jobs/process, web, subagent, and compaction-like strategies.
 4. Shadow Replacement Trial: complete. `git_status` now has governed request/decision/run/evidence records comparing built-in and deterministic candidate provider-safe projections with rollback/disable/abort controls and no candidate execution.
-5. Cockpit Visibility: complete. Engine Cockpit now reads `capability_binding::cockpit_overview` and progressively discloses total vs returned operations, list/scan completeness, redacted operation owner and replacement target, server-derived readiness/next action, built-in/module/locked status, replacement/shadow/extension eligibility, active route state, route events, routed invocations, failed-closed/disabled/rolled-back routes, verification context, failed replacement attempts, shadow runs, and rollback/disable/abort availability without exposing raw internals.
+5. Cockpit Visibility: complete. Dashboard now reads `capability_binding::cockpit_overview` v2 and progressively discloses server-owned friendly operation presentation, total vs returned operations, list/scan completeness, redacted operation owner and replacement target, server-derived readiness/next action, built-in/module/locked status, replacement/shadow/extension eligibility, active route state, route events, routed invocations, failed-closed/disabled/rolled-back routes, verification context, failed replacement attempts, shadow runs, and rollback/disable/abort availability without exposing raw internals.

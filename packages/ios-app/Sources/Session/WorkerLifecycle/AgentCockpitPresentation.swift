@@ -79,11 +79,11 @@ enum AgentCockpitPresentation {
     static func capabilityReplacementClassLabel(_ value: String) -> String {
         switch AgentCockpitProjection.normalized(value) {
         case "runtimeroutable":
-            return "Runtime-routable"
+            return "Can be replaced safely"
         case "producerextensible":
-            return "Producer-extensible"
+            return "Can be extended"
         case "kernelevolutiononly":
-            return "Kernel-evolution only"
+            return "Engine update only"
         default:
             return displayLabel(value)
         }
@@ -92,13 +92,13 @@ enum AgentCockpitPresentation {
     static func capabilityVisibilityLabel(_ value: String) -> String {
         switch AgentCockpitProjection.normalized(value) {
         case "defaultvisible":
-            return "Default-visible"
+            return "Visible to the agent"
         case "searchvisible":
-            return "Search-visible"
+            return "Available by search"
         case "inspectonly":
-            return "Inspect-only"
+            return "Details only"
         case "hiddenunlessevolutionmode":
-            return "Evolution-only"
+            return "Developer-only"
         default:
             return displayLabel(value)
         }
@@ -107,11 +107,11 @@ enum AgentCockpitPresentation {
     static func capabilityMinimalityLabel(_ value: String) -> String {
         switch AgentCockpitProjection.normalized(value) {
         case "keepcore":
-            return "Keep core"
+            return "Stays in the engine"
         case "keepgovernance":
-            return "Keep governance"
+            return "Stays engine-owned"
         case "modulecandidate":
-            return "Module candidate"
+            return "Can become a module"
         default:
             return displayLabel(value)
         }
@@ -126,8 +126,8 @@ enum AgentCockpitPresentation {
         switch metric {
         case .operations:
             return "Operations"
-        case .definitions:
-            return group.operationCount > 0 ? "Contracts" : "Functions"
+        case .engineFunctions:
+            return "Functions"
         case .workers:
             return "Workers"
         case .issues:
@@ -180,6 +180,8 @@ enum AgentCockpitPresentation {
 
     static func displayLabel(_ value: String) -> String {
         splitCamelCase(value)
+            .replacingOccurrences(of: "::", with: " ")
+            .replacingOccurrences(of: ".", with: " ")
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
             .split(separator: " ")
@@ -188,6 +190,28 @@ enum AgentCockpitPresentation {
                 return first.uppercased() + word.dropFirst()
             }
             .joined(separator: " ")
+    }
+
+    static func functionDisplayName(_ value: String) -> String {
+        let components = value.components(separatedBy: "::")
+        guard components.count > 1, let namespace = components.first else {
+            return displayLabel(value)
+        }
+        let action = components.dropFirst().joined(separator: " ")
+        return "\(displayLabel(action)) \(displayLabel(namespace))"
+    }
+
+    static func provenanceLabel(_ value: String) -> String {
+        let key = AgentCockpitProjection.normalized(value)
+            .filter { $0.isLetter || $0.isNumber }
+        switch key {
+        case "capabilityexecuteregistry":
+            return "Capability registry"
+        case "capabilitybindingcockpitprojection":
+            return "Dashboard projection"
+        default:
+            return displayLabel(value)
+        }
     }
 
     private static func splitCamelCase(_ value: String) -> String {
@@ -215,7 +239,7 @@ enum AgentCockpitPresentation {
 
 enum CapabilityGroupMetric {
     case operations
-    case definitions
+    case engineFunctions
     case workers
     case issues
 }

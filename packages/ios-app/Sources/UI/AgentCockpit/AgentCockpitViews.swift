@@ -26,14 +26,14 @@ struct AgentCockpitSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetTitle(title: "Engine Cockpit", color: .tronEmerald)
+                    SheetTitle(title: "Dashboard", color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     SheetPrimaryActionButton(
                         icon: "arrow.clockwise",
                         accent: .tronEmerald,
                         isBusy: viewModel.isRefreshing,
-                        accessibilityLabel: "Refresh engine cockpit"
+                        accessibilityLabel: "Refresh dashboard"
                     ) {
                         Task { await refresh() }
                     }

@@ -89,8 +89,8 @@ extension AgentCockpitSheet {
             if viewModel.overview.discovery.engineGroups.isEmpty {
                 CockpitEmptyState(
                     symbol: "lock.shield",
-                    title: "No engine contracts",
-                    detail: "The connected engine has not published inspectable kernel or governance contracts."
+                    title: "No engine functions",
+                    detail: "The connected engine has not published inspectable kernel or governance functions."
                 )
             } else {
                 ForEach(viewModel.overview.discovery.engineGroups) { group in
@@ -147,6 +147,7 @@ extension AgentCockpitSheet {
 
     private var activityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
+            CapabilityIssuesCard(overview: viewModel.overview)
             if let moduleActivity = viewModel.overview.moduleActivity {
                 ModuleActivitySummaryCard(activity: moduleActivity)
             }
@@ -239,7 +240,7 @@ enum AgentCockpitTab: String, CaseIterable, Identifiable {
     }
 
     static func visibleTabs(for overview: AgentCockpitOverview) -> [Self] {
-        var tabs: [Self] = [.capabilities, .activity, .engine]
+        var tabs: [Self] = [.capabilities, .engine, .activity]
         if !overview.workers.isEmpty { tabs.append(.workers) }
         if !overview.packages.isEmpty { tabs.append(.packages) }
         if !overview.runtimeSurfaces.isEmpty { tabs.append(.surfaces) }

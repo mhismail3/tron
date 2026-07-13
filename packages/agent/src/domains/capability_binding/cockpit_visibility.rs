@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::domains::capability::{
-    OperationBindingMetadata, operation_binding_metadata,
+    OperationBindingMetadata, operation_binding_metadata, operation_presentation,
     pool::{CapabilityPoolMetadata, operation_agent_usage_projection, operation_pool_metadata},
     supported_operation_names,
 };
@@ -236,6 +236,8 @@ struct RouteStoryProjection {
 #[serde(rename_all = "camelCase")]
 struct OperationVisibility {
     name: String,
+    display_name: String,
+    description: String,
     family: String,
     family_label: String,
     capability_pool: CapabilityPoolRoleProjection,
@@ -945,6 +947,8 @@ fn operation_visibility(
     facts: OperationFacts,
     include_shadow_evidence_refs: bool,
 ) -> OperationVisibility {
+    let presentation = operation_presentation(metadata.operation)
+        .expect("supported operation has server-owned presentation metadata");
     let replacement = replacement_projection(
         metadata.family,
         metadata.ownership_class,
@@ -969,6 +973,8 @@ fn operation_visibility(
     );
     OperationVisibility {
         name: metadata.operation.to_owned(),
+        display_name: presentation.display_name.to_owned(),
+        description: presentation.description.to_owned(),
         family: metadata.family.to_owned(),
         family_label: family_label(metadata.family),
         capability_pool,
@@ -979,7 +985,7 @@ fn operation_visibility(
             metadata.current_owner,
             metadata.ownership_class,
         ),
-        status: status_projection(metadata.family, metadata.ownership_class),
+        status: status_projection(metadata.ownership_class),
         replacement,
         readiness,
         binding,
@@ -1416,7 +1422,7 @@ fn owner_projection(family: &str, current_owner: &str, ownership_class: &str) ->
     }
 }
 
-fn status_projection(family: &str, ownership_class: &str) -> StatusProjection {
+fn status_projection(ownership_class: &str) -> StatusProjection {
     let (label, detail, built_in, module_owned, locked) = match ownership_class {
         "kernel_locked" => (
             "Kernel locked",
@@ -1468,7 +1474,7 @@ fn status_projection(family: &str, ownership_class: &str) -> StatusProjection {
             ownership_class.to_owned()
         },
         label: label.to_owned(),
-        detail: format!("{detail} Family: {}.", family_label(family)),
+        detail: detail.to_owned(),
         built_in,
         module_owned,
         locked,
@@ -2172,13 +2178,14 @@ fn route_stories(operations: &[OperationVisibility]) -> Vec<RouteStoryProjection
 fn route_story(operation: &OperationVisibility) -> Option<RouteStoryProjection> {
     let route = &operation.route;
     let operation_name = operation.name.clone();
+    let display_name = operation.display_name.as_str();
     let evidence_count =
         route.route_events + route.candidates + route.bindings + route.rollback_records;
     if route.active_routes > 0 {
         return Some(RouteStoryProjection {
             kind: "active_route",
             operation: operation_name.clone(),
-            title: format!("{operation_name} is using a governed replacement route"),
+            title: format!("{display_name} is using a governed replacement route"),
             detail: format!(
                 "{} routed invocation{} recorded. Rollback {} and disable {}.",
                 route.routed_invocations,
@@ -2196,7 +2203,7 @@ fn route_story(operation: &OperationVisibility) -> Option<RouteStoryProjection> 
         return Some(RouteStoryProjection {
             kind: "failed_closed",
             operation: operation_name.clone(),
-            title: format!("{operation_name} replacement failed closed"),
+            title: format!("{display_name} replacement failed closed"),
             detail: format!(
                 "{} failed-closed route event{} recorded; the engine did not project a built-in success result as replacement output.",
                 route.failed_closed,
@@ -2212,7 +2219,7 @@ fn route_story(operation: &OperationVisibility) -> Option<RouteStoryProjection> 
         return Some(RouteStoryProjection {
             kind: "rolled_back",
             operation: operation_name.clone(),
-            title: format!("{operation_name} returned to built-in ownership"),
+            title: format!("{display_name} returned to built-in ownership"),
             detail: format!(
                 "{} rollback record{} or event{} prove built-in ownership was restored.",
                 route.rollback_records.max(route.rolled_back),
@@ -2229,7 +2236,7 @@ fn route_story(operation: &OperationVisibility) -> Option<RouteStoryProjection> 
         return Some(RouteStoryProjection {
             kind: "disabled",
             operation: operation_name.clone(),
-            title: format!("{operation_name} replacement route was disabled"),
+            title: format!("{display_name} replacement route was disabled"),
             detail: format!(
                 "{} disable event{} recorded; no active replacement route is selected.",
                 route.disabled,
@@ -2245,7 +2252,7 @@ fn route_story(operation: &OperationVisibility) -> Option<RouteStoryProjection> 
         return Some(RouteStoryProjection {
             kind: "candidate",
             operation: operation_name.clone(),
-            title: format!("{operation_name} has a replacement candidate"),
+            title: format!("{display_name} has a replacement candidate"),
             detail: format!(
                 "{} candidate{} and {} binding{} exist; runtime routing has not changed.",
                 route.candidates,
@@ -2396,6 +2403,67 @@ fn normalize(value: &str) -> String {
 
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_operation_rows_project_server_owned_friendly_presentation() {
+        assert_eq!(supported_operation_names().len(), 188);
+        for operation in supported_operation_names() {
+            let metadata = operation_binding_metadata(operation)
+                .unwrap_or_else(|| panic!("missing binding metadata for {operation}"));
+            let pool = operation_pool_metadata(operation)
+                .unwrap_or_else(|| panic!("missing pool metadata for {operation}"));
+            let row = operation_visibility(
+                metadata,
+                capability_pool_role_projection(&pool),
+                OperationFacts::default(),
+                false,
+            );
+            let value = serde_json::to_value(&row).expect("operation row serializes");
+            assert_eq!(value["name"], *operation);
+            assert!(!value["displayName"].as_str().unwrap_or_default().is_empty());
+            assert!(!value["description"].as_str().unwrap_or_default().is_empty());
+            assert!(
+                !value["displayName"]
+                    .as_str()
+                    .expect("display name")
+                    .contains(['_', ':']),
+                "{operation}"
+            );
+            assert!(
+                !value["status"]["detail"]
+                    .as_str()
+                    .expect("status detail")
+                    .contains("Family:"),
+                "{operation}"
+            );
+        }
+
+        let metadata = operation_binding_metadata("process_run").expect("process metadata");
+        let pool = operation_pool_metadata("process_run").expect("process pool metadata");
+        let mut facts = OperationFacts::default();
+        facts.route.candidates = 1;
+        let process = operation_visibility(
+            metadata,
+            capability_pool_role_projection(&pool),
+            facts,
+            false,
+        );
+        assert_eq!(process.display_name, "Run Process");
+        assert!(
+            process
+                .description
+                .starts_with("Run a bounded local command")
+        );
+        assert_eq!(
+            route_story(&process).expect("candidate route story").title,
+            "Run Process has a replacement candidate"
+        );
+    }
 }
 
 #[cfg(test)]

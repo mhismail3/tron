@@ -133,7 +133,7 @@ extension AgentCockpitViewModelTests {
 
     nonisolated static func capabilityCockpitOverview() -> CapabilityCockpitOverviewDTO {
         CapabilityCockpitOverviewDTO(
-            schemaVersion: "tron.capability_binding.cockpit_overview.v1",
+            schemaVersion: "tron.capability_binding.cockpit_overview.v2",
             operation: "capability_binding_cockpit_overview",
             summary: CapabilityCockpitSummaryDTO(
                 totalOperations: 2,
@@ -216,7 +216,7 @@ extension AgentCockpitViewModelTests {
                 CapabilityCockpitRouteStoryDTO(
                     kind: "active_route",
                     operation: "git_status",
-                    title: "git_status is using a governed replacement route",
+                    title: "Inspect Git Status is using a governed replacement route",
                     detail: "1 routed invocation recorded. Rollback available and disable available.",
                     status: "active",
                     evidenceCount: 4,
@@ -227,6 +227,8 @@ extension AgentCockpitViewModelTests {
             operations: [
                 CapabilityCockpitOperationDTO(
                     name: "git_status",
+                    displayName: "Inspect Git Status",
+                    description: "Inspects the current repository state without changing it.",
                     family: "git",
                     familyLabel: "Git",
                     capabilityPool: CapabilityCockpitPoolDTO(
@@ -247,7 +249,7 @@ extension AgentCockpitViewModelTests {
                     status: CapabilityCockpitStatusDTO(
                         kind: "built_in_adapter",
                         label: "Built-in adapter",
-                        detail: "Built-in execution can be shadowed or replaced only after governed evidence. Family: Git.",
+                        detail: "Built-in execution can be shadowed or replaced only after governed evidence.",
                         builtIn: true,
                         moduleOwned: false,
                         locked: false
@@ -323,6 +325,8 @@ extension AgentCockpitViewModelTests {
                 ),
                 CapabilityCockpitOperationDTO(
                     name: "observe",
+                    displayName: "Record Observation",
+                    description: "Records text as an assistant-visible observation.",
                     family: "core",
                     familyLabel: "Core",
                     capabilityPool: CapabilityCockpitPoolDTO(
@@ -343,7 +347,7 @@ extension AgentCockpitViewModelTests {
                     status: CapabilityCockpitStatusDTO(
                         kind: "kernel_locked",
                         label: "Kernel locked",
-                        detail: "Engine substrate; replacement is not available. Family: Core.",
+                        detail: "Engine substrate; replacement is not available.",
                         builtIn: true,
                         moduleOwned: false,
                         locked: true

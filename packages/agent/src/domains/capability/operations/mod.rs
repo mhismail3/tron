@@ -86,8 +86,9 @@ pub(crate) use operation_contract::{
     ResourceKindPolicy, SelectorAddition, WorkerPackageKindSource, authority_policy,
     binding_metadata as operation_binding_metadata, effect as operation_effect,
     host_request_schema as operation_host_request_schema, is_supported_operation,
-    operation_list_text, required_payload_fields as operation_required_payload_fields,
-    risk as operation_risk, supported_operation_names,
+    operation_list_text, operation_presentation,
+    required_payload_fields as operation_required_payload_fields, risk as operation_risk,
+    supported_operation_names,
 };
 
 /// Operations whose durable domain record, not the generic engine ledger,

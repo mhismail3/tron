@@ -150,14 +150,28 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/SessionListExpansionAccessibilityTests
 ```
 
-For Engine Cockpit capability visibility or `WorkerLifecycleRepository` protocol
+For Dashboard capability visibility or `WorkerLifecycleRepository` protocol
 changes, run the focused cockpit state/view-model set:
 
 ```bash
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/AgentCockpitIssueStateTests \
   -only-testing:TronMobileTests/AgentCockpitStateTests \
   -only-testing:TronMobileTests/AgentCockpitViewModelTests
+```
+
+For presentation-only Dashboard card changes, run only the dedicated UI source
+contract. Issue aggregation has its own equally small state suite:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/DashboardPresentationTests
+
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/AgentCockpitIssueStateTests
 ```
 
 For the IOSTC thin-client closeout, the focused iOS 26.5 simulator set is:

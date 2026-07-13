@@ -204,7 +204,7 @@ struct AgentBriefingSheet: View {
     }
 
     private var diagnosticsNote: some View {
-        Label("Core engine diagnostics live in the dashboard Engine Cockpit when operator-level details are needed.", systemImage: "stethoscope")
+        Label("Core engine diagnostics live in the Dashboard when operator-level details are needed.", systemImage: "stethoscope")
             .font(TronTypography.sans(size: TronTypography.sizeCaption))
             .foregroundStyle(.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)

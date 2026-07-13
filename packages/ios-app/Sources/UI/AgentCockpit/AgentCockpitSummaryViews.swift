@@ -14,7 +14,7 @@ struct EngineCockpitDashboardBand: View {
                     .frame(width: 22, height: 22)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Engine Cockpit")
+                    Text("Dashboard")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
                     Text(summary)
@@ -44,7 +44,7 @@ struct EngineCockpitDashboardBand: View {
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityIdentifier("engine-cockpit-dashboard-band")
-        .accessibilityLabel("Engine Cockpit")
+        .accessibilityLabel("Dashboard")
     }
 
     private var summary: String {
@@ -52,7 +52,7 @@ struct EngineCockpitDashboardBand: View {
             return "No active engine link. Connect a server to inspect core health."
         }
         if issueCount > 0 {
-            return "Engine link is up, but \(issueCount) capability issue\(issueCount == 1 ? "" : "s") need review."
+            return "Engine link is up, but \(issueCount) issue\(issueCount == 1 ? "" : "s") need review."
         }
         switch overview.status.kind {
         case .connecting:
@@ -73,9 +73,7 @@ struct EngineCockpitDashboardBand: View {
     }
 
     private var issueCount: Int {
-        overview.discovery.missingSchemaCount
-            + overview.discovery.degradedFunctionCount
-            + overview.discovery.catalogDecodeIssueCount
+        overview.issueCount
     }
 
     private var verificationPhrase: String {
@@ -83,6 +81,9 @@ struct EngineCockpitDashboardBand: View {
     }
 
     private var accent: Color {
+        if issueCount > 0 {
+            return .tronWarning
+        }
         switch overview.status.kind {
         case .degraded:
             return .tronError
@@ -132,9 +133,7 @@ struct AgentCockpitMetricStrip: View {
     }
 
     private var issueCount: Int {
-        overview.discovery.missingSchemaCount
-            + overview.discovery.degradedFunctionCount
-            + overview.discovery.catalogDecodeIssueCount
+        overview.issueCount
     }
 
     private var verificationMetricValue: String {

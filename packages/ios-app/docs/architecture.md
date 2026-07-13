@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-12 (trusted APNs lifecycle registration and redacted server delivery were restored; the prompt composer owns one integrated Liquid Glass surface with provider-policy-driven attachments and state-driven voice/send/stop controls, while a transparent icon-sized menu target keeps attachment presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination uses independently aligned disclosure controls; Engine Cockpit separates agent capabilities, activity/verification, and inspect-only engine contracts).
+> Last verified: 2026-07-12 (trusted APNs lifecycle registration and redacted server delivery were restored; the prompt composer owns one integrated Liquid Glass surface with provider-policy-driven attachments and state-driven voice/send/stop controls, while a transparent icon-sized menu target keeps attachment presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; dashboard session-list cursor pagination uses independently aligned disclosure controls; Dashboard separates agent capabilities, inspect-only engine functions, and activity/verification).
 
 ## Overview
 
@@ -12,11 +12,11 @@ keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
 runtime surfaces emitted by the engine. The session dashboard keeps its
-workspace-grouped chat list and adds small Agent Briefing and Engine Cockpit
+workspace-grouped chat list and adds small Agent Briefing and Dashboard
 bands backed by server-owned projections. The full Agent Briefing
 sheet presents activity, adaptation, active work, user-needed work, weak
 points/failures, memory/learned-state, and audit sections with drill-down
-evidence and empty/degraded states. The Engine Cockpit opens from the dashboard
+evidence and empty/degraded states. The Dashboard sheet opens from the session list
 and starts with core engine visibility before progressively exposing module-plane
 diagnostics. It surfaces capabilities grouped into user-facing areas,
 schema/health gaps, durable verification history, redacted
@@ -75,7 +75,7 @@ and matching database/event/settings/dependency work.
   selection.
 - Settings needed to reach the server, configure providers, choose models, tune
   server-owned context policy, configure voice input, and inspect local diagnostics.
-- Grouped session dashboard with scoped Agent Briefing and Engine Cockpit bands, collapsible
+- Grouped session dashboard with scoped Agent Briefing and Dashboard bands, collapsible
   workspace headers and compact
   inset liquid-glass one-line session rows. Each workspace shows its latest 10
   sessions initially and exposes native View more/View less controls for
@@ -99,7 +99,7 @@ and matching database/event/settings/dependency work.
 - Chat timeline/model pill Session Briefing sheet for model switching,
   server-owned context snapshots, manual compact/clear actions, read-only memory
   refs, and durable context action audit refs.
-- Dashboard Engine Cockpit band and sheet for core engine link/catalog health,
+- Dashboard band and sheet for core engine link/catalog health,
   catalog discovery, worker lifecycle catalog/resource state, package actions,
   server-owned module activity, capability binding cockpit visibility, and
   dynamic runtime surfaces. The primary chat conversation shell does not mount
@@ -133,7 +133,7 @@ Sources/
 +-- Support/              Composition, diagnostics, feedback, foundation,
 |                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
-|                         surfaces, Agent Briefing, Engine Cockpit, capabilities, components,
+|                         surfaces, Agent Briefing, Dashboard, capabilities, components,
 |                         system sheets
 +-- Assets.xcassets/      App icons and image assets
 +-- Resources/            Fonts and generated app-icon source layers
@@ -347,7 +347,7 @@ The chat timeline owns only truthful local/session presentation state:
   stay compact; detail sheets read as a progressive briefing: what happened,
   what needs attention, the concise request, the useful result, then evidence.
   Detail cards use the same liquid-glass progressive disclosure language as
-  Engine Cockpit: high-level narrative and compact metric strips first,
+  Dashboard: high-level narrative and compact metric strips first,
   invocation list rows with dividers next, and full invocation refs/raw payloads
   only inside disclosure rows so top-level sheets do not lead with raw IDs,
   grants, paths, or JSON.
@@ -543,10 +543,11 @@ payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
-The Engine Cockpit opens from the dashboard, not Settings. Its dashboard band
+The Dashboard opens from the session list, not Settings. Its compact band
 and compact equal-height sheet-header metrics are the core engine summary: connection
 state, visible invokable operation count, issue count, and plain verification
-state from server-owned facts. The sheet opens on Capabilities, grouping
+state from server-owned facts. The sheet orders Capabilities, Engine, then
+Activity, grouping
 agent-facing operations into user-facing areas before drilling into
 server-supplied operation owner,
 metadata/projection source labels, total/returned operation completeness,
@@ -558,7 +559,19 @@ replacement/shadow/extension eligibility, binding and shadow-trial attempts,
 active route state, route events, routed invocations,
 failed-closed/disabled/rolled-back route state, rollback/disable/abort
 availability, effect/risk, schema-health, worker, trigger, tags,
-request/response schema bodies, and safe verification details.
+request/response schema bodies, and safe verification details. Top-level area
+cards contain one title, one concise description, and one metric row; healthy
+cards do not repeat status badges or worker boilerplate. Operation rows and
+detail summaries lead with server-owned friendly names and concise behavior
+descriptions while retaining canonical identifiers as secondary technical
+detail, with the canonical operation ID on its own final technical row. The Engine tab labels live typed catalog definitions “Functions” and
+explains that these are interfaces used by Tron and its clients, distinct from
+actions the agent can invoke. The shared issue count covers degraded workers,
+deduplicated blocked or degraded module activity, malformed operation
+classification, failed-closed routes, incomplete operation/evidence
+projections, failed verification evidence, and Dashboard refresh failures. It
+appears in the Dashboard summary, while Activity renders a concise review card
+instead of repeating healthy badges on every capability area.
 Capability map version and recent `catalog_discovery_report` resources are
 rendered only inside cockpit evidence/detail surfaces, not as top-level
 telemetry.
@@ -626,7 +639,7 @@ settings snapshot is unavailable. Providers owns OAuth and API-key setup, and
 App owns local appearance and device behavior. Database logging, diagnostic
 retention, and storage-budget enforcement are fixed internal Engine safeguards,
 not mobile settings. Settings main does not grow a server-health dashboard;
-core engine visibility lives on the dashboard Engine Cockpit.
+core engine visibility lives in the Dashboard.
 Each main Settings destination or maintenance action renders as its own card;
 the sheet avoids grouped table dividers and chevrons because the card itself is
 the tap target and disclosure affordance.

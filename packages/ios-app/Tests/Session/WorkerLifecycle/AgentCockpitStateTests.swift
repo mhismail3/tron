@@ -87,8 +87,10 @@ struct AgentCockpitStateTests {
         #expect(overview.invokableUnitLabel == "Agent operations")
         #expect(overview.discovery.agentOperationCount == 1)
         #expect(overview.discovery.engineOperationCount == 1)
-        #expect(overview.discovery.internalContractCount == 1)
+        #expect(overview.discovery.engineFunctionCount == 1)
         let git = overview.modularityOperations.first { $0.name == "git_status" }
+        #expect(git?.displayName == "Inspect Git Status")
+        #expect(git?.description == "Inspects the current repository state without changing it.")
         #expect(git?.ownerLabel == "Built-in Git adapter")
         #expect(git?.metadataSourceLabel == "Capability execute registry")
         #expect(git?.projectionSourceLabel == "Capability binding cockpit projection")
@@ -112,12 +114,13 @@ struct AgentCockpitStateTests {
         #expect(git?.routeRollbackAvailable == true)
         #expect(git?.routeDisableAvailable == true)
         #expect(git?.rollbackAvailable == true)
+        #expect(git?.statusDetail.contains("Family:") == false)
         #expect(git?.ownerLabel.contains("domains::") == false)
         #expect(git?.metadataSourceLabel.contains("domains::") == false)
         #expect(overview.routeStories.count == 1)
         #expect(overview.routeStories.first?.operation == "git_status")
         #expect(overview.routeStories.first?.kind == "active_route")
-        #expect(overview.routeStories.first?.title == "git_status is using a governed replacement route")
+        #expect(overview.routeStories.first?.title == "Inspect Git Status is using a governed replacement route")
         #expect(overview.routeStories.first?.drillDownLabel == "Inspect route evidence")
 
         let observe = overview.modularityOperations.first { $0.name == "observe" }
@@ -262,7 +265,7 @@ struct AgentCockpitStateTests {
         #expect(overview.invokableUnitCount == 1)
         #expect(overview.discovery.agentOperationCount == 1)
         #expect(overview.discovery.engineOperationCount == 1)
-        #expect(overview.discovery.internalContractCount == 1)
+        #expect(overview.discovery.engineFunctionCount == 1)
     }
 
     @Test("Projection treats missing operation pool classification as a cockpit issue")
@@ -280,10 +283,11 @@ struct AgentCockpitStateTests {
         #expect(overview.status.kind == .degraded)
         #expect(overview.status.title == "Operations Need Review")
         #expect(overview.status.detail.contains("missing capability-pool classification"))
+        #expect(overview.issueCount == 1)
         let git = overview.modularityOperations.first { $0.name == "git_status" }
         #expect(git?.capabilityAudience == "unknown")
         #expect(git?.capabilityReplacementClass == "unknown")
-        #expect(git?.capabilityEvolutionPath == "Capability-pool classification is missing from the server projection.")
+        #expect(git?.capabilityMinimalityDecision == "unknown")
     }
 
     @Test("Projection treats server snake-case schema evidence as complete")
@@ -457,6 +461,11 @@ struct AgentCockpitStateTests {
         #expect(topLevelStrings.contains("Operations verified"))
         #expect(topLevelStrings.contains("Verified"))
         #expect(topLevelStrings.contains("Runtime"))
+        #expect(AgentCockpitPresentation.functionDisplayName("agent::abort_invocation") == "Abort Invocation Agent")
+        #expect(AgentCockpitPresentation.capabilityReplacementClassLabel("runtime_routable") == "Can be replaced safely")
+        #expect(AgentCockpitPresentation.capabilityVisibilityLabel("default_visible") == "Visible to the agent")
+        #expect(AgentCockpitPresentation.capabilityMinimalityLabel("module_candidate") == "Can become a module")
+        #expect(AgentCockpitPresentation.provenanceLabel("capability binding cockpit projection") == "Dashboard projection")
     }
 
     @Test("Projection reports offline without calling lifecycle data")

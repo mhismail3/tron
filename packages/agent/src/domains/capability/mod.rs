@@ -257,7 +257,8 @@ pub(crate) use operations::{
     AuthorityPolicy, ConditionalAuthority, OperationBindingMetadata, ResourceKindPolicy,
     SelectorAddition, WorkerPackageKindSource, authority_policy, is_supported_operation,
     operation_binding_metadata, operation_host_request_schema, operation_list_text,
-    operation_required_payload_fields, operation_risk, validate_operation_payload,
+    operation_presentation, operation_required_payload_fields, operation_risk,
+    validate_operation_payload,
 };
 pub(crate) use operations::{OperationEffect, operation_effect};
 

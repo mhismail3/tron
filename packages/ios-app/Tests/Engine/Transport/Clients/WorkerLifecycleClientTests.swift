@@ -190,7 +190,7 @@ struct WorkerLifecycleClientTests {
             let request = try #require(payload as? CapabilityCockpitOverviewRequestDTO)
             #expect(request.limit == 17)
             return CapabilityCockpitOverviewDTO(
-                schemaVersion: "tron.capability_binding.cockpit_overview.v1",
+                schemaVersion: "tron.capability_binding.cockpit_overview.v2",
                 operation: "capability_binding_cockpit_overview",
                 summary: CapabilityCockpitSummaryDTO(
                     totalOperations: 0,

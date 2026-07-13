@@ -7,6 +7,9 @@
 //! runtime resource validation after this structural gate. Typed resource-ref
 //! fields encode their required kind prefix here so provider preflight rejects
 //! malformed identities before an invocation reaches domain policy.
+//! Server-owned presentation metadata gives every operation a concise behavior
+//! description and a natural verb-first display name for native discovery UI;
+//! canonical operation identifiers remain the stable invocation keys.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -23,9 +26,11 @@ mod governance;
 mod metadata;
 mod output;
 mod policy;
+mod presentation;
 mod records;
 
 pub(crate) use output::provider_result_text;
+pub(crate) use presentation::operation_presentation;
 
 macro_rules! define_operation_ids {
     ($($variant:ident => $name:literal,)+) => {

@@ -68,7 +68,7 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var engineGroups: [AgentCockpitCapabilityGroupRow]
     var agentOperationCount: Int
     var engineOperationCount: Int
-    var internalContractCount: Int
+    var engineFunctionCount: Int
     var capabilityVisibility: CapabilityCockpitOverviewDTO?
 
     static let empty = AgentCockpitDiscoveryOverview(
@@ -91,7 +91,7 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
         engineGroups: [],
         agentOperationCount: 0,
         engineOperationCount: 0,
-        internalContractCount: 0,
+        engineFunctionCount: 0,
         capabilityVisibility: nil
     )
 }
@@ -215,7 +215,7 @@ extension AgentCockpitProjection {
             engineGroups: engineGroups,
             agentOperationCount: hasOperationProjection ? agentOperations.count : (modularityOperations.isEmpty ? functions.count : modularityOperations.count),
             engineOperationCount: hasOperationProjection ? engineOperations.count : 0,
-            internalContractCount: hasOperationProjection ? functions.count : 0,
+            engineFunctionCount: hasOperationProjection ? functions.count : 0,
             capabilityVisibility: capabilityVisibility
         )
     }

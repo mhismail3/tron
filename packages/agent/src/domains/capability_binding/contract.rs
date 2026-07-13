@@ -37,7 +37,7 @@ pub(crate) const CAPABILITY_ROUTE_EVENT_SCHEMA_VERSION: &str =
 pub(crate) const CAPABILITY_ROUTE_ROLLBACK_SCHEMA_VERSION: &str =
     crate::engine::CAPABILITY_ROUTE_ROLLBACK_PAYLOAD_SCHEMA_VERSION;
 pub(crate) const COCKPIT_VISIBILITY_SCHEMA_VERSION: &str =
-    "tron.capability_binding.cockpit_overview.v1";
+    "tron.capability_binding.cockpit_overview.v2";
 /// Shared provider/native bound for one broad cockpit operation projection.
 pub(crate) const COCKPIT_OVERVIEW_MAX_LIMIT: usize = 200;
 
@@ -51,7 +51,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             Some(READ_SCOPE),
         )
         .description(
-            "Read-only redacted capability modularity projection for Engine Cockpit clients",
+            "Read-only redacted capability modularity projection for Dashboard clients",
         )
         .tags(vec![
             "capability",

@@ -49,7 +49,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `authority` | Binding/resource grant and exact selector checks |
-//! | `cockpit_visibility` | Redacted Engine Cockpit projection over registry metadata and binding records |
+//! | `cockpit_visibility` | Redacted Dashboard projection with server-owned operation presentation, registry metadata, and binding records |
 //! | `contract` | Worker id, stream topic, scope, and schema constants |
 //! | `payload_safety` | Unsafe-field, path, prompt, command, and token denial |
 //! | `projection` | Bounded provider-safe request, decision, and policy projections |

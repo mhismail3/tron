@@ -30,13 +30,13 @@ final class DashboardHitTargetUITests: XCTestCase {
         let cockpitBand = app.buttons["engine-cockpit-dashboard-band"].firstMatch
         XCTAssertTrue(
             cockpitBand.waitForExistence(timeout: 20),
-            "Engine Cockpit dashboard band should be visible above grouped sessions"
+            "Dashboard band should be visible above grouped sessions"
         )
         keepScreenshot(named: "engine-cockpit-dashboard-band")
 
         cockpitBand.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
 
-        XCTAssertTrue(app.staticTexts["Engine Cockpit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Dashboard"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Capabilities"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Activity"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Core"].exists)
@@ -66,7 +66,7 @@ final class DashboardHitTargetUITests: XCTestCase {
         operation.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         XCTAssertTrue(app.staticTexts["Operation Detail"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Role"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Kernel-evolution only"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Engine update only"].waitForExistence(timeout: 10))
         keepScreenshot(named: "engine-cockpit-operation-role-detail")
         app.buttons["Close"].tap()
 

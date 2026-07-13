@@ -353,7 +353,7 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
         "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift",
         &[
             "struct AgentCockpitSheet",
-            "SheetTitle(title: \"Engine Cockpit\", color: .tronEmerald)",
+            "SheetTitle(title: \"Dashboard\", color: .tronEmerald)",
             "SheetDismissButton(color: .tronEmerald)",
             "TronSegmentedControl(",
             ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)",
@@ -407,9 +407,14 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
     assert_contains_all(
         "packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift",
         &[
-            "ConnectionSettingsDiagnosticsCopy",
-            "Engine visibility now lives in the dashboard cockpit.",
+            "static let order: [Self] = [",
+            "case transcription = \"Transcription\"",
         ],
+    );
+    assert!(
+        !read_repo_file("packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift")
+            .contains("ConnectionSettingsDiagnosticsCopy"),
+        "engine diagnostics must stay in Dashboard rather than return as a Settings control"
     );
     assert_contains_all(
         "packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift",
@@ -527,7 +532,7 @@ fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
     assert_contains_all(
         "packages/ios-app/docs/architecture.md",
         &[
-            "Engine Cockpit",
+            "Dashboard",
             "WorkerLifecycleRepository",
             "AgentCockpitProjection",
             "catalog decode degradation",

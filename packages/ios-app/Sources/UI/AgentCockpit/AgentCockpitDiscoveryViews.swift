@@ -96,13 +96,13 @@ struct EngineCoreSummaryCard: View {
             Label("Engine Core", systemImage: "lock.shield")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
-            Text("Read-only engine, governance, and diagnostic contracts that keep capability execution safe and inspectable. They evolve through reviewed source changes rather than live module routing.")
+            Text("Functions are typed interfaces used by Tron and its clients. Operations are actions the agent can invoke. Both stay inspectable here.")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 metric("Engine operations", overview.engineOperationCount)
-                metric("Internal contracts", overview.internalContractCount)
+                metric("Functions", overview.engineFunctionCount)
                 metric("Areas", overview.engineGroups.count)
             }
         }
@@ -141,6 +141,36 @@ struct WorkerTriggerExplanationCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .sectionFill(.tronInfo, cornerRadius: 10, subtle: true, interactive: false)
         }
+    }
+}
+
+struct CapabilityIssuesCard: View {
+    let overview: AgentCockpitOverview
+
+    var body: some View {
+        if overview.issueCount > 0 {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.tronWarning)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(overview.issueCount) issue\(overview.issueCount == 1 ? "" : "s") need review")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(issueDetail)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .sectionFill(.tronWarning, cornerRadius: 12, subtle: true, interactive: false)
+        }
+    }
+
+    private var issueDetail: String {
+        overview.issueDetail
     }
 }
 
@@ -217,18 +247,12 @@ struct CapabilityGroupCard: View {
                     Text(group.title)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
-                    Text(group.question)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextSecondary)
                     Text(group.narrative)
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextMuted)
-                        .lineLimit(2)
+                        .foregroundStyle(.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Text(group.hasIssues ? "\(group.degradedCount + group.missingSchemaCount)" : "OK")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                    .countBadge(group.hasIssues ? .tronWarning : .tronInfo)
             }
             HStack(spacing: 8) {
                 compactMetric(
@@ -236,22 +260,14 @@ struct CapabilityGroupCard: View {
                     group.operationCount > 0 ? group.operationCount : group.functionCount
                 )
                 compactMetric(
-                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .definitions),
+                    AgentCockpitPresentation.groupMetricTitle(for: group, metric: .engineFunctions),
                     group.functionCount
                 )
                 compactMetric(
                     AgentCockpitPresentation.groupMetricTitle(for: group, metric: .workers),
                     group.workerCount
                 )
-            }
-            Text(group.ownerSummary)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextSecondary)
-            if let explanation = group.workerTriggerExplanation {
-                Text(explanation)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
-                    .fixedSize(horizontal: false, vertical: true)
+                compactSummaryMetric(group.ownerSummary)
             }
         }
         .padding(13)
@@ -270,6 +286,14 @@ struct CapabilityGroupCard: View {
                 .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func compactSummaryMetric(_ value: String) -> some View {
+        Text(value)
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(.tronTextSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -328,7 +352,7 @@ struct CapabilityGroupDetailSheet: View {
                         } label: {
                             CapabilityOperationCard(operation: operation)
                                 .accessibilityElement(children: .combine)
-                                .accessibilityLabel(operation.name)
+                                .accessibilityLabel(operation.displayName)
                                 .accessibilityIdentifier("operation-row-\(operation.id)")
                         }
                         .buttonStyle(.plain)
@@ -341,7 +365,7 @@ struct CapabilityGroupDetailSheet: View {
                         } label: {
                             CapabilityFunctionCard(function: function)
                                 .accessibilityElement(children: .combine)
-                                .accessibilityLabel(function.id)
+                                .accessibilityLabel(AgentCockpitPresentation.functionDisplayName(function.id))
                                 .accessibilityIdentifier("catalog-function-row-\(function.id)")
                         }
                         .buttonStyle(.plain)
@@ -388,7 +412,7 @@ struct CapabilityGroupDetailSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 detailMetric("Operations", group.operationCount)
-                detailMetric("Contracts", group.functionCount)
+                detailMetric("Functions", group.functionCount)
                 detailMetric("Workers", group.workerCount)
                 detailMetric("Issues", group.degradedCount + group.missingSchemaCount)
             }
@@ -419,19 +443,23 @@ private struct CapabilityOperationCard: View {
                 .foregroundStyle(tint)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 4) {
-                Text(operation.name)
-                    .font(TronTypography.codeCaption)
+                Text(operation.displayName)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("\(operation.ownerLabel) · \(operation.statusLabel)")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(operation.description)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
                 Text(activitySummary)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(2)
+                Text("Operation ID: \(operation.name)")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer()
         }
@@ -481,16 +509,20 @@ private struct CapabilityFunctionCard: View {
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 4) {
                 Text(operationName)
-                    .font(TronTypography.codeCaption)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(function.description.nilIfEmpty ?? "No provider-visible description is published.")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
                 Text("\(schemaStatus) · \(riskSummary)")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("Function ID: \(function.id)")
+                    .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -504,7 +536,7 @@ private struct CapabilityFunctionCard: View {
     }
 
     private var operationName: String {
-        function.id
+        AgentCockpitPresentation.functionDisplayName(function.id)
     }
 
     private var schemaStatus: String {

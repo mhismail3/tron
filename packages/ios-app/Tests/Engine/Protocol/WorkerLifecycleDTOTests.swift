@@ -345,7 +345,7 @@ struct WorkerLifecycleDTOTests {
     func capabilityCockpitOverviewDecodesServerProjectionTruth() throws {
         let json = """
         {
-          "schemaVersion": "tron.capability_binding.cockpit_overview.v1",
+          "schemaVersion": "tron.capability_binding.cockpit_overview.v2",
           "operation": "capability_binding_cockpit_overview",
           "summary": {
             "totalOperations": 181,
@@ -403,7 +403,7 @@ struct WorkerLifecycleDTOTests {
             {
               "kind": "active_route",
               "operation": "git_status",
-              "title": "git_status is using a governed replacement route",
+              "title": "Inspect Git Status is using a governed replacement route",
               "detail": "1 routed invocation recorded. Rollback available and disable available.",
               "status": "active",
               "evidenceCount": 4,
@@ -414,6 +414,8 @@ struct WorkerLifecycleDTOTests {
           "operations": [
             {
               "name": "git_status",
+              "displayName": "Inspect Git Status",
+              "description": "Inspects the current repository state without changing it.",
               "family": "git",
               "familyLabel": "Git",
               "capabilityPool": {
@@ -447,7 +449,7 @@ struct WorkerLifecycleDTOTests {
               "status": {
                 "kind": "built_in_adapter",
                 "label": "Built-in adapter",
-                "detail": "Built-in execution can be shadowed or replaced only after governed evidence. Family: Git.",
+                "detail": "Built-in execution can be shadowed or replaced only after governed evidence.",
                 "builtIn": true,
                 "moduleOwned": false,
                 "locked": false
@@ -560,10 +562,13 @@ struct WorkerLifecycleDTOTests {
 
         let overview = try JSONDecoder().decode(CapabilityCockpitOverviewDTO.self, from: Data(json.utf8))
 
+        #expect(overview.schemaVersion == "tron.capability_binding.cockpit_overview.v2")
         #expect(overview.summary.totalOperations == 181)
         #expect(overview.summary.returnedOperations == 1)
         #expect(overview.operationList.truncated == true)
         #expect(overview.resourceScan.state == "bounded_degraded")
+        #expect(overview.operations.first?.displayName == "Inspect Git Status")
+        #expect(overview.operations.first?.description == "Inspects the current repository state without changing it.")
         #expect(overview.operations.first?.owner.metadataSourceLabel == "Capability execute registry")
         #expect(overview.operations.first?.capabilityPool?.surface == "agent_operation")
         #expect(overview.operations.first?.capabilityPool?.audience == "session_work")
@@ -575,6 +580,7 @@ struct WorkerLifecycleDTOTests {
         #expect(overview.operations.first?.route?.state == "active")
         #expect(overview.operations.first?.route?.activeRoutes == 1)
         #expect(overview.operations.first?.route?.routedInvocations == 1)
+        #expect(overview.operations.first?.status.detail.contains("Family:") == false)
         #expect(overview.routeStories?.first?.operation == "git_status")
         #expect(overview.routeStories?.first?.kind == "active_route")
         #expect(overview.routeStories?.first?.drillDownLabel == "Inspect route evidence")

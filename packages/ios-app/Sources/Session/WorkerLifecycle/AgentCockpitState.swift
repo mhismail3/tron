@@ -51,6 +51,8 @@ struct AgentCockpitFunctionRow: Equatable, Identifiable, Sendable {
 struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var id: String { name }
     var name: String
+    var displayName: String
+    var description: String
     var family: String
     var familyLabel: String
     var capabilitySurface: String
@@ -58,7 +60,6 @@ struct AgentCockpitOperationRow: Equatable, Identifiable, Sendable {
     var capabilityReplacementClass: String
     var capabilityDefaultVisibility: String
     var capabilityMinimalityDecision: String
-    var capabilityEvolutionPath: String
     var agentUsageCallable: Bool
     var agentUsageTool: String
     var agentUsageOperation: String
@@ -259,6 +260,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var activity: [AgentCockpitActivityItem]
     var currentRevision: UInt64?
     var nextRevision: UInt64?
+    var refreshFailed: Bool
 
     var invokableUnitCount: Int {
         if capabilityVisibility != nil {
@@ -304,7 +306,8 @@ struct AgentCockpitOverview: Equatable, Sendable {
             moduleActivity: nil,
             activity: [],
             currentRevision: nil,
-            nextRevision: nil
+            nextRevision: nil,
+            refreshFailed: false
         )
     }
 }
@@ -393,7 +396,8 @@ enum AgentCockpitProjection {
             moduleActivity: moduleActivity,
             activity: activity,
             currentRevision: snapshot.currentRevision,
-            nextRevision: snapshot.nextRevision
+            nextRevision: snapshot.nextRevision,
+            refreshFailed: false
         )
     }
 
@@ -412,6 +416,7 @@ enum AgentCockpitProjection {
             detail: message.nilIfEmpty ?? "Latest cockpit refresh failed",
             systemImage: "exclamationmark.triangle"
         )
+        overview.refreshFailed = true
         return overview
     }
 
@@ -678,6 +683,8 @@ enum AgentCockpitProjection {
         let pool = operation.capabilityPool
         return AgentCockpitOperationRow(
             name: operation.name,
+            displayName: operation.displayName,
+            description: operation.description,
             family: operation.family,
             familyLabel: operation.familyLabel,
             capabilitySurface: pool?.surface ?? "unknown",
@@ -685,7 +692,6 @@ enum AgentCockpitProjection {
             capabilityReplacementClass: pool?.replacementClass ?? "unknown",
             capabilityDefaultVisibility: pool?.agentDefaultVisibility ?? "inspect_only",
             capabilityMinimalityDecision: pool?.minimalityDecision ?? "unknown",
-            capabilityEvolutionPath: pool?.evolutionPath ?? "Capability-pool classification is missing from the server projection.",
             agentUsageCallable: operation.agentUsage?.callable ?? true,
             agentUsageTool: operation.agentUsage?.tool ?? "capability::execute",
             agentUsageOperation: operation.agentUsage?.operation ?? operation.name,
