@@ -480,6 +480,11 @@ separate state, row status mapping, interactive row liquid-glass containers,
 and header/row presentation metrics. Session expansion is count-based and
 derived from each refreshed server group, so new or archived rows cannot leave
 stale counts; disappearing or <=10-row groups shed obsolete expansion state.
+Workspace collapse, expansion, and pagination mutate `List` membership in a
+non-animated transaction because interactive Liquid Glass cells otherwise
+remain composited over relocating section headers. Only the workspace header's
+folder/chevron state animates, keeping disclosure responsive without transient
+row overlap.
 `NewSessionFlow` owns the new-session sheet workflow and presents with medium
 and large detents so the sheet starts compactly while still allowing expansion
 for workspace and model selection.

@@ -94,12 +94,12 @@ struct SessionSidebar: View {
                                     canViewLess: canViewLess,
                                     canViewMore: canViewMore,
                                     onViewLess: {
-                                        withAnimation(SessionListLayout.expansionAnimation) {
+                                        updateSessionListStructure {
                                             sessionExpansion.showLess(groupId: group.id)
                                         }
                                     },
                                     onViewMore: {
-                                        withAnimation(SessionListLayout.expansionAnimation) {
+                                        updateSessionListStructure {
                                             sessionExpansion.revealMore(
                                                 groupId: group.id,
                                                 totalCount: group.sessions.count
@@ -117,7 +117,7 @@ struct SessionSidebar: View {
                             title: group.name,
                             isExpanded: workspaceExpansion.isExpanded(group.id)
                         ) {
-                            withAnimation(SessionListLayout.expansionAnimation) {
+                            updateSessionListStructure {
                                 workspaceExpansion.toggle(group.id)
                             }
                         }
@@ -186,6 +186,15 @@ struct SessionSidebar: View {
                 connectionState: dependencies.connectionRepository.connectionState
             )
         }
+    }
+
+    private func updateSessionListStructure(_ mutation: () -> Void) {
+        // List renders each Liquid Glass row in its own compositing layer.
+        // Structural animation lets departing layers overlap relocating
+        // section headers, so row membership changes atomically. The header
+        // owns the only disclosure animation.
+        let transaction = Transaction(animation: nil)
+        withTransaction(transaction, mutation)
     }
 
     private func refreshBriefing() async {
