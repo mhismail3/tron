@@ -53,10 +53,12 @@ root, and `Stop Dev Server` runs `scripts/tron dev --stop`.
 `Rebuild + Install + Launch iOS Beta on iPhone` and `Rebuild + Install + Launch
 iOS Beta on iPad` run `scripts/tron-ios-beta install` with generic device-name
 selectors; the helper regenerates the Xcode project, preflights the active
-Xcode toolchain, builds the `Tron Beta` scheme for a physical iOS destination,
-writes a full log plus `.xcresult` bundle, installs the resulting app bundle
-with `xcrun devicectl`, and launches the resolved bundle ID with a bounded
-`devicectl` launch timeout.
+Xcode toolchain, and builds `TronMobile.xcodeproj` directly from the authoritative
+`project.yml`; arbitrary local workspaces do not override that generated owner.
+It builds the `Tron Beta` scheme for a physical iOS destination, writes a full
+log plus `.xcresult` bundle, installs the resulting app bundle with
+`xcrun devicectl`, and launches the resolved bundle ID with a bounded `devicectl`
+launch timeout.
 `Rebuild + Install + Launch iOS Prod Fast Debug on iPhone` uses the same helper
 with `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so
 it builds the fast production-bundle app and launches it on the selected iPhone.

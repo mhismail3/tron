@@ -15,12 +15,13 @@ scripts/tron-ios-beta stop
 scripts/tron-ios-beta status
 ```
 
-`install` regenerates the Xcode project, builds the `Tron Beta` scheme with the
-`Beta` configuration by default for a physical iOS destination, installs the app
-with `xcrun devicectl`, and launches the resolved bundle ID unless `--no-launch`
-is provided. Set `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` to build a local
-variant such as `Tron Fast` / `ProdDebug` or the full production `Tron` /
-`Prod` build.
+`install` regenerates `TronMobile.xcodeproj` from the authoritative `project.yml`
+and builds that project directly; arbitrary local workspaces do not override it.
+It builds the `Tron Beta` scheme with the `Beta` configuration by default for a
+physical iOS destination, installs the app with `xcrun devicectl`, and launches
+the resolved bundle ID unless `--no-launch` is provided. Set `TRON_IOS_SCHEME`
+and `TRON_IOS_CONFIGURATION` to build a local variant such as `Tron Fast` /
+`ProdDebug` or the full production `Tron` / `Prod` build.
 
 `launch` launches the already-installed app for the selected scheme/configuration
 without rebuilding. Launch is bounded by `TRON_IOS_LAUNCH_TIMEOUT_SECONDS`,

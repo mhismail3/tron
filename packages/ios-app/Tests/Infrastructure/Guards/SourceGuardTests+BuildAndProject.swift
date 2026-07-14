@@ -600,6 +600,10 @@ extension SourceGuardTests {
 
         #expect(installScript.contains(#"SCHEME="${TRON_IOS_SCHEME:-Tron Beta}""#))
         #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Beta}""#))
+        #expect(installScript.contains(#"PROJECT="TronMobile.xcodeproj""#))
+        #expect(installScript.contains(#"-project "$PROJECT""#))
+        #expect(!installScript.contains("project_selector"))
+        #expect(!installScript.contains(".xcworkspace"))
         #expect(installScript.contains("TRON_IOS_SCHEME"))
         #expect(installScript.contains("TRON_IOS_CONFIGURATION"))
         #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))

@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
+PROJECT="TronMobile.xcodeproj"
 DERIVED_DATA="build/DerivedData"
 SCHEME="${TRON_IOS_SCHEME:-Tron Beta}"
 CONFIG="${TRON_IOS_CONFIGURATION:-Beta}"
@@ -145,22 +146,9 @@ resolve_device_id() {
     die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are selectable"
 }
 
-project_selector() {
-    cd "$IOS_DIR"
-    local workspace
-    workspace="$(find . -maxdepth 2 -name "*.xcworkspace" -not -path "*/.build/*" -not -path "*/build/*" -not -path "*.xcodeproj/*" | head -1)"
-    if [ -n "$workspace" ]; then
-        printf '%s\n%s\n' "-workspace" "$workspace"
-    else
-        printf '%s\n%s\n' "-project" "TronMobile.xcodeproj"
-    fi
-}
-
 bundle_id_for_project() {
-    local selector_flag="$1"
-    local selector_path="$2"
     cd "$IOS_DIR"
-    xcodebuild -showBuildSettings "$selector_flag" "$selector_path" \
+    xcodebuild -showBuildSettings -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration "$CONFIG" 2>/dev/null \
         | awk -F' = ' '/^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER/ {print $2; exit}'
@@ -196,14 +184,8 @@ build_install_launch() {
     cd "$IOS_DIR"
     xcodegen generate
 
-    local selector
-    selector="$(project_selector)"
-    local project_flag project_path
-    project_flag="$(printf '%s\n' "$selector" | sed -n '1p')"
-    project_path="$(printf '%s\n' "$selector" | sed -n '2p')"
-
     local bundle_id
-    bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
+    bundle_id="$(bundle_id_for_project)"
 
     local destination
     if [ -n "$DESTINATION" ]; then
@@ -220,7 +202,7 @@ build_install_launch() {
     set +e
     xcodebuild \
         build \
-        "$project_flag" "$project_path" \
+        -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration "$CONFIG" \
         -destination "$destination" \
@@ -290,14 +272,9 @@ launch_installed_app() {
 
     cd "$IOS_DIR"
     xcodegen generate >/dev/null
-    local selector
-    selector="$(project_selector)"
-    local project_flag project_path
-    project_flag="$(printf '%s\n' "$selector" | sed -n '1p')"
-    project_path="$(printf '%s\n' "$selector" | sed -n '2p')"
 
     local bundle_id
-    bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
+    bundle_id="$(bundle_id_for_project)"
     [ -n "$bundle_id" ] || die "could not resolve bundle ID"
     launch_app_for_device "$device_id" "$bundle_id"
 }
