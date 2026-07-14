@@ -83,6 +83,21 @@ ensure_prod_binary() {
         return 0
     fi
 
+    # The workspace entrypoint explicitly grants this recovery source after
+    # tron-lib.sh clears ambient input. Keep recovery ordering here so sourcing
+    # workspace modules cannot replace the service owner's behavior.
+    if [ -n "$SERVICE_RECOVERY_RELEASE_BINARY" ] \
+        && [ -f "$SERVICE_RECOVERY_RELEASE_BINARY" ] \
+        && file "$SERVICE_RECOVERY_RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O"; then
+        print_status "Restoring from release build..."
+        if ! create_app_bundle "$INSTALLED_BUNDLE" "$SERVICE_RECOVERY_RELEASE_BINARY"; then
+            return 1
+        fi
+        codesign_bundle "$INSTALLED_BUNDLE"
+        print_success "Restored from release build"
+        return 0
+    fi
+
     print_error "No valid contributor service binary found. Run: tron manual-deploy"
     return 1
 }

@@ -61,6 +61,7 @@ source "$SCRIPT_DIR/tron-lib.sh"
 # Rust workspace
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
+SERVICE_RECOVERY_RELEASE_BINARY="$RELEASE_BINARY"
 DEV_SERVER_BINARY="$RUST_WORKSPACE/target/dev-server/tron"
 BENCH_SCRIPT="$SCRIPT_DIR/benchmarks/bench.py"
 BENCH_BASELINE_DIR="$SCRIPT_DIR/benchmarks/baselines"

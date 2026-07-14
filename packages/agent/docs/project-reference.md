@@ -1131,7 +1131,7 @@ See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for commit conventions, TDD expe
 
 ## CLI Reference
 
-The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. When adding or renaming a subcommand, update the dispatcher and the owning module together.
+The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. Contributor-binary recovery has one owner in `scripts/tron-lib.d/service.sh`: it prefers `tron.bak`, then uses a release artifact only when the workspace entrypoint explicitly grants its repository-owned path; the shared library clears inherited recovery input. When adding or renaming a subcommand, update the dispatcher and the owning module together.
 
 ### Development (workspace only)
 

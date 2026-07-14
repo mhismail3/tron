@@ -233,6 +233,10 @@ EOF
 # COMMAND MODULES
 #=============================================================================
 
+# Clear ambient input before service modules are loaded. The workspace
+# entrypoint explicitly grants its release artifact as a recovery source.
+SERVICE_RECOVERY_RELEASE_BINARY=""
+
 TRON_LIB_MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tron-lib.d"
 for tron_lib_module in "$TRON_LIB_MODULE_DIR"/*.sh; do
     [ -e "$tron_lib_module" ] && source "$tron_lib_module"

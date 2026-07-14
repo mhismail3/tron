@@ -411,6 +411,40 @@ fn port_9847_and_process_ownership_are_source_guarded() {
 }
 
 #[test]
+fn contributor_binary_recovery_has_one_service_owner() {
+    let service = read_repo_file("scripts/tron-lib.d/service.sh");
+    let definitions: Vec<_> = git_ls_files("scripts/tron-lib.d")
+        .into_iter()
+        .chain(git_ls_files("scripts/tron.d"))
+        .filter(|path| path.ends_with(".sh"))
+        .filter(|path| read_repo_file(path).contains("ensure_prod_binary() {"))
+        .collect();
+
+    assert_eq!(
+        definitions,
+        ["scripts/tron-lib.d/service.sh"],
+        "workspace modules must not override shared service recovery by source order"
+    );
+    let tron_lib = read_repo_file("scripts/tron-lib.sh");
+    let workspace_cli = read_repo_file("scripts/tron");
+    assert!(tron_lib.contains("SERVICE_RECOVERY_RELEASE_BINARY=\"\""));
+    assert!(workspace_cli.contains("SERVICE_RECOVERY_RELEASE_BINARY=\"$RELEASE_BINARY\""));
+    assert_order(
+        &workspace_cli,
+        "source \"$SCRIPT_DIR/tron-lib.sh\"",
+        "SERVICE_RECOVERY_RELEASE_BINARY=\"$RELEASE_BINARY\"",
+        "workspace entrypoint must clear ambient recovery input before granting its artifact",
+    );
+    assert!(service.contains("[ -n \"$SERVICE_RECOVERY_RELEASE_BINARY\" ]"));
+    assert_order(
+        &service,
+        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$CONTRIBUTOR_DIR/tron.bak\"",
+        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$SERVICE_RECOVERY_RELEASE_BINARY\"",
+        "service recovery must prefer the installed backup to a workspace release artifact",
+    );
+}
+
+#[test]
 fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     let manual = read_repo_file("scripts/tron.d/manual-deploy.sh");
     assert_order(
