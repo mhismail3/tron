@@ -210,6 +210,10 @@ See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac
 
 `setup.onboardedSentinelExists()` is a single `FileManager.default.fileExists(atPath:)` call. If the wizard keeps re-showing, check:
 
+The terminal **Open menu bar** action writes this sentinel before switching
+modes. If that write fails, the current Done screen remains visible so the
+action can be retried after fixing the filesystem problem.
+
 ```bash
 ls -la ~/.tron/internal/run/.onboarded
 # Should be a 0-or-more-byte file; first line is an ISO8601 timestamp with millis.

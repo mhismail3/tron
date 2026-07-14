@@ -22,8 +22,8 @@ final class WizardState {
     }
 
     /// Direction of the most recent navigation, set BEFORE `step` is
-    /// mutated by every navigation method (`advance`, `goBack`,
-    /// `skipToPairing`, `complete`). `WizardShell.slideTransition`
+    /// mutated by every navigation method (`advance`, `goBack`, and
+    /// `skipToPairing`). `WizardShell.slideTransition`
     /// reads this single source of truth to pick the asymmetric
     /// move-edge pair, instead of inferring direction from ordinal
     /// comparisons against a separate `previousStep` field.
@@ -108,15 +108,13 @@ final class WizardState {
             let raw = defaults.string(forKey: Self.stepStorageKey)
             let persisted = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
             // Only resume at steps that are safe to cold-start on.
-            // State-dependent post-install steps (.permissions,
-            // .pairingInfo, .done) depend on transient state
-            // (installOutcome, permissionStatuses, pairingPayload, …)
-            // that doesn't survive a relaunch. The
-            // informational .iosBeta handoff is safe to resume because
-            // it owns only a static TestFlight QR code. If we honour the
-            // state-dependent steps on cold boot, the user lands
-            // mid-wizard with greyed-out Continue buttons and nothing
-            // to click.
+            // State-dependent post-install steps (.permissions and
+            // .pairingInfo) depend on transient state (installOutcome,
+            // permissionStatuses, pairingPayload, …) that doesn't
+            // survive a relaunch. The informational .iosBeta handoff
+            // owns no transient runtime state and is safe to resume.
+            // Done still clamps: without the sentinel, stale progress
+            // must not bypass onboarding after an uninstall.
             // Clamp them back to welcome so onboarding always has a
             // coherent entry point.
             self.step = Self.isSafeToResume(persisted) ? persisted : .welcome
@@ -127,12 +125,10 @@ final class WizardState {
     }
 
     /// Steps the wizard can cold-resume at without transient runtime
-    /// state. Pre-permissions steps are always safe, and the iOS beta
-    /// handoff owns only static TestFlight data; the other post-install
-    /// steps assume `installOutcome` / `permissionStatuses` /
-    /// `pairingPayload`
-    /// from an earlier navigation, so cold-booting into them strands the
-    /// user behind a disabled Continue button.
+    /// state. Pre-permissions steps and the static iOS beta handoff are
+    /// safe. Permissions/pairing require transient state, while Done is
+    /// valid only within the current process until its sentinel write
+    /// succeeds; relaunch without that sentinel restarts onboarding.
     private static func isSafeToResume(_ step: WizardStep) -> Bool {
         switch step {
         case .welcome, .tailscale, .install, .iosBeta:
@@ -165,13 +161,6 @@ final class WizardState {
     /// step on the assumption the server is already running.
     func skipToPairing() {
         navigate(to: .pairingInfo, direction: .forward)
-    }
-
-    /// Marks the wizard complete and notifies AppDelegate to swap to
-    /// menu-bar mode.
-    func complete() {
-        navigate(to: .done, direction: .forward)
-        NotificationCenter.default.post(name: .tronWizardDidComplete, object: nil)
     }
 
     /// Explicitly starts or retries the install pipeline. This is the

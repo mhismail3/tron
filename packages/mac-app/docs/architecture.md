@@ -147,7 +147,7 @@ TronMacApp.main()
                     → .tailscale → .install
                     → .permissions → .iosBeta
                     → .pairingInfo → .done
-                └─ DoneStep taps "Finish"
+                └─ WizardShell taps "Open menu bar"
                     ├─ setup.touchOnboardedSentinel()  ← atomic tempfile+rename
                     └─ post .tronWizardDidComplete
                          └─ AppDelegate observer

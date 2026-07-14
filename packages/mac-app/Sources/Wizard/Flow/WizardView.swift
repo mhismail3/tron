@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 
+/// Commits durable onboarding before emitting the process-local mode switch;
+/// throwing prevents AppDelegate from entering a mode that cannot survive relaunch.
+@MainActor
+func commitWizardCompletion(
+    touchSentinel: @Sendable () throws -> Void,
+    notificationCenter: NotificationCenter = .default
+) throws {
+    try touchSentinel()
+    notificationCenter.post(name: .tronWizardDidComplete, object: nil)
+}
+
 /// Top-level wizard. Reads the current `WizardStep` from `WizardState`
 /// and dispatches to a per-step view. The shell (top-bar with progress,
 /// fixed action bar, glass canvas, animated step transitions) is shared
@@ -33,7 +44,7 @@ struct WizardView: View {
             case .pairingInfo:
                 PairingInfoStep(state: state)
             case .done:
-                DoneStep(state: state)
+                DoneStep()
             }
         }
         .environment(state)
@@ -386,7 +397,7 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
         case .pairingInfo:
             Button {
-                state.complete()
+                state.advance()
             } label: {
                 Text("I'm paired")
             }
@@ -394,13 +405,21 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
             .disabled(state.pairingPayload == nil)
         case .done:
-            Button {
-                NotificationCenter.default.post(name: .tronWizardDidComplete, object: nil)
-            } label: {
+            Button(action: completeOnboarding) {
                 Text("Open menu bar")
             }
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
+        }
+    }
+
+    /// A failed durable commit leaves Done visible for retry instead of
+    /// asking AppDelegate to enter menu-bar mode.
+    private func completeOnboarding() {
+        do {
+            try commitWizardCompletion(touchSentinel: setup.touchOnboardedSentinel)
+        } catch {
+            NSLog("[Tron] Failed to write onboarded sentinel: \(error.localizedDescription)")
         }
     }
 
