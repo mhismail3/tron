@@ -7,27 +7,23 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 
 /// Reconstructed session state for resuming.
 #[derive(Clone, Debug, Default)]
-pub struct ReconstructedState {
+pub(in crate::domains) struct ReconstructedState {
     /// Session model.
-    pub model: String,
+    pub(in crate::domains) model: String,
     /// Reconstructed messages.
-    pub messages: Vec<Message>,
+    pub(in crate::domains) messages: Vec<Message>,
     /// Cumulative token usage.
-    pub token_usage: TokenUsage,
+    pub(in crate::domains) token_usage: TokenUsage,
     /// Turn count.
-    pub turn_count: u32,
+    pub(in crate::domains) turn_count: u32,
     /// Working directory.
-    pub working_directory: Option<String>,
-    /// System prompt override.
-    pub system_prompt: Option<String>,
+    pub(in crate::domains) working_directory: Option<String>,
     /// Whether the session has ended.
-    pub is_ended: bool,
-    /// Last-seen reasoning level from `config.reasoning_level` events.
-    pub reasoning_level: Option<String>,
+    pub(in crate::domains) is_ended: bool,
 }
 
 /// Reconstruct session state from the event store.
-pub fn reconstruct(
+pub(in crate::domains::agent::r#loop) fn reconstruct(
     event_store: &EventStore,
     session_id: &str,
 ) -> Result<ReconstructedState, RuntimeError> {
@@ -128,9 +124,7 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
         token_usage,
         turn_count: state.turn_count as u32,
         working_directory: Some(state.working_directory.clone()),
-        system_prompt: state.system_prompt.clone(),
         is_ended: state.is_ended.unwrap_or(false),
-        reasoning_level: state.reasoning_level.clone(),
     }
 }
 
@@ -299,16 +293,6 @@ mod tests {
         } else {
             panic!("Expected assistant message at index 1");
         }
-    }
-
-    #[test]
-    fn reconstruct_reasoning_level_none_by_default() {
-        let store = make_store();
-        let session = store
-            .create_session("test-model", "/tmp", Some("test"), None)
-            .unwrap();
-        let state = reconstruct(&store, &session.session.id).unwrap();
-        assert!(state.reasoning_level.is_none());
     }
 
     #[test]

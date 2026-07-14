@@ -6,7 +6,7 @@
 //! |--------|---------|
 //! | `core` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
 //! | `session_manager` | Session CRUD, reconstructed-state cache, prompt eviction guard, fork |
-//! | `session_reconstructor` | Rebuild session state from persisted events |
+//! | `session_reconstructor` | Rebuild the runtime execution projection from persisted events |
 //! | `agent_runner` | High-level primitive run and event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
 //! | `event_persister` | Reconciles live sequence counters before direct transactional event-store writes |
@@ -21,6 +21,9 @@
 //! - [`core::Orchestrator`] coordinates sessions, runs, and stream broadcast.
 //! - [`session_manager::SessionManager`] owns the reconstructed-state cache and
 //!   delegates durable session lifecycle truth to the event store.
+//! - The runtime reconstruction projection contains only execution inputs used
+//!   on resume; prompt-request and agent-construction owners retain configuration
+//!   policy.
 //! - [`recovery::recover_incomplete_turns`] replays orphaned streaming journals
 //!   during startup.
 //!

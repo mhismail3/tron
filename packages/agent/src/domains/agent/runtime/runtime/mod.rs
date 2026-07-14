@@ -11,7 +11,8 @@ use crate::domains::session::event_store::{ActivitySummaryLine, MessagePreview};
 mod session_update;
 mod user_event;
 
-pub use session_update::{load_session_update_data, resume_prompt_session};
+pub use session_update::load_session_update_data;
+pub(in crate::domains::agent::runtime) use session_update::resume_prompt_session;
 pub use user_event::{
     build_user_content_override, build_user_event_payload, persist_user_message_event,
 };

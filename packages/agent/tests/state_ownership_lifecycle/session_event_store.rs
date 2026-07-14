@@ -30,7 +30,7 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
             "pub(crate) fn create_session",
             ".create_session(model, workspace_path, title, None)",
             "cached_sessions",
-            "pub fn resume_session",
+            "pub(in crate::domains) fn resume_session",
             "session_reconstructor::reconstruct",
             "pub(in crate::domains::agent) fn end_session",
             "cached_sessions.remove(session_id)",

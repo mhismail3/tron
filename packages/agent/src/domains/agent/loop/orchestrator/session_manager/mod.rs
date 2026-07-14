@@ -124,7 +124,7 @@ impl SessionManager {
 
     /// Resume an existing session by reconstructing from persisted events.
     #[instrument(skip(self), fields(session_id))]
-    pub fn resume_session(
+    pub(in crate::domains) fn resume_session(
         &self,
         session_id: &str,
     ) -> Result<Arc<ReconstructedState>, RuntimeError> {

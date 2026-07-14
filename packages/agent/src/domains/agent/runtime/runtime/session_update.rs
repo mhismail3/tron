@@ -20,7 +20,7 @@ fn session_update_read_error_is_busy(
     error.is_busy()
 }
 
-pub async fn resume_prompt_session(
+pub(in crate::domains::agent::runtime) async fn resume_prompt_session(
     session_manager: Arc<SessionManager>,
     session_id: String,
 ) -> Result<Arc<ReconstructedState>, CapabilityError> {
