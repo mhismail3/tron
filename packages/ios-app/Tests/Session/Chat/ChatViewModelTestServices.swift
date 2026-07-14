@@ -6,7 +6,8 @@ extension ChatViewModel {
     convenience init(
         engineClient: EngineClient,
         sessionId: String,
-        eventStoreManager: EventStoreManager? = nil
+        eventStoreManager: EventStoreManager? = nil,
+        photoPickerDataLoader: PhotoPickerDataLoader = .live
     ) {
         self.init(
             services: ChatSessionServices(
@@ -20,7 +21,8 @@ extension ChatViewModel {
                 workerLifecycle: DefaultWorkerLifecycleRepository(client: engineClient.workerLifecycle)
             ),
             sessionId: sessionId,
-            eventStoreManager: eventStoreManager
+            eventStoreManager: eventStoreManager,
+            photoPickerDataLoader: photoPickerDataLoader
         )
     }
 }

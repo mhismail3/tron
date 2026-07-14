@@ -296,7 +296,12 @@ edited host/port values are treated as a new pairing and continue into setup.
 boundary. Runtime callback installation for streaming text, UI update queue
 drain, capability completion ordering, and live event processing lives in
 `ChatViewModel+RuntimeCallbacks.swift` so new callback behavior does not grow
-the root state object. Chat-scoped error routing lives in
+the root state object. Its session-lifetime observation tasks retain only their
+observed sources, capture the view model weakly for mutations, and use a
+cancellation-aware wait so releasing the view model terminates idle bindings;
+PhotosPicker transfers use a narrow I/O adapter and one cancel-and-replace task
+that never retains the view model across data loading or image preparation.
+Chat-scoped error routing lives in
 `ChatViewModel+Errors.swift`: local failures append ephemeral
 `LocalChatNotification` timeline items with deduped replacement and are cleared
 when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
@@ -506,7 +511,9 @@ Transport and UI scheduling follows the CSD inventory in
 `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`.
 Long-lived `Task` handles are stored and cancelled by their owner, SwiftUI
 `.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
-callback bridges use bounded stream buffering or owner queues. Production code
+callback bridges use bounded stream buffering or owner queues. An observation
+task must not retain its lifecycle owner through a suspended wait, and stored
+observation waits must resume on cancellation. Production code
 must not use `Task.detached`, `DispatchQueue.global`, or
 `DispatchQueue.main.asyncAfter`; capture sessions use owner serial queues and
 UI delays use cancellation-aware Swift concurrency tasks.

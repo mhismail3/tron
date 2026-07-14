@@ -109,6 +109,10 @@ final class ChatViewModel {
 
     let services: ChatSessionServices
     let sessionId: String
+    /// PhotosPicker I/O adapter. The selection task captures this value rather
+    /// than retaining the mounted view model across an external data load.
+    @ObservationIgnored
+    let photoPickerDataLoader: PhotoPickerDataLoader
     /// Task for handling the live session event stream.
     @ObservationIgnored
     private var eventTask: Task<Void, Never>?
@@ -251,10 +255,16 @@ final class ChatViewModel {
 
     // MARK: - Initialization
 
-    init(services: ChatSessionServices, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
+    init(
+        services: ChatSessionServices,
+        sessionId: String,
+        eventStoreManager: EventStoreManager? = nil,
+        photoPickerDataLoader: PhotoPickerDataLoader = .live
+    ) {
         self.services = services
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
+        self.photoPickerDataLoader = photoPickerDataLoader
         self.connectionState = services.connection.connectionState
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
         setupBindings()
@@ -270,32 +280,37 @@ final class ChatViewModel {
     private var observationTasks: [Task<Void, Never>] = []
 
     private func setupBindings() {
-        observationTasks.append(Self.observeLoop({ self.services.connection.connectionState }) { [self] state in
-            self.connectionState = state
+        let connection = services.connection
+        let inputBarState = inputBarState
+        let micRecorder = micRecorder
+
+        observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
+            guard let self else { return }
+            connectionState = state
 
             if case .disconnected = state {
-                if self.agentPhase != .idle {
-                    self.agentPhase = .idle
+                if agentPhase != .idle {
+                    agentPhase = .idle
                 }
-                self.streamingManager.reset()
-                self.isCompacting = false
-                self.compactionInProgressMessageId = nil
-                self.runningCapabilityInvocationCount = 0
-                self.clearDisplayStreamState()
-                self.prunedLiveMessages.removeAll()
+                streamingManager.reset()
+                isCompacting = false
+                compactionInProgressMessageId = nil
+                runningCapabilityInvocationCount = 0
+                clearDisplayStreamState()
+                prunedLiveMessages.removeAll()
             }
         })
 
-        observationTasks.append(Self.observeLoop({ self.inputBarState.selectedImages }) { [self] images in
-            Task { await self.processSelectedImages(images) }
+        observationTasks.append(Self.observeLoop({ inputBarState.selectedImages }) { [weak self] images in
+            self?.startSelectedImageProcessing(images)
         })
 
-        observationTasks.append(Self.observeLoop({ self.micRecorder.isRecording }) { [self] recording in
-            self.isRecording = recording
+        observationTasks.append(Self.observeLoop({ micRecorder.isRecording }) { [weak self] recording in
+            self?.isRecording = recording
         })
 
-        observationTasks.append(Self.observeLoop({ self.micRecorder.audioLevel }) { [self] level in
-            self.recordingAudioLevel = level
+        observationTasks.append(Self.observeLoop({ micRecorder.audioLevel }) { [weak self] level in
+            self?.recordingAudioLevel = level
         })
     }
 
@@ -333,16 +348,20 @@ final class ChatViewModel {
         eventTask != nil
     }
 
-    /// Tracked fire-and-forget tasks — cancelled in deinit to prevent leaks
+    /// Single cancel-and-replace owner for the current PhotosPicker selection.
     @ObservationIgnored
-    private var backgroundTasks: [Task<Void, Never>] = []
-    /// Launch a tracked background task. Removed from tracking on completion.
+    var selectedImageTask: Task<Void, Never>?
+
+    /// Tracked fire-and-forget work keyed for removal on completion.
+    @ObservationIgnored
+    private var backgroundTasks: [UUID: Task<Void, Never>] = [:]
+
     func launchBackground(_ operation: @escaping @Sendable @MainActor () async -> Void) {
-        let task = Task { @MainActor [weak self] in
+        let id = UUID()
+        backgroundTasks[id] = Task { @MainActor [weak self] in
             await operation()
-            self?.backgroundTasks.removeAll { $0.isCancelled }
+            self?.backgroundTasks[id] = nil
         }
-        backgroundTasks.append(task)
     }
 
     deinit {
@@ -351,7 +370,8 @@ final class ChatViewModel {
         MainActor.assumeIsolated {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
-            for task in backgroundTasks { task.cancel() }
+            selectedImageTask?.cancel()
+            for task in backgroundTasks.values { task.cancel() }
             transcriptionTask?.cancel()
             micRecorder.cancelRecording()
         }
