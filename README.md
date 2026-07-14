@@ -152,9 +152,8 @@ Start with the document closest to the work:
   [development guide](packages/ios-app/docs/development.md).
 - [Mac architecture](packages/mac-app/docs/architecture.md) and
   [development guide](packages/mac-app/docs/development.md).
-- [Capability modularity](packages/agent/docs/capability-modularity-scorecard.md),
-  [capability pool](packages/agent/docs/engine-capability-pool-scorecard.md), and
-  [dynamic replacement](packages/agent/docs/capability-dynamic-replacement-scorecard.md)
+- [Capability modularity](packages/agent/docs/capability-modularity-scorecard.md)
+  and [dynamic replacement](packages/agent/docs/capability-dynamic-replacement-scorecard.md)
   scorecards.
 
 The root README intentionally stays short. Detailed catalogs and audit evidence

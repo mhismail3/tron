@@ -106,18 +106,10 @@ Current living entry points:
 - `packages/agent/docs/capability-modularity-evidence-manifest.md`:
   companion evidence manifest for capability modularity baseline facts and
   Kernel Boundary Lockdown and Capability Binding Policy validation commands.
-- `packages/agent/docs/engine-capability-pool-scorecard.md`: active
-  scorecard for the unified capability pool. It classifies both model-facing
-  `capability::execute` operations and engine catalog functions as
-  runtime-routable, producer-extensible, or kernel-evolution-only, with
-  agent-facing visibility guidance for normal session work versus diagnostics
-  and kernel evolution.
-- `packages/agent/docs/engine-capability-pool-inventory.tsv`:
-  machine-readable inventory covering every current `capability::execute`
-  operation and every startup-registered catalog function exactly once.
-- `packages/agent/docs/engine-capability-pool-evidence-manifest.md`:
-  companion evidence manifest for the capability-pool classifier, catalog
-  projection, and exact-coverage invariant tests.
+- `packages/agent/src/domains/capability/pool.rs`: live typed classifier for
+  model-facing operations and startup-registered catalog functions. It derives
+  replacement class, visibility, minimality, and kernel-evolution constraints
+  from canonical operation/catalog owners and tests those live sources directly.
 - `packages/agent/docs/capability-dynamic-replacement-scorecard.md`: active
   scorecard for governed candidate, route, activation, event, rollback, and
   supervised module-runtime replacement-route milestones.

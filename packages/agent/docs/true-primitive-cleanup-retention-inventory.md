@@ -45,7 +45,7 @@ The TSV covers tracked and newly introduced files under:
 | implementation | 881 |
 | support | 396 |
 | test | 628 |
-| docs | 146 |
+| docs | 143 |
 | delete | 0 |
 
 ## Owner Summary
@@ -63,7 +63,7 @@ The TSV covers tracked and newly introduced files under:
 | `context_control` | 9 |
 | `device` | 7 |
 | `docs` | 3 |
-| `docs/static gates` | 135 |
+| `docs/static gates` | 132 |
 | `domain_worker` | 7 |
 | `engine` | 110 |
 | `filesystem` | 7 |
