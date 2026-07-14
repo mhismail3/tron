@@ -190,11 +190,6 @@ impl Orchestrator {
         &self.invocation_abort_registry
     }
 
-    /// Get the session manager.
-    pub fn session_manager(&self) -> &Arc<SessionManager> {
-        &self.session_manager
-    }
-
     /// Get the broadcast emitter.
     pub fn broadcast(&self) -> &Arc<EventEmitter> {
         &self.broadcast

@@ -23,13 +23,13 @@ use crate::domains::agent::r#loop::orchestrator::session_reconstructor::{
 };
 
 /// Result of a session fork operation.
-pub struct ForkSessionResult {
+pub(in crate::domains) struct ForkSessionResult {
     /// The new forked session ID.
-    pub new_session_id: String,
+    pub(in crate::domains) new_session_id: String,
     /// The root event in the new session (the fork event).
-    pub root_event_id: String,
+    pub(in crate::domains) root_event_id: String,
     /// The event ID from which the fork was created.
-    pub forked_from_event_id: String,
+    pub(in crate::domains) forked_from_event_id: String,
 }
 
 /// Cached reconstructed state with access tracking for idle eviction.
@@ -62,21 +62,21 @@ impl CachedSession {
 
 /// Filter for listing sessions.
 #[derive(Clone, Debug, Default)]
-pub struct SessionFilter {
+pub(in crate::domains) struct SessionFilter {
     /// Filter by workspace path.
-    pub workspace_path: Option<String>,
+    pub(in crate::domains) workspace_path: Option<String>,
     /// Include archived sessions.
-    pub include_archived: bool,
+    pub(in crate::domains) include_archived: bool,
     /// Maximum number of results.
-    pub limit: Option<usize>,
+    pub(in crate::domains) limit: Option<usize>,
     /// Skip results.
-    pub offset: Option<usize>,
+    pub(in crate::domains) offset: Option<usize>,
     /// Immutable upper creation-time boundary for a paginated snapshot.
-    pub snapshot_created_at: Option<String>,
+    pub(in crate::domains) snapshot_created_at: Option<String>,
     /// Stable keyset boundary creation timestamp.
-    pub before_created_at: Option<String>,
+    pub(in crate::domains) before_created_at: Option<String>,
     /// Stable keyset boundary session ID tie-breaker.
-    pub before_session_id: Option<String>,
+    pub(in crate::domains) before_session_id: Option<String>,
 }
 
 /// Session manager.
@@ -96,7 +96,7 @@ impl SessionManager {
 
     /// Create a new session.
     #[instrument(skip(self), fields(model, working_dir = workspace_path))]
-    pub fn create_session(
+    pub(crate) fn create_session(
         &self,
         model: &str,
         workspace_path: &str,
@@ -168,7 +168,10 @@ impl SessionManager {
     }
 
     /// End a session (remove it from the active map, persist `session.end`).
-    pub fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub(in crate::domains::agent) fn end_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), RuntimeError> {
         let _ = self.cached_sessions.remove(session_id);
 
         // Persist session.end event before marking the session as ended
@@ -190,7 +193,7 @@ impl SessionManager {
     }
 
     /// Fork a session, optionally from a specific event (defaults to HEAD).
-    pub fn fork_session(
+    pub(in crate::domains) fn fork_session(
         &self,
         session_id: &str,
         from_event_id: Option<&str>,
@@ -226,7 +229,7 @@ impl SessionManager {
     }
 
     /// Archive a session.
-    pub fn archive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub(in crate::domains) fn archive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let _ = self.cached_sessions.remove(session_id);
         let _ = self
             .event_store
@@ -236,7 +239,10 @@ impl SessionManager {
     }
 
     /// Unarchive a session.
-    pub fn unarchive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub(in crate::domains) fn unarchive_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), RuntimeError> {
         let _ = self
             .event_store
             .clear_session_ended(session_id)
@@ -245,7 +251,7 @@ impl SessionManager {
     }
 
     /// Delete a session.
-    pub fn delete_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub(in crate::domains) fn delete_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let _ = self.cached_sessions.remove(session_id);
         let _ = self
             .event_store
@@ -255,7 +261,7 @@ impl SessionManager {
     }
 
     /// Get session info.
-    pub fn get_session(
+    pub(in crate::domains) fn get_session(
         &self,
         session_id: &str,
     ) -> Result<Option<crate::domains::session::event_store::SessionRow>, RuntimeError> {
@@ -265,7 +271,7 @@ impl SessionManager {
     }
 
     /// List sessions.
-    pub fn list_sessions(
+    pub(in crate::domains) fn list_sessions(
         &self,
         filter: &SessionFilter,
     ) -> Result<Vec<crate::domains::session::event_store::SessionRow>, RuntimeError> {
@@ -302,13 +308,8 @@ impl SessionManager {
     }
 
     /// Invalidate cached session state, forcing re-reconstruction on next `resume_session`.
-    pub fn invalidate_session(&self, session_id: &str) {
+    pub(in crate::domains) fn invalidate_session(&self, session_id: &str) {
         let _ = self.cached_sessions.remove(session_id);
-    }
-
-    /// Get the event store.
-    pub fn event_store(&self) -> &Arc<EventStore> {
-        &self.event_store
     }
 
     // ── Cache eviction ────────────────────────────────────────────────
@@ -318,7 +319,7 @@ impl SessionManager {
     /// Cache entries pinned by an active prompt are never evicted.
     /// Evicted sessions are seamlessly reconstructed via `resume_session()`.
     /// Returns the number of sessions evicted.
-    pub fn evict_idle_sessions(&self, ttl: Duration) -> usize {
+    pub(crate) fn evict_idle_sessions(&self, ttl: Duration) -> usize {
         let now = Instant::now();
         let mut evicted = 0usize;
         self.cached_sessions.retain(|session_id, cached| {

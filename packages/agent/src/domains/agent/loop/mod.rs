@@ -39,5 +39,6 @@ pub(crate) mod types;
 pub(crate) use event_emitter::EventEmitter;
 pub use orchestrator::core::Orchestrator;
 pub use orchestrator::recovery::recover_incomplete_turns;
-pub use orchestrator::session_manager::{SessionFilter, SessionManager};
+pub(in crate::domains) use orchestrator::session_manager::SessionFilter;
+pub use orchestrator::session_manager::SessionManager;
 pub use profile_runtime::ProfileRuntime;

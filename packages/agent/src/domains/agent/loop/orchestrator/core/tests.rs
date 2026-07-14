@@ -26,7 +26,7 @@ fn create_orchestrator() {
 async fn create_session_through_orchestrator() {
     let orch = make_orchestrator();
     let _ = orch
-        .session_manager()
+        .session_manager
         .create_session("model", "/tmp", Some("test"))
         .unwrap();
 

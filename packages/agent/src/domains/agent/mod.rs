@@ -40,7 +40,9 @@
 //!
 //! External integration tests construct a real server runtime through the
 //! narrow re-exports below. The loop module itself remains private so tests do
-//! not grow a dependency on its internal submodule layout.
+//! not grow a dependency on its internal submodule layout. `SessionManager`
+//! stays public for runtime construction; mutating session lifecycle operations
+//! stay crate- or domain-owner scoped.
 
 pub(crate) mod context;
 pub(crate) mod contract;
