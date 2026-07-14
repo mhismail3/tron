@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 131 production scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 130 production scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,
@@ -40,7 +40,7 @@ artifacts visible to the CSD harness:
   `DispatchQueue`, `AsyncStream`, timers, debounce/coalescing markers, and
   `AsyncSemaphore`.
 
-Scheduler class distribution for the 131 production scheduling-surface rows:
+Scheduler class distribution for the 130 production scheduling-surface rows:
 
 | Scheduler class | Rows |
 |---|---:|
@@ -52,7 +52,7 @@ Scheduler class distribution for the 131 production scheduling-surface rows:
 | `actor_serialization` | 8 |
 | `external_callback_bridge` | 9 |
 | `view_scoped_task` | 7 |
-| `bounded_queue` | 4 |
+| `bounded_queue` | 3 |
 | `blocking_supervisor` | 1 |
 | `ack_coalescer` | 1 |
 
@@ -64,7 +64,6 @@ Static-gate/predecessor rows: 27 `test_fixture` rows.
 |---|---|---|
 | Shutdown coordinator | `app_lifecycle` | Registered tasks self-prune, reject late registration after close, run phase callbacks with timeout/panic isolation, drain with bounded timeout, and abort slow tasks. |
 | Blocking task supervisor | `shared_server` | Blocking work is bounded by semaphore permits, tracked by active guards, registered with shutdown, and drained by the coordinator. |
-| Event persister | `agent_orchestrator` | Bounded MPSC preserves send order into one worker; worker death and flush/shutdown paths are tested. |
 | Agent runner forwarder | `agent_orchestrator` | Forwarder task owns a cancellation token and drains buffered events before `agent.ready`. |
 | Provider retry | `model_domain` | Backoff observes cancellation and has focused retry/cancel tests. |
 | Queue drainer | `engine_runtime_transport` | One drainer per queue owns lease-owner identity, cadence, retry, and dead-letter timing. |

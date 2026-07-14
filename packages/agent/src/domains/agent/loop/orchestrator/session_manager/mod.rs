@@ -157,11 +157,9 @@ impl SessionManager {
         Ok(active)
     }
 
-    /// End a session (flush events, persist session.end, remove from active map).
-    pub async fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        if let Some((_, cached)) = self.active_sessions.remove(session_id) {
-            cached.session.context.persister.flush().await?;
-        }
+    /// End a session (remove it from the active map, persist `session.end`).
+    pub fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        let _ = self.active_sessions.remove(session_id);
 
         // Persist session.end event before marking the session as ended
         let _ = self

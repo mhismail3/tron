@@ -141,8 +141,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
-    )
-    .await;
+    );
     info!(
         component = "agent.turn",
         agent_event = "turn_started_event_recorded",
@@ -267,9 +266,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         &model_request_audit,
         sequence_counter,
-    )
-    .await
-    {
+    ) {
         let error_msg = format!("failed to persist model provider request audit: {error}");
         error!(session_id, turn, error = %error_msg);
         let failure = FailureEnvelope::new(
@@ -501,8 +498,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 previous_context_baseline,
             ),
             sequence_counter,
-        )
-        .await;
+        );
 
         // Finalize journal — interrupted message was persisted successfully
         if let Some(j) = journal.take() {
@@ -570,9 +566,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         assistant_payload,
         sequence_counter,
-    )
-    .await
-    {
+    ) {
         let error_msg = format!("failed to persist assistant message: {error}");
         error!(session_id, turn, error = %error_msg);
         let failure = FailureEnvelope::new(
@@ -680,8 +674,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         sequence_counter,
         run_context.engine_trace_id.as_ref(),
         run_context.parent_invocation_id.as_ref(),
-    )
-    .await;
+    );
 
     info!(
         component = "agent.turn",

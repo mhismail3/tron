@@ -10,7 +10,7 @@
 //! | `session_context` | Per-session context and workspace path |
 //! | `agent_runner` | High-level primitive run and event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
-//! | `event_persister` | Persists agent events to the event store (supports pre-assigned sequences) |
+//! | `event_persister` | Reconciles live sequence counters before direct transactional event-store writes |
 //! | `turn_accumulator` | In-memory per-session scratchpad of in-flight turn content for `session.reconstruct` |
 //! | `streaming_journal` | Per-turn append-only WAL for crash recovery of ordered partial LLM output |
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
@@ -60,6 +60,8 @@
 //!
 //! - Per-session sequence counters are monotonic and reconciled against durable
 //!   event-store truth before runtime persistence.
+//! - The event store, not an agent-owned queue, serializes per-session writes
+//!   and owns parent/head threading; persistence calls return after commit.
 //! - Active runs must hold a registry permit and remove their active session
 //!   entry on drop.
 //! - Streaming journal recovery runs before accepting new connections.

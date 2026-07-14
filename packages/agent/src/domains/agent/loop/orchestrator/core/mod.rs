@@ -517,7 +517,7 @@ impl Orchestrator {
             .unwrap_or_default();
 
         for session in sessions {
-            if let Err(e) = self.session_manager.end_session(&session.id).await {
+            if let Err(e) = self.session_manager.end_session(&session.id) {
                 warn!(session_id = %session.id, error = %e, "failed to end session during shutdown");
             }
         }

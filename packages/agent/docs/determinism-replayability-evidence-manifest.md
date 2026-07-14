@@ -179,8 +179,8 @@ Proof:
   snapshot for custom responders.
 - `execute_turn` persists `model.provider_request` through
   `persist_model_provider_request_audit` before calling `responder.respond`.
-- `provider_request_audit_persist_failure_prevents_model_response` aborts the
-  persister worker and proves `respond` is not called.
+- `provider_request_audit_persist_failure_prevents_model_response` forces an
+  authoritative event-store rejection and proves `respond` is not called.
 - `provider_request_audit_persists_before_assistant_message` proves the audit
   row is persisted before the assistant message row in session sequence order.
 

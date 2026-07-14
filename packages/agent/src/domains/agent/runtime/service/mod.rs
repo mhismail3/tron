@@ -5,9 +5,9 @@
 //! lightweight session title generation, and the major run-turn phases. The
 //! service also owns the outer structured logging lifecycle for accepted prompt
 //! runs so logs, session events, trace records, and agent-result resources share
-//! common run/session/trace identifiers. Completion flushes the event persister
-//! before deriving `agent_result` text and its event reference from reconstructed
-//! session truth; it does not maintain a second final-answer state.
+//! common run/session/trace identifiers. Completion derives `agent_result` text
+//! and its event reference after the turn's synchronous persistence calls have
+//! committed; it does not maintain a second final-answer state.
 
 use std::sync::atomic::AtomicI64;
 

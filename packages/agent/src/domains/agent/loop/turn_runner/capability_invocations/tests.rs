@@ -349,7 +349,6 @@ async fn assert_provider_result_identity_survives_reconstruction(
             }),
             Some(&h.counter),
         )
-        .await
         .expect("persist assistant invocation");
 
     let outcome = execute_capability_invocation_phase(CapabilityInvocationPhaseParams {
@@ -390,7 +389,6 @@ async fn assert_provider_result_identity_survives_reconstruction(
         expected_operation
     );
 
-    h.persister.flush().await.expect("flush persisted events");
     let completed = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
     assert_eq!(completed.len(), 1);
     let completed_payload: Value =
@@ -521,7 +519,6 @@ async fn parallel_phase_broadcasts_all_persisted_starts_before_first_completion(
         TronEvent::CapabilityInvocationCompleted { .. }
     ));
 
-    h.persister.flush().await.unwrap();
     let persisted_starts = persisted_rows(&h.store, &h.session_id, "capability.invocation.started");
     let persisted_completions =
         persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
@@ -642,7 +639,6 @@ async fn context_boundary_terminalizes_later_started_invocations_without_executi
 
     assert_eq!(outcome.capability_invocations_executed, 1);
     assert!(outcome.stop_turn_requested);
-    h.persister.flush().await.expect("flush lifecycle rows");
     let starts = persisted_rows(&h.store, &h.session_id, "capability.invocation.started");
     let completions = persisted_rows(&h.store, &h.session_id, "capability.invocation.completed");
     assert_eq!(starts.len(), 2);
@@ -676,8 +672,6 @@ async fn context_boundary_terminalizes_later_started_invocations_without_executi
 #[tokio::test]
 async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
     let mut h = phase_persistence_harness().await;
-    h.persister.worker_handle.abort();
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     let (_engine_host, surface) = phase_engine_surface().await;
     let tempdir = tempfile::tempdir().expect("working directory");
     let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
@@ -694,7 +688,7 @@ async fn phase_does_not_broadcast_starts_when_start_persistence_fails() {
         stream_result: &stream_result,
         context_manager: &mut context_manager,
         primitive_surface: &surface,
-        session_id: &h.session_id,
+        session_id: "missing-session",
         emitter: &h.emitter,
         cancel: &cancel,
         workspace_id: None,

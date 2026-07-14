@@ -363,6 +363,15 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             run_migrations(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER fail_model_provider_request
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'model.provider_request'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced provider audit failure');
+                 END;",
+            )
+            .unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let session = store
@@ -378,8 +387,6 @@ mod tests {
         );
 
         let persister = Arc::new(EventPersister::new(Arc::clone(&store)));
-        persister.worker_handle.abort();
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         agent.set_persister(Some(persister));
 
         let result = run_agent(
@@ -403,6 +410,12 @@ mod tests {
             .into_iter()
             .map(|event| event.event_type)
             .collect();
+        assert!(
+            event_types
+                .iter()
+                .any(|event_type| event_type == "stream.turn_start"),
+            "the scoped trigger must allow earlier turn persistence"
+        );
         assert!(
             !event_types
                 .iter()
@@ -446,7 +459,6 @@ mod tests {
             None,
         )
         .await;
-        persister.flush().await.unwrap();
 
         assert_eq!(result.stop_reason, StopReason::EndTurn);
         assert_eq!(respond_calls.load(Ordering::SeqCst), 1);

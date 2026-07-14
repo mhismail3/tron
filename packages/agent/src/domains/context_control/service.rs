@@ -566,7 +566,6 @@ pub(crate) async fn record_runtime_compaction_action(
                 }),
                 input.sequence_counter,
             )
-            .await
             .map_err(runtime_error)?
     };
     deps.session_manager.invalidate_session(input.session_id);

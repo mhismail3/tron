@@ -185,7 +185,7 @@ pub(super) fn emit_persisted_capability_invocation_completed(
 /// The persisted and broadcast events share the same sequence; when a
 /// resumed session's in-memory counter is behind the DB, the DB allocator
 /// wins and the counter is advanced before any later pre-assigned events.
-pub(super) async fn emit_turn_start(
+pub(super) fn emit_turn_start(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
     session_id: &str,
@@ -195,14 +195,11 @@ pub(super) async fn emit_turn_start(
     parent_invocation_id: Option<&InvocationId>,
 ) {
     if let Some(persister) = persister {
-        let row = match persister
-            .append(
-                session_id,
-                EventType::StreamTurnStart,
-                json!({ "turn": turn }),
-            )
-            .await
-        {
+        let row = match persister.append(
+            session_id,
+            EventType::StreamTurnStart,
+            json!({ "turn": turn }),
+        ) {
             Ok(row) => row,
             Err(error) => {
                 warn!(session_id, turn, error = %error, "failed to persist turn-start event; skipping broadcast");
@@ -270,7 +267,7 @@ pub(super) fn build_interrupted_message_payload(
 /// `ModelResponder::respond`. If the write fails, the provider stream must not
 /// be opened because replay would be missing the exact request that produced
 /// the response.
-pub(super) async fn persist_model_provider_request_audit(
+pub(super) fn persist_model_provider_request_audit(
     persister: Option<&EventPersister>,
     session_id: &str,
     audit: &ModelProviderRequestAudit,
@@ -284,33 +281,28 @@ pub(super) async fn persist_model_provider_request_audit(
             "failed to serialize model provider request: {error}"
         ))
     })?;
-    persister
-        .append_with_runtime_sequence(
-            session_id,
-            EventType::ModelProviderRequest,
-            payload,
-            sequence_counter,
-        )
-        .await?;
+    persister.append_with_runtime_sequence(
+        session_id,
+        EventType::ModelProviderRequest,
+        payload,
+        sequence_counter,
+    )?;
     Ok(())
 }
 
-pub(super) async fn persist_interrupted_message(
+pub(super) fn persist_interrupted_message(
     persister: Option<&EventPersister>,
     session_id: &str,
     payload: Option<Value>,
     sequence_counter: Option<&AtomicI64>,
 ) {
     if let (Some(persister), Some(payload)) = (persister, payload) {
-        if let Err(error) = persister
-            .append_with_runtime_sequence(
-                session_id,
-                EventType::MessageAssistant,
-                payload,
-                sequence_counter,
-            )
-            .await
-        {
+        if let Err(error) = persister.append_with_runtime_sequence(
+            session_id,
+            EventType::MessageAssistant,
+            payload,
+            sequence_counter,
+        ) {
             error!(
                 session_id,
                 error = %error,
@@ -499,7 +491,7 @@ pub(super) fn build_completed_assistant_payload(
 /// corresponding `ResponseComplete` broadcast can be gated on successful
 /// persistence. A silent log-and-continue here would let `ResponseComplete`
 /// reach iOS with no matching message in the event log.
-pub(super) async fn persist_completed_assistant_message(
+pub(super) fn persist_completed_assistant_message(
     persister: Option<&EventPersister>,
     session_id: &str,
     payload: Value,
@@ -515,7 +507,6 @@ pub(super) async fn persist_completed_assistant_message(
             payload,
             sequence_counter,
         )
-        .await
         .map(|_| ())
         .inspect_err(|error| {
             error!(
@@ -530,7 +521,7 @@ pub(super) async fn persist_completed_assistant_message(
 ///
 /// INVARIANT: persist before broadcast. On persist failure the broadcast
 /// is skipped so iOS subscribers and the persisted DB state stay consistent.
-pub(super) async fn emit_turn_end(
+pub(super) fn emit_turn_end(
     emitter: &Arc<EventEmitter>,
     persister: Option<&EventPersister>,
     session_id: &str,
@@ -581,15 +572,12 @@ pub(super) async fn emit_turn_end(
             payload["cost"] = json!(cost);
         }
 
-        if let Err(error) = persister
-            .append_with_runtime_sequence(
-                session_id,
-                EventType::StreamTurnEnd,
-                payload,
-                sequence_counter,
-            )
-            .await
-        {
+        if let Err(error) = persister.append_with_runtime_sequence(
+            session_id,
+            EventType::StreamTurnEnd,
+            payload,
+            sequence_counter,
+        ) {
             warn!(
                 session_id,
                 turn,

@@ -67,8 +67,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         has_error = result.error.is_some(),
         "agent prompt run finalizing"
     );
-    let _ = persister.flush().await;
-    persist_interrupted_if_needed(&persister, &session_id, &result).await;
+    persist_interrupted_if_needed(&persister, &session_id, &result);
     emit_run_error_if_needed(
         &broadcast,
         &session_id,
@@ -260,7 +259,7 @@ fn assistant_content_text(content: &serde_json::Value) -> String {
     }
 }
 
-async fn persist_interrupted_if_needed(
+fn persist_interrupted_if_needed(
     persister: &Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
     session_id: &str,
     result: &crate::domains::agent::r#loop::types::RunResult,
@@ -277,31 +276,27 @@ async fn persist_interrupted_if_needed(
         FailureOrigin::AgentRuntime,
     )
     .with_session_id(Some(session_id.to_owned()));
-    if let Err(error) = persister
-        .append(
-            session_id,
-            crate::domains::session::event_store::EventType::TurnFailed,
-            serde_json::json!({
-                "turn": result.turns_executed,
-                "error": failure.message.clone(),
-                "code": failure.code.clone(),
-                "category": failure.category.as_str(),
-                "retryable": failure.retryable,
-                "recoverable": failure.recoverable,
-                "origin": failure.origin.as_str(),
-                "details": failure.details_with_failure(),
-                "partialContent": null,
-            }),
-        )
-        .await
-    {
+    if let Err(error) = persister.append(
+        session_id,
+        crate::domains::session::event_store::EventType::TurnFailed,
+        serde_json::json!({
+            "turn": result.turns_executed,
+            "error": failure.message.clone(),
+            "code": failure.code.clone(),
+            "category": failure.category.as_str(),
+            "retryable": failure.retryable,
+            "recoverable": failure.recoverable,
+            "origin": failure.origin.as_str(),
+            "details": failure.details_with_failure(),
+            "partialContent": null,
+        }),
+    ) {
         tracing::error!(
             session_id = %session_id,
             error = %error,
             "failed to persist interrupted turn failure"
         );
     }
-    let _ = persister.flush().await;
 }
 
 fn emit_run_error_if_needed(

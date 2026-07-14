@@ -255,7 +255,7 @@ fn ios_terminal_task_owners_cancel_and_await_exact_handles() {
     assert!(refresh.contains("await shutdownTask.value"));
 
     let inventory = inventory_by_path();
-    assert_eq!(inventory.len(), 158, "CSD inventory row total changed");
+    assert_eq!(inventory.len(), 157, "CSD inventory row total changed");
     assert_eq!(
         inventory
             .values()
@@ -269,7 +269,7 @@ fn ios_terminal_task_owners_cancel_and_await_exact_handles() {
             .values()
             .filter(|row| row.scheduler_class != "test_fixture")
             .count(),
-        131,
+        130,
         "CSD production row total changed"
     );
     for (scheduler_class, expected) in [

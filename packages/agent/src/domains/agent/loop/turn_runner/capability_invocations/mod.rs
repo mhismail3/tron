@@ -204,15 +204,12 @@ pub(super) async fn execute_capability_invocation_phase(
             ) {
                 payload.extend(identity);
             }
-            let row = match persister
-                .append_with_runtime_sequence(
-                    params.session_id,
-                    EventType::CapabilityInvocationStarted,
-                    payload.clone(),
-                    params.sequence_counter,
-                )
-                .await
-            {
+            let row = match persister.append_with_runtime_sequence(
+                params.session_id,
+                EventType::CapabilityInvocationStarted,
+                payload.clone(),
+                params.sequence_counter,
+            ) {
                 Ok(row) => row,
                 Err(error) => {
                     warn!(
@@ -424,15 +421,12 @@ pub(super) async fn execute_capability_invocation_phase(
                         ) {
                             payload.extend(identity);
                         }
-                        match persister
-                            .append_with_runtime_sequence(
-                                params.session_id,
-                                EventType::CapabilityInvocationCompleted,
-                                payload.clone(),
-                                params.sequence_counter,
-                            )
-                            .await
-                        {
+                        match persister.append_with_runtime_sequence(
+                            params.session_id,
+                            EventType::CapabilityInvocationCompleted,
+                            payload.clone(),
+                            params.sequence_counter,
+                        ) {
                             Ok(row) => {
                                 super::persistence::emit_persisted_capability_invocation_completed(
                                     params.emitter,
@@ -561,15 +555,12 @@ async fn persist_skipped_invocations(
         ) {
             payload.extend(identity);
         }
-        match persister
-            .append_with_runtime_sequence(
-                params.session_id,
-                EventType::CapabilityInvocationCompleted,
-                payload.clone(),
-                params.sequence_counter,
-            )
-            .await
-        {
+        match persister.append_with_runtime_sequence(
+            params.session_id,
+            EventType::CapabilityInvocationCompleted,
+            payload.clone(),
+            params.sequence_counter,
+        ) {
             Ok(row) => super::persistence::emit_persisted_capability_invocation_completed(
                 params.emitter,
                 &row,

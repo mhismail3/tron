@@ -53,14 +53,14 @@ async fn resume_already_active() {
     assert_eq!(mgr.active_count(), 1);
 }
 
-#[tokio::test]
-async fn end_session() {
+#[test]
+fn end_session() {
     let mgr = make_manager();
     let sid = mgr
         .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
-    mgr.end_session(&sid).await.unwrap();
+    mgr.end_session(&sid).unwrap();
     assert!(!mgr.is_active(&sid));
 }
 
@@ -68,8 +68,8 @@ async fn end_session() {
 /// event. This test guards against any future change that accidentally
 /// stops emitting the event (e.g. refactoring `end_session` to skip
 /// the append) because the iOS display layer treats the event as current.
-#[tokio::test]
-async fn end_session_emits_session_end_event() {
+#[test]
+fn end_session_emits_session_end_event() {
     use crate::domains::session::event_store::ListEventsOptions;
 
     let mgr = make_manager();
@@ -77,7 +77,7 @@ async fn end_session_emits_session_end_event() {
         .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
-    mgr.end_session(&sid).await.unwrap();
+    mgr.end_session(&sid).unwrap();
 
     let events = mgr
         .event_store
