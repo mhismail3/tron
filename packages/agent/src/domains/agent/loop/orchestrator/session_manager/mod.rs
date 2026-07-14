@@ -24,16 +24,6 @@ use crate::domains::agent::r#loop::orchestrator::session_reconstructor::{
     self, ReconstructedState,
 };
 
-/// Result of a session fork operation.
-pub(in crate::domains) struct ForkSessionResult {
-    /// The new forked session ID.
-    pub(in crate::domains) new_session_id: String,
-    /// The root event in the new session (the fork event).
-    pub(in crate::domains) root_event_id: String,
-    /// The event ID from which the fork was created.
-    pub(in crate::domains) forked_from_event_id: String,
-}
-
 /// Cached reconstructed state with access tracking for idle eviction.
 struct CachedSession {
     /// Immutable projection rebuilt from durable session events.
@@ -170,42 +160,6 @@ impl SessionManager {
             .end_session(session_id)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
         Ok(())
-    }
-
-    /// Fork a session, optionally from a specific event (defaults to HEAD).
-    pub(in crate::domains) fn fork_session(
-        &self,
-        session_id: &str,
-        from_event_id: Option<&str>,
-        model: Option<&str>,
-        title: Option<&str>,
-    ) -> Result<ForkSessionResult, RuntimeError> {
-        let fork_event_id = if let Some(id) = from_event_id {
-            id.to_owned()
-        } else {
-            let session = self
-                .event_store
-                .get_session(session_id)
-                .map_err(|e| RuntimeError::Persistence(e.to_string()))?
-                .ok_or_else(|| RuntimeError::SessionNotFound(session_id.to_owned()))?;
-            session
-                .head_event_id
-                .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?
-        };
-
-        let result = self
-            .event_store
-            .fork(
-                &fork_event_id,
-                &crate::domains::session::event_store::ForkOptions { model, title },
-            )
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
-
-        Ok(ForkSessionResult {
-            new_session_id: result.session.id,
-            root_event_id: result.fork_event.id,
-            forked_from_event_id: fork_event_id,
-        })
     }
 
     /// Archive a session.

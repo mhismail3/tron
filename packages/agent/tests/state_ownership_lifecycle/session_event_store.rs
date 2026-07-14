@@ -40,9 +40,6 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         ],
     );
     for required in [
-        "pub(in crate::domains) fn fork_session",
-        "head_event_id",
-        ".fork(",
         "pub(in crate::domains) fn archive_session",
         "cached_sessions.remove(session_id)",
         ".end_session(session_id)",
@@ -223,8 +220,10 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
     }
     let lifecycle_fork = read_repo_file("packages/agent/src/domains/session/lifecycle/fork.rs");
     for required in [
-        "fork_session(",
-        "from_event_id.as_deref()",
+        "get_session(&session_id_for_fork)",
+        "head_event_id",
+        "ForkOptions",
+        ".fork(",
         "init_sequence_counter(&new_session_id, 0)",
         "TronEvent::SessionForked",
     ] {

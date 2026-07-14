@@ -5,7 +5,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `core` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
-//! | `session_manager` | Session CRUD, reconstructed-state cache, prompt eviction guard, fork |
+//! | `session_manager` | Cache-coordinated session lifecycle, reconstructed-state cache, prompt eviction guard |
 //! | `session_reconstructor` | Rebuild the runtime execution projection from persisted events |
 //! | `agent_runner` | High-level primitive run and event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
