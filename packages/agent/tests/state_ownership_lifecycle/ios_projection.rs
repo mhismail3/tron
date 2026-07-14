@@ -475,7 +475,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     );
 
     let all_rows: Vec<&InventoryRow> = inventory.values().flatten().collect();
-    assert_eq!(all_rows.len(), 823, "SOL inventory row total drifted");
+    assert_eq!(all_rows.len(), 822, "SOL inventory row total drifted");
     assert_eq!(
         all_rows
             .iter()
@@ -489,7 +489,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
             .iter()
             .filter(|row| row.state_class == "ephemeral_runtime")
             .count(),
-        350,
+        349,
         "SOL ephemeral_runtime total drifted"
     );
     let manager_rows = inventory

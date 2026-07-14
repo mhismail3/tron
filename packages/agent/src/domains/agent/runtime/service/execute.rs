@@ -10,6 +10,7 @@ use super::{
     ShutdownCancelForwarder, build_user_content_override, build_user_event_payload,
     persist_user_message_event, resume_prompt_session, run_agent, spawn_session_title_generation,
 };
+use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let PromptRunPlan {
@@ -70,29 +71,20 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let settings = crate::domains::settings::get_settings();
     let title_responder_factory = responder_factory.clone();
 
-    let (state, persister) = match resume_prompt_session(
-        session_manager.clone(),
-        session_id.clone(),
-    )
-    .await
-    {
-        Ok(active) => (active.state, active.persister),
+    let state = match resume_prompt_session(session_manager.clone(), session_id.clone()).await {
+        Ok(state) => state,
         Err(error) => {
             warn!(session_id = %session_id, error = %error, "failed to resume session, starting fresh");
-            let fresh_state =
+            Arc::new(
                 crate::domains::agent::r#loop::orchestrator::session_reconstructor::ReconstructedState {
                     model: model.clone(),
                     working_directory: Some(working_dir.clone()),
                     ..Default::default()
-                };
-            let fresh_persister = Arc::new(
-                crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister::new(
-                    event_store.clone(),
-                ),
-            );
-            (fresh_state, fresh_persister)
+                },
+            )
         }
     };
+    let persister = Arc::new(EventPersister::new(event_store.clone()));
     trace!(
         component = "agent.runtime",
         agent_event = "session_state_resolved",

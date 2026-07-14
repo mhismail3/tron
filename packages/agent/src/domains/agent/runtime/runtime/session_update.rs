@@ -1,14 +1,9 @@
-use super::{ActivitySummaryLine, Duration, EventPersister, MessagePreview, ReconstructedState};
+use super::{ActivitySummaryLine, Duration, MessagePreview, ReconstructedState};
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use std::sync::Arc;
-
-pub struct ResumedPromptSession {
-    pub state: ReconstructedState,
-    pub persister: Arc<EventPersister>,
-}
 
 pub struct SessionUpdateData {
     pub session: crate::domains::session::event_store::SessionRow,
@@ -28,17 +23,13 @@ fn session_update_read_error_is_busy(
 pub async fn resume_prompt_session(
     session_manager: Arc<SessionManager>,
     session_id: String,
-) -> Result<ResumedPromptSession, CapabilityError> {
+) -> Result<Arc<ReconstructedState>, CapabilityError> {
     run_blocking_task("agent.prompt.resume", move || {
-        let active = session_manager
+        session_manager
             .resume_session(&session_id)
             .map_err(|error| CapabilityError::Internal {
                 message: error.to_string(),
-            })?;
-        Ok(ResumedPromptSession {
-            state: active.state.clone(),
-            persister: active.context.persister.clone(),
-        })
+            })
     })
     .await
 }

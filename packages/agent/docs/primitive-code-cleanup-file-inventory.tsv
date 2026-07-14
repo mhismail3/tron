@@ -94,7 +94,6 @@ packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs	retain	rus
 packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/recovery.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

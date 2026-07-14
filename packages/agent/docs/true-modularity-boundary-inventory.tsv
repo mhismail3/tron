@@ -54,7 +54,6 @@ packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs	rust	imple
 packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/orchestrator/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/orchestrator/recovery.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract

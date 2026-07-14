@@ -7,7 +7,6 @@
 //! | `core` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
 //! | `session_manager` | Session CRUD, active session cache, fork |
 //! | `session_reconstructor` | Rebuild session state from persisted events |
-//! | `session_context` | Per-session context and workspace path |
 //! | `agent_runner` | High-level primitive run and event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
 //! | `event_persister` | Reconciles live sequence counters before direct transactional event-store writes |
@@ -79,7 +78,6 @@ pub(crate) mod core;
 pub(crate) mod event_persister;
 pub(crate) mod invocation_abort_registry;
 pub(crate) mod recovery;
-pub(crate) mod session_context;
 pub(crate) mod session_manager;
 pub(crate) mod session_reconstructor;
 pub(crate) mod streaming_journal;

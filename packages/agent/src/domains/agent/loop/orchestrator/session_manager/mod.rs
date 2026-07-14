@@ -16,7 +16,6 @@ use serde_json::json;
 use tracing::{debug, info, instrument};
 
 use crate::domains::agent::r#loop::errors::RuntimeError;
-use crate::domains::agent::r#loop::orchestrator::session_context::SessionContext;
 use crate::domains::agent::r#loop::orchestrator::session_reconstructor::{
     self, ReconstructedState,
 };
@@ -31,29 +30,20 @@ pub struct ForkSessionResult {
     pub forked_from_event_id: String,
 }
 
-/// Active session wrapper.
-pub struct ActiveSession {
-    /// Session context with persister and state.
-    pub context: SessionContext,
-    /// Reconstructed state (messages, model, etc.).
-    pub state: ReconstructedState,
-}
-
-/// Cached session with access tracking for idle eviction.
-pub struct CachedSession {
-    /// The active session.
-    pub session: Arc<ActiveSession>,
+/// Cached reconstructed state with access tracking for idle eviction.
+struct CachedSession {
+    /// Immutable projection rebuilt from durable session events.
+    state: Arc<ReconstructedState>,
     /// Last time this session was accessed (for TTL eviction).
-    pub last_accessed: Mutex<Instant>,
-    /// Whether an agent loop is currently processing a prompt.
-    /// Prevents eviction and concurrent access (Phase 6).
-    pub is_processing: AtomicBool,
+    last_accessed: Mutex<Instant>,
+    /// Whether an agent loop is currently processing a prompt, preventing eviction.
+    is_processing: AtomicBool,
 }
 
 impl CachedSession {
-    fn new(session: Arc<ActiveSession>) -> Self {
+    fn new(state: Arc<ReconstructedState>) -> Self {
         Self {
-            session,
+            state,
             last_accessed: Mutex::new(Instant::now()),
             is_processing: AtomicBool::new(false),
         }
@@ -113,48 +103,42 @@ impl SessionManager {
 
         let session_id = result.session.id.clone();
 
-        let state = ReconstructedState {
+        let state = Arc::new(ReconstructedState {
             model: model.to_owned(),
             working_directory: Some(workspace_path.to_owned()),
             ..Default::default()
-        };
-
-        let ctx = SessionContext::new(session_id.clone(), self.event_store.clone());
-        let active = Arc::new(ActiveSession {
-            context: ctx,
-            state,
         });
 
         let _ = self
             .active_sessions
-            .insert(session_id.clone(), CachedSession::new(active));
+            .insert(session_id.clone(), CachedSession::new(state));
         debug!(session_id, "session created");
         Ok(session_id)
     }
 
     /// Resume an existing session by reconstructing from persisted events.
     #[instrument(skip(self), fields(session_id))]
-    pub fn resume_session(&self, session_id: &str) -> Result<Arc<ActiveSession>, RuntimeError> {
+    pub fn resume_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<ReconstructedState>, RuntimeError> {
         // Check if already active
         if let Some(existing) = self.active_sessions.get(session_id) {
             existing.touch();
-            return Ok(existing.session.clone());
+            return Ok(existing.state.clone());
         }
 
         // Reconstruct from events
-        let state = session_reconstructor::reconstruct(&self.event_store, session_id)?;
-
-        let ctx = SessionContext::new(session_id.to_owned(), self.event_store.clone());
-        let active = Arc::new(ActiveSession {
-            context: ctx,
-            state,
-        });
+        let state = Arc::new(session_reconstructor::reconstruct(
+            &self.event_store,
+            session_id,
+        )?);
 
         let _ = self
             .active_sessions
-            .insert(session_id.to_owned(), CachedSession::new(active.clone()));
+            .insert(session_id.to_owned(), CachedSession::new(state.clone()));
         debug!(session_id, "session resumed");
-        Ok(active)
+        Ok(state)
     }
 
     /// End a session (remove it from the active map, persist `session.end`).

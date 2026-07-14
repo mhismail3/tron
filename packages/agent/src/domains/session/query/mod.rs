@@ -42,7 +42,7 @@ impl SessionQueryService {
         let session_manager = deps.session_manager.clone();
         let session_id_for_resume = session_id.clone();
         run_blocking_task("session.resume", move || {
-            let active = session_manager
+            let state = session_manager
                 .resume_session(&session_id_for_resume)
                 .map_err(|error| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -51,8 +51,8 @@ impl SessionQueryService {
 
             Ok(json!({
                 "sessionId": session_id_for_resume,
-                "model": active.state.model,
-                "messageCount": active.state.messages.len(),
+                "model": state.model,
+                "messageCount": state.messages.len(),
                 "lastActivity": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             }))
         })
@@ -215,7 +215,7 @@ impl SessionQueryService {
                     message: format!("Session '{session_id_for_state}' not found"),
                 })?;
 
-            let active = session_manager
+            let state = session_manager
                 .resume_session(&session_id_for_state)
                 .map_err(|error| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -227,16 +227,16 @@ impl SessionQueryService {
             Ok(json!({
                 "sessionId": session_id_for_state,
                 "headEventId": session.head_event_id,
-                "model": active.state.model,
-                "turnCount": active.state.turn_count,
-                "isEnded": active.state.is_ended,
-                "workingDirectory": active.state.working_directory,
+                "model": state.model,
+                "turnCount": state.turn_count,
+                "isEnded": state.is_ended,
+                "workingDirectory": state.working_directory,
                 "workspaceId": session.working_directory,
                 "eventCount": event_count,
                 "lastTurnInputTokens": session.last_turn_input_tokens,
                 "tokenUsage": {
-                    "inputTokens": active.state.token_usage.input_tokens,
-                    "outputTokens": active.state.token_usage.output_tokens,
+                    "inputTokens": state.token_usage.input_tokens,
+                    "outputTokens": state.token_usage.output_tokens,
                     "cacheReadTokens": session.total_cache_read_tokens,
                     "cacheCreationTokens": session.total_cache_creation_tokens,
                 },

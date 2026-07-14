@@ -170,6 +170,7 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
     }
     for required in [
         "active_sessions: DashMap<String, CachedSession>",
+        "state: Arc<ReconstructedState>",
         "last_accessed: Mutex<Instant>",
         "is_processing: AtomicBool",
         "insert(session_id.clone()",

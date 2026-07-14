@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-10 `passed_after_fix`; 823 state-surface rows inventoried and classified.
+Status: SOL-10 `passed_after_fix`; 822 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -55,7 +55,7 @@ State class distribution:
 
 | State class | Rows |
 |---|---:|
-| `ephemeral_runtime` | 350 |
+| `ephemeral_runtime` | 349 |
 | `projection_cache` | 223 |
 | `durable_substrate` | 147 |
 | `canonical_truth` | 41 |

@@ -80,7 +80,6 @@ packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs	implementa
 packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/recovery.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
-packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation

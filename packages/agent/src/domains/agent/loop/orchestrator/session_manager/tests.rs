@@ -35,8 +35,8 @@ async fn resume_session() {
     assert!(!mgr.is_active(&sid));
 
     // Resume should reconstruct
-    let active = mgr.resume_session(&sid).unwrap();
-    assert_eq!(active.state.model, "test-model");
+    let state = mgr.resume_session(&sid).unwrap();
+    assert_eq!(state.model, "test-model");
     assert!(mgr.is_active(&sid));
 }
 
@@ -48,8 +48,13 @@ async fn resume_already_active() {
         .unwrap();
 
     // Resume when already active should return existing
-    let active = mgr.resume_session(&sid).unwrap();
-    assert_eq!(active.state.model, "test-model");
+    let first = mgr.resume_session(&sid).unwrap();
+    let second = mgr.resume_session(&sid).unwrap();
+    assert_eq!(first.model, "test-model");
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "cache must reuse one projection"
+    );
     assert_eq!(mgr.active_count(), 1);
 }
 
@@ -319,8 +324,8 @@ async fn evicted_session_reconstructs_on_resume() {
     assert!(!mgr.is_active(&sid));
 
     // Resume should reconstruct
-    let active = mgr.resume_session(&sid).unwrap();
-    assert_eq!(active.state.model, "m");
+    let state = mgr.resume_session(&sid).unwrap();
+    assert_eq!(state.model, "m");
     assert!(mgr.is_active(&sid));
 }
 
