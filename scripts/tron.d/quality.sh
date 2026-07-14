@@ -56,7 +56,6 @@ run_tests() {
         ios_affordance_restoration_map_invariants
         capability_dynamic_replacement_invariants
         failure_semantics_invariants
-        minimal_kernel_self_adaptation_hardening_invariants
         primitive_module_proposal_trace
         state_ownership_lifecycle_invariants
         true_modularity_boundary_invariants

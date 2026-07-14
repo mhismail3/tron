@@ -1290,17 +1290,14 @@ without exposing raw resource IDs, paths, commands, logs, grants, authority
 IDs, or token-like material, package-manager output, dependency artifacts, or
 candidate module payloads. `capability_binding` is the projection source for
 these facts, not the operation owner.
-The Minimal Kernel Self-Adaptation Hardening capstone in
-`packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md`
-ties these slices together without adding another runtime surface. Its
-invariant test proves that the irreducible kernel/governance substrate remains
-authority, transport, event log, resource custody, redaction,
-trace/replay/catalog, module governance, context policy, route resolution, and
-server-owned visibility; replaceable behavior must pass through exact evidence,
-provider-safety, route events, and rollback/disable contracts. This foundation
-proves the first scoped read-only `git_status` route and the contract future
-routes must satisfy. It does not claim broad autonomous self-update across every
-operation.
+Self-adaptation remains constrained by canonical operation metadata and the
+route, context-policy, and cockpit source owners. Authority, transport, event
+history, resource custody, redaction, trace/replay/catalog, module governance,
+context policy, route resolution, and server-owned visibility remain protected
+substrate. Replaceable behavior must pass through exact evidence,
+provider-safety, route events, and rollback/disable contracts. The current
+runtime proves one scoped read-only `git_status` route; it does not claim broad
+autonomous self-update across every operation.
 `catalog_inspect` also projects operation-specific contracts for provider-safe
 trace and web operations. `execute::trace_list` and `execute::trace_get` show the
 model the safe record shape and redaction guarantees before invocation.

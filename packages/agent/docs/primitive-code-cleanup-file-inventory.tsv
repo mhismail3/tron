@@ -2154,9 +2154,6 @@ packages/ios-app/UITests/SessionBriefingUITests.swift	retain	ios ui test owner	P
 packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md	retain	docs owner	PCC-10/dynamic-replacement	Dynamic replacement evidence retained for governed route activation rollback and failure proof.
 packages/agent/docs/capability-dynamic-replacement-inventory.tsv	retain	docs owner	PCC-10/dynamic-replacement	Dynamic replacement inventory retained for machine-checked route coverage.
 packages/agent/docs/capability-dynamic-replacement-scorecard.md	retain	docs owner	PCC-10/dynamic-replacement	Dynamic replacement scorecard retained for governed replacement acceptance criteria.
-packages/agent/docs/minimal-kernel-self-adaptation-hardening-evidence-manifest.md	retain	docs owner	PCC-10/minimal-kernel	Minimal-kernel evidence retained for irreducible substrate verification.
-packages/agent/docs/minimal-kernel-self-adaptation-hardening-inventory.tsv	retain	docs owner	PCC-10/minimal-kernel	Minimal-kernel inventory retained for machine-checked boundary decisions.
-packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md	retain	docs owner	PCC-10/minimal-kernel	Minimal-kernel scorecard retained for self-adaptation guardrail closure.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_catalog_tests.rs	retain	capability grant test owner	PCC-10/capability-contract	Catalog grant tests retained for canonical discovery authority derivation.
 packages/agent/src/domains/capability/operations/catalog/tests.rs	retain	capability discovery test owner	PCC-10/capability-contract	Catalog regression module retained for exhaustive model-facing discovery and recovery behavior.
 packages/agent/src/domains/capability/operations/operation_contract/mod.rs	retain	capability contract owner	PCC-10/capability-contract	Canonical typed operation registry retained as the single identity and contract entry point.
@@ -2178,7 +2175,6 @@ packages/agent/src/domains/capability/operations/operation_contract/records.rs	r
 packages/agent/src/domains/capability/pool.rs	retain	capability pool owner	PCC-10/engine-capability-pool	Canonical operation audience surface and evolution classification retained.
 packages/agent/src/domains/capability_binding/route.rs	retain	capability binding owner	PCC-10/dynamic-replacement	Governed route resolution and fail-closed replacement dispatch retained.
 packages/agent/tests/capability_dynamic_replacement_invariants.rs	retain	dynamic replacement invariant owner	PCC-10/dynamic-replacement	Static route replacement governance and coverage invariants retained.
-packages/agent/tests/minimal_kernel_self_adaptation_hardening_invariants.rs	retain	minimal-kernel invariant owner	PCC-10/minimal-kernel	Static irreducible-kernel and self-adaptation boundary invariants retained.
 packages/ios-app/Sources/Engine/Persistence/Sync/SessionListPageLoader.swift	retain	ios session sync owner	PCC-10/dashboard-pagination	Session list pagination owner retained for explicit bounded dashboard loading.
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationBriefPresentation.swift	retain	ios capability presentation owner	PCC-10/capability-ui	High-signal invocation presentation retained for progressive capability detail disclosure.
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationGrouping.swift	retain	ios capability presentation owner	PCC-10/capability-ui	Deterministic adjacent invocation grouping retained for compact transcript rendering.

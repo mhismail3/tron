@@ -2113,9 +2113,6 @@ packages/ios-app/Tests/UI/Settings/EngineSettingsPageLayoutTests.swift	test	test
 packages/agent/docs/capability-dynamic-replacement-evidence-manifest.md	docs	docs/static gates	TPC-10	durable capability replacement evidence documentation
 packages/agent/docs/capability-dynamic-replacement-inventory.tsv	docs	docs/static gates	TPC-10	durable capability replacement inventory
 packages/agent/docs/capability-dynamic-replacement-scorecard.md	docs	docs/static gates	TPC-10	durable capability replacement scorecard
-packages/agent/docs/minimal-kernel-self-adaptation-hardening-evidence-manifest.md	docs	docs/static gates	TPC-10	durable kernel hardening evidence documentation
-packages/agent/docs/minimal-kernel-self-adaptation-hardening-inventory.tsv	docs	docs/static gates	TPC-10	durable kernel hardening inventory
-packages/agent/docs/minimal-kernel-self-adaptation-hardening-scorecard.md	docs	docs/static gates	TPC-10	durable kernel hardening scorecard
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests/grant_catalog_tests.rs	test	test_harness	TPC-10	canonical catalog grant derivation regression coverage
 packages/agent/src/domains/capability/operations/catalog/tests.rs	test	test_harness	TPC-10	canonical capability discovery and inspection regression coverage
 packages/agent/src/domains/capability/operations/operation_contract/mod.rs	implementation	agent_runtime	TPC-10	canonical operation contract owner
@@ -2147,7 +2144,6 @@ packages/agent/src/domains/capability/operations/operation_contract/records.rs	i
 packages/agent/src/domains/capability/pool.rs	implementation	agent_runtime	TPC-10	canonical capability pool classification owner
 packages/agent/src/domains/capability_binding/route.rs	implementation	agent_runtime	TPC-10	governed capability route lifecycle owner
 packages/agent/tests/capability_dynamic_replacement_invariants.rs	test	test_harness	TPC-10	capability replacement static invariant coverage
-packages/agent/tests/minimal_kernel_self_adaptation_hardening_invariants.rs	test	test_harness	TPC-10	minimal kernel hardening static invariant coverage
 packages/ios-app/Sources/Engine/Persistence/Sync/SessionListPageLoader.swift	implementation	ios_app	TPC-8	bounded session list pagination owner
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationBriefPresentation.swift	implementation	ios_app	TPC-8	capability invocation progressive presentation owner
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationGrouping.swift	implementation	ios_app	TPC-8	capability invocation grouping owner
