@@ -185,17 +185,13 @@ async fn fork_session_from_nonexistent_event_fails() {
 }
 
 #[tokio::test]
-async fn archive_and_unarchive() {
+async fn archive_invalidates_cache() {
     let mgr = make_manager();
     let sid = mgr
         .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     mgr.archive_session(&sid).unwrap();
-    assert!(!mgr.is_cached(&sid));
-
-    mgr.unarchive_session(&sid).unwrap();
-    // Unarchive makes it available but doesn't add to active map
     assert!(!mgr.is_cached(&sid));
 }
 

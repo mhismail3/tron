@@ -1,10 +1,11 @@
 //! Session lifecycle services and operation wrappers.
 //!
 //! This module owns the capability-facing lifecycle commands for sessions.
-//! Durable truth is still the session event store: lifecycle commands delegate
-//! to [`SessionManager`], which updates the event-store facade and then clears
-//! reconstructable runtime projections such as sequence counters, compaction
-//! handlers, and reconstructed-session cache entries.
+//! Durable truth is still the session event store. Commands use
+//! [`SessionManager`] when a mutation must also update reconstructed-session
+//! cache state; durable-only mutations may call the event-store facade directly.
+//! The capability owner clears other reconstructable runtime projections such
+//! as sequence counters and compaction handlers.
 //!
 //! ## Submodules
 //!
@@ -18,8 +19,8 @@
 //!
 //! ## Invariants
 //!
-//! - Session lifecycle commands mutate durable truth only through
-//!   [`SessionManager`] and the session event-store facade.
+//! - Session lifecycle commands mutate durable truth through the session
+//!   event-store facade; [`SessionManager`] coordinates cache-affecting changes.
 //! - Archive/unarchive is reversible session-row state (`ended_at`); it does
 //!   not delete event history.
 //! - Deleting a session is the only physical event-row cleanup path and is

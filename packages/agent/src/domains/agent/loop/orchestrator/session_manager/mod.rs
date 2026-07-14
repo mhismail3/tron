@@ -238,18 +238,6 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Unarchive a session.
-    pub(in crate::domains) fn unarchive_session(
-        &self,
-        session_id: &str,
-    ) -> Result<(), RuntimeError> {
-        let _ = self
-            .event_store
-            .clear_session_ended(session_id)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
-        Ok(())
-    }
-
     /// Delete a session.
     pub(in crate::domains) fn delete_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let _ = self.cached_sessions.remove(session_id);

@@ -1,7 +1,7 @@
 use super::support::*;
 
 #[tokio::test]
-async fn archive_without_external_workspace_succeeds() {
+async fn archive_and_unarchive_without_external_workspace_succeed() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
@@ -14,6 +14,14 @@ async fn archive_without_external_workspace_succeeds() {
 
     let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
     assert!(session.ended_at.is_some());
+
+    SessionLifecycleService::unarchive(&Deps::from_test_context(&ctx), sid.clone())
+        .await
+        .unwrap();
+
+    let session = ctx.event_store.get_session(&sid).unwrap().unwrap();
+    assert!(session.ended_at.is_none());
+    assert!(!ctx.session_manager.is_cached(&sid));
 }
 
 #[tokio::test]

@@ -37,13 +37,13 @@ impl SessionLifecycleService {
         deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_unarchive = session_id.clone();
         run_blocking_task("session.unarchive", move || {
-            session_manager
-                .unarchive_session(&session_id_for_unarchive)
+            let _ = event_store
+                .clear_session_ended(&session_id_for_unarchive)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?;
             Ok(())
         })
