@@ -12,12 +12,11 @@
 # Xcode
 *.xcuserstate
 project.xcworkspace/
-!packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/
-!packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/contents.xcworkspacedata
 xcuserdata/
 DerivedData/
 packages/ios-app/.build/
 packages/ios-app/build/
+packages/ios-app/TronMobile.xcodeproj/
 packages/ios-app/Configuration/Local.xcconfig
 *.xcresult
 *.dSYM/

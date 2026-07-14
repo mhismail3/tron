@@ -30,17 +30,17 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `retain` | Keep as a real ownership, build, platform, persistence, provider, UI, test, docs, or config boundary. |
 | `collapse` | Keep only until the owning row folds the file into a clearer parent or proves the boundary remains necessary. |
 | `delete` | Delete candidate; no move happens until the owning implementation row proves no retained primitive needs it. |
-| `generated` | Tracked generated or lock artifact whose source of truth is another file/tool. |
+| `generated` | Tracked dependency lock artifact whose source of truth is dependency tooling. |
 | `asset` | Binary/resource/fixture asset; keep only when the owning package still uses it. |
 
 ## Inventory Counts
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 2123 | Current package/config/test/doc boundaries |
+| `retain` | 2117 | Current package/config/test/doc boundaries |
 | `asset` | 70 | iOS/Mac resources and benchmark baselines |
-| `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **2200** | Whole repo plus retained inventory artifacts |
+| `generated` | 2 | Cargo and package-manager lock outputs |
+| **Total** | **2189** | Currently classified inventory rows |
 
 ## Current Tracked Package Counts
 

@@ -403,7 +403,6 @@ fn dxrha_inventory_is_structured_and_covers_required_workflow_surfaces() {
         ".gitignore",
         "packages/mac-app/.gitignore",
         "packages/ios-app/project.yml",
-        "packages/ios-app/TronMobile.xcodeproj/project.pbxproj",
         "packages/mac-app/project.yml",
         "packages/mac-app/docs/development.md",
         "packages/ios-app/docs/development.md",
@@ -565,8 +564,10 @@ fn scripts_tron_dispatch_help_and_docs_stay_in_sync_without_hidden_deploy() {
 fn generated_and_ignored_artifact_policy_is_source_guarded() {
     let tracked = git_ls_files();
     assert!(
-        tracked.contains("packages/ios-app/TronMobile.xcodeproj/project.pbxproj"),
-        "iOS generated project is intentionally tracked and must stay visible to drift checks"
+        !tracked
+            .iter()
+            .any(|path| path.starts_with("packages/ios-app/TronMobile.xcodeproj/")),
+        "iOS generated project must stay ignored, not tracked"
     );
     assert!(
         !tracked
@@ -580,6 +581,7 @@ fn generated_and_ignored_artifact_policy_is_source_guarded() {
         "**/target/",
         "packages/ios-app/.build/",
         "packages/ios-app/build/",
+        "packages/ios-app/TronMobile.xcodeproj/",
         "*.xcresult",
         "DerivedData/",
         "scripts/artifacts/",
@@ -612,9 +614,8 @@ fn generated_and_ignored_artifact_policy_is_source_guarded() {
 
     let ci = read_repo_file(".github/workflows/ci.yml");
     for required in [
-        "git diff --exit-code packages/ios-app/TronMobile.xcodeproj",
+        "git check-ignore -q packages/ios-app/TronMobile.xcodeproj",
         "git check-ignore -q packages/mac-app/TronMac.xcodeproj",
-        "Verify generated Xcode project is committed",
         "Verify generated Xcode project stays ignored",
     ] {
         assert!(

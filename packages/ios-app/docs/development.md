@@ -16,6 +16,9 @@ xcodegen generate
 open TronMobile.xcodeproj
 ```
 
+`project.yml` is the authoritative project definition. The generated
+`TronMobile.xcodeproj` is local build output and remains ignored by Git.
+
 ### Server Connection
 
 The app connects to the Tron engine over `/engine`. Physical device testing

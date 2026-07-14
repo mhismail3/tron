@@ -11,7 +11,7 @@ This inventory maps the retained release, install, development takeover, update 
 - `service_manager`: shared launchd, health, status, start, stop, restart, and rollback helpers.
 - `mac_wrapper`: SwiftUI wrapper, SMAppService, helper validation, command mode, update finalization, process probing, and uninstall.
 - `update_rollback`: app-version finalization, stale registration repair, rollback, and failed-upgrade handling.
-- `generated_project`: XcodeGen project sources, tracked/ignored project policy, and drift checks.
+- `generated_project`: XcodeGen project sources and ignored generated-output policy.
 - `release_workflow`: GitHub release pipelines and packaging checks.
 - `rust_startup`: Rust server path/port/startup/shutdown/database lock surfaces.
 - `environment`: Codex local actions and environment variables that can start development tooling.
@@ -27,7 +27,7 @@ This inventory maps the retained release, install, development takeover, update 
 5. Manual deploy and rollback success require `/health`, not just launchd loaded state.
 6. Clean setup may create intended profile/workspace/internal support paths and managed auth/config seeds. Uninstall preserves database and workspace by default.
 7. Mac app update finalization records `mac-app-version.json` only after the current bundled helper is loaded and healthy; active `tron dev` defers production restart/finalization.
-8. iOS `TronMobile.xcodeproj` is tracked and must not drift after `xcodegen generate`. Mac `TronMac.xcodeproj` is intentionally ignored and regenerated before build/release.
+8. iOS `TronMobile.xcodeproj` and Mac `TronMac.xcodeproj` are ignored build outputs. Their `project.yml` definitions are authoritative and workflows regenerate each project before build/release.
 9. Production releases are manual tag/workflow-driven DMG and TestFlight pipelines. This slice does not add automatic production deployment.
 
 ## Source Findings

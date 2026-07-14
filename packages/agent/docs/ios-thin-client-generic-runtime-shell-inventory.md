@@ -1,6 +1,6 @@
 # iOS Thin Client / Generic Runtime Shell Inventory
 
-This inventory maps the current iOS app as a thin `/engine` client and generic runtime shell. It is source-backed by the iOS docs, Swift source/tests, generated project files, root README, local/GitHub quality gates, and predecessor hardening inventories.
+This inventory maps the current iOS app as a thin `/engine` client and generic runtime shell. It is source-backed by the iOS docs, Swift source/tests, the XcodeGen project definition, root README, local/GitHub quality gates, and predecessor hardening inventories.
 
 ## Taxonomy
 
@@ -13,7 +13,7 @@ This inventory maps the current iOS app as a thin `/engine` client and generic r
 - `ios_settings`: server-authoritative settings decode, sparse updates, reset/default behavior, settings state, and settings pages.
 - `ios_pairing_auth`: pairing URL parsing, host validation, token Keychain custody, local paired-server store, onboarding setup hydration, unauthorized repair, and forget/re-pair flows.
 - `ios_diagnostics`: bounded local logs, diagnostics bundle assembly, redaction, MetricKit retention, client-log ingestion, feedback delivery, and copied logs.
-- `generated_project`: XcodeGen source and tracked generated project discipline.
+- `generated_project`: XcodeGen source ownership and ignored generated output discipline.
 - `docs_ci`: README, iOS docs, local quality, and GitHub static gate wiring.
 - `ios_tests`: focused Swift simulator tests used as behavioral proof for the rows.
 - `predecessor_inventory`: current-lineage hardening artifacts updated or referenced so future agents can find IOSTC proof.
@@ -28,13 +28,13 @@ This inventory maps the current iOS app as a thin `/engine` client and generic r
 6. User-editable server settings flow through `ServerSettings`, `ServerSettingsSnapshot`, `SettingsState`, `SettingsMutation`, a settings page control, and sparse `ServerSettingsUpdate`. `tailscaleIp` is Mac-wrapper-owned pairing metadata and stays decode-only in iOS.
 7. Server-authored errors use `CanonicalFailurePayload`; local client errors are used only when there is no server response.
 8. Diagnostics bundles and client-log ingestion are bounded, redacted, and local-client-owned until explicitly uploaded through `logs::ingest`.
-9. `packages/ios-app/TronMobile.xcodeproj` is tracked and must match `project.yml` after `xcodegen generate`.
+9. `packages/ios-app/project.yml` is authoritative. XcodeGen recreates the ignored `TronMobile.xcodeproj` before supported build and release workflows.
 
 ## Source Findings
 
 - The current iOS implementation already matches the intended thin-client shape. No product-specific source root, provider implementation, deploy/launch service owner, repo-managed skill copy path, or successor self-adapting UI was found under `packages/ios-app/Sources`.
 - Existing Swift tests already cover the required behavioral seams: settings decode/update/reset/parity, pairing parsing/validation/persistence/token custody, event registry/projection, chat/timeline reconstruction, generated UI/runtime surfaces, diagnostics/redaction/log ingestion, SQLite schema/cache ownership, reconnect/offline/send-disabled states, and source guards.
-- The generated Xcode project already contains the focused test files used by the IOSTC evidence set.
+- The `TronMobileTests` target recursively includes the source-owned `Tests` directory, so XcodeGen includes the focused test files used by the IOSTC suite.
 - `tailscaleIp` is an intentional decode-only setting for iOS. CPE records the Mac wrapper as the owner of writes to this sparse server setting; iOS does not expose a user mutation for it.
 
 The machine-readable inventory is `ios-thin-client-generic-runtime-shell-inventory.tsv`.

@@ -149,7 +149,7 @@ fn tron_ci_clippy_contract_matches_cargo_lint_policy() {
 }
 
 #[test]
-fn xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy() {
+fn xcodegen_workflows_keep_generated_projects_untracked() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let release_ios = read_repo_file(".github/workflows/release-ios.yml");
     let release_mac = read_repo_file(".github/workflows/release-mac.yml");
@@ -165,25 +165,21 @@ fn xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy() {
             release_ios.as_str(),
             "packages/ios-app/TronMobile.xcodeproj",
         ),
+        ("ci.yml", ci.as_str(), "packages/mac-app/TronMac.xcodeproj"),
+        (
+            "release-mac.yml",
+            release_mac.as_str(),
+            "packages/mac-app/TronMac.xcodeproj",
+        ),
     ] {
+        let ignore_guard = format!("git check-ignore -q {project}");
+        let tracked_guard = format!("git diff --exit-code {project}");
         assert!(
             text.contains("xcodegen generate")
-                && text.contains("git diff --exit-code")
-                && text.contains(project),
-            "{name} must fail when xcodegen changes tracked project `{project}`"
-        );
-    }
-
-    for (name, text) in [
-        ("ci.yml", ci.as_str()),
-        ("release-mac.yml", release_mac.as_str()),
-    ] {
-        assert!(
-            text.contains("xcodegen generate")
-                && text.contains("packages/mac-app/TronMac.xcodeproj")
-                && text.contains("git check-ignore -q packages/mac-app/TronMac.xcodeproj")
-                && !text.contains("git diff --exit-code packages/mac-app/TronMac.xcodeproj"),
-            "{name} must keep the generated Mac project ignored instead of checking tracked drift"
+                && text.contains(project)
+                && text.contains(&ignore_guard)
+                && !text.contains(&tracked_guard),
+            "{name} must generate `{project}` and keep it ignored"
         );
     }
 }

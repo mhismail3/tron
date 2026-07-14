@@ -12,7 +12,7 @@ is machine-checked by
 - `local_ci`: local `scripts/tron ci` and focused helper commands.
 - `github_ci`: GitHub Actions jobs, path filters, and explicit static gates.
 - `static_gate`: Rust invariant targets that enforce workflow truth.
-- `generated_project`: XcodeGen-owned project files and drift policy.
+- `generated_project`: XcodeGen-owned definitions and ignored generated output policy.
 - `version_release`: version mirror and release-note helper checks.
 - `personal_info_guard`: username, home-path, and secret leakage guards.
 - `docs_upkeep`: README, CONTRIBUTING, PR template, and package docs.
@@ -41,7 +41,7 @@ is machine-checked by
 - Broad closeout:
   `scripts/tron ci fmt check clippy test`,
   `scripts/personal-info-guard.sh`, version helper checks, release-note helper
-  tests, XcodeGen drift check, `git diff --check`,
+  tests, XcodeGen generation/ignore checks, `git diff --check`,
   `git ls-files -ci --exclude-standard`, and `git status --short`.
 
 The durable TSV rows below are intentionally specific. They let another worker

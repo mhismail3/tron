@@ -109,7 +109,7 @@ packages/ios-app/
 │   ├── UI/
 │   ├── Support/
 │   └── Infrastructure/
-└── TronMobile.xcodeproj     # Generated Xcode project
+└── TronMobile.xcodeproj     # Generated locally by XcodeGen (ignored)
 ```
 
 ## Building from Command Line

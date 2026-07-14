@@ -12,7 +12,7 @@ This inventory maps the configuration surfaces that can affect effective Tron se
 - `script_env`: scripts and CI that export or consume runtime env.
 - `ios_settings`: iOS settings decode/update/state/UI/tests.
 - `mac_wrapper`: Mac wrapper settings/profile/env surfaces.
-- `docs_ci`: README, scorecard, evidence, inventory, generated project, and CI wiring.
+- `docs_ci`: README, scorecard, evidence, inventory, and CI wiring.
 - `predecessor_inventory`: predecessor/current-lineage inventory links audited during this slice.
 
 ## Canonical Rules

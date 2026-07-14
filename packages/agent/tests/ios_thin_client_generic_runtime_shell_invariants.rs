@@ -340,7 +340,6 @@ fn iostc_inventory_is_structured_and_covers_required_surfaces() {
         "packages/ios-app/Tests/Session/Chat/State/SettingsParityTests.swift",
         "packages/ios-app/Tests/Support/Diagnostics/DiagnosticsRedactorTests.swift",
         "packages/ios-app/project.yml",
-        "packages/ios-app/TronMobile.xcodeproj/project.pbxproj",
         "scripts/tron.d/quality.sh",
         ".github/workflows/ci.yml",
         "README.md",
@@ -571,8 +570,23 @@ fn generated_runtime_renderer_stays_generic() {
 
 #[test]
 fn pairing_diagnostics_persistence_and_recovery_tests_remain_present() {
-    let project = read_repo_file("packages/ios-app/TronMobile.xcodeproj/project.pbxproj");
+    let project = read_repo_file("packages/ios-app/project.yml");
+    let tracked = git_ls_files();
     let evidence = read_repo_file(EVIDENCE_PATH);
+    let (_, after_test_target) = project
+        .split_once("  TronMobileTests:")
+        .expect("project.yml must define TronMobileTests");
+    let (test_target, _) = after_test_target
+        .split_once("  TronMobileUITests:")
+        .expect("TronMobileTests must end before TronMobileUITests");
+    assert!(
+        test_target.contains("\n    sources:\n      - path: Tests\n"),
+        "TronMobileTests must recursively include the source-owned Tests directory"
+    );
+    assert!(
+        !test_target.contains("includes:") && !test_target.contains("excludes:"),
+        "TronMobileTests must not filter source-owned tests"
+    );
     for test_name in [
         "PairingValidationTests.swift",
         "PairingURLParserTests.swift",
@@ -593,8 +607,10 @@ fn pairing_diagnostics_persistence_and_recovery_tests_remain_present() {
         "SettingsParityTests.swift",
     ] {
         assert!(
-            project.contains(test_name),
-            "generated project missing focused test file {test_name}"
+            tracked.iter().any(|path| {
+                path.starts_with("packages/ios-app/Tests/") && path.ends_with(test_name)
+            }),
+            "tracked iOS Tests directory missing focused test file {test_name}"
         );
         assert!(
             evidence.contains(test_name.trim_end_matches(".swift")),

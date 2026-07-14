@@ -165,9 +165,11 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Verify generated Xcode project is committed
+      - name: Verify generated Xcode project stays ignored
         working-directory: ${{ github.workspace }}
-        run: git diff --exit-code packages/ios-app/TronMobile.xcodeproj
+        run: |
+          test -d packages/ios-app/TronMobile.xcodeproj
+          git check-ignore -q packages/ios-app/TronMobile.xcodeproj
 
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60

@@ -97,10 +97,10 @@ xcodebuild test \
 
 CI exercises the same flow on every PR that touches `packages/mac-app/**` or
 `packages/agent/**` (the agent binary is embedded, so a Rust change affects
-the Mac app bundle). It verifies XcodeGen leaves the tracked project unchanged,
-runs focused non-flaky wrapper tests for paths/status/Tailscale coverage, and
-keeps a dry-run DMG assembly to catch breakage in `release-mac.yml` before tag
-push.
+the Mac app bundle). The iOS and Mac `project.yml` files are authoritative; CI
+generates their ignored Xcode projects before building. It also runs focused
+non-flaky wrapper tests for paths/status/Tailscale coverage and keeps a dry-run
+DMG assembly to catch breakage in `release-mac.yml` before tag push.
 
 ## Testing
 

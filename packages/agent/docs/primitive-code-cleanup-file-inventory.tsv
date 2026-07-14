@@ -1271,11 +1271,6 @@ packages/ios-app/Tests/UI/Theme/ChipStyleModifierTests.swift	retain	ios test	PCC
 packages/ios-app/Tests/UI/Theme/FontSettingsTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Theme/TronColorsTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Theme/TronTypographyTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/TronMobile.xcodeproj/project.pbxproj	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/contents.xcworkspacedata	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/TronMobile.xcodeproj/xcshareddata/xcschemes/Tron Beta.xcscheme	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/TronMobile.xcodeproj/xcshareddata/xcschemes/Tron Fast.xcscheme	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/TronMobile.xcodeproj/xcshareddata/xcschemes/Tron.xcscheme	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/TronMobileBeta.entitlements	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/TronMobileProd.entitlements	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/bun.lock	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -2146,7 +2141,6 @@ packages/ios-app/Tests/Session/Chat/Navigation/ScrollHistoryAutoloadTests.swift	
 packages/ios-app/Tests/Session/Chat/Navigation/ScrollViewportAnchorTests.swift	retain	ios chat test owner	PCC-10/chat-hardening	Scroll viewport anchor tests retained for prepend offset preservation and jump prevention.
 packages/ios-app/Tests/UI/Settings/EngineSettingsOwnershipTests.swift	retain	ios settings test owner	PCC-10/settings-parity	Engine settings ownership tests retained for server-owned versus device-local settings grouping.
 packages/ios-app/Tests/UI/Settings/EngineSettingsPageLayoutTests.swift	retain	ios settings test owner	PCC-10/settings-parity	Engine settings layout tests retained for flattened server-owned setting controls.
-packages/ios-app/TronMobile.xcodeproj/xcshareddata/xcschemes/Tron UI Validation.xcscheme	retain	ios project owner	PCC-10/ui-validation	UI validation scheme retained for simulator-backed focused iOS visual and interaction tests.
 packages/ios-app/UITests/DashboardHitTargetUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Dashboard hit-target UI tests retained to prevent icon-only tappable containers.
 packages/ios-app/UITests/OnboardingSheetDetentUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Onboarding detent UI tests retained to prevent stretched sheet row regressions.
 packages/ios-app/UITests/SessionBriefingUITests.swift	retain	ios ui test owner	PCC-10/ui-validation	Session Briefing UI tests retained for composer context-ring controls, attachment-menu interaction, and model picker coverage.

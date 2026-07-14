@@ -62,7 +62,7 @@ The Rust integration target
 - `github_rust_ci_matches_tron_ci_test_harness_shape`
 - `tron_ci_clippy_contract_matches_cargo_lint_policy`
 - `external_cli_variance_has_no_compatibility_or_fallback_wording`
-- `xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy`
+- `xcodegen_workflows_keep_generated_projects_untracked`
 - `mac_ci_runs_focused_wrapper_tests`
 - `rust_production_modules_have_no_path_aliases_or_module_inception`
 - `rust_provider_shared_and_settings_loader_use_physical_owners`
