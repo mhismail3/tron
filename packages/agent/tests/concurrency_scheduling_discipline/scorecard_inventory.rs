@@ -52,7 +52,7 @@ fn csd_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Concurrency Scheduling Discipline Inventory",
-        "Status: CSD-10 `passed_after_fix`; 130 scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.",
+        "Status: CSD-10 `passed_after_fix`; 131 production scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.",
         "## Allowed Scheduler Classes",
         "`tracked_background_task`",
         "`bounded_queue`",

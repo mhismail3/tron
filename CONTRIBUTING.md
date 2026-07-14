@@ -116,12 +116,15 @@ work test-first whenever practical — write the failing test, then make it pass
 | All-in-one (workspace only) | `scripts/tron ci` |
 
 CI runs `scripts/tron ci fmt`, `check`, `clippy`, and `test` as its one Rust
-quality path for every repository change. The test command owns the named
-closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
-database-path, and serial integration targets; the workflow does not duplicate
-that list. iOS and Mac jobs only run for their package paths, relevant labels,
-or full validation on `main` and manual dispatch (macOS minutes are ~10× the
-cost of Linux minutes). The Rust job checks out full history because accepted
+quality path for every repository change. Cargo's default auto-discovery of
+tracked top-level `packages/agent/tests/*.rs` files owns the integration-target
+fact set. The test command schedules that exact set explicitly, keeps
+`integration` last and serial, and runs unit/binary tests separately. The DX
+repository invariant rejects missing, stale, or duplicate scheduled targets;
+the GitHub workflow delegates to this local owner instead of duplicating the
+list. iOS and Mac jobs only run for their package paths, relevant labels, or
+full validation on `main` and manual dispatch (macOS minutes are ~10× the cost
+of Linux minutes). The Rust job checks out full history because accepted
 baseline invariants verify commit ancestry. `CI summary` is the required
 mainline check.
 

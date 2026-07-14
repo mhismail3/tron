@@ -1151,7 +1151,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
-| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step is the single owner of serial lib/bin tests, closeout invariant targets, primitive trace, database-path, and serial integration targets |
+| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; Cargo auto-discovers tracked top-level integration-test sources, while the `test` step explicitly schedules that exact set and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | First-time project setup |
@@ -3462,6 +3462,15 @@ cargo test --quiet           # Quiet output
 ```
 
 The agent is a single `tron` crate, so `cargo test` runs everything: library unit tests, app/bootstrap tests, integration tests, doc tests, and static gates. Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
+
+For repository CI, Cargo's default auto-discovery of tracked top-level
+`packages/agent/tests/*.rs` files owns the integration-target fact set.
+`scripts/tron ci test` orders and runs that exact set explicitly, with
+`integration` final and serial because it shares process-global test-server
+plumbing. The developer-experience repository invariant rejects missing,
+stale, and duplicate schedule entries and verifies the final serial target;
+GitHub Actions delegates to `scripts/tron ci test` rather than carrying a
+second target list.
 
 ### iOS Tests
 

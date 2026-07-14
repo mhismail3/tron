@@ -63,7 +63,9 @@ replay boundary.
   `shared::protocol::events::error_event`; allowed `TronEvent::Error`
   patterns are projections or tests.
 - Text-only model capability `error_result` has been removed. Capability
-  executor failures use `failure_result` with `details.failure`.
+  executor failures use `failure_result` with `details.failure`; the source
+  guard matches that retired identifier as a whole token so unrelated plural
+  helpers remain valid.
 - `/engine` socket errors use `CapabilityError::to_failure` before serializing
   the response error object.
 

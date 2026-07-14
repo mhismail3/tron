@@ -40,6 +40,24 @@ fn tracked_files() -> Vec<String> {
         .collect()
 }
 
+fn contains_rust_identifier(source: &str, identifier: &str) -> bool {
+    source
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .any(|token| token == identifier)
+}
+
+#[test]
+fn failure_semantics_identifier_guard_matches_whole_tokens() {
+    assert!(contains_rust_identifier(
+        "fn error_result() {}",
+        "error_result"
+    ));
+    assert!(!contains_rust_identifier(
+        "fn error_results() {}",
+        "error_result"
+    ));
+}
+
 #[test]
 fn failure_semantics_campaign_harness_exists() {
     let scorecard = read_repo_file("packages/agent/docs/failure-semantics-scorecard.md");
@@ -266,7 +284,7 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
         "capability results must expose the canonical failure-result helper"
     );
     assert!(
-        !model_capabilities.contains("error_result"),
+        !contains_rust_identifier(&model_capabilities, "error_result"),
         "text-only capability error_result helper must not return"
     );
 
@@ -347,7 +365,7 @@ fn failure_semantics_closeout_rejects_unapproved_runtime_failure_construction() 
     }) {
         let source = read_repo_file(&path);
         assert!(
-            !source.contains("error_result"),
+            !contains_rust_identifier(&source, "error_result"),
             "production Rust source must not reintroduce text-only capability errors: {path}"
         );
         if source.contains("TronEvent::TurnFailed") {

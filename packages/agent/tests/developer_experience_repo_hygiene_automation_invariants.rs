@@ -134,6 +134,62 @@ fn parse_quality_closeout_targets() -> Vec<String> {
     targets
 }
 
+fn cargo_discovered_integration_targets() -> BTreeSet<String> {
+    let manifest: toml::Value = read_repo_file("packages/agent/Cargo.toml")
+        .parse()
+        .expect("agent Cargo.toml should parse");
+    let package = manifest["package"]
+        .as_table()
+        .expect("agent Cargo.toml should define [package]");
+    assert!(
+        package
+            .get("autotests")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true),
+        "Cargo integration-test auto-discovery must remain enabled"
+    );
+    assert!(
+        manifest.get("test").is_none(),
+        "explicit [[test]] targets would bypass the tracked top-level source contract"
+    );
+
+    let prefix = "packages/agent/tests/";
+    git_ls_files()
+        .into_iter()
+        .filter_map(|path| {
+            let relative = path.strip_prefix(prefix)?;
+            if relative.contains('/') || !relative.ends_with(".rs") {
+                return None;
+            }
+            Some(relative.trim_end_matches(".rs").to_owned())
+        })
+        .collect()
+}
+
+fn validate_quality_target_schedule(
+    discovered: &BTreeSet<String>,
+    scheduled: &[String],
+) -> Result<(), &'static str> {
+    let unique: BTreeSet<_> = scheduled.iter().cloned().collect();
+    if unique.len() != scheduled.len() {
+        return Err("duplicate scheduled target");
+    }
+    if scheduled.last().map(String::as_str) != Some("integration") {
+        return Err("serial integration target must remain last");
+    }
+    if !discovered.is_subset(&unique) {
+        return Err("missing discovered targets");
+    }
+    if !unique.is_subset(discovered) {
+        return Err("stale scheduled targets");
+    }
+    Ok(())
+}
+
+fn owned_targets(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_owned()).collect()
+}
+
 fn assert_github_delegates_to_local_ci_test() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     assert!(
@@ -369,6 +425,7 @@ fn dxrha_inventory_is_structured_and_covers_required_workflow_surfaces() {
 #[test]
 fn local_and_github_static_gate_targets_match_exactly() {
     let local_targets = parse_quality_closeout_targets();
+    let discovered_targets = cargo_discovered_integration_targets();
     assert_github_delegates_to_local_ci_test();
     let quality = read_repo_file("scripts/tron.d/quality.sh");
     let workflow = read_repo_file(".github/workflows/ci.yml");
@@ -400,17 +457,41 @@ fn local_and_github_static_gate_targets_match_exactly() {
         local_targets.contains(&TARGET_NAME.to_owned()),
         "DXRHA target must be in the closeout set"
     );
-    let unique: BTreeSet<_> = local_targets.iter().collect();
-    assert_eq!(
-        unique.len(),
-        local_targets.len(),
-        "closeout target set must not contain duplicates"
-    );
-    assert_eq!(
-        local_targets.last().map(String::as_str),
-        Some("integration"),
-        "serial integration target must remain last"
-    );
+    validate_quality_target_schedule(&discovered_targets, &local_targets)
+        .unwrap_or_else(|error| panic!("local CI target schedule drifted from Cargo: {error}"));
+}
+
+#[test]
+fn closeout_schedule_validator_rejects_every_drift_shape() {
+    let discovered = ["alpha", "beta", "integration"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+
+    for (schedule, expected) in [
+        (owned_targets(&["alpha", "beta", "integration"]), Ok(())),
+        (
+            owned_targets(&["alpha", "integration"]),
+            Err("missing discovered targets"),
+        ),
+        (
+            owned_targets(&["alpha", "beta", "stale", "integration"]),
+            Err("stale scheduled targets"),
+        ),
+        (
+            owned_targets(&["alpha", "beta", "beta", "integration"]),
+            Err("duplicate scheduled target"),
+        ),
+        (
+            owned_targets(&["alpha", "integration", "beta"]),
+            Err("serial integration target must remain last"),
+        ),
+    ] {
+        assert_eq!(
+            validate_quality_target_schedule(&discovered, &schedule),
+            expected
+        );
+    }
 }
 
 #[test]
