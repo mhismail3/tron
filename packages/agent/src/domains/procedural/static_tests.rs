@@ -279,8 +279,7 @@ fn skill_bootstrap_identifier_guard_allows_metadata_only_proof_fields() {
 
 #[test]
 fn procedural_module_manifest_seed_remains_metadata_only_not_skill_bootstrap() {
-    let manifest_path =
-        "packages/agent/src/engine/durability/resources/module_registry_procedural_manifest.rs";
+    let manifest_path = "packages/agent/src/domains/registration/module_manifests/procedural.rs";
     let manifest = std::fs::read_to_string(repo_root().join(manifest_path))
         .unwrap_or_else(|error| panic!("failed to read {manifest_path}: {error}"));
     for required in [

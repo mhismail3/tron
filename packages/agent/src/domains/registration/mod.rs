@@ -8,7 +8,9 @@
 //! that tool performs direct primitive operations rather than catalog routing.
 //! The registration entrypoint is crate-private: transport setup is the
 //! server-facing facade, while this module owns the concrete domain-worker
-//! wiring.
+//! wiring. `module_manifests` owns the ordered first-party manifest composition
+//! and reconciles it before any domain worker or function is registered; the
+//! engine owns only the generic version-preserving reconciliation algorithm.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -18,6 +20,7 @@
 pub(crate) mod bindings;
 pub(crate) mod catalog;
 pub(crate) mod contract;
+mod module_manifests;
 pub(crate) mod worker;
 
 use std::collections::BTreeSet;
@@ -50,8 +53,19 @@ pub(crate) async fn register_domain_workers_for_runtime_context(
     register_domain_workers_runtime(ctx).await
 }
 
+#[cfg(test)]
+pub(in crate::domains) fn reconcile_module_manifests_for_test(
+    handle: &crate::engine::EngineHostHandle,
+) -> EngineResult<()> {
+    handle
+        .reconcile_source_resources_for_setup(module_manifests::builtin_module_manifest_resources())
+}
+
 fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
+    handle.reconcile_source_resources_for_setup(
+        module_manifests::builtin_module_manifest_resources(),
+    )?;
     for module in domain_worker_modules(ctx)? {
         validate_domain_stream_topics(&module)?;
         handle.register_worker_for_setup(module.worker, false)?;
@@ -68,6 +82,9 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
 
 async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
+    handle
+        .reconcile_source_resources(module_manifests::builtin_module_manifest_resources())
+        .await?;
     for module in domain_worker_modules(ctx)? {
         validate_domain_stream_topics(&module)?;
         handle.register_worker(module.worker, false).await?;

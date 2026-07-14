@@ -141,6 +141,41 @@ impl EngineHostHandle {
             .register_type(request)
     }
 
+    /// Reconcile caller-owned canonical resources during async composition.
+    pub(crate) async fn reconcile_source_resources(
+        &self,
+        resources: Vec<CreateResource>,
+    ) -> Result<()> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .reconcile_source_resources(resources)
+    }
+
+    /// Reconcile caller-owned canonical resources during single-threaded
+    /// setup without introducing a constructor fallback.
+    pub(crate) fn reconcile_source_resources_for_setup(
+        &self,
+        resources: Vec<CreateResource>,
+    ) -> Result<()> {
+        let store = self
+            .inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation(
+                    "engine host is busy during source-resource setup".to_owned(),
+                )
+            })?
+            .primitives
+            .resources
+            .clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .reconcile_source_resources(resources)
+    }
+
     /// Create a typed resource through the engine-owned resource store.
     pub async fn create_resource(&self, request: CreateResource) -> Result<EngineResource> {
         let store = self.inner.lock().await.primitives.resources.clone();

@@ -7,7 +7,7 @@
 
 use serde_json::{Value, json};
 
-use super::module_registry_definitions::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
+use super::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
 
 pub(super) fn web_research_module_manifest() -> Value {
     json!({

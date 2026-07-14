@@ -7,12 +7,12 @@
 
 use serde_json::{Value, json};
 
-use super::module_registry_definitions::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
-use super::types::{
+use super::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
+use crate::domains::{device::contract as device_contract, notifications::contract};
+use crate::engine::{
     DEVICE_REGISTRATION_KIND, DEVICE_REGISTRATION_SCHEMA_ID, NOTIFICATION_DELIVERY_KIND,
     NOTIFICATION_DELIVERY_SCHEMA_ID, NOTIFICATION_KIND, NOTIFICATION_SCHEMA_ID,
 };
-use crate::domains::{device::contract as device_contract, notifications::contract};
 
 pub(super) fn notification_delivery_module_manifest() -> Value {
     json!({

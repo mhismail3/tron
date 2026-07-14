@@ -9,17 +9,17 @@
 
 use serde_json::{Value, json};
 
-use super::module_registry_definitions::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
-use super::types::{
-    IMPORT_HISTORY_RECORD_KIND, IMPORT_HISTORY_RECORD_SCHEMA_ID, IMPORT_PREVIEW_KIND,
-    IMPORT_PREVIEW_SCHEMA_ID, REPOSITORY_TREE_SNAPSHOT_KIND, REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID,
-    UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID,
-};
+use super::{MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, redaction_proof};
 use crate::domains::{
     import_history::contract as import_history_contract,
     import_preview::contract as import_preview_contract,
     repository_tree::contract as repository_tree_contract,
     update_diagnostics::contract as update_diagnostics_contract,
+};
+use crate::engine::{
+    IMPORT_HISTORY_RECORD_KIND, IMPORT_HISTORY_RECORD_SCHEMA_ID, IMPORT_PREVIEW_KIND,
+    IMPORT_PREVIEW_SCHEMA_ID, REPOSITORY_TREE_SNAPSHOT_KIND, REPOSITORY_TREE_SNAPSHOT_SCHEMA_ID,
+    UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID,
 };
 
 pub(super) fn import_update_module_manifest() -> Value {

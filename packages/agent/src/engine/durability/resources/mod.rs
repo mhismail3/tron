@@ -10,17 +10,13 @@
 //! control-plane summaries are projections over this store.
 //!
 //! Ownership is split by concern: `types` holds public substrate structs,
-//! `definitions` registers built-in resource kinds, `validation` enforces the
-//! generic resource contract, `versions` owns payload hashing/current-version
-//! helpers, domain definition modules own contract resource schemas including
-//! module manifests and split module-pack manifest seeds, module validation
-//! reports, procedural skill/rule/hook/procedure custody and activation-review
-//! records, module dependency policy metadata records, metadata-only capability
-//! binding policy and shadow-trial records, and media artifacts,
-//! `ui_surface` validates the runtime UI surface payload, and `store` contains
-//! the in-memory and SQLite persistence implementations. Source-owned built-in
-//! module manifests retain durable version history, but their current versions
-//! are reconciled to the canonical source payload when the engine starts.
+//! `definitions` and the type-definition modules register accepted resource
+//! kinds, `validation` enforces the generic resource contract, `versions` owns
+//! payload hashing/current-version helpers, `ui_surface` validates the runtime
+//! UI surface payload, and `store` contains the in-memory and SQLite persistence
+//! implementations. Feature composition supplies source-owned resource
+//! payloads through the host reconciliation boundary; the engine neither
+//! enumerates feature records nor imports their domain contracts.
 
 mod capability_binding_definitions;
 mod context_control_definitions;
@@ -37,11 +33,6 @@ mod module_dependencies_definitions;
 mod module_install_definitions;
 mod module_lifecycle_definitions;
 mod module_registry_definitions;
-mod module_registry_import_update_manifest;
-mod module_registry_memory_manifest;
-mod module_registry_notification_delivery_manifest;
-mod module_registry_procedural_manifest;
-mod module_registry_web_research_manifest;
 mod module_runtime_definitions;
 mod module_validation_definitions;
 mod notification_definitions;
@@ -91,7 +82,6 @@ pub(crate) use module_install_definitions::{
 };
 pub(crate) use module_lifecycle_definitions::MODULE_LIFECYCLE_STATE_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_registry_definitions::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
-pub(in crate::engine) use module_registry_definitions::builtin_module_manifest_resources;
 pub(crate) use module_runtime_definitions::MODULE_RUNTIME_STATE_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_validation_definitions::MODULE_VALIDATION_REPORT_PAYLOAD_SCHEMA_VERSION;
 pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore};

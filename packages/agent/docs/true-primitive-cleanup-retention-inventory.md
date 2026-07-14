@@ -99,9 +99,9 @@ The TSV covers tracked and newly introduced files under:
 | `program_execution` | 6 |
 | `prompt_artifacts` | 6 |
 | `protocol` | 1 |
-| `registration` | 5 |
+| `registration` | 10 |
 | `repository_tree` | 6 |
-| `resource_kernel` | 25 |
+| `resource_kernel` | 20 |
 | `rust_crate` | 2 |
 | `scheduler` | 7 |
 | `scripts` | 23 |
