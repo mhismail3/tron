@@ -1,18 +1,17 @@
 import Foundation
 import Observation
 
-/// Persistent + transient state for the wizard. `step` survives kill +
-/// relaunch via `UserDefaults` so a user who quits in the middle of
-/// onboarding resumes at the same step.
+/// Resume progress + transient state for the wizard. `step` survives
+/// kill + relaunch via `UserDefaults` so a user who quits in the middle
+/// of onboarding resumes at the same step. Durable completion belongs
+/// exclusively to the on-disk `.onboarded` sentinel.
 ///
-/// Mirrors the iOS `OnboardingState` so reading them side-by-side is
-/// straightforward: same key naming, same `advance()` / `goBack()`
-/// idioms, same `complete()` semantics.
+/// Shares the iOS `OnboardingState` navigation idioms (`advance()` and
+/// `goBack()`), while keeping Mac completion under its sentinel owner.
 @MainActor
 @Observable
 final class WizardState {
     nonisolated static let stepStorageKey = "tron.mac.wizardStep"
-    nonisolated static let onboardingCompleteKey = "tron.mac.wizardComplete"
 
     private let defaults: UserDefaults
 
@@ -171,28 +170,8 @@ final class WizardState {
     /// Marks the wizard complete and notifies AppDelegate to swap to
     /// menu-bar mode.
     func complete() {
-        defaults.set(true, forKey: Self.onboardingCompleteKey)
         navigate(to: .done, direction: .forward)
         NotificationCenter.default.post(name: .tronWizardDidComplete, object: nil)
-    }
-
-    /// Used by tests + the diagnostics page to wipe persistent state
-    /// without touching the on-disk sentinel.
-    func reset() {
-        defaults.removeObject(forKey: Self.stepStorageKey)
-        defaults.removeObject(forKey: Self.onboardingCompleteKey)
-        step = .welcome
-        slideDirection = .forward
-        tailscaleStatus = nil
-        permissionStatuses.removeAll()
-        permissionsServerRestarted = false
-        permissionsRestartInProgress = false
-        existingInstallStatus = .none
-        installOutcome = nil
-        installRequestID = 0
-        handledInstallRequestID = 0
-        installIsRunning = false
-        pairingPayload = nil
     }
 
     /// Explicitly starts or retries the install pipeline. This is the
@@ -204,13 +183,6 @@ final class WizardState {
 
     func markInstallRequestHandled(_ requestID: Int) {
         handledInstallRequestID = max(handledInstallRequestID, requestID)
-    }
-
-    func resetInstallRunState() {
-        installOutcome = nil
-        installRequestID = 0
-        handledInstallRequestID = 0
-        installIsRunning = false
     }
 
     /// Single mutation point for step + direction. Centralises the

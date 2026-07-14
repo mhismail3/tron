@@ -12,7 +12,8 @@
 Wrapper scenarios must keep `/health`, launchd, and SMAppService evidence tied
 to the visible wizard/menu state and the primitive teardown evidence manifest.
 
-The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
+The switch is driven entirely by the `.onboarded` sentinel file. UserDefaults
+stores only resumable wizard-step progress; it does not duplicate completion.
 
 `Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. The helper executable is produced by `cargo build --release --bin tron` and staged into two bundled helper apps: `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/` for production/local Release and `Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/` for isolated Debug install testing. `tron` is the LaunchAgent entrypoint. Helpers are signed first, then the outer wrapper is re-signed after copying the `Contents/Library` tree so ServiceManagement can verify the bundled LaunchAgent plists as sealed resources. The app bundle also carries Constitution defaults under `Contents/Resources/Constitution/`; it does not bundle managed skills or transcription sidecars on the primitive branch. See [development.md](./development.md) for the build pipeline.
 

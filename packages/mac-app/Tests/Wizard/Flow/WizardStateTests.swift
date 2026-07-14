@@ -85,14 +85,13 @@ struct WizardStateTests {
         #expect(state.step == .pairingInfo)
     }
 
-    @Test("complete sets the done step + persists onboardingComplete=true")
-    func completeFlips() async {
+    @Test("complete navigates to the done step")
+    func completeNavigatesToDone() {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
         state.complete()
         #expect(state.step == .done)
-        #expect(defaults.bool(forKey: WizardState.onboardingCompleteKey) == true)
     }
 
     @Test("step changes persist to UserDefaults")
@@ -106,36 +105,6 @@ struct WizardStateTests {
         // Re-instantiating from the same defaults resumes there.
         let revived = WizardState(defaults: defaults)
         #expect(revived.step == .install)
-    }
-
-    @Test("reset wipes all transient state and persistent flags")
-    func resetWipes() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance(); state.advance()
-        state.installOutcome = .success
-        state.requestInstall()
-        state.installIsRunning = true
-        state.pairingPayload = PairingPayload(host: "1.2.3.4", port: 9847, token: "x", label: nil)
-        state.tailscaleStatus = .signedIn(ipv4: "100.1.2.3")
-        state.permissionStatuses[.fullDiskAccess] = .granted
-        state.existingInstallStatus = .registered(version: "0.5.0")
-        state.complete()
-
-        state.reset()
-        #expect(state.step == .welcome)
-        #expect(state.installOutcome == nil)
-        #expect(state.installRequestID == 0)
-        #expect(state.handledInstallRequestID == 0)
-        #expect(state.hasUnhandledInstallRequest == false)
-        #expect(state.installIsRunning == false)
-        #expect(state.pairingPayload == nil)
-        #expect(state.tailscaleStatus == nil)
-        #expect(state.permissionStatuses.isEmpty)
-        #expect(state.existingInstallStatus == .none)
-        #expect(defaults.bool(forKey: WizardState.onboardingCompleteKey) == false)
-        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.welcome.rawValue)
     }
 
     @Test("safe-to-resume persisted step rawValue is honored")
@@ -284,36 +253,6 @@ struct WizardStateTests {
         state.requestInstall()
         #expect(state.installRequestID == 2)
         #expect(state.hasUnhandledInstallRequest == true)
-    }
-
-    @Test("resetInstallRunState clears install request replay tracking")
-    func resetInstallRunStateClearsReplayTracking() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.installOutcome = .success
-        state.requestInstall()
-        state.markInstallRequestHandled(state.installRequestID)
-        state.installIsRunning = true
-
-        state.resetInstallRunState()
-        #expect(state.installOutcome == nil)
-        #expect(state.installRequestID == 0)
-        #expect(state.handledInstallRequestID == 0)
-        #expect(state.hasUnhandledInstallRequest == false)
-        #expect(state.installIsRunning == false)
-    }
-
-    @Test("reset returns slideDirection to forward (default)")
-    func resetRestoresForward() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance()
-        state.goBack() // direction now .backward
-        #expect(state.slideDirection == .backward)
-        state.reset()
-        #expect(state.slideDirection == .forward)
     }
 
     @Test("interleaved advance/goBack flips direction each time")
