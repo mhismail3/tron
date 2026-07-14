@@ -9,6 +9,7 @@ import SwiftUI
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let setup: EnvironmentSetup
     private let poller: ServerStatusPoller
+    private let actionHandler: MenuBarActionHandler
     private var statusItem: NSStatusItem?
     private var pollerTask: Task<Void, Never>?
     private var pairingInfoWindowController: NSWindowController?
@@ -21,8 +22,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     init(setup: EnvironmentSetup) {
         self.setup = setup
         self.poller = ServerStatusPoller(setup: setup)
+        self.actionHandler = MenuBarActionHandler(setup: setup)
         self.snapshot = ServerStatusSnapshot.checking
         super.init()
+        self.actionHandler.menuBarController = self
     }
 
     func install() {
@@ -163,8 +166,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.isEnabled = false
             item.image = nil
             return item
-        case .action(let title, let isEnabled, let handler):
-            let wrapper = ActionWrapper(handler: handler)
+        case .action(let title, let isEnabled, let action):
+            let wrapper = ActionWrapper { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.actionHandler.perform(action)
+                }
+            }
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
             item.representedObject = wrapper // keep alive

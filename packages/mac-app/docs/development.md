@@ -202,9 +202,9 @@ See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac
 
 ### Add a new menu-bar item
 
-1. Extend `MenuItemDescriptor` enum in `MenuBarItemBuilder.swift` if the row needs new semantics (most new items are `.action` or `.openLink`; pairing/log detail belongs in dedicated windows).
-2. Add the item to the returned array in `MenuBarItemBuilder.build(snapshot:paths:)`.
-3. Pin the ordering in `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift`.
+1. Add a `MenuBarAction` case and route it in `MenuBarActionHandler.perform(_:)` when the item has side effects; pairing/log detail belongs in dedicated windows.
+2. Add the typed `.action` (or passive `.openLink`) descriptor in `MenuBarItemBuilder.build(snapshot:paths:)`.
+3. Pin the action mapping and ordering in `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift`.
 
 ### Debug the `.onboarded` sentinel logic
 

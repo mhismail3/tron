@@ -6,21 +6,10 @@ import Foundation
 /// without needing AppKit.
 enum MenuItemDescriptor: Equatable {
     case header(MenuHeaderContent)
-    case action(title: String, isEnabled: Bool, handler: @MainActor () -> Void)
+    case action(title: String, isEnabled: Bool, action: MenuBarAction)
     case openLink(title: String, url: URL)
     case separator
     case quit(title: String)
-
-    static func == (lhs: MenuItemDescriptor, rhs: MenuItemDescriptor) -> Bool {
-        switch (lhs, rhs) {
-        case (.header(let l), .header(let r)): return l == r
-        case (.action(let l1, let l2, _), .action(let r1, let r2, _)): return l1 == r1 && l2 == r2
-        case (.openLink(let l1, let l2), .openLink(let r1, let r2)): return l1 == r1 && l2 == r2
-        case (.separator, .separator): return true
-        case (.quit(let l), .quit(let r)): return l == r
-        default: return false
-        }
-    }
 
     var title: String {
         switch self {
@@ -50,41 +39,25 @@ enum MenuBarItemBuilder {
         items.append(.header(headerContent(snapshot: snapshot, paths: paths)))
         items.append(.separator)
 
-        items.append(.action(title: "Show pairing info", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarShowPairingInfo, object: nil)
-        }))
+        items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
 
         items.append(.openLink(title: "Open Tron folder", url: paths.tronHome))
 
-        items.append(.action(title: "Show logs", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarViewLogs, object: nil)
-        }))
+        items.append(.action(title: "Show logs", isEnabled: true, action: .viewLogs))
 
-        items.append(.action(title: "Send feedback", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarSendFeedback, object: nil)
-        }))
+        items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
 
         items.append(.separator)
         if snapshot.state.isRunning {
-            items.append(.action(title: "Pause server", isEnabled: serviceControlsEnabled, handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarPauseServer, object: nil)
-            }))
+            items.append(.action(title: "Pause server", isEnabled: serviceControlsEnabled, action: .pauseServer))
         } else {
-            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarResumeServer, object: nil)
-            }))
+            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
         }
-        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarRestartServer, object: nil)
-        }))
+        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: .restartServer))
         if snapshot.isDevServerActive {
-            items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, handler: { @MainActor in
-                NotificationCenter.default.post(name: .tronMenuBarStopDevServer, object: nil)
-            }))
+            items.append(.action(title: "Stop dev server", isEnabled: controlsEnabled, action: .stopDevServer))
         }
-        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarUninstall, object: nil)
-        }))
+        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
         items.append(.quit(title: "Quit Tron"))
 
         return items
@@ -268,15 +241,4 @@ struct ServerStatusSnapshot: Equatable {
     }
 
     static let checking = ServerStatusSnapshot(state: .checking)
-}
-
-extension Notification.Name {
-    static let tronMenuBarShowPairingInfo = Notification.Name("com.tron.mac.menu.pairingInfo")
-    static let tronMenuBarRestartServer = Notification.Name("com.tron.mac.menu.restart")
-    static let tronMenuBarPauseServer = Notification.Name("com.tron.mac.menu.pause")
-    static let tronMenuBarResumeServer = Notification.Name("com.tron.mac.menu.resume")
-    static let tronMenuBarStopDevServer = Notification.Name("com.tron.mac.menu.stopDevServer")
-    static let tronMenuBarViewLogs = Notification.Name("com.tron.mac.menu.viewLogs")
-    static let tronMenuBarSendFeedback = Notification.Name("com.tron.mac.menu.feedback")
-    static let tronMenuBarUninstall = Notification.Name("com.tron.mac.menu.uninstall")
 }

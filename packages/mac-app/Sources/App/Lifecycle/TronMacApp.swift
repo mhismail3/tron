@@ -193,7 +193,6 @@ struct CommandModeHostView: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
-    private var actionHandler: MenuBarActionHandler?
     private var wizardCompletionObserver: NSObjectProtocol?
     private var instanceLock: SingleInstanceLock?
 
@@ -310,12 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let wizardCompletionObserver {
             NotificationCenter.default.removeObserver(wizardCompletionObserver)
         }
-        // Tear down menu bar + action observers BEFORE releasing the
-        // single-instance lock so a second wrapper that races to launch
-        // sees a clean state (no stale observers, no half-disposed
-        // status item) by the time it acquires the lock.
-        actionHandler?.uninstall()
-        actionHandler = nil
+        // Tear down the menu bar before releasing the single-instance
+        // lock so a second wrapper cannot observe a half-disposed item.
         menuBarController?.dispose()
         menuBarController = nil
         instanceLock?.release()
@@ -325,12 +320,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installMenuBar(setup: EnvironmentSetup, context: MacAppStartupContext) {
         guard menuBarController == nil else { return }
         let controller = MenuBarController(setup: setup)
-        let handler = MenuBarActionHandler(setup: setup)
-        handler.menuBarController = controller
-        handler.install()
         controller.install()
         menuBarController = controller
-        actionHandler = handler
         Task { [weak controller] in
             _ = await MacAppStartupMaintenance.run(
                 setup: setup,

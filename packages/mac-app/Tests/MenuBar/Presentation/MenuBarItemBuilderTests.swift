@@ -244,6 +244,39 @@ struct MenuBarItemBuilderTests {
         ])
     }
 
+    @Test("menu titles map directly to typed actions")
+    func canonicalActionRouting() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = Self.makeSetup(in: tmp)
+        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let actions = Dictionary(uniqueKeysWithValues: MenuBarItemBuilder.build(snapshot: snap, paths: setup).compactMap { item in
+            if case .action(let title, _, let action) = item {
+                return (title, action)
+            }
+            return nil
+        })
+
+        #expect(actions == [
+            "Show pairing info": .showPairingInfo,
+            "Show logs": .viewLogs,
+            "Send feedback": .sendFeedback,
+            "Pause server": .pauseServer,
+            "Restart server": .restartServer,
+            "Uninstall Tron": .uninstall,
+        ])
+
+        let pausedItems = MenuBarItemBuilder.build(snapshot: ServerStatusSnapshot(state: .paused), paths: setup)
+        #expect(pausedItems.contains(.action(title: "Resume server", isEnabled: true, action: .resumeServer)))
+
+        let devSnapshot = ServerStatusSnapshot(
+            state: .running(version: "0.5.0", port: 9847),
+            isDevServerActive: true
+        )
+        let devItems = MenuBarItemBuilder.build(snapshot: devSnapshot, paths: setup)
+        #expect(devItems.contains(.action(title: "Stop dev server", isEnabled: true, action: .stopDevServer)))
+    }
+
     @Test("debug companion disables production LaunchAgent controls")
     func companionDisablesProductionControls() throws {
         let tmp = TestTempDir.make()

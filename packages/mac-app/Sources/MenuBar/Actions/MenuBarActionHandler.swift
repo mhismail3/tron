@@ -2,21 +2,25 @@ import AppKit
 import Foundation
 import UserNotifications
 
-/// Glue between the menu-bar `NotificationCenter` events and the actual
-/// side-effecting code (launchctl, NSWorkspace, AppleScript dialogs).
-///
-/// The builder in `MenuBarItemBuilder` posts notifications instead of
-/// invoking handlers directly so the View layer stays free of AppKit
-/// process control. This handler installs one observer per notification
-/// in `AppDelegate` and disposes them on terminate.
-///
-/// Each action is fire-and-forget: a Task performs subprocess work,
-/// then any UI surfacing (dialogs, windows, notifications, GitHub
-/// issue links) happens back on MainActor.
+/// Typed commands emitted by the pure menu builder and executed by the
+/// controller-owned action handler.
+enum MenuBarAction: Equatable, Sendable {
+    case showPairingInfo
+    case viewLogs
+    case sendFeedback
+    case pauseServer
+    case resumeServer
+    case restartServer
+    case stopDevServer
+    case uninstall
+}
+
+/// Owns the side effects behind typed menu-bar actions (launchctl,
+/// NSWorkspace, dialogs, notifications, and feedback issue links).
+/// `MenuBarController` owns one handler for exactly its own lifecycle.
 @MainActor
 final class MenuBarActionHandler {
     private let setup: EnvironmentSetup
-    private var observers: [NSObjectProtocol] = []
 
     /// Handle on the menu-bar controller so re-pairing can request a
     /// status refresh and pause/resume can re-render the menu.
@@ -26,74 +30,30 @@ final class MenuBarActionHandler {
         self.setup = setup
     }
 
-    deinit {
-        // observers must already be removed before this point because
-        // NotificationCenter strongly references them; we call install /
-        // uninstall explicitly from AppDelegate's lifecycle hooks.
-    }
-
-    /// Wires every menu-bar notification to its handler. Idempotent —
-    /// calling twice does NOT duplicate observers (the second call is ignored
-    /// when `observers` is non-empty).
-    func install() {
-        guard observers.isEmpty else { return }
-        let center = NotificationCenter.default
-
-        observe(.tronMenuBarRestartServer, on: center) { [weak self] in
-            await self?.restartServer()
+    func perform(_ action: MenuBarAction) async {
+        switch action {
+        case .showPairingInfo:
+            showPairingInfo()
+        case .viewLogs:
+            viewLogs()
+        case .sendFeedback:
+            await sendFeedback()
+        case .pauseServer:
+            await pauseServer()
+        case .resumeServer:
+            await resumeServer()
+        case .restartServer:
+            await restartServer()
+        case .stopDevServer:
+            await stopDevServer()
+        case .uninstall:
+            await confirmAndUninstall()
         }
-        observe(.tronMenuBarPauseServer, on: center) { [weak self] in
-            await self?.pauseServer()
-        }
-        observe(.tronMenuBarResumeServer, on: center) { [weak self] in
-            await self?.resumeServer()
-        }
-        observe(.tronMenuBarStopDevServer, on: center) { [weak self] in
-            await self?.stopDevServer()
-        }
-        observe(.tronMenuBarShowPairingInfo, on: center) { [weak self] in
-            self?.showPairingInfo()
-        }
-        observe(.tronMenuBarViewLogs, on: center) { [weak self] in
-            self?.viewLogs()
-        }
-        observe(.tronMenuBarSendFeedback, on: center) { [weak self] in
-            await self?.sendFeedback()
-        }
-        observe(.tronMenuBarUninstall, on: center) { [weak self] in
-            await self?.confirmAndUninstall()
-        }
-    }
-
-    func uninstall() {
-        let center = NotificationCenter.default
-        for token in observers {
-            center.removeObserver(token)
-        }
-        observers.removeAll()
-    }
-
-    // MARK: - Subscription helper
-
-    private func observe(
-        _ name: Notification.Name,
-        on center: NotificationCenter,
-        handler: @MainActor @escaping () async -> Void
-    ) {
-        // queue: nil so the closure runs synchronously on the posting
-        // thread; we hop to MainActor + spawn the async Task ourselves so
-        // the call site is explicit about its threading model.
-        let token = center.addObserver(forName: name, object: nil, queue: nil) { _ in
-            Task { @MainActor in
-                await handler()
-            }
-        }
-        observers.append(token)
     }
 
     // MARK: - Actions
 
-    func restartServer() async {
+    private func restartServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
         let outcome = await InstallLaunchAgentRunner.ensureLoaded(
@@ -126,7 +86,7 @@ final class MenuBarActionHandler {
         }
     }
 
-    func pauseServer() async {
+    private func pauseServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Pause blocked") else { return }
         applyBusy(.pausing)
         let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
@@ -148,7 +108,7 @@ final class MenuBarActionHandler {
         }
     }
 
-    func resumeServer() async {
+    private func resumeServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
         applyBusy(.resuming)
         let outcome = await setup.launchAgentManager.load(
@@ -180,7 +140,7 @@ final class MenuBarActionHandler {
         }
     }
 
-    func stopDevServer() async {
+    private func stopDevServer() async {
         let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
         let port = current.port ?? setup.serverPort
         applyBusy(.stoppingDevServer)
@@ -220,20 +180,20 @@ final class MenuBarActionHandler {
         }
     }
 
-    func showPairingInfo() {
+    private func showPairingInfo() {
         menuBarController?.showPairingInfoWindow(setup: setup)
     }
 
-    func viewLogs() {
+    private func viewLogs() {
         menuBarController?.showLogsWindow(setup: setup)
     }
 
-    func sendFeedback() async {
+    private func sendFeedback() async {
         let snapshot = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
         await MenuBarFeedbackAction.present(snapshot: snapshot)
     }
 
-    func confirmAndUninstall() async {
+    private func confirmAndUninstall() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Uninstall blocked") else { return }
         let alert = NSAlert()
         alert.messageText = "Uninstall Tron?"

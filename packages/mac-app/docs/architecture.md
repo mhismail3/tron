@@ -30,9 +30,9 @@ packages/mac-app/
 │   │   ├── CommandMode/            # Internal start/uninstall command-mode entry points
 │   │   └── Composition/            # Sendable DI struct (live + test values)
 │   ├── MenuBar/
-│   │   ├── Actions/                # Menu descriptor side effects and feedback issue action
-│   │   ├── Controller/             # NSStatusItem lifecycle + poller task + custom header view
-│   │   └── Presentation/           # Pure menu builder, logs reader, logs window
+│   │   ├── Actions/                # Typed menu commands, side effects, and feedback issue action
+│   │   ├── Controller/             # NSStatusItem, action-handler, poller, and window lifecycle
+│   │   └── Presentation/           # Pure typed-descriptor builder, logs reader, logs window
 │   ├── Resources/                  # bundled Library tree, defaults, AppIcon.icns, fonts
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
@@ -205,6 +205,7 @@ TronMacApp.main()
            └─ installMenuBar(setup:)
                 └─ MenuBarController
                     ├─ NSStatusItem with tinted Tron logo
+                    ├─ typed MenuBarAction → controller-owned MenuBarActionHandler
                     └─ 30s poller task → ServerStatusPoller.snapshot()
                          ├─ setup.pingServer(token) → ServerPingResult
                          ├─ launchAgentManager.isLoaded() when ping fails
