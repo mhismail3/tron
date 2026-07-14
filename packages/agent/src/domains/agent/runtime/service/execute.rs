@@ -11,6 +11,8 @@ use super::{
     persist_user_message_event, resume_prompt_session, run_agent, spawn_session_title_generation,
 };
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+use crate::shared::protocol::events::{BaseEvent, error_event};
+use crate::shared::server::failure::FailureOrigin;
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let PromptRunPlan {
@@ -83,7 +85,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             )
         }
     };
-    let persister = Arc::new(EventPersister::new(event_store.clone()));
     trace!(
         component = "agent.runtime",
         agent_event = "session_state_resolved",
@@ -94,6 +95,50 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         had_working_directory = state.working_directory.is_some(),
         "agent session state resolved"
     );
+
+    let mut user_event_payload = build_user_event_payload(&prompt, attachments.as_deref());
+    if let Some(object) = user_event_payload.as_object_mut() {
+        object.insert("runId".to_owned(), serde_json::json!(run_id.clone()));
+        if let Some(causality) = engine_causality.as_ref() {
+            object.insert(
+                "traceId".to_owned(),
+                serde_json::json!(causality.context.trace_id.as_str()),
+            );
+            object.insert(
+                "parentInvocationId".to_owned(),
+                serde_json::json!(
+                    causality
+                        .parent_invocation_id
+                        .as_ref()
+                        .map(|id| id.as_str())
+                ),
+            );
+        }
+    }
+    if let Err(error) =
+        persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)
+            .await
+    {
+        warn!(
+            session_id = %session_id,
+            run_id = %run_id,
+            error = %error,
+            "failed to persist message.user event; aborting prompt run"
+        );
+        let failure = error.to_failure(FailureOrigin::EventStore);
+        let _ = broadcast.emit(error_event(BaseEvent::now(&session_id), &failure, None));
+        return;
+    }
+    info!(
+        component = "agent.runtime",
+        agent_event = "user_message_persisted",
+        session_id = %session_id,
+        run_id = %run_id,
+        persisted = true,
+        "agent user message persistence completed"
+    );
+
+    let persister = Arc::new(EventPersister::new(event_store.clone()));
 
     let working_dir = state.working_directory.clone().unwrap_or(working_dir);
     let resolved_workspace_id = event_store
@@ -183,65 +228,19 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     });
     agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
-    let mut user_event_payload = build_user_event_payload(&prompt, attachments.as_deref());
-    if let Some(object) = user_event_payload.as_object_mut() {
-        object.insert("runId".to_owned(), serde_json::json!(run_id.clone()));
-        if let Some(causality) = engine_causality.as_ref() {
-            object.insert(
-                "traceId".to_owned(),
-                serde_json::json!(causality.context.trace_id.as_str()),
-            );
-            object.insert(
-                "parentInvocationId".to_owned(),
-                serde_json::json!(
-                    causality
-                        .parent_invocation_id
-                        .as_ref()
-                        .map(|id| id.as_str())
-                ),
-            );
-        }
-    }
-    let user_message_persisted = match persist_user_message_event(
+    spawn_session_title_generation(
+        title_responder_factory,
         event_store.clone(),
-        session_id.clone(),
-        user_event_payload,
-    )
-    .await
-    {
-        Ok(()) => true,
-        Err(error) => {
-            warn!(
-                session_id = %session_id,
-                error = %error,
-                "failed to persist message.user event"
-            );
-            false
-        }
-    };
-    info!(
-        component = "agent.runtime",
-        agent_event = "user_message_persisted",
-        session_id = %session_id,
-        run_id = %run_id,
-        persisted = user_message_persisted,
-        "agent user message persistence completed"
+        broadcast.clone(),
+        shutdown_coordinator,
+        SessionTitleGenerationRequest {
+            session_id: session_id.clone(),
+            model: model.clone(),
+            prompt: prompt.clone(),
+            working_dir: working_dir.clone(),
+            server_origin: server_origin.clone(),
+        },
     );
-    if user_message_persisted {
-        spawn_session_title_generation(
-            title_responder_factory,
-            event_store.clone(),
-            broadcast.clone(),
-            shutdown_coordinator,
-            SessionTitleGenerationRequest {
-                session_id: session_id.clone(),
-                model: model.clone(),
-                prompt: prompt.clone(),
-                working_dir: working_dir.clone(),
-                server_origin: server_origin.clone(),
-            },
-        );
-    }
 
     let user_content_override =
         build_user_content_override(&prompt, &model, attachments.as_deref());
@@ -297,4 +296,135 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         model_for_error,
     })
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
+    use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+    use crate::domains::model::responder::{
+        ModelResponder, ModelResponderFactory, ModelResponseError,
+    };
+    use crate::domains::session::event_store::{
+        ConnectionConfig, EventStore, ListEventsOptions, new_in_memory, run_migrations,
+    };
+    use crate::shared::protocol::events::TronEvent;
+    use crate::shared::server::errors::EVENT_STORE_FAILURE;
+
+    struct CountingFactory {
+        create_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ModelResponderFactory for CountingFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+        ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+            self.create_calls.fetch_add(1, Ordering::SeqCst);
+            Err(ModelResponseError::other(
+                "provider construction must not follow persistence failure",
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn user_message_persistence_failure_aborts_before_provider_construction() {
+        let pool = new_in_memory(&ConnectionConfig {
+            pool_size: 1,
+            ..ConnectionConfig::default()
+        })
+        .expect("event pool");
+        {
+            let conn = pool.get().expect("event connection");
+            run_migrations(&conn).expect("event migrations");
+        }
+        let event_store = Arc::new(EventStore::new(pool.clone()));
+        let session = event_store
+            .create_session("mock", "/tmp", Some("persist failure"), None)
+            .expect("session");
+        {
+            let conn = pool.get().expect("event connection");
+            conn.execute_batch(
+                "CREATE TRIGGER fail_user_message
+                 BEFORE INSERT ON events
+                 WHEN NEW.type = 'message.user'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced user-message failure');
+                 END;",
+            )
+            .expect("failure trigger");
+        }
+
+        let session_manager = Arc::new(SessionManager::new(event_store.clone()));
+        let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
+        let run_id = "run-persist-failure".to_owned();
+        let started_run = orchestrator
+            .begin_run(&session.session.id, &run_id)
+            .expect("run guard");
+        let create_calls = Arc::new(AtomicUsize::new(0));
+        let broadcast = orchestrator.broadcast().clone();
+        let mut events = broadcast.subscribe();
+
+        execute_prompt_run(PromptRunPlan {
+            started_run,
+            orchestrator: orchestrator.clone(),
+            session_manager,
+            broadcast,
+            responder_factory: Arc::new(CountingFactory {
+                create_calls: create_calls.clone(),
+            }),
+            event_store: event_store.clone(),
+            shutdown_token: None,
+            shutdown_coordinator: None,
+            engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+            engine_causality: None,
+            sequence_counter: None,
+            server_origin: "localhost:9847".to_owned(),
+            run_id,
+            model: session.session.latest_model,
+            working_dir: session.session.working_directory,
+            request: PromptRequest {
+                session_id: session.session.id.clone(),
+                prompt: "must be durable".to_owned(),
+                reasoning_level: None,
+                attachments: None,
+                engine_causality: None,
+            },
+        })
+        .await;
+
+        assert_eq!(
+            create_calls.load(Ordering::SeqCst),
+            0,
+            "provider construction must not start without durable user input"
+        );
+        assert!(!orchestrator.has_active_run(&session.session.id));
+        assert!(
+            orchestrator
+                .get_compaction_handler(&session.session.id)
+                .is_none(),
+            "failure before provider construction must not leak a compaction handler"
+        );
+        let rows = event_store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .expect("session events");
+        assert!(rows.iter().all(|row| row.event_type != "message.user"));
+        assert!(
+            rows.iter()
+                .all(|row| row.event_type != "model.provider_request")
+        );
+        assert!(rows.iter().all(|row| row.event_type != "message.assistant"));
+        let terminal_error = std::iter::from_fn(|| events.try_recv().ok())
+            .find(|event| event.event_type() == "error")
+            .expect("the acknowledged run must terminate with a client-visible error");
+        let TronEvent::Error { code, .. } = terminal_error else {
+            panic!("terminal event must retain the canonical error payload");
+        };
+        assert_eq!(code.as_deref(), Some(EVENT_STORE_FAILURE));
+    }
 }

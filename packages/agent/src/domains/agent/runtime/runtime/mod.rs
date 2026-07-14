@@ -1,7 +1,7 @@
 //! Prompt-turn runtime helpers.
 //!
 //! This module keeps the retained prompt-run primitives: bounded session
-//! refresh/resume reads and user-message payload persistence.
+//! refresh/resume reads and fail-closed user-message payload persistence.
 
 use std::time::Duration;
 

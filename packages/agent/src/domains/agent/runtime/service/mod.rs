@@ -7,9 +7,12 @@
 //! runs so logs, session events, trace records, and agent-result resources share
 //! common run/session/trace identifiers. Completion derives `agent_result` text
 //! and its event reference after the turn's synchronous persistence calls have
-//! committed. Prompt-run composition owns its event persister; the session
-//! cache retains only reconstructed event-store state and no parallel runtime
-//! service. Completion does not maintain a second final-answer state.
+//! committed. A durable `message.user` append is the prerequisite for provider
+//! construction and model execution; persistence failure releases the run
+//! without opening a provider stream. Prompt-run composition owns its event
+//! persister; the session cache retains only reconstructed event-store state
+//! and no parallel runtime service. Completion does not maintain a second
+//! final-answer state.
 
 use std::sync::atomic::AtomicI64;
 

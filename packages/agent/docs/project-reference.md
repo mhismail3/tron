@@ -2506,6 +2506,10 @@ Event-store ownership is folder-backed: `event_store/envelope`,
 `event_store/sqlite` expose normal Rust modules without `#[path]` aliases. The
 high-level `EventStore` facade lives under `event_store/store/event_store`,
 while SQLite repositories stay under `event_store/sqlite/repositories`.
+Prompt execution appends `message.user` after reconstructing prior history but
+before constructing or calling a provider. If that append fails, the runtime
+emits a canonical persistence error, releases the active run, and creates no
+provider audit or assistant event.
 
 ### Event Categories
 
