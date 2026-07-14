@@ -44,6 +44,18 @@ struct ServerStatusPollerTests {
         )
     }
 
+    @Test("snapshot tone follows state changes")
+    func snapshotToneFollowsStateChanges() {
+        var snapshot = ServerStatusSnapshot(state: .checking)
+        #expect(snapshot.tone == .attention)
+
+        snapshot.state = .running(version: "0.5.0", port: 9847)
+        #expect(snapshot.tone == .running)
+
+        snapshot.state = .failed(reason: "unreachable")
+        #expect(snapshot.tone == .failed)
+    }
+
     @Test("running: ping succeeds, snapshot is .running with version + port")
     func runningSnapshot() async throws {
         let setup = Self.makeSetup(

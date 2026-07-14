@@ -204,7 +204,7 @@ enum ServerStatusState: Equatable, Sendable {
 /// `ServerStatusPoller`.
 struct ServerStatusSnapshot: Equatable {
     var state: ServerStatusState
-    var tone: MenuBarTone
+    var tone: MenuBarTone { state.tone }
     var version: String?
     var port: Int?
     var tailscaleIP: String?
@@ -224,7 +224,6 @@ struct ServerStatusSnapshot: Equatable {
         isDevServerActive: Bool = false
     ) {
         self.state = state
-        self.tone = state.tone
         switch state {
         case .running(let stateVersion, let statePort):
             self.version = version ?? stateVersion

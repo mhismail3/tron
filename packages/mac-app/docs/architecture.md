@@ -216,8 +216,9 @@ TronMacApp.main()
 
 The menu bar renders an explicit server state rather than a generic dot:
 `running` is green, `checking`/busy/unauthorized are yellow, `failed` is red,
-and `paused` is gray. On a successful ping the poller asks the local port owner
-for PID/uptime, so `tron dev` takeover reports the `Tron-Dev.app` process
+and `paused` is gray. `ServerStatusState` owns that tone; snapshots derive it
+instead of storing a second value. On a successful ping the poller asks the
+local port owner for PID/uptime, so `tron dev` takeover reports the `Tron-Dev.app` process
 instead of stale LaunchAgent metadata and marks the header `Dev Server active`.
 If `system::ping` fails, the poller asks launchd whether `com.tron.server` is
 loaded; unloaded maps to paused, loaded-but-unreachable maps to failed.
