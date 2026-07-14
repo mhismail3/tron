@@ -29,7 +29,6 @@ fn live_docs_templates_and_scorecards_have_no_deleted_doc_residue() {
     let banned_needles = [
         ".claude",
         "CLAUDE",
-        "packages/agent/docs/primitive-code-cleanup-scorecard.md`: active",
         "packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: active",
         "managed skill sync",
         "managed-skill sync",
@@ -70,7 +69,6 @@ fn github_ci_runs_rust_static_gates_for_docs_templates_ios_and_mac_changes() {
     let quality = read_repo_file("scripts/tron.d/quality.sh");
     let required_static_gates = [
         "primitive_engine_teardown_plan_invariants",
-        "primitive_code_cleanup_invariants",
         "hierarchical_rearchitecture_invariants",
         "post_hra_adversarial_hardening_invariants",
     ];

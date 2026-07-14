@@ -58,14 +58,12 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
         || path.starts_with("packages/agent/docs/baseline-pre-restoration-closure-")
         || path == "packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv"
         || path == "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs"
-        || path == "packages/agent/docs/primitive-code-cleanup-scorecard.md"
         || path == "packages/agent/docs/provider-model-boundary-discipline-scorecard.md"
         || path == "packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md"
         || path
             == "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
         || path == "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
         || path == "packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs"
-        || path == "packages/agent/tests/primitive_code_cleanup/budgets_generated_dependencies.rs"
         || path == "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
         || source.contains("off-plan-saa-authorship-teardown-cleanup")
         || source.contains("self-sufficient-agent-runtime-readiness")
@@ -393,7 +391,6 @@ fn evidence_manifest_records_required_commands_without_placeholders() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture",
         "scripts/tron ci fmt check clippy test",
         "scripts/personal-info-guard.sh",
         "cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj",

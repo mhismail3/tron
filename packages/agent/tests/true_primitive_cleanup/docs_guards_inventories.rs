@@ -50,8 +50,6 @@ fn docs_guards_and_inventories_are_current() {
     for path in [
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
-        "packages/agent/docs/primitive-code-cleanup-scorecard.md",
         "packages/agent/tests/hierarchical_rearchitecture/docs_path_closeout.rs",
     ] {
         let text = read_repo_file(path);

@@ -131,16 +131,6 @@ Current living entry points:
   source, entropy, API, hash, and proof inventory.
 - `packages/agent/docs/determinism-replayability-inventory.tsv`:
   machine-readable replay-critical source inventory used by DRC static gates.
-- `packages/agent/docs/primitive-code-cleanup-scorecard.md`: completed whole-repo
-  primitive cleanup scorecard for folder ownership, file budgets, generated
-  artifact hygiene, and final retained-surface proof.
-- `packages/agent/docs/primitive-code-cleanup-evidence-manifest.md`: companion
-  evidence manifest for the completed primitive cleanup scorecard.
-- `packages/agent/docs/primitive-code-cleanup-inventory.md`: PCC-1
-  whole-repo tracked-file inventory, classification summary, and canonical
-  cleanup target tree.
-- `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
-  machine-readable per-file cleanup classification used by static gates.
 - `packages/agent/docs/true-primitive-cleanup-scorecard.md`: completed
   scorecard for the final strict primitive cleanup pass over oversized roots,
   residue review, dead state, provider/model ownership, iOS shell flattening,
@@ -472,9 +462,6 @@ Current living entry points:
   provider request audit wiring, replay manifest hashing, stable ordering,
   cross-record replay references, offline roundtrip proof, docs parity, and
   closeout.
-- `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
-  scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
-  gates.
 - `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: completed
   hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
   large-file-budget gates.
@@ -3468,7 +3455,7 @@ tron ci clippy test          # Subset: linting + tests
 
 `tron ci test` runs Rust lib/bin tests serially first, then the named closeout targets:
 `db_path_guard`, `primitive_engine_teardown_plan_invariants`,
-`determinism_replayability_invariants`, `primitive_code_cleanup_invariants`,
+`determinism_replayability_invariants`,
 `hierarchical_rearchitecture_invariants`,
 `post_hra_adversarial_hardening_invariants`,
 `post_aha_adversarial_closeout_invariants`,

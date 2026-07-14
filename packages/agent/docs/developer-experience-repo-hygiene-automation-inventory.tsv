@@ -31,7 +31,6 @@ DXRHA-INV-030	scripts/tron-lib.sh	setup	runtime-home-owner	Setup seeds profiles,
 DXRHA-INV-031	scripts/tron.d/manual-deploy.sh	release_boundary	manual-deploy-owner	Manual contributor deploy stays explicit and health-gated, not hidden in CI or dev workflow	source audit	README deployment docs	DXRHA-2,DXRHA-6
 DXRHA-INV-032	scripts/tron-lib.d/service.sh	release_boundary	service-script-owner	Start/restart/rollback service helpers preserve health gates and manual production boundaries	source audit	README deployment docs	DXRHA-2,DXRHA-6
 DXRHA-INV-033	.codex/environments/environment.toml	dev_server	codex-action-owner	Local Codex actions call dev and iOS helper commands without production deploy automation	source audit	README local actions	DXRHA-6,DXRHA-9
-DXRHA-INV-034	packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	predecessor_inventory	pcc-owner	PCC inventory classifies new DXRHA artifacts	PCC invariant	static gates	DXRHA-8
 DXRHA-INV-035	packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv	predecessor_inventory	tpc-owner	TPC retention inventory classifies new DXRHA artifacts	TPC invariant	static gates	DXRHA-8
 DXRHA-INV-036	packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv	predecessor_inventory	hra-owner	HRA tracked-file inventory classifies new DXRHA artifacts	HRA invariant	static gates	DXRHA-8
 DXRHA-INV-037	packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv	predecessor_inventory	hra-owner	HRA ownership map classifies new DXRHA artifacts	HRA invariant	static gates	DXRHA-8

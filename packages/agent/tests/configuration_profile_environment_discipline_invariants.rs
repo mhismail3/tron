@@ -767,7 +767,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "true-primitive-cleanup-retention-inventory.tsv",
         "hierarchical-rearchitecture-file-inventory.tsv",
         "hierarchical-rearchitecture-current-ownership-map.tsv",
-        "primitive-code-cleanup-file-inventory.tsv",
     ] {
         assert!(
             inventory.contains(predecessor),
@@ -789,7 +788,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
     ] {
         let predecessor = read_repo_file(path);
         assert!(

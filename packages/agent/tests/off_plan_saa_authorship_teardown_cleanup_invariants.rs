@@ -176,7 +176,6 @@ fn opsaa_evidence_manifest_records_closeout_without_placeholders() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test integration -- --nocapture",
@@ -540,8 +539,6 @@ fn active_readme_and_predecessor_inventories_do_not_claim_saa_complete_current_a
         "packages/agent/docs/hierarchical-rearchitecture-inventory.md",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/primitive-code-cleanup-inventory.md",
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
     ] {
         let source = read_repo_file(path);
         for forbidden in [
@@ -684,7 +681,6 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
-        | "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv"
         | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
         | "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv"
         | "packages/agent/tests/hierarchical_rearchitecture/scorecard_inventory.rs" => {
@@ -702,12 +698,10 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         }
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
         | "packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs"
-        | "packages/agent/tests/primitive_code_cleanup/budgets_generated_dependencies.rs"
         | "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md"
-        | "packages/agent/docs/primitive-code-cleanup-scorecard.md"
         | "packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md"
         | "packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs" => {
             Some(ResidueClass::FutureReadinessWording)

@@ -452,10 +452,6 @@ fn predecessor_inventory_rows_record_pmbd_as_current_original_slice() {
             "PMBD provider/model boundary artifacts extend PPACD public protocol hardening evidence",
         ),
         (
-            "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
-            "Provider / Model Boundary Discipline",
-        ),
-        (
             "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
             "Provider / Model Boundary Discipline",
         ),

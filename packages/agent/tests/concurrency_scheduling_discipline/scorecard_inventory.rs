@@ -109,7 +109,6 @@ fn csd_invariant_target_is_in_closeout_ci_lists() {
     for required in [
         "primitive_engine_teardown_plan_invariants",
         "determinism_replayability_invariants",
-        "primitive_code_cleanup_invariants",
         "hierarchical_rearchitecture_invariants",
         "post_hra_adversarial_hardening_invariants",
         "post_aha_adversarial_closeout_invariants",

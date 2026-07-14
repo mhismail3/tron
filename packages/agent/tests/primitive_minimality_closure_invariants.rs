@@ -527,7 +527,6 @@ fn predecessor_inventories_classify_pmc_artifacts() {
         TARGET_PATH,
     ];
     for predecessor in [
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
         "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",

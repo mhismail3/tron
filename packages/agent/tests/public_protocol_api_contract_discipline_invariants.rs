@@ -412,7 +412,6 @@ fn ppacd_evidence_manifest_records_required_command_results() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture",
         "cd packages/ios-app && xcodegen generate",
@@ -452,7 +451,6 @@ fn predecessor_inventories_classify_ppacd_artifacts() {
         INVARIANT_PATH,
     ];
     for predecessor in [
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
         "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",

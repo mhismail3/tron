@@ -647,6 +647,37 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
 #[test]
 fn dev_quality_environment_and_app_wrapper_do_not_hide_production_deploys() {
     for path in [
+        concat!("scripts/auto", "-deploy"),
+        "scripts/tron.d/automation.sh",
+    ] {
+        assert!(
+            !repo_path(path).exists(),
+            "automatic deployment helper must stay absent: {path}"
+        );
+    }
+
+    for path in [
+        "README.md",
+        "scripts/tron",
+        "scripts/tron-cli",
+        "scripts/tron-lib.sh",
+        "packages/mac-app/Sources/Server/Paths/TronPaths.swift",
+    ] {
+        let source = read_repo_file(path);
+        for forbidden in [
+            concat!("auto", "-deploy"),
+            "AUTO_DEPLOY",
+            concat!("cmd_", "auto", "_deploy"),
+            "com.tron.auto-deploy",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "manual production surface must not retain {forbidden} in {path}"
+            );
+        }
+    }
+
+    for path in [
         "scripts/tron.d/dev.sh",
         "scripts/tron.d/quality.sh",
         ".codex/environments/environment.toml",
@@ -720,7 +751,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "true-primitive-cleanup-retention-inventory.tsv",
         "hierarchical-rearchitecture-file-inventory.tsv",
         "hierarchical-rearchitecture-current-ownership-map.tsv",
-        "primitive-code-cleanup-file-inventory.tsv",
     ] {
         assert!(
             inventory.contains(predecessor),
@@ -743,7 +773,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
     ] {
         let predecessor = read_repo_file(path);
         assert!(

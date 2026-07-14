@@ -370,7 +370,6 @@ fn local_and_github_ci_run_the_same_static_closeout_targets() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let required_targets = [
         "primitive_engine_teardown_plan_invariants",
-        "primitive_code_cleanup_invariants",
         "hierarchical_rearchitecture_invariants",
         "post_hra_adversarial_hardening_invariants",
         "post_aha_adversarial_closeout_invariants",

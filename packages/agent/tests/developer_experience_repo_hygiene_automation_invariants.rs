@@ -583,9 +583,16 @@ fn generated_and_ignored_artifact_policy_is_source_guarded() {
         "packages/ios-app/build/",
         "packages/ios-app/TronMobile.xcodeproj/",
         "*.xcresult",
+        "*.dSYM/",
         "DerivedData/",
         "scripts/artifacts/",
         "node_modules/",
+        "__pycache__/",
+        "*.pyc",
+        ".pytest_cache/",
+        "tmp/",
+        "*.log",
+        ".worktrees/",
     ] {
         assert!(
             root_gitignore.contains(required),
@@ -745,7 +752,6 @@ fn predecessor_inventories_classify_dxrha_artifacts() {
         TARGET_PATH,
     ];
     for predecessor in [
-        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
         "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
