@@ -1,6 +1,7 @@
 use super::SessionLifecycleService;
 use super::{BaseEvent, TronEvent};
 use crate::domains::session::Deps;
+use crate::domains::session::event_store::ListSessionsOptions;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
@@ -84,17 +85,17 @@ impl SessionLifecycleService {
         let cutoff_rfc = cutoff.to_rfc3339();
 
         // Gather candidate session IDs inside a blocking task.
-        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let cutoff_for_filter = cutoff_rfc.clone();
         let candidates: Vec<String> =
             run_blocking_task("session.archiveOlderThan.list", move || {
-                let filter = crate::domains::agent::r#loop::SessionFilter {
-                    include_archived: false,
+                let options = ListSessionsOptions {
+                    ended: Some(false),
                     ..Default::default()
                 };
-                let sessions = session_manager.list_sessions(&filter).map_err(|error| {
+                let sessions = event_store.list_sessions(&options).map_err(|error| {
                     CapabilityError::Internal {
-                        message: error.to_string(),
+                        message: format!("Persistence error: {error}"),
                     }
                 })?;
                 // RFC3339 strings are lexicographically sortable, so a

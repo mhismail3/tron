@@ -32,7 +32,7 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
             "cached_sessions",
             "pub(in crate::domains) fn resume_session",
             "session_reconstructor::reconstruct",
-            "pub(in crate::domains::agent) fn end_session",
+            "fn end_session",
             "cached_sessions.remove(session_id)",
             ".append(&AppendOptions",
             "EventType::SessionEnd",
@@ -189,7 +189,7 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "clear_session_ended(&session_id_for_unarchive)",
         "TronEvent::SessionUnarchived",
         "archive_older_than",
-        "include_archived: false",
+        "ended: Some(false)",
         "Self::archive(deps, session_id.clone()).await",
     ] {
         assert!(

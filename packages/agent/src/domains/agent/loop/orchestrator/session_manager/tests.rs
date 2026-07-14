@@ -207,43 +207,24 @@ async fn delete_session() {
 }
 
 #[tokio::test]
-async fn list_sessions() {
-    let mgr = make_manager();
-    let _ = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
-    let _ = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
-
-    let sessions = mgr.list_sessions(&SessionFilter::default()).unwrap();
-    assert_eq!(sessions.len(), 2);
-}
-
-#[tokio::test]
-async fn list_sessions_filters_by_workspace_path_and_offset() {
+async fn shutdown_ends_unarchived_sessions_and_clears_cache() {
     let mgr = make_manager();
     let first = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
     let second = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
-
-    let filtered = mgr
-        .list_sessions(&SessionFilter {
-            workspace_path: Some("/tmp/a".to_string()),
-            ..Default::default()
-        })
+    let archived = mgr
+        .create_session("model-c", "/tmp/c", Some("archived"))
         .unwrap();
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].id, first);
+    mgr.archive_session(&archived).unwrap();
 
-    let paged = mgr
-        .list_sessions(&SessionFilter {
-            limit: Some(1),
-            offset: Some(1),
-            ..Default::default()
-        })
-        .unwrap();
-    assert_eq!(paged.len(), 1);
-    assert!(
-        paged
-            .iter()
-            .all(|session| session.id == first || session.id == second)
-    );
+    mgr.end_unarchived_sessions_for_shutdown();
+
+    for session_id in [first, second] {
+        let session = mgr.event_store.get_session(&session_id).unwrap().unwrap();
+        assert!(session.ended_at.is_some());
+        assert!(!mgr.is_cached(&session_id));
+    }
+
+    assert_eq!(mgr.event_store.count_events(&archived).unwrap(), 1);
 }
 
 #[tokio::test]

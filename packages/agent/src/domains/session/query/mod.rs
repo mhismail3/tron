@@ -4,14 +4,14 @@
 //! over immutable creation/session-ID keys beneath one server-issued
 //! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
 //! and clients can assemble a generous bounded snapshot without one unbounded
-//! database read. Single-session row lookups read `EventStore` directly;
-//! `SessionManager` retains resume/cache behavior and the bounded list adapter
-//! also used by orchestrator shutdown.
+//! database read. Row lookups and bounded listing read `EventStore` directly;
+//! within this query path, `SessionManager` remains only for resume/cache data.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domains::session::Deps;
+use crate::domains::session::event_store::ListSessionsOptions;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
 
@@ -77,30 +77,37 @@ impl SessionQueryService {
             || chrono::Utc::now().to_rfc3339(),
             |cursor| cursor.snapshot_as_of.clone(),
         );
-        let filter = crate::domains::agent::r#loop::SessionFilter {
-            workspace_path: working_directory,
-            include_archived,
-            limit: Some(fetch_limit),
-            offset,
-            snapshot_created_at: Some(snapshot_as_of.clone()),
-            before_created_at: cursor
-                .as_ref()
-                .map(|cursor| cursor.before_created_at.clone()),
-            before_session_id: cursor
-                .as_ref()
-                .map(|cursor| cursor.before_session_id.clone()),
-            ..Default::default()
-        };
+        let before_created_at = cursor
+            .as_ref()
+            .map(|cursor| cursor.before_created_at.clone());
+        let before_session_id = cursor
+            .as_ref()
+            .map(|cursor| cursor.before_session_id.clone());
         let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let orchestrator = deps.orchestrator.clone();
         run_blocking_task("session.list", move || {
-            let mut sessions =
-                session_manager
-                    .list_sessions(&filter)
-                    .map_err(|error| CapabilityError::Internal {
-                        message: error.to_string(),
-                    })?;
+            let options = ListSessionsOptions {
+                workspace_id: None,
+                working_directory: working_directory.as_deref(),
+                ended: if include_archived {
+                    None
+                } else {
+                    Some(false)
+                },
+                #[allow(clippy::cast_possible_wrap)]
+                limit: Some(fetch_limit as i64),
+                #[allow(clippy::cast_possible_wrap)]
+                offset: offset.map(|value| value as i64),
+                snapshot_created_at: Some(&snapshot_as_of),
+                before_created_at: before_created_at.as_deref(),
+                before_session_id: before_session_id.as_deref(),
+            };
+            let mut sessions = event_store.list_sessions(&options).map_err(|error| {
+                CapabilityError::Internal {
+                    message: format!("Persistence error: {error}"),
+                }
+            })?;
 
             let has_more = sessions.len() > limit;
             sessions.truncate(limit);
@@ -112,7 +119,7 @@ impl SessionQueryService {
                         before_created_at: session.created_at.clone(),
                         before_session_id: session.id.clone(),
                         include_archived,
-                        working_directory: filter.workspace_path.clone(),
+                        working_directory: working_directory.clone(),
                     })
                     .expect("session list cursor serialization cannot fail")
                 })
@@ -169,7 +176,7 @@ impl SessionQueryService {
                 "hasMore": has_more,
                 "nextCursor": next_cursor,
                 "snapshotAsOf": snapshot_as_of,
-                "snapshotCanReconcile": include_archived && filter.workspace_path.is_none() && offset.is_none(),
+                "snapshotCanReconcile": include_archived && working_directory.is_none() && offset.is_none(),
             }))
         })
         .await

@@ -55,7 +55,7 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::capability_invocation_tracker::CapabilityInvocationTracker;
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
-use crate::domains::agent::r#loop::orchestrator::session_manager::{SessionFilter, SessionManager};
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::r#loop::orchestrator::turn_accumulator::TurnAccumulatorMap;
 
 /// Tracks an active agent run within a session.
@@ -461,7 +461,7 @@ impl Orchestrator {
             .has_pending(invocation_id)
     }
 
-    /// Graceful shutdown — end all active sessions.
+    /// Graceful shutdown — cancel runtime work and end all unarchived durable sessions.
     #[instrument(skip(self))]
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         info!("orchestrator shutdown initiated");
@@ -489,17 +489,7 @@ impl Orchestrator {
         self.sequence_counters.clear();
         self.compaction_handlers.clear();
 
-        // List all active sessions and end them
-        let sessions = self
-            .session_manager
-            .list_sessions(&SessionFilter::default())
-            .unwrap_or_default();
-
-        for session in sessions {
-            if let Err(e) = self.session_manager.end_session(&session.id) {
-                warn!(session_id = %session.id, error = %e, "failed to end session during shutdown");
-            }
-        }
+        self.session_manager.end_unarchived_sessions_for_shutdown();
 
         Ok(())
     }

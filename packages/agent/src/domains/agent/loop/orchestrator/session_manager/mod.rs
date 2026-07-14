@@ -9,13 +9,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::domains::session::event_store::{AppendOptions, EventStore, EventType};
+use crate::domains::session::event_store::{
+    AppendOptions, EventStore, EventType, ListSessionsOptions,
+};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use parking_lot::Mutex;
 use serde_json::json;
 
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::orchestrator::session_reconstructor::{
@@ -58,25 +60,6 @@ impl CachedSession {
         }
         self.state.clone()
     }
-}
-
-/// Filter for listing sessions.
-#[derive(Clone, Debug, Default)]
-pub(in crate::domains) struct SessionFilter {
-    /// Filter by workspace path.
-    pub(in crate::domains) workspace_path: Option<String>,
-    /// Include archived sessions.
-    pub(in crate::domains) include_archived: bool,
-    /// Maximum number of results.
-    pub(in crate::domains) limit: Option<usize>,
-    /// Skip results.
-    pub(in crate::domains) offset: Option<usize>,
-    /// Immutable upper creation-time boundary for a paginated snapshot.
-    pub(in crate::domains) snapshot_created_at: Option<String>,
-    /// Stable keyset boundary creation timestamp.
-    pub(in crate::domains) before_created_at: Option<String>,
-    /// Stable keyset boundary session ID tie-breaker.
-    pub(in crate::domains) before_session_id: Option<String>,
 }
 
 /// Session manager.
@@ -168,10 +151,7 @@ impl SessionManager {
     }
 
     /// End a session (remove it from the active map, persist `session.end`).
-    pub(in crate::domains::agent) fn end_session(
-        &self,
-        session_id: &str,
-    ) -> Result<(), RuntimeError> {
+    fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         let _ = self.cached_sessions.remove(session_id);
 
         // Persist session.end event before marking the session as ended
@@ -248,31 +228,28 @@ impl SessionManager {
         Ok(())
     }
 
-    /// List sessions.
-    pub(in crate::domains) fn list_sessions(
-        &self,
-        filter: &SessionFilter,
-    ) -> Result<Vec<crate::domains::session::event_store::SessionRow>, RuntimeError> {
-        use crate::domains::session::event_store::ListSessionsOptions;
-        let opts = ListSessionsOptions {
-            workspace_id: None,
-            working_directory: filter.workspace_path.as_deref(),
-            ended: if filter.include_archived {
-                None
-            } else {
-                Some(false)
-            },
-            #[allow(clippy::cast_possible_wrap)]
-            limit: filter.limit.map(|l| l as i64),
-            #[allow(clippy::cast_possible_wrap)]
-            offset: filter.offset.map(|o| o as i64),
-            snapshot_created_at: filter.snapshot_created_at.as_deref(),
-            before_created_at: filter.before_created_at.as_deref(),
-            before_session_id: filter.before_session_id.as_deref(),
+    /// End every unarchived durable session while preserving cache/event cleanup.
+    pub(super) fn end_unarchived_sessions_for_shutdown(&self) {
+        let sessions = match self.event_store.list_sessions(&ListSessionsOptions {
+            ended: Some(false),
+            ..Default::default()
+        }) {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                warn!(%error, "failed to list unarchived sessions during shutdown");
+                return;
+            }
         };
-        self.event_store
-            .list_sessions(&opts)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))
+
+        for session in sessions {
+            if let Err(error) = self.end_session(&session.id) {
+                warn!(
+                    session_id = %session.id,
+                    error = %error,
+                    "failed to end session during shutdown"
+                );
+            }
+        }
     }
 
     /// Check whether a reconstructed session projection is cached.
