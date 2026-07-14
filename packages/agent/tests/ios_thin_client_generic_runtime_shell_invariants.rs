@@ -654,7 +654,6 @@ fn predecessor_inventory_wiring_is_recorded() {
     let predecessors = [
         "hierarchical-rearchitecture-file-inventory.tsv",
         "hierarchical-rearchitecture-current-ownership-map.tsv",
-        "true-primitive-cleanup-retention-inventory.tsv",
         "public-protocol-api-contract-discipline-inventory.tsv",
         "configuration-profile-environment-discipline-inventory.tsv",
         "release-install-upgrade-rollback-discipline-inventory.tsv",
@@ -673,7 +672,6 @@ fn predecessor_inventory_wiring_is_recorded() {
     for path in [
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
         "packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv",
         "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",

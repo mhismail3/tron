@@ -728,7 +728,6 @@ fn predecessor_inventories_classify_desi_artifacts() {
         TARGET_PATH,
     ];
     for predecessor in [
-        "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
         "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",
@@ -771,7 +770,6 @@ fn closeout_evidence_records_required_commands_without_placeholders() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture",
         "scripts/tron ci fmt check clippy test",

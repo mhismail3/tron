@@ -58,7 +58,6 @@ run_tests() {
         primitive_module_proposal_trace
         state_ownership_lifecycle_invariants
         true_modularity_boundary_invariants
-        true_primitive_cleanup_invariants
         primitive_trace_execution
         integration
     )

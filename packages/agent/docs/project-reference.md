@@ -131,17 +131,6 @@ Current living entry points:
   source, entropy, API, hash, and proof inventory.
 - `packages/agent/docs/determinism-replayability-inventory.tsv`:
   machine-readable replay-critical source inventory used by DRC static gates.
-- `packages/agent/docs/true-primitive-cleanup-scorecard.md`: completed
-  scorecard for the final strict primitive cleanup pass over oversized roots,
-  residue review, dead state, provider/model ownership, iOS shell flattening,
-  Mac/scripts helper scope, and closeout evidence.
-- `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`: companion
-  evidence manifest for the completed True Primitive Cleanup scorecard.
-- `packages/agent/docs/true-primitive-cleanup-retention-inventory.md`: completed
-  TPC retention inventory that classifies every tracked source/docs/script path
-  in scope as primitive, implementation, support, test, docs, or delete.
-- `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`:
-  machine-readable TPC retention inventory used by static gates.
 - `packages/agent/docs/true-modularity-boundary-scorecard.md`: completed
   scorecard for proving Rust and iOS boundaries are black-boxed by ownership,
   narrow APIs, and guarded dependency direction.
@@ -471,8 +460,6 @@ Current living entry points:
 - `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
   post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
   ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
-- `packages/agent/tests/true_primitive_cleanup_invariants.rs`: completed TPC
-  scorecard, evidence, initial red-finding, and tracked-source setup gates.
 - `packages/agent/tests/true_modularity_boundary_invariants.rs`: completed TMB
   scorecard, boundary inventory, responder, facade, domain, storage, transport,
   iOS engine-access, boundary-error, and final closeout gates.

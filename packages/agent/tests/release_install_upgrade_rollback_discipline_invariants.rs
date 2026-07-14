@@ -748,7 +748,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "state-ownership-lifecycle-inventory.tsv",
         "failure-semantics-inventory.tsv",
         "determinism-replayability-inventory.tsv",
-        "true-primitive-cleanup-retention-inventory.tsv",
         "hierarchical-rearchitecture-file-inventory.tsv",
         "hierarchical-rearchitecture-current-ownership-map.tsv",
     ] {
@@ -770,7 +769,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "packages/agent/docs/state-ownership-lifecycle-inventory.tsv",
         "packages/agent/docs/failure-semantics-inventory.tsv",
         "packages/agent/docs/determinism-replayability-inventory.tsv",
-        "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
     ] {

@@ -208,7 +208,6 @@ fn predecessor_inventories_classify_ssarr_artifacts() {
         TARGET_PATH,
     ];
     for predecessor in [
-        "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
         "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",

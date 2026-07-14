@@ -176,7 +176,6 @@ fn opsaa_evidence_manifest_records_closeout_without_placeholders() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test integration -- --nocapture",
         "scripts/tron ci fmt check clippy test",
@@ -682,7 +681,6 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
         | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
-        | "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv"
         | "packages/agent/tests/hierarchical_rearchitecture/scorecard_inventory.rs" => {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
