@@ -1,21 +1,19 @@
-//! Generic resource-store definition for module manifest records.
+//! Durable resource contract for module manifest records.
 //!
-//! Domain registration owns first-party manifest payload composition. This
-//! engine module owns only the persisted resource type accepted by the generic
-//! store.
+//! The module-registry domain owns the kind, schema, retention, redaction, and
+//! materialization rules. Domain registration installs this definition before
+//! reconciling source-owned manifest payloads into the generic engine store.
 
 use serde_json::{Value, json};
 
-use super::types::{
-    EngineResourceVersioningMode, MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID,
-    RegisterResourceType,
+use super::{
+    MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, RESOURCE_READ_SCOPE,
+    SCHEMA_VERSION, WORKER,
 };
-use crate::engine::kernel::ids::WorkerId;
+use crate::engine::{EngineResourceVersioningMode, RegisterResourceType, WorkerId};
 
-pub(crate) const MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION: &str = "tron.module_manifest.v1";
-
-pub(super) fn module_registry_resource_type_definitions() -> Vec<RegisterResourceType> {
-    vec![RegisterResourceType {
+pub(in crate::domains) fn resource_type_definition() -> RegisterResourceType {
+    RegisterResourceType {
         kind: MODULE_MANIFEST_KIND.to_owned(),
         schema_id: MODULE_MANIFEST_SCHEMA_ID.to_owned(),
         schema: module_manifest_schema(),
@@ -42,10 +40,10 @@ pub(super) fn module_registry_resource_type_definitions() -> Vec<RegisterResourc
             "activation": "forbidden"
         }),
         required_capabilities: json!({
-            "read": ["module_registry.read", "resource.read"]
+            "read": [READ_SCOPE, RESOURCE_READ_SCOPE]
         }),
-        owner_worker_id: WorkerId::new("module_registry").expect("valid static worker id"),
-    }]
+        owner_worker_id: WorkerId::new(WORKER).expect("valid static worker id"),
+    }
 }
 
 fn module_manifest_schema() -> Value {
@@ -66,7 +64,7 @@ fn module_manifest_schema() -> Value {
         ],
         "additionalProperties": false,
         "properties": {
-            "schemaVersion": {"type": "string", "const": MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION},
+            "schemaVersion": {"type": "string", "const": SCHEMA_VERSION},
             "identity": {
                 "type": "object",
                 "required": ["moduleId", "name", "kind", "owner", "summary", "version"],

@@ -10,13 +10,14 @@
 //! control-plane summaries are projections over this store.
 //!
 //! Ownership is split by concern: `types` holds public substrate structs,
-//! `definitions` and the type-definition modules register accepted resource
-//! kinds, `validation` enforces the generic resource contract, `versions` owns
-//! payload hashing/current-version helpers, `ui_surface` validates the runtime
-//! UI surface payload, and `store` contains the in-memory and SQLite persistence
-//! implementations. Feature composition supplies source-owned resource
-//! payloads through the host reconciliation boundary; the engine neither
-//! enumerates feature records nor imports their domain contracts.
+//! `definitions` and the type-definition modules register engine-owned
+//! substrate kinds, `validation` enforces the generic resource contract,
+//! `versions` owns payload hashing/current-version helpers, `ui_surface`
+//! validates the runtime UI surface payload, and `store` contains the in-memory
+//! and SQLite persistence implementations. Feature composition can register
+//! feature-owned definitions and reconcile source-owned payloads through the
+//! host boundary; the engine neither enumerates feature records nor imports
+//! their domain contracts.
 
 mod capability_binding_definitions;
 mod context_control_definitions;
@@ -32,7 +33,6 @@ mod module_authoring_definitions;
 mod module_dependencies_definitions;
 mod module_install_definitions;
 mod module_lifecycle_definitions;
-mod module_registry_definitions;
 mod module_runtime_definitions;
 mod module_validation_definitions;
 mod notification_definitions;
@@ -81,7 +81,6 @@ pub(crate) use module_install_definitions::{
     MODULE_INSTALL_DECISION_PAYLOAD_SCHEMA_VERSION, MODULE_INSTALL_REQUEST_PAYLOAD_SCHEMA_VERSION,
 };
 pub(crate) use module_lifecycle_definitions::MODULE_LIFECYCLE_STATE_PAYLOAD_SCHEMA_VERSION;
-pub(crate) use module_registry_definitions::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_runtime_definitions::MODULE_RUNTIME_STATE_PAYLOAD_SCHEMA_VERSION;
 pub(crate) use module_validation_definitions::MODULE_VALIDATION_REPORT_PAYLOAD_SCHEMA_VERSION;
 pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore};

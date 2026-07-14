@@ -1978,9 +1978,9 @@ packages/agent/src/domains/capability/operations/module_manifest.rs	retain	capab
 packages/agent/src/domains/module_registry/manifest.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A provider-safe module manifest validation retained.
 packages/agent/src/domains/module_registry/mod.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module-registry domain facade and docs retained.
 packages/agent/src/domains/module_registry/projection.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A bounded provider-safe module manifest projections retained.
+packages/agent/src/domains/module_registry/resource.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Module-registry-owned module_manifest kind schema retention redaction and materialization contract retained.
 packages/agent/src/domains/module_registry/service.rs	retain	module-registry owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module_list and module_inspect service owner retained.
 packages/agent/src/domains/module_registry/tests.rs	retain	module-registry test owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A module manifest schema redaction authority and side-effect tests retained.
-packages/agent/src/engine/durability/resources/module_registry_definitions.rs	retain	resource definition owner	PCC-10/P3MSA-S23A	Accepted Phase 3 Slice 23A built-in module_manifest resource schema retained.
 packages/agent/src/domains/registration/module_manifests/mod.rs	retain	domain registration	P3MSA-INV-012	Domain registration composes the ordered built-in manifest payloads before generic engine persistence and reconciliation.
 packages/agent/src/domains/registration/module_manifests/procedural.rs	retain	domain registration	P3MSA-INV-013	Domain registration owns the pending-review metadata-only procedural module payload.
 packages/agent/src/domains/capability/operations/common.rs	retain	capability execute owner	PCC-10/HRA-5	Shared primitive execute parsing and result helpers split from operations root to preserve dispatch-only ownership.

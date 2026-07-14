@@ -15,13 +15,11 @@ use self::import_update::import_update_module_manifest;
 use self::notification_delivery::notification_delivery_module_manifest;
 use self::procedural::procedural_module_manifest;
 use self::web_research::web_research_module_manifest;
-use crate::engine::{
-    ActorId, CreateResource, EngineResourceScope, MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID,
-    TraceId, WorkerId,
+use crate::domains::module_registry::{
+    MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, RESOURCE_READ_SCOPE,
+    SCHEMA_VERSION as MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION, WORKER,
 };
-
-const MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION: &str =
-    crate::engine::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
+use crate::engine::{ActorId, CreateResource, EngineResourceScope, TraceId, WorkerId};
 
 pub(super) fn builtin_module_manifest_resources() -> Vec<CreateResource> {
     [
@@ -75,11 +73,11 @@ fn module_registry_manifest() -> Value {
         ],
         "authorityNeeds": [
             {
-                "scope": "module_registry.read",
+                "scope": READ_SCOPE,
                 "purpose": "read module manifest projections"
             },
             {
-                "scope": "resource.read",
+                "scope": RESOURCE_READ_SCOPE,
                 "purpose": "inspect system module_manifest resources"
             }
         ],
@@ -616,12 +614,12 @@ fn seed_resource(payload: Value) -> CreateResource {
         kind: MODULE_MANIFEST_KIND.to_owned(),
         schema_id: Some(MODULE_MANIFEST_SCHEMA_ID.to_owned()),
         scope: EngineResourceScope::System,
-        owner_worker_id: WorkerId::new("module_registry").expect("valid static worker id"),
-        owner_actor_id: ActorId::new("system:module_registry").expect("valid static actor id"),
+        owner_worker_id: WorkerId::new(WORKER).expect("valid static worker id"),
+        owner_actor_id: ActorId::new(format!("system:{WORKER}")).expect("valid static actor id"),
         lifecycle: Some("validated".to_owned()),
         policy: json!({
-            "owner": "module_registry",
-            "authority": "module_registry.read",
+            "owner": WORKER,
+            "authority": READ_SCOPE,
             "activation": "forbidden",
             "networkPolicy": "none"
         }),
@@ -651,8 +649,8 @@ mod tests {
                 .is_none(),
             "bare engine construction must not compose domain manifests"
         );
-        host.reconcile_source_resources_for_setup(builtin_module_manifest_resources())
-            .expect("initial domain manifest reconciliation");
+        crate::domains::registration::install_module_manifests_for_test(&host)
+            .expect("initial domain manifest installation");
 
         let inspection = host
             .inspect_resource(resource_id)
@@ -699,10 +697,9 @@ mod tests {
         drop(host);
 
         let reopened = EngineHostHandle::open_sqlite(&database).expect("reopened host");
-        reopened
-            .reconcile_source_resources(builtin_module_manifest_resources())
+        super::super::install_module_manifest_resources(&reopened)
             .await
-            .expect("reconcile source-owned manifests");
+            .expect("install source-owned manifests");
         let inspection = reopened
             .inspect_resource(resource_id)
             .await
@@ -732,10 +729,9 @@ mod tests {
                 .all(|declaration| declaration["operation"] != json!("device_register"))
         );
 
-        reopened
-            .reconcile_source_resources(builtin_module_manifest_resources())
+        super::super::install_module_manifest_resources(&reopened)
             .await
-            .expect("repeat source-owned manifest reconciliation");
+            .expect("repeat source-owned manifest installation");
         let repeated = reopened
             .inspect_resource(resource_id)
             .await

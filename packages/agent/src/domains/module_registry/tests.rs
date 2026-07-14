@@ -2,7 +2,10 @@ use serde_json::{Value, json};
 
 use super::manifest::{LIST_LIMIT_MAX, validate_manifest_payload};
 use super::service::{inspect_module_value, list_modules_value};
-use super::{MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, SCHEMA_VERSION, WORKER};
+use super::{
+    MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID, READ_SCOPE, RESOURCE_READ_SCOPE,
+    SCHEMA_VERSION, WORKER, resource_type_definition,
+};
 use crate::engine::kernel::ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId,
 };
@@ -12,22 +15,22 @@ use crate::engine::{
     EngineResourceScope, EngineResourceVersioningMode, ListResources, RegisterResourceType,
 };
 
-const RESOURCE_READ_SCOPE: &str = "resource.read";
-
 fn test_host() -> EngineHostHandle {
     let host = EngineHostHandle::new_in_memory().expect("engine host");
-    crate::domains::registration::reconcile_module_manifests_for_test(&host)
+    crate::domains::registration::install_module_manifests_for_test(&host)
         .expect("domain manifest composition");
     host
 }
 
 #[tokio::test]
-async fn built_in_definition_and_seed_resources_are_registered() {
-    let definitions = crate::engine::builtin_resource_type_definitions();
-    let definition = definitions
-        .iter()
-        .find(|definition| definition.kind == MODULE_MANIFEST_KIND)
-        .expect("module manifest type definition");
+async fn domain_definition_and_seed_resources_are_registered() {
+    assert!(
+        crate::engine::builtin_resource_type_definitions()
+            .iter()
+            .all(|definition| definition.kind != MODULE_MANIFEST_KIND),
+        "engine construction must not register a domain-owned resource type"
+    );
+    let definition = resource_type_definition();
 
     assert_eq!(definition.schema_id, MODULE_MANIFEST_SCHEMA_ID);
     assert_eq!(

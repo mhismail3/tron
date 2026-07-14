@@ -787,11 +787,12 @@ minting, conformance reports, and `worker_package` resource/event evidence.
 It is host lifecycle infrastructure, not a provider-visible toolbox, and it
 does not add fixed iOS product panels.
 `domains/module_registry` owns the Phase 3 Slice 23A inspect-only module
-manifest contract and provider-safe projections. The sole domain composition
-root in `domains/registration/module_manifests/mod.rs` owns the ordered first-party
-seed set and reconciles it through the generic resource-store boundary before
-registering any domain worker. `module_list` and `module_inspect` remain behind
-`capability::execute`. The registry
+manifest resource contract, stored-payload validation, and provider-safe
+projections. The sole domain composition root in
+`domains/registration/module_manifests/mod.rs` owns the ordered first-party
+seed set. Domain registration installs the type and reconciles the seeds
+through generic engine boundaries before registering any domain worker.
+`module_list` and `module_inspect` remain behind `capability::execute`. The registry
 revalidates stored kind/schema/system scope/payload shape and returns bounded
 identity, capability/resource declarations, authority needs, settings and
 dependency intents, validation, provenance, lifecycle, and redaction proof
@@ -2015,9 +2016,10 @@ catalog registration, proposed-tool execution, trust promotion, public
 `/engine` expansion, or fixed native source/package UI.
 
 Phase 3 Slice 23A adds the inspect-only module manifest registry foundation.
-The generic resource store registers `module_manifest` with resource schema
+The module-registry domain defines `module_manifest` with resource schema
 `tron.resource.module_manifest.v1` and payload schema version
-`tron.module_manifest.v1`; domain registration reconciles the ordered narrow
+`tron.module_manifest.v1`. Domain registration installs that contract through
+the generic resource-store boundary, then reconciles the ordered narrow
 first-party metadata for the registry, capability domain, the pending-review
 `file_git_module` operation pack, the accepted Slice 24B pending-review
 `jobs_program_execution_module` pack, the accepted Slice 24D pending-review

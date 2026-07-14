@@ -1919,9 +1919,9 @@ packages/agent/src/engine/durability/resources/prompt_artifact_definitions.rs	im
 packages/agent/src/domains/module_registry/manifest.rs	implementation	module_registry	TPC-10/P3MSA-S23A	module manifest schema bounds provider-safety and stored payload validation owner
 packages/agent/src/domains/module_registry/mod.rs	implementation	module_registry	TPC-10/P3MSA-S23A	module-registry domain docs and registration boundary for inspect-only manifest foundation
 packages/agent/src/domains/module_registry/projection.rs	implementation	module_registry	TPC-10/P3MSA-S23A	bounded provider-safe module manifest summary and detail projection owner
+packages/agent/src/domains/module_registry/resource.rs	implementation	module_registry	TPC-10/P3MSA-S23A	domain-owned module_manifest kind schema retention redaction and materialization contract
 packages/agent/src/domains/module_registry/service.rs	implementation	module_registry	TPC-10/P3MSA-S23A	resource-backed module_list and module_inspect service owner
 packages/agent/src/domains/module_registry/tests.rs	test	test_harness	TPC-10/P3MSA-S23A	focused Slice 23A module manifest schema seed redaction authority scope lifecycle and side-effect coverage
-packages/agent/src/engine/durability/resources/module_registry_definitions.rs	implementation	resource_kernel	TPC-10/P3MSA-S23A	generic module_manifest resource kind and schema; domain registration owns source payload records
 packages/agent/src/domains/registration/module_manifests/mod.rs	implementation	registration	Phase3-Slice24D	Domain registration composes the ordered built-in module manifests including memory_engine_module before generic engine reconciliation
 packages/agent/src/domains/registration/module_manifests/procedural.rs	implementation	registration	Phase3-Slice24E	Domain registration owns the metadata-only procedural_module_pack source payload; the engine owns only generic persistence and reconciliation
 packages/agent/src/domains/capability/operations/module_authoring.rs	implementation	capability_execute	TPC-10/P3MSA-S23B	provider execute adapter for bounded module_proposal record list and inspect operations

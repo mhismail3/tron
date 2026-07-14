@@ -130,11 +130,33 @@ impl EngineHostHandle {
     }
 
     /// Register a resource type through the engine-owned resource store.
-    pub async fn register_resource_type(
+    pub(crate) async fn register_resource_type(
         &self,
         request: RegisterResourceType,
     ) -> Result<EngineResourceTypeDefinition> {
         let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .register_type(request)
+    }
+
+    /// Register a caller-owned resource type during single-threaded setup.
+    pub(crate) fn register_resource_type_for_setup(
+        &self,
+        request: RegisterResourceType,
+    ) -> Result<EngineResourceTypeDefinition> {
+        let store = self
+            .inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation(
+                    "engine host is busy during resource-type setup".to_owned(),
+                )
+            })?
+            .primitives
+            .resources
+            .clone();
         store
             .lock()
             .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?

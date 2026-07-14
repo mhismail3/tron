@@ -17,8 +17,9 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `manifest` | Payload schema version, bounds, and stored-manifest validation |
+//! | `manifest` | Payload bounds and stored-manifest validation |
 //! | `projection` | Provider-safe summary and detail projections |
+//! | `resource` | Domain-owned kind, schema, retention, and redaction contract |
 //! | `service` | Resource-backed list/inspect operations and grant checks |
 //! | `tests` | Schema, seed, redaction, authority, scope, and side-effect coverage |
 //!
@@ -34,13 +35,17 @@ use crate::domains::registration::worker::{DomainRegistrationContext, DomainWork
 
 pub(crate) mod manifest;
 mod projection;
+mod resource;
 pub(crate) mod service;
 
-pub(crate) use crate::engine::{MODULE_MANIFEST_KIND, MODULE_MANIFEST_SCHEMA_ID};
+pub(in crate::domains) use resource::resource_type_definition;
 
-pub(crate) const WORKER: &str = "module_registry";
-pub(crate) const READ_SCOPE: &str = "module_registry.read";
-pub(crate) const SCHEMA_VERSION: &str = crate::engine::MODULE_MANIFEST_PAYLOAD_SCHEMA_VERSION;
+pub(in crate::domains) const WORKER: &str = "module_registry";
+pub(in crate::domains) const READ_SCOPE: &str = "module_registry.read";
+pub(in crate::domains) const RESOURCE_READ_SCOPE: &str = "resource.read";
+pub(in crate::domains) const MODULE_MANIFEST_KIND: &str = "module_manifest";
+pub(in crate::domains) const MODULE_MANIFEST_SCHEMA_ID: &str = "tron.resource.module_manifest.v1";
+pub(in crate::domains) const SCHEMA_VERSION: &str = "tron.module_manifest.v1";
 
 pub(crate) fn worker_module(
     _deps: &DomainRegistrationContext,

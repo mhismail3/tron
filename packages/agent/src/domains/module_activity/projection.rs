@@ -4,6 +4,7 @@ use chrono::DateTime;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::domains::module_registry::MODULE_MANIFEST_KIND;
 use crate::engine::{EngineResource, EngineResourceVersion};
 
 use super::contract;
@@ -602,7 +603,7 @@ fn first_string(payload: &Value, pointers: &[&str]) -> Option<String> {
 
 fn title_from_kind(kind: &str) -> &str {
     match kind {
-        crate::engine::MODULE_MANIFEST_KIND => "Module manifest",
+        MODULE_MANIFEST_KIND => "Module manifest",
         crate::engine::MODULE_PROPOSAL_KIND => "Module proposal",
         crate::engine::MODULE_VALIDATION_REPORT_KIND => "Validation report",
         crate::engine::MODULE_INSTALL_REQUEST_KIND => "Install request",

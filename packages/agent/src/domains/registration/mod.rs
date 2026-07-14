@@ -8,9 +8,10 @@
 //! that tool performs direct primitive operations rather than catalog routing.
 //! The registration entrypoint is crate-private: transport setup is the
 //! server-facing facade, while this module owns the concrete domain-worker
-//! wiring. `module_manifests` owns the ordered first-party manifest composition
-//! and reconciles it before any domain worker or function is registered; the
-//! engine owns only the generic version-preserving reconciliation algorithm.
+//! wiring. `module_registry` owns the manifest resource contract, while
+//! `module_manifests` owns the ordered first-party payload composition.
+//! Registration installs both before any domain worker or function; the engine
+//! owns only generic type registration and version-preserving reconciliation.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -25,7 +26,7 @@ pub(crate) mod worker;
 
 use std::collections::BTreeSet;
 
-use crate::engine::{EngineError, Result as EngineResult};
+use crate::engine::{EngineError, EngineHostHandle, Result as EngineResult};
 use crate::shared::server::context::ServerRuntimeContext;
 
 use crate::domains::registration::worker::{
@@ -54,18 +55,30 @@ pub(crate) async fn register_domain_workers_for_runtime_context(
 }
 
 #[cfg(test)]
-pub(in crate::domains) fn reconcile_module_manifests_for_test(
-    handle: &crate::engine::EngineHostHandle,
+pub(in crate::domains) fn install_module_manifests_for_test(
+    handle: &EngineHostHandle,
 ) -> EngineResult<()> {
+    install_module_manifest_resources_for_setup(handle)
+}
+
+fn install_module_manifest_resources_for_setup(handle: &EngineHostHandle) -> EngineResult<()> {
+    handle.register_resource_type_for_setup(module_registry::resource_type_definition())?;
     handle
         .reconcile_source_resources_for_setup(module_manifests::builtin_module_manifest_resources())
 }
 
+async fn install_module_manifest_resources(handle: &EngineHostHandle) -> EngineResult<()> {
+    handle
+        .register_resource_type(module_registry::resource_type_definition())
+        .await?;
+    handle
+        .reconcile_source_resources(module_manifests::builtin_module_manifest_resources())
+        .await
+}
+
 fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
-    handle.reconcile_source_resources_for_setup(
-        module_manifests::builtin_module_manifest_resources(),
-    )?;
+    install_module_manifest_resources_for_setup(handle)?;
     for module in domain_worker_modules(ctx)? {
         validate_domain_stream_topics(&module)?;
         handle.register_worker_for_setup(module.worker, false)?;
@@ -82,9 +95,7 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
 
 async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
-    handle
-        .reconcile_source_resources(module_manifests::builtin_module_manifest_resources())
-        .await?;
+    install_module_manifest_resources(handle).await?;
     for module in domain_worker_modules(ctx)? {
         validate_domain_stream_topics(&module)?;
         handle.register_worker(module.worker, false).await?;

@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::domains::module_registry::MODULE_MANIFEST_KIND;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::{
     EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
@@ -13,7 +14,7 @@ use super::projection::{ModuleActivityItem, ModuleActivityProjection};
 const DEFAULT_LIMIT: usize = 40;
 const MAX_LIMIT: usize = 100;
 const MODULE_RESOURCE_KINDS: &[&str] = &[
-    crate::engine::MODULE_MANIFEST_KIND,
+    MODULE_MANIFEST_KIND,
     crate::engine::MODULE_PROPOSAL_KIND,
     crate::engine::MODULE_VALIDATION_REPORT_KIND,
     crate::engine::MODULE_INSTALL_REQUEST_KIND,

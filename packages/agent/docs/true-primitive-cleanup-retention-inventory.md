@@ -89,7 +89,7 @@ The TSV covers tracked and newly introduced files under:
 | `module_dependencies` | 9 |
 | `module_install` | 11 |
 | `module_lifecycle` | 11 |
-| `module_registry` | 4 |
+| `module_registry` | 5 |
 | `module_runtime` | 8 |
 | `module_validation` | 6 |
 | `notifications` | 7 |
@@ -101,7 +101,7 @@ The TSV covers tracked and newly introduced files under:
 | `protocol` | 1 |
 | `registration` | 10 |
 | `repository_tree` | 6 |
-| `resource_kernel` | 20 |
+| `resource_kernel` | 19 |
 | `rust_crate` | 2 |
 | `scheduler` | 7 |
 | `scripts` | 23 |
