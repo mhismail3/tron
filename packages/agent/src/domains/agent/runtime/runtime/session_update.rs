@@ -1,8 +1,12 @@
 use super::{ActivitySummaryLine, Duration, MessagePreview, ReconstructedState};
+use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::failure::{
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_PERSISTENCE_ERROR,
+};
 use std::sync::Arc;
 
 pub struct SessionUpdateData {
@@ -27,11 +31,25 @@ pub(in crate::domains::agent::runtime) async fn resume_prompt_session(
     run_blocking_task("agent.prompt.resume", move || {
         session_manager
             .resume_session_for_prompt(&session_id)
-            .map_err(|error| CapabilityError::Internal {
-                message: error.to_string(),
-            })
+            .map_err(|error| map_prompt_resume_error(error, &session_id))
     })
     .await
+}
+
+fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> CapabilityError {
+    let failure = match error {
+        RuntimeError::Persistence(_) => FailureEnvelope::new(
+            RUNTIME_PERSISTENCE_ERROR,
+            FailureCategory::Persistence,
+            "Session history could not be reconstructed",
+            false,
+            false,
+            FailureOrigin::AgentRuntime,
+        )
+        .with_session_id(Some(session_id.to_owned())),
+        other => other.to_failure(),
+    };
+    CapabilityError::from_failure(failure)
 }
 
 pub async fn load_session_update_data(

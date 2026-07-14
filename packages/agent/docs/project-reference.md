@@ -2509,7 +2509,9 @@ while SQLite repositories stay under `event_store/sqlite/repositories`.
 Prompt execution appends `message.user` after reconstructing prior history but
 before constructing or calling a provider. If that append fails, the runtime
 emits a canonical persistence error, releases the active run, and creates no
-provider audit or assistant event.
+provider audit or assistant event. Prior-history reconstruction is also
+fail-closed; the runtime never substitutes an empty conversation for unavailable
+durable history.
 
 ### Event Categories
 
