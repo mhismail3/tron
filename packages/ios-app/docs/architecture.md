@@ -513,7 +513,11 @@ Long-lived `Task` handles are stored and cancelled by their owner, SwiftUI
 `.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
 callback bridges use bounded stream buffering or owner queues. An observation
 task must not retain its lifecycle owner through a suspended wait, and stored
-observation waits must resume on cancellation. Production code
+observation waits must resume on cancellation. The shared bridge in
+`Support/Foundation/Concurrency` enforces that contract for chat bindings and
+transport policy; active-server replacement can therefore release the old
+connection manager and interaction policy even while observation or connect
+debounce work is suspended. Production code
 must not use `Task.detached`, `DispatchQueue.global`, or
 `DispatchQueue.main.asyncAfter`; capture sessions use owner serial queues and
 UI delays use cancellation-aware Swift concurrency tasks.

@@ -205,4 +205,26 @@ struct InteractionPolicyTests {
         await yieldForObservation()
         #expect(f.policy.state == .reconnecting(attempt: 2, nextRetrySeconds: 3))
     }
+
+    @Test("Pending connect debounce releases its interaction policy")
+    func pendingDebounceReleasesPolicy() async throws {
+        let provider = MockConnectionStateProvider()
+        let connection = ConnectionManager(provider: provider)
+        let clock = MockAsyncClock(mode: .manual)
+        var policy: InteractionPolicy? = InteractionPolicy(
+            connection: connection,
+            clock: clock
+        )
+        weak let retainedPolicy = policy
+
+        provider.connectionState = .connected
+        try await clock.waitUntilPendingCount()
+        #expect(clock.pendingCount == 1)
+
+        policy = nil
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(retainedPolicy == nil)
+        #expect(clock.pendingCount == 0)
+    }
 }

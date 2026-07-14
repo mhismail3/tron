@@ -117,23 +117,22 @@ final class InteractionPolicy {
 
     private func startObserving() {
         observationTask?.cancel()
+        let connection = connection
         observationTask = Task { [weak self] in
             var lastState: ConnectionState? = nil
             while !Task.isCancelled {
-                guard let self else { return }
                 // Read current state at the top so we never miss a transition between cycles.
-                let currentState = self.connection.state
-                if lastState != currentState {
-                    self.apply(newState: currentState)
-                    lastState = currentState
+                let currentState = connection.state
+                do {
+                    guard let self else { return }
+                    if lastState != currentState {
+                        apply(newState: currentState)
+                        lastState = currentState
+                    }
                 }
 
-                await withCheckedContinuation { continuation in
-                    withObservationTracking {
-                        _ = self.connection.state
-                    } onChange: {
-                        continuation.resume()
-                    }
+                await waitForObservationChange {
+                    connection.state
                 }
             }
         }
@@ -154,16 +153,18 @@ final class InteractionPolicy {
         if isConnected { return }
 
         // Debounced flip: wait for `debounceDuration`, then re-check state and flip on.
+        let clock = clock
+        let debounceDuration = debounceDuration
+        let connection = connection
         debounceTask = Task { [weak self] in
-            guard let self else { return }
             do {
-                try await self.clock.sleep(for: self.debounceDuration)
+                try await clock.sleep(for: debounceDuration)
             } catch {
                 return
             }
             guard !Task.isCancelled else { return }
-            if self.connection.state.isConnected {
-                self.isConnected = true
+            if connection.state.isConnected {
+                self?.isConnected = true
             }
         }
     }
