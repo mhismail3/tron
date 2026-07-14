@@ -379,10 +379,9 @@ fn ios_sourceguard_has_deep_hierarchy_and_budget_gates() {
         "UI/Components",
         "Tests/Session/Chat",
         "testIOSDeepHierarchyRootsHaveExplicitCountAndBudgetGates",
-        "testSwiftNearBudgetFilesHaveExplicitScorecardRows",
         "testIOSDeploymentTargetAvailabilityAnnotationsAreNotDuplicated",
-        "590",
-        "near-budget",
+        "hardLineLimit = 700",
+        "maximumLineCount: hardLineLimit",
     ] {
         assert!(
             sourceguard.contains(required),

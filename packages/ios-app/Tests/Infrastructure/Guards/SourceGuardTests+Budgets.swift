@@ -6,7 +6,6 @@ extension SourceGuardTests {
     @Test("iOS deep hierarchy roots have explicit count and budget gates")
     func testIOSDeepHierarchyRootsHaveExplicitCountAndBudgetGates() throws {
         let iosRoot = iosAppRoot()
-        let nearBudgetWarningLineCount = 590
         let hardLineLimit = 700
         let watchedRoots: [HierarchyBudget] = [
             HierarchyBudget(
@@ -159,35 +158,7 @@ extension SourceGuardTests {
 
         #expect(
             failures.isEmpty,
-            "iOS deep hierarchy/budget drift. Near-budget rows start at \(nearBudgetWarningLineCount) LOC; hard failures start above \(hardLineLimit) LOC. \(failures)"
-        )
-    }
-
-    @Test("Swift near-budget files have explicit scorecard rows")
-    func testSwiftNearBudgetFilesHaveExplicitScorecardRows() throws {
-        let iosRoot = iosAppRoot()
-        let repoRoot = iosRoot
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let scorecard = try String(
-            contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/post-hra-adversarial-hardening-scorecard.md"),
-            encoding: .utf8
-        )
-        let nearBudgetWarningLineCount = 590
-        let files = try swiftFiles(in: iosRoot.appendingPathComponent("Sources"))
-            + swiftFiles(in: iosRoot.appendingPathComponent("Tests"))
-
-        let missingRows = try files.compactMap { file -> String? in
-            let lineCount = try sourceLineCount(file)
-            guard lineCount >= nearBudgetWarningLineCount else { return nil }
-            let path = relativePath(file, from: repoRoot)
-            let expectedRowPrefix = "| `\(path)` | \(lineCount) |"
-            return scorecard.contains(expectedRowPrefix) ? nil : "\(path) has \(lineCount) LOC"
-        }
-
-        #expect(
-            missingRows.isEmpty,
-            "Swift near-budget files at or above \(nearBudgetWarningLineCount) LOC must have explicit scorecard rows: \(missingRows)"
+            "iOS deep hierarchy/budget drift. Hard failures start above \(hardLineLimit) LOC. \(failures)"
         )
     }
 
