@@ -18,7 +18,7 @@ Source-backed artifacts:
 - Machine inventory: `packages/agent/docs/minimal-kernel-self-adaptation-hardening-inventory.tsv`
 - Evidence manifest: `packages/agent/docs/minimal-kernel-self-adaptation-hardening-evidence-manifest.md`
 - Static invariant: `packages/agent/tests/minimal_kernel_self_adaptation_hardening_invariants.rs`
-- Operation inventory: `packages/agent/docs/capability-modularity-inventory.tsv`
+- Operation ownership metadata: `packages/agent/src/domains/capability/operations/operation_contract/metadata.rs`
 - Runtime route scorecard: `packages/agent/docs/capability-dynamic-replacement-scorecard.md`
 - Context policy owner: `packages/agent/src/domains/context_control/mod.rs`
 - Dynamic route owner: `packages/agent/src/domains/capability_binding/route.rs`
@@ -56,7 +56,7 @@ source-backed:
 | MKS-3 | Fail-closed route behavior | 12 | passed | 12 | Unsafe, stale, ambiguous, disabled, or missing-proof routes do not return built-in success as the replacement result. |
 | MKS-4 | Visibility and explanation | 12 | passed | 12 | Engine Cockpit derives route stories, operation state, failed adaptations, terminal controls, and drill-downs from server-owned route/binding facts. |
 | MKS-5 | Minimality guard | 10 | passed | 10 | No new model-facing tool, runtime plane, package/deploy behavior, or broad module hot-swap is introduced by the capstone. |
-| MKS-6 | Static proof coverage | 10 | passed | 10 | Static invariants pin this capstone to the modularity and dynamic replacement scorecards plus the core source files that enforce them. |
+| MKS-6 | Static proof coverage | 10 | passed | 10 | Static invariants pin this capstone to canonical operation metadata, the dynamic replacement contract, and the core source files that enforce them. |
 | MKS-7 | Honest boundary | 6 | passed | 6 | The foundation proves the first scoped read-only `git_status` route and the replacement contract; it does not claim full autonomous self-update across all operations. |
 
 ## Minimal Kernel Map
@@ -79,7 +79,7 @@ source-backed:
 A replacement candidate is contractually valid only if the server can verify all
 of the following before routing:
 
-- Target operation is known and eligible by the capability modularity inventory.
+- Target operation is known and eligible in canonical operation metadata.
 - Candidate, binding, activation, shadow evidence, lifecycle, and runtime refs
   are exact, current, and scope-compatible.
 - Authority constraints are exact, non-wildcard, and resource-scoped where a

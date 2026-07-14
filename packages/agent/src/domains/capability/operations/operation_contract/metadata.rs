@@ -435,6 +435,93 @@ pub(super) fn metadata(operation: OperationId) -> OperationMetadata {
 mod tests {
     use super::*;
 
+    fn protected_boundary(operation: &str) -> Option<(&'static str, &'static str)> {
+        const EXACT: &[(&str, &str, &str)] = &[
+            ("observe", "core", "kernel_locked"),
+            ("replay_manifest", "core", "kernel_locked"),
+            ("context_policy_snapshot", "context_control", "record_plane"),
+            ("notification_send", "notifications", "governance_locked"),
+            ("module_list", "module_registry", "governance_locked"),
+            ("module_inspect", "module_registry", "governance_locked"),
+        ];
+        const PREFIXES: &[(&str, &str, &str)] = &[
+            ("state_", "state", "kernel_locked"),
+            ("trace_", "trace", "kernel_locked"),
+            ("log_", "logs", "kernel_locked"),
+            ("catalog_", "catalog_discovery", "kernel_locked"),
+            ("goal_", "goals_questions", "record_plane"),
+            ("question_", "goals_questions", "record_plane"),
+            ("schedule_", "scheduler", "record_plane"),
+            ("context_control_", "context_control", "record_plane"),
+            ("context_survivor_", "context_control", "record_plane"),
+            ("context_exclusion_", "context_control", "record_plane"),
+            ("memory_", "memory", "record_plane"),
+            ("media_", "media", "record_plane"),
+            ("import_history_", "import_history", "record_plane"),
+            ("repository_tree_", "repository_tree", "record_plane"),
+            ("import_preview_", "import_preview", "record_plane"),
+            ("program_execution_", "program_execution", "record_plane"),
+            ("prompt_artifact_", "prompt_artifacts", "record_plane"),
+            ("update_diagnostic_", "update_diagnostics", "record_plane"),
+            ("device_", "device", "record_plane"),
+            ("notification_", "notifications", "record_plane"),
+            ("procedural_", "procedural", "governance_locked"),
+            ("tool_source_", "tool_sources", "governance_locked"),
+            ("worker_package_", "worker_packages", "governance_locked"),
+            ("subagent_task_", "subagents", "record_plane"),
+            (
+                "module_program_execution_",
+                "module_program_execution",
+                "module_owned",
+            ),
+            ("module_proposal_", "module_authoring", "governance_locked"),
+            (
+                "module_validation_",
+                "module_validation",
+                "governance_locked",
+            ),
+            ("module_install_", "module_install", "governance_locked"),
+            (
+                "module_dependency_",
+                "module_dependencies",
+                "governance_locked",
+            ),
+            (
+                "capability_binding_",
+                "capability_binding",
+                "governance_locked",
+            ),
+            (
+                "capability_shadow_trial_",
+                "capability_binding",
+                "governance_locked",
+            ),
+            (
+                "capability_replacement_",
+                "capability_binding",
+                "governance_locked",
+            ),
+            (
+                "capability_route_",
+                "capability_binding",
+                "governance_locked",
+            ),
+            ("module_lifecycle_", "module_lifecycle", "governance_locked"),
+            ("module_runtime_", "module_runtime", "governance_locked"),
+            ("web_research_", "web_research", "record_plane"),
+        ];
+
+        EXACT
+            .iter()
+            .find(|(name, _, _)| operation == *name)
+            .or_else(|| {
+                PREFIXES
+                    .iter()
+                    .find(|(prefix, _, _)| operation.starts_with(prefix))
+            })
+            .map(|(_, family, class)| (*family, *class))
+    }
+
     #[test]
     fn metadata_covers_every_operation_id() {
         for operation in OperationId::ALL_NAMES {
@@ -444,6 +531,52 @@ mod tests {
             assert!(!metadata.current_owner.is_empty());
             assert!(!metadata.ownership_class.is_empty());
             assert!(!metadata.replacement_target.is_empty());
+        }
+    }
+
+    #[test]
+    fn ownership_classes_name_their_required_evolution_constraints() {
+        for operation in OperationId::ALL_NAMES {
+            let operation = OperationId::parse(operation).expect("all operation names parse");
+            let metadata = metadata(operation);
+            if let Some((expected_family, expected_class)) = protected_boundary(operation.as_str())
+            {
+                assert_eq!(metadata.family, expected_family, "{}", operation.as_str());
+                assert_eq!(
+                    metadata.ownership_class,
+                    expected_class,
+                    "{}",
+                    operation.as_str()
+                );
+            }
+            match metadata.ownership_class {
+                "adapter_replaceable" => {
+                    for required in ["authority", "replay", "idempotency", "rollback", "disable"] {
+                        assert!(
+                            metadata.replacement_target.contains(required),
+                            "{} adapter replacement target must name {required}",
+                            operation.as_str()
+                        );
+                    }
+                }
+                "module_owned" => assert!(
+                    metadata.replacement_target.contains("supervised"),
+                    "{} module-owned target must name supervised execution",
+                    operation.as_str()
+                ),
+                "record_plane" => assert!(
+                    ["record", "custody", "policy"]
+                        .iter()
+                        .any(|required| metadata.replacement_target.contains(required)),
+                    "{} record-plane target must preserve records, custody, or policy",
+                    operation.as_str()
+                ),
+                "kernel_locked" | "governance_locked" => {}
+                class => panic!(
+                    "{} has unsupported ownership class {class}",
+                    operation.as_str()
+                ),
+            }
         }
     }
 }

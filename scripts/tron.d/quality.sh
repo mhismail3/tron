@@ -55,7 +55,6 @@ run_tests() {
         ios_self_adapting_agent_cockpit_baseline_invariants
         ios_affordance_restoration_map_invariants
         capability_dynamic_replacement_invariants
-        capability_modularity_scorecard_invariants
         failure_semantics_invariants
         minimal_kernel_self_adaptation_hardening_invariants
         primitive_module_proposal_trace

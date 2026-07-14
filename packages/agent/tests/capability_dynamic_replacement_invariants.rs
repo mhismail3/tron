@@ -16,8 +16,6 @@ const EVIDENCE_PATH: &str =
 const REGISTRY_PATH: &str =
     "packages/agent/src/domains/capability/operations/operation_contract/mod.rs";
 const DISPATCH_PATH: &str = "packages/agent/src/domains/capability/operations/dispatch.rs";
-const METADATA_PATH: &str =
-    "packages/agent/src/domains/capability/operations/operation_contract/metadata.rs";
 const GIT_OPERATION_PATH: &str = "packages/agent/src/domains/capability/operations/git.rs";
 const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs";
 const VALIDATION_PATH: &str = "packages/agent/src/domains/capability_binding/validation.rs";
@@ -361,30 +359,4 @@ fn dynamic_replacement_git_status_seam_is_scoped_and_honest() {
             "module runtime adapter projection missing safety marker {required}"
         );
     }
-}
-
-#[test]
-fn dynamic_replacement_governance_operations_are_not_themselves_replaceable() {
-    let metadata = read_repo_file(METADATA_PATH);
-    let modularity_inventory =
-        read_repo_file("packages/agent/docs/capability-modularity-inventory.tsv");
-
-    for operation in ROUTE_OPERATIONS {
-        let row = modularity_inventory
-            .lines()
-            .find(|line| line.starts_with(operation))
-            .unwrap_or_else(|| panic!("modularity inventory missing {operation}"));
-        assert!(
-            row.contains("\tcapability_binding\t"),
-            "{operation} must stay in capability_binding family"
-        );
-        assert!(
-            row.contains("\tgovernance_locked\t"),
-            "{operation} must stay governance_locked"
-        );
-    }
-    assert!(
-        metadata.contains("\"governance_locked\""),
-        "operation metadata must continue to expose governance_locked class"
-    );
 }

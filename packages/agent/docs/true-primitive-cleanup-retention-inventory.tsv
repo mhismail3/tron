@@ -2073,9 +2073,6 @@ packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionForkedPlugin.swift
 packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingEndPlugin.swift	implementation	ios_events	TPC-10/event-surface	thinking end event plugin retained as normalized timeline adapter
 packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingStartPlugin.swift	implementation	ios_events	TPC-10/event-surface	thinking start event plugin retained as normalized timeline adapter
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+EventSurface.swift	test	test_harness	TPC-10/event-surface	iOS event surface source guard retained for primitive-owned event plugin drift coverage
-packages/agent/docs/capability-modularity-evidence-manifest.md	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
-packages/agent/docs/capability-modularity-inventory.tsv	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
-packages/agent/docs/capability-modularity-scorecard.md	docs	docs	TPC-10	active documentation or inventory artifact retained as project truth
 packages/agent/src/domains/capability/operations/capability_binding.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
 packages/agent/src/domains/capability/operations/dispatch.rs	implementation	capability_execute	TPC-hardening	capability execute dispatcher split from operations module to preserve registry and dispatch parity ownership
 packages/agent/src/domains/capability_binding/authority.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
@@ -2091,7 +2088,6 @@ packages/agent/src/domains/capability_binding/shadow_trial.rs	implementation	age
 packages/agent/src/domains/capability_binding/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/capability_binding/validation.rs	implementation	agent_domain	TPC-10	domain implementation retained behind primitive boundaries
 packages/agent/src/engine/durability/resources/capability_binding_definitions.rs	primitive	engine	TPC-2	engine/shared primitive substrate retained under primitive ownership
-packages/agent/tests/capability_modularity_scorecard_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
 packages/ios-app/Sources/Session/Chat/Navigation/ChatMessageVisibilityPolicy.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership
 packages/ios-app/Sources/Session/Chat/Navigation/ChatTranscriptRevealPolicy.swift	implementation	ios_app	TPC-8	iOS projection, session, or UI implementation retained under native app ownership

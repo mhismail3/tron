@@ -152,9 +152,8 @@ Start with the document closest to the work:
   [development guide](packages/ios-app/docs/development.md).
 - [Mac architecture](packages/mac-app/docs/architecture.md) and
   [development guide](packages/mac-app/docs/development.md).
-- [Capability modularity](packages/agent/docs/capability-modularity-scorecard.md)
-  and [dynamic replacement](packages/agent/docs/capability-dynamic-replacement-scorecard.md)
-  scorecards.
+- [Capability ownership metadata](packages/agent/src/domains/capability/operations/operation_contract/metadata.rs)
+  and the [dynamic replacement contract](packages/agent/docs/capability-dynamic-replacement-scorecard.md).
 
 The root README intentionally stays short. Detailed catalogs and audit evidence
 belong with their owning source or scorecard rather than on the project front

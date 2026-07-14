@@ -1,10 +1,9 @@
 //! Capstone invariants for the minimal-kernel self-adaptation foundation.
 //!
 //! The goal of these tests is not to add another runtime layer. They make sure
-//! the existing modularity, context-policy, dynamic-route, and cockpit
-//! scorecards are tied to source files that actually enforce the contract.
+//! canonical ownership metadata plus the existing context-policy,
+//! dynamic-route, and cockpit contracts are tied to their source owners.
 
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const SCORECARD_PATH: &str =
@@ -13,8 +12,6 @@ const INVENTORY_PATH: &str =
     "packages/agent/docs/minimal-kernel-self-adaptation-hardening-inventory.tsv";
 const EVIDENCE_PATH: &str =
     "packages/agent/docs/minimal-kernel-self-adaptation-hardening-evidence-manifest.md";
-const MODULARITY_SCORECARD_PATH: &str = "packages/agent/docs/capability-modularity-scorecard.md";
-const MODULARITY_INVENTORY_PATH: &str = "packages/agent/docs/capability-modularity-inventory.tsv";
 const DYNAMIC_SCORECARD_PATH: &str =
     "packages/agent/docs/capability-dynamic-replacement-scorecard.md";
 const REGISTRY_PATH: &str =
@@ -75,64 +72,12 @@ fn registry_operations() -> Vec<String> {
     operations
 }
 
-fn tsv_rows(path: &str) -> Vec<HashMap<String, String>> {
-    let text = read_repo_file(path);
-    let mut lines = text.lines();
-    let header = lines
-        .next()
-        .unwrap_or_else(|| panic!("{path} must have a TSV header"))
-        .split('\t')
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    lines
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            let values = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
-            assert_eq!(
-                values.len(),
-                header.len(),
-                "{path} has malformed TSV row: {line}"
-            );
-            header.iter().cloned().zip(values).collect()
-        })
-        .collect()
-}
-
-fn locked_family_capstone_area(family: &str, ownership_class: &str) -> Option<&'static str> {
-    match (family, ownership_class) {
-        ("core", "kernel_locked") => Some("minimal_kernel_authority"),
-        ("state", "kernel_locked") => Some("minimal_kernel_event_log"),
-        ("trace" | "logs" | "catalog_discovery", "kernel_locked") => {
-            Some("minimal_kernel_trace_replay_catalog")
-        }
-        ("device" | "notifications", "governance_locked") => {
-            Some("minimal_kernel_resource_custody")
-        }
-        ("capability_binding", "governance_locked") => Some("capability_route_contract"),
-        (
-            "module_registry"
-            | "module_authoring"
-            | "module_validation"
-            | "module_install"
-            | "module_dependencies"
-            | "module_lifecycle"
-            | "module_runtime"
-            | "procedural"
-            | "tool_sources"
-            | "worker_packages",
-            "governance_locked",
-        ) => Some("module_governance_pipeline"),
-        _ => None,
-    }
-}
-
 #[test]
 fn minimal_kernel_capstone_artifacts_are_present_and_honest() {
     let scorecard = read_repo_file(SCORECARD_PATH);
     let inventory = read_repo_file(INVENTORY_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
     let readme = read_repo_file(README_PATH);
-    let modularity = read_repo_file(MODULARITY_SCORECARD_PATH);
     let dynamic = read_repo_file(DYNAMIC_SCORECARD_PATH);
 
     for required in [
@@ -183,13 +128,11 @@ fn minimal_kernel_capstone_artifacts_are_present_and_honest() {
         );
     }
 
-    for source_scorecard in [&modularity, &dynamic] {
-        assert!(
-            source_scorecard.contains("Current score: **100/100**")
-                || source_scorecard.contains("Current foundation score: **100/100**"),
-            "capstone can only close over complete source scorecards"
-        );
-    }
+    assert!(
+        dynamic.contains("Current score: **100/100**")
+            || dynamic.contains("Current foundation score: **100/100**"),
+        "capstone can only close over a complete dynamic-replacement scorecard"
+    );
 }
 
 #[test]
@@ -222,41 +165,6 @@ fn minimal_kernel_capstone_adds_no_runtime_plane_or_provider_tool() {
             "capstone must not describe forbidden runtime behavior: {forbidden}"
         );
     }
-}
-
-#[test]
-fn minimal_kernel_capstone_closes_over_locked_operation_inventory() {
-    let capstone_rows = tsv_rows(INVENTORY_PATH);
-    let capstone_areas = capstone_rows
-        .iter()
-        .map(|row| row["area"].as_str())
-        .collect::<HashSet<_>>();
-    let modularity_rows = tsv_rows(MODULARITY_INVENTORY_PATH);
-    let mut locked_rows = 0usize;
-
-    for row in modularity_rows {
-        let operation = row["operation"].as_str();
-        let family = row["family"].as_str();
-        let ownership_class = row["ownershipClass"].as_str();
-        if !matches!(ownership_class, "kernel_locked" | "governance_locked") {
-            continue;
-        }
-        locked_rows += 1;
-        let area = locked_family_capstone_area(family, ownership_class).unwrap_or_else(|| {
-            panic!(
-                "{operation} is {ownership_class} in family {family}, but the minimal-kernel capstone has no substrate mapping for that locked family"
-            )
-        });
-        assert!(
-            capstone_areas.contains(area),
-            "{operation} maps to capstone area {area}, but the capstone inventory does not contain it"
-        );
-    }
-
-    assert!(
-        locked_rows > 0,
-        "capstone closure test must cover at least one kernel/governance operation"
-    );
 }
 
 #[test]
@@ -336,7 +244,6 @@ fn context_policy_contract_is_server_owned_and_summarizer_only() {
     let resource_defs = read_repo_file(
         "packages/agent/src/engine/durability/resources/context_control_definitions.rs",
     );
-    let modularity = read_repo_file(MODULARITY_SCORECARD_PATH);
 
     for required in [
         "context_survivor",
@@ -390,12 +297,6 @@ fn context_policy_contract_is_server_owned_and_summarizer_only() {
             "context policy resource definitions missing {kind}"
         );
     }
-
-    assert!(
-        modularity.contains("context_control_compact")
-            && modularity.contains("summarizer strategy"),
-        "capability modularity scorecard must classify compaction as a summarizer seam only"
-    );
 }
 
 #[test]

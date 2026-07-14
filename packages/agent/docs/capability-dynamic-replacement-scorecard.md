@@ -111,7 +111,7 @@ the provider-safe projection is unsafe.
 
 1. Inspect the cockpit/capability catalog and identify an adapter-replaceable
    operation gap.
-2. Inspect the operation schema, modularity scorecard row, authority
+2. Inspect the operation schema, canonical ownership metadata, authority
    constraints, and current owner.
 3. Record a replacement candidate rationale with lifecycle/runtime refs,
    rollback controls, and provider-safe contract evidence.

@@ -97,15 +97,10 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
   primitive and provider export.
-- `packages/agent/docs/capability-modularity-scorecard.md`: active scorecard
-  for classifying all current `capability::execute` operations as
-  kernel-locked, governance-locked, record-plane, adapter-replaceable,
-  module-owned, or deferred so future modular replacement work is measurable.
-- `packages/agent/docs/capability-modularity-inventory.tsv`:
-  machine-readable 188-row inventory for the capability modularity scorecard.
-- `packages/agent/docs/capability-modularity-evidence-manifest.md`:
-  companion evidence manifest for capability modularity baseline facts and
-  Kernel Boundary Lockdown and Capability Binding Policy validation commands.
+- `packages/agent/src/domains/capability/operations/operation_contract/metadata.rs`:
+  exhaustive runtime-owned operation family, owner, evolution class, and
+  replacement-constraint metadata used by binding validation, capability-pool
+  classification, and cockpit projection.
 - `packages/agent/src/domains/capability/pool.rs`: live typed classifier for
   model-facing operations and startup-registered catalog functions. It derives
   replacement class, visibility, minimality, and kernel-evolution constraints
@@ -1231,34 +1226,24 @@ fuzzy operation matches, while valid prefixes still expand to supported
 operations. Inspecting an unsupported `execute::<operation>` id returns bounded
 recovery guidance rather than an opaque catalog failure.
 
-Capability modularity is tracked in
-`packages/agent/docs/capability-modularity-scorecard.md`, with the
-machine-readable inventory in
-`packages/agent/docs/capability-modularity-inventory.tsv` and reviewed evidence
-in `packages/agent/docs/capability-modularity-evidence-manifest.md`. The static
-`capability_modularity_scorecard_invariants` test locks the current 188
-operation baseline, registry/dispatch parity, and the ownership classes used for
-future modularity work: `kernel_locked`, `governance_locked`, `record_plane`,
-`adapter_replaceable`, `module_owned`, and `deferred`. Replacement means
-governed contract-compatible substitution with authority, evidence, visibility,
-and rollback constraints; it does not mean arbitrary hot swapping. Kernel and
-module-governance operations are intentionally non-replaceable in v1 because
-they are the substrate that validates future replacement. Kernel Boundary
-Lockdown evidence now source-checks authority/grants, event/session log,
-resource store, redaction/provider-safety, trace/audit/replay/catalog,
-transport boundary, and the module governance pipeline before those areas can
-move toward binding policy. The Capability Binding Policy follow-on adds
+Operation ownership and evolution metadata live in the exhaustive
+`OperationId` match in
+`packages/agent/src/domains/capability/operations/operation_contract/metadata.rs`.
+Runtime consumers use its `kernel_locked`, `governance_locked`, `record_plane`,
+`adapter_replaceable`, and `module_owned` classifications directly. Source-owned
+tests require every operation to have metadata, keep protected kernel,
+governance, record-plane, and module-owned boundaries locked, and require
+replaceable/module/record-plane targets to name their safety constraints.
+Replacement means governed contract-compatible substitution with
+authority, evidence, visibility, replay, and rollback constraints; it does not
+mean arbitrary hot swapping. Kernel and module-governance operations remain
+non-replaceable because they validate future replacement. Capability Binding adds
 metadata-only `capability_binding_request`, `capability_binding_decision`, and
 `capability_binding_policy` records for future shadow/extend/replace proposals;
 active binding policy records do not route execution, hot-swap modules, mutate
 dispatch, install or activate modules, restore dependencies, run package
 managers, inherit `agent_state`, access networks, or expose raw paths, secrets,
 commands, logs, grant IDs, authority IDs, or debug payloads.
-Adapter Seam Hardening now source-checks the replaceable filesystem, Git,
-jobs/process, web, subagent, and compaction strategy seams. Those rows name
-required authority, evidence, side-effect, provider-safety,
-replay/idempotency, and rollback/disable prerequisites before any future
-shadow or replacement trial can move past metadata-only policy records.
 The Shadow Replacement Trial adds metadata-only
 `capability_shadow_trial_request`, `capability_shadow_trial_decision`,
 `capability_shadow_trial_run`, and `capability_shadow_trial_evidence` records

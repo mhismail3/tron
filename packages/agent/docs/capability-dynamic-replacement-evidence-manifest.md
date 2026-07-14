@@ -29,7 +29,7 @@ autonomous self-update across every operation or live module-code execution.
 | iOS cockpit DTOs | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift` |
 | iOS cockpit state | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift` |
 | iOS cockpit UI | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
-| Modularity inventory | `packages/agent/docs/capability-modularity-inventory.tsv` |
+| Operation ownership metadata | `packages/agent/src/domains/capability/operations/operation_contract/metadata.rs` |
 | Canonical README | `README.md` |
 
 ## Evidence
@@ -37,8 +37,8 @@ autonomous self-update across every operation or live module-code execution.
 | Claim | Evidence |
 |---|---|
 | Route operations are provider-visible only through `capability::execute`. | Registry and dispatch add `capability_replacement_candidate_*`, `capability_route_binding_*`, `capability_route_activate`, `capability_route_disable`, `capability_route_rollback`, and `capability_route_event_*` operations. |
-| Route operations are governance-locked, not adapter-replaceable. | `operation_binding_metadata` and `capability-modularity-inventory.tsv` classify all replacement/route operations as `capability_binding` / `governance_locked`. |
-| Kernel and governance operations remain non-routable. | The route service accepts only the first target operation, `git_status`, and the modularity invariants reject binding/rollback seams for locked rows. |
+| Route operations are governance-locked, not adapter-replaceable. | Canonical operation metadata classifies all replacement/route operations as `capability_binding` / `governance_locked`, with an exact source-owned regression. |
+| Kernel and governance operations remain non-routable. | The route service accepts only the first target operation, `git_status`; binding validation rejects replacement for locked classes. |
 | Candidate records are bounded and provider-safe. | `route.rs` validates unsafe payloads, bounded text/tokens/refs, exact target metadata, route authority, rollback controls, idempotency, exact current accepted `capability_shadow_trial_evidence` resource/version proof, exact lifecycle/runtime resource selectors, current lifecycle/runtime versions, the supervised module-runtime projection boundary, and `networkPolicy: none`. |
 | Candidate lifecycle/runtime refs can come from the governed module path. | `capability_binding::tests::route_candidate_accepts_refs_created_by_module_lifecycle_and_runtime_operations` seeds the install-decision prerequisite, records and approves a `module_lifecycle_state` through `module_lifecycle_request`/`module_lifecycle_decision`, records a `module_runtime_state` through `module_runtime_request`, and proves `capability_replacement_candidate_record` accepts those current refs only after runtime projection-boundary validation. |
 | Activation is explicit and approval-backed. | `capability_route_activate` requires a ready binding, exact expected binding version, accepted shadow-evidence proof captured by the binding, approval refs, rollback/disable controls, exact selectors, and `networkPolicy: none`. |
@@ -60,7 +60,7 @@ Focused validation for this slice:
 ```bash
 cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo check --manifest-path packages/agent/Cargo.toml
-CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
+CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --lib operation_contract::metadata::tests -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml --test capability_dynamic_replacement_invariants -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::capability_execute_dispatch_controls_shadow_trial_workflow -- --nocapture
 CARGO_TARGET_DIR=/tmp/tron-agent-target-dynamic-check cargo test --manifest-path packages/agent/Cargo.toml capability_binding::tests::capability_execute_dispatch_controls_full_route_lifecycle -- --nocapture
@@ -104,10 +104,10 @@ cargo check --manifest-path packages/agent/Cargo.toml
 result: passed.
 
 cargo test --manifest-path packages/agent/Cargo.toml --test capability_dynamic_replacement_invariants -- --nocapture
-result: passed; 6 passed, 0 failed.
+result: passed; 5 passed, 0 failed.
 
-cargo test --manifest-path packages/agent/Cargo.toml --test capability_modularity_scorecard_invariants -- --nocapture
-result: passed; 9 passed, 0 failed.
+cargo test --manifest-path packages/agent/Cargo.toml --lib operation_contract::metadata::tests -- --nocapture
+result: passed; canonical operation metadata coverage and evolution constraints hold.
 ```
 
 ## Practical Live-Test Boundary
