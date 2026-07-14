@@ -355,9 +355,13 @@ extension SourceGuardTests {
         ]
         let requiredFiles = [
             "Sources/App/Lifecycle/AppDelegate.swift",
+            "Sources/App/Lifecycle/AppRuntimeMode.swift",
+            "Sources/App/Lifecycle/ProductionAppRoot.swift",
             "Sources/App/Lifecycle/TronMobileApp.swift",
             "Sources/Support/Composition/AppInitializer.swift",
+            "Sources/Support/Composition/DependencyContainer+RuntimeServices.swift",
             "Sources/Support/Composition/DependencyContainer.swift",
+            "Sources/Support/Composition/DependencyContainerStorage.swift",
             "Sources/Support/Composition/DependencyEnvironment.swift",
             "Sources/Support/Composition/DependencyProviding.swift",
             "Sources/Support/Diagnostics/ClientLogIngestionService.swift",
@@ -440,15 +444,22 @@ extension SourceGuardTests {
             "Tests/ViewModels",
             "Tests/Views",
         ]
+        let requiredFiles = [
+            "Tests/Infrastructure/AppLifecycle/AppDelegateTests.swift",
+            "Tests/Infrastructure/AppLifecycle/AppRuntimeModeTests.swift",
+            "Tests/Infrastructure/Fixtures/IsolatedTestState.swift",
+        ]
 
         let missingRequired = requiredRoots
             .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
         let presentBanned = bannedRoots
             .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+        let missingFiles = requiredFiles
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
 
         #expect(
-            missingRequired.isEmpty && presentBanned.isEmpty,
-            "HRA iOS tests must mirror production owners. Missing target roots: \(missingRequired); old technical buckets still present: \(presentBanned)"
+            missingRequired.isEmpty && presentBanned.isEmpty && missingFiles.isEmpty,
+            "HRA iOS tests must mirror production owners. Missing target roots: \(missingRequired); missing owner files: \(missingFiles); old technical buckets still present: \(presentBanned)"
         )
     }
 

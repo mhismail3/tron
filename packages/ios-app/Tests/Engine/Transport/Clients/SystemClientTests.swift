@@ -65,19 +65,14 @@ struct SystemClientTests {
     }
 
     @Test("device installation identity is stable and isolated by defaults store")
-    func deviceInstallationIdentityIsStableAndIsolated() throws {
-        let firstSuite = try #require(UserDefaults(suiteName: "SystemClientTests.first"))
-        let secondSuite = try #require(UserDefaults(suiteName: "SystemClientTests.second"))
-        defer {
-            firstSuite.removePersistentDomain(forName: "SystemClientTests.first")
-            secondSuite.removePersistentDomain(forName: "SystemClientTests.second")
+    func deviceInstallationIdentityIsStableAndIsolated() {
+        IsolatedTestState.withDefaults(label: "system-client-first") { firstDefaults in
+            IsolatedTestState.withDefaults(label: "system-client-second") { secondDefaults in
+                let first = DeviceInstallationIdentity.current(defaults: firstDefaults)
+                #expect(DeviceInstallationIdentity.current(defaults: firstDefaults) == first)
+                #expect(DeviceInstallationIdentity.current(defaults: secondDefaults) != first)
+            }
         }
-        firstSuite.removePersistentDomain(forName: "SystemClientTests.first")
-        secondSuite.removePersistentDomain(forName: "SystemClientTests.second")
-
-        let first = DeviceInstallationIdentity.current(defaults: firstSuite)
-        #expect(DeviceInstallationIdentity.current(defaults: firstSuite) == first)
-        #expect(DeviceInstallationIdentity.current(defaults: secondSuite) != first)
     }
 
     @Test("device registration idempotency is stable and installation-specific")

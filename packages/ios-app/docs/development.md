@@ -139,6 +139,88 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+### Hosted Unit-Test Isolation
+
+Hosted `TronMobileTests` are allowed to create only declared, task-owned
+defaults suites, fixture roots, visual artifacts, DerivedData, and result
+bundles, all with registered cleanup. The supported isolation claim is that the
+hosted suite neither reads nor writes pre-existing user durable state and opens
+no real network session. It is not a claim of zero filesystem activity or raw
+whole-simulator byte equality. Production and separate UI-test behavior remain
+unchanged.
+
+Every hosted `DependencyContainer` must come from `IsolatedTestState`. Its
+immutable runtime-I/O configuration uses a handled-attempt recorder for direct,
+retry, reconnect, and rebuilt-client paths, `StubPairingProbe` for pairing, and
+a task-owned in-memory `PairedServerTokenStore.Backend`. Do not construct a
+live session, `URLSessionPairingProbe`, the production token backend, or an
+OAuth owner in a hosted unit-test path.
+
+Named-suite cleanup is semantic and test-only. Both owned suite factories emit
+a versioned registration record before exposure, remove the exact persistent
+domain during cleanup, prove that the domain is nil or an empty dictionary,
+and emit one matching cleanup record. Repeated and process-fallback cleanup use
+the same idempotent owner and cannot duplicate the cleanup event. Tests must
+not discover, unlink, or synchronize CoreSimulator preference backing files;
+`cfprefsd` may materialize an empty plist after the process exits.
+Token identities use a separate, complete
+`TRON_TEST_KEYCHAIN_LIFECYCLE_V1` ledger. Parse it independently from defaults
+records; registration and cleanup must be unique and set-equal by namespace,
+service, and account, and lifecycle JSON must never contain token material.
+Cleanup order is manager shutdown, token clear/proof/ledger emission, database
+close, fixture-root removal, defaults cleanup, then process-fallback
+deregistration. Repeated cleanup must await the same drain and emit no duplicate
+record.
+
+Hosted logical-time tests use a cancellation-cooperative `MockAsyncClock`.
+Manual sleepers and deterministic registration waiters have stable identities;
+cancellation, logical advance, and teardown atomically select one continuation
+owner, and every continuation resumes outside the clock lock. Terminal service
+owners must cancel and await their accepted tasks. Tests must await genuine
+clock registration before shutdown and must not use real-time sleeps, polling,
+or post-shutdown clock advancement to unblock canceled work.
+
+Isolation validation must not use the persistent paired simulator above. Create
+a new simulator for the task, record the UDID returned by `simctl create`, and
+use `-destination id=<task-udid>` and that literal UDID for every subsequent
+operation—never a device name or `booted`. Keep DerivedData, result bundles,
+HOME/TMPDIR where supported, and all fixture/artifact roots under the task's
+private evidence directory. Register the device as a task-owned process and
+delete that exact UDID after all checks.
+
+Before the full hosted suite, seed adversarial app defaults, Documents/SQLite,
+Application Support, App Group, and production-pairing sentinels, start a
+loopback connection recorder for that seeded pairing, and capture these
+separate baselines:
+
+1. Run the focused `AppDelegateTests` probe through the Beta test host. Require
+   notification authorization to be `.notDetermined` and retain the canonical
+   authorization/alert/sound/badge record.
+2. Read only sorted TCC rows for the exact built app and extension bundle IDs,
+   comparing service, client, client type, authorization value, and reason.
+3. Hash and semantically decode the App Group canary; inventory the seeded
+   defaults, database, and durable trees.
+
+Run focused lifecycle, storage, cleanup, transport, guard, and hosted-render
+tests before all `TronMobileTests`. Then rerun the real notification probe and
+capture the scoped TCC, App Group, defaults, database, durable-tree, registered
+scope, and recorder post-state. Require identical protected records and zero
+recorder accepts/bytes. Do not launch a normal or UI-test app until these
+post-snapshots pass; notification settings and TCC are distinct proofs. Only
+then may a normal Beta launch/background-to-active negative require a recorder
+accept, followed by the separate onboarding UI-validation cases. Terminate
+owned processes and verify deletion of the exact task UDID at the end.
+
+For every hosted invocation, parse only complete
+`TRON_TEST_SUITE_LIFECYCLE_V1` records. Registration and cleanup identities
+must each be unique and set-equal. A residual preference artifact is permitted
+only when `lstat` proves it is a regular non-symlink plist directly under the
+current task app container's `Library/Preferences`, its stem matches an owned
+suite grammar and a cumulative registration, and its plist root is an empty
+dictionary. Unknown, unregistered, malformed, nonempty, duplicate, misplaced,
+directory, or symlink artifacts fail the run; only accepted empty envelopes
+are excluded from durable-tree comparison.
+
 For chat response rails and final-response metadata projection, run only the
 payload, dispatch, lifecycle, reconstruction, and presentation contracts:
 
@@ -212,6 +294,8 @@ xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/AgentCockpitIssueStateTests \
   -only-testing:TronMobileTests/AgentCockpitStateTests \
+  -only-testing:TronMobileTests/AgentCockpitDiscoveryStateTests \
+  -only-testing:TronMobileTests/AgentCockpitPresentationTests \
   -only-testing:TronMobileTests/AgentCockpitViewModelTests
 ```
 
@@ -223,7 +307,9 @@ has its own equally small state suite:
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/DashboardPresentationTests \
-  -only-testing:TronMobileTests/AgentCockpitStateTests
+  -only-testing:TronMobileTests/AgentCockpitStateTests \
+  -only-testing:TronMobileTests/AgentCockpitDiscoveryStateTests \
+  -only-testing:TronMobileTests/AgentCockpitPresentationTests
 
 xcodebuild test -scheme Tron \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
@@ -372,7 +458,8 @@ Tests/
 ├── Engine/            # Transport, protocol, event, persistence, and model tests
 │   └── Transport/     # Clients, Retry, WebSocket, and DeepLinks tests mirror Sources
 ├── Session/           # Chat, timeline, attachment, and parsing tests
-│   └── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
+│   ├── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
+│   └── WorkerLifecycle/ # State, discovery, presentation, and shared cockpit fixtures
 ├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards

@@ -5,11 +5,8 @@ import Testing
 @Suite("PairedServerStore")
 @MainActor
 struct PairedServerStoreTests {
-    private func defaults(_ name: String = UUID().uuidString) -> UserDefaults {
-        let suite = "PairedServerStoreTests.\(name)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
+    private func withDefaults<T>(_ body: (UserDefaults) throws -> T) rethrows -> T {
+        try IsolatedTestState.withDefaults(label: "paired-server-store", body)
     }
 
     private func server(
@@ -23,18 +20,20 @@ struct PairedServerStoreTests {
 
     @Test("starts empty with no hidden localhost pairing")
     func startsEmpty() {
-        let store = PairedServerStore(defaults: defaults())
+        withDefaults { defaults in
+            let store = PairedServerStore(defaults: defaults)
 
-        #expect(store.servers.isEmpty)
-        #expect(store.activeServer == nil)
-        #expect(store.activeServerId == nil)
+            #expect(store.servers.isEmpty)
+            #expect(store.activeServer == nil)
+            #expect(store.activeServerId == nil)
+        }
     }
 
     @Test("replace persists local servers and active id")
     func replacePersists() {
-        let defaults = defaults()
-        let first = server(id: "a")
-        let second = server(id: "b", host: "100.64.0.2")
+        withDefaults { defaults in
+            let first = server(id: "a")
+            let second = server(id: "b", host: "100.64.0.2")
 
         let store = PairedServerStore(defaults: defaults)
         store.replace([first, second], activeId: second.id)
@@ -42,12 +41,13 @@ struct PairedServerStoreTests {
         let restored = PairedServerStore(defaults: defaults)
         #expect(restored.servers == [first, second])
         #expect(restored.activeServerId == second.id)
-        #expect(restored.activeServer == second)
+            #expect(restored.activeServer == second)
+        }
     }
 
     @Test("active id normalizes to first real server when stale")
     func staleActiveIdNormalizes() {
-        let defaults = defaults()
+        withDefaults { defaults in
         let first = server(id: "a")
         let data = try! JSONEncoder().encode([first])
         defaults.set(data, forKey: PairedServerStore.serversKey)
@@ -56,12 +56,13 @@ struct PairedServerStoreTests {
         let store = PairedServerStore(defaults: defaults)
 
         #expect(store.activeServerId == "a")
-        #expect(store.activeServer == first)
+            #expect(store.activeServer == first)
+        }
     }
 
     @Test("selecting a server only changes local active id")
     func selectIsLocalOnly() {
-        let defaults = defaults()
+        withDefaults { defaults in
         let first = server(id: "a")
         let second = server(id: "b", host: "100.64.0.2")
         let store = PairedServerStore(defaults: defaults)
@@ -70,14 +71,16 @@ struct PairedServerStoreTests {
         store.select(second)
 
         #expect(store.activeServer == second)
-        #expect(defaults.string(forKey: PairedServerStore.activeIdKey) == second.id)
+            #expect(defaults.string(forKey: PairedServerStore.activeIdKey) == second.id)
+        }
     }
 
     @Test("forgetting inactive server keeps active server")
     func forgetInactive() {
+        withDefaults { defaults in
         let first = server(id: "a")
         let second = server(id: "b", host: "100.64.0.2")
-        let store = PairedServerStore(defaults: defaults())
+        let store = PairedServerStore(defaults: defaults)
         store.replace([first, second], activeId: first.id)
 
         let plan = store.remove(second)
@@ -86,14 +89,16 @@ struct PairedServerStoreTests {
         #expect(plan.nextActiveServer == nil)
         #expect(plan.shouldReturnToOnboarding == false)
         #expect(store.servers == [first])
-        #expect(store.activeServer == first)
+            #expect(store.activeServer == first)
+        }
     }
 
     @Test("forgetting active server selects next local server without contacting removed server")
     func forgetActiveSelectsNext() {
+        withDefaults { defaults in
         let first = server(id: "a")
         let second = server(id: "b", host: "100.64.0.2")
-        let store = PairedServerStore(defaults: defaults())
+        let store = PairedServerStore(defaults: defaults)
         store.replace([first, second], activeId: first.id)
 
         let plan = store.remove(first)
@@ -102,13 +107,15 @@ struct PairedServerStoreTests {
         #expect(plan.nextActiveServer == second)
         #expect(plan.shouldReturnToOnboarding == false)
         #expect(store.servers == [second])
-        #expect(store.activeServer == second)
+            #expect(store.activeServer == second)
+        }
     }
 
     @Test("forgetting final server clears active id")
     func forgetFinalClearsActive() {
+        withDefaults { defaults in
         let only = server(id: "only")
-        let store = PairedServerStore(defaults: defaults())
+        let store = PairedServerStore(defaults: defaults)
         store.replace([only], activeId: only.id)
 
         let plan = store.remove(only)
@@ -118,7 +125,8 @@ struct PairedServerStoreTests {
         #expect(plan.shouldReturnToOnboarding == true)
         #expect(store.servers.isEmpty)
         #expect(store.activeServerId == nil)
-        #expect(store.activeServer == nil)
+            #expect(store.activeServer == nil)
+        }
     }
 
     @Test("pairing same host and port refreshes existing id without duplicate")

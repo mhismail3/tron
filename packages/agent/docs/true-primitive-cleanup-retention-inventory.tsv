@@ -656,6 +656,8 @@ packages/agent/tests/true_primitive_cleanup/support.rs	test	test_harness	TPC-10	
 packages/agent/tests/true_primitive_cleanup/transport_agent_observability.rs	test	test_harness	TPC-6	static gate coverage for transport, agent persistence, and observability cleanup
 packages/agent/tests/true_primitive_cleanup_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
+packages/ios-app/Sources/App/Lifecycle/AppRuntimeMode.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
+packages/ios-app/Sources/App/Lifecycle/ProductionAppRoot.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Assets.xcassets/AccentColor.colorset/Contents.json	support	ios	TPC-7	client shell asset or bundled resource support
 packages/ios-app/Sources/Assets.xcassets/AppIcon.appiconset/Contents.json	support	ios	TPC-7	client shell asset or bundled resource support
@@ -908,7 +910,9 @@ packages/ios-app/Sources/Session/Timeline/Reconstruction/UnifiedEventTransformer
 packages/ios-app/Sources/Session/Timeline/Tokens/TokenRecord.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Timeline/Tokens/TokenStateManager.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Support/Composition/AppInitializer.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
+packages/ios-app/Sources/Support/Composition/DependencyContainer+RuntimeServices.swift	support	ios	TPC-7	iOS composition runtime-service facade
 packages/ios-app/Sources/Support/Composition/DependencyContainer.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
+packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift	support	ios	TPC-7	iOS typed local-storage resolution owner
 packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Support/Composition/DependencyProviding.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
@@ -1140,15 +1144,20 @@ packages/ios-app/Tests/Engine/Transport/Retry/ReconnectProbePolicyTests.swift	te
 packages/ios-app/Tests/Engine/Transport/WebSocket/EngineClientTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Engine/Transport/WebSocket/WebSocketAuthTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Infrastructure/AppLifecycle/AppDelegateTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Infrastructure/AppLifecycle/AppRuntimeModeTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClock.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClockTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Fakes/MockEngineTransport.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Fixtures/CapabilityTestFixtures.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Infrastructure/Fixtures/IsolatedTestState.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Fixtures/ServerSettingsFixture.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Guards/CleanupGuardTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Guards/InfoPlistPrivacyTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+Budgets.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+BuildAndProject.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+RuntimeIsolation.swift	test	test_harness	TPC-10	hosted runtime and durable test-state source-guard coverage
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+RuntimeIsolationNetwork.swift	test	test_harness	TPC-10	per-function network-attempt constructor provenance and egress source-guard coverage
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+CapabilityAbsence.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+Hierarchy.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+PrimitiveShellAbsence.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -1493,21 +1502,16 @@ packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md	docs	
 packages/agent/docs/concurrency-scheduling-discipline-inventory.md	docs	docs/static gates	CSD-10	Concurrency Scheduling Discipline inventory retained after final closeout.
 packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv	docs	docs/static gates	CSD-10	Concurrency Scheduling Discipline machine-readable inventory retained after final closeout.
 packages/agent/docs/concurrency-scheduling-discipline-scorecard.md	docs	docs/static gates	CSD-10	Concurrency Scheduling Discipline scorecard retained after final closeout.
-packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md	docs	docs/static gates	SACB-4	Security Authority Capability Boundaries evidence artifact retained for active campaign verification.
-packages/agent/docs/security-authority-capability-boundaries-inventory.md	docs	docs/static gates	SACB-4	Security Authority Capability Boundaries inventory retained for active campaign verification.
-packages/agent/docs/security-authority-capability-boundaries-inventory.tsv	docs	docs/static gates	SACB-4	Security Authority Capability Boundaries machine-readable inventory retained for active campaign verification.
-packages/agent/docs/security-authority-capability-boundaries-scorecard.md	docs	docs/static gates	SACB-4	Security Authority Capability Boundaries scorecard retained for active campaign verification.
 packages/agent/tests/concurrency_scheduling_discipline/mod.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline invariant module retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline/scorecard_inventory.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline scorecard/inventory invariant retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline/static_guards.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline static guard invariant retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline/support.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline invariant test support retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline_invariants.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline invariant target retained after final closeout.
-packages/agent/tests/security_authority_capability_boundaries/mod.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant module retained for active campaign verification.
-packages/agent/tests/security_authority_capability_boundaries/platform_guards.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries platform guard invariant retained for active campaign verification.
-packages/agent/tests/security_authority_capability_boundaries/scorecard_inventory.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries scorecard/inventory invariant retained for active campaign verification.
-packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries static guard invariant retained for active campaign verification.
-packages/agent/tests/security_authority_capability_boundaries/support.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant test support retained for active campaign verification.
-packages/agent/tests/security_authority_capability_boundaries_invariants.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant target retained for active campaign verification.
+packages/agent/tests/security_authority_capability_boundaries/mod.rs	test	test_harness	SACB-4	Living Security Authority Capability Boundaries gate module registry retained for cross-cutting security verification.
+packages/agent/tests/security_authority_capability_boundaries/platform_guards.rs	test	test_harness	SACB-4	Living Security Authority Capability Boundaries platform guards retained for secret custody, redaction, and pairing verification.
+packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	test	test_harness	SACB-4	Living Security Authority Capability Boundaries static guards retained for transport, authority, execution, and worker isolation verification.
+packages/agent/tests/security_authority_capability_boundaries/support.rs	test	test_harness	SACB-4	Minimal repository source-reader support retained for the living Security Authority Capability Boundaries guards.
+packages/agent/tests/security_authority_capability_boundaries_invariants.rs	test	test_harness	SACB-4	Living Security Authority Capability Boundaries invariant target retained in CI with nine semantic guards.
 packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability evidence manifest retained after closeout.
 packages/agent/docs/observability-diagnostics-auditability-inventory.md	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability inventory retained after closeout.
 packages/agent/docs/observability-diagnostics-auditability-inventory.tsv	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability machine-readable inventory retained after closeout.
@@ -1665,7 +1669,10 @@ packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+VoiceTranscription
 packages/ios-app/Tests/Session/Chat/Coordinators/ChatTranscriptionCoordinatorTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityEvidencePresentationTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/Session/Timeline/Messages/LocalChatNotificationTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
-packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitDiscoveryStateTests.swift	test	test_harness	TPC-hardening	capability discovery, schema evidence, operation ownership, and malformed catalog regressions split into a focused test owner
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitPresentationTests.swift	test	test_harness	TPC-hardening	Dashboard summary, bounded count, activity grouping, and user-facing label regressions split into a focused test owner
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTestFixtures.swift	test	test_harness	TPC-hardening	shared synthetic cockpit builders moved once behind a fixture namespace for the focused state, discovery, and presentation suites
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	test	test_harness	Phase1-closeout	core cockpit projection, module activity, degradation, offline, lifecycle action, and confirmation regressions retained under the state owner
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTestFixtures.swift	test	test_harness	TPC-hardening	cockpit repository doubles and DTO builders split from the view-model spec owner
 packages/ios-app/Tests/UI/Chat/AttachmentMenuTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
@@ -2133,7 +2140,16 @@ packages/agent/src/domains/capability/operations/operation_contract/output/proje
 packages/agent/src/domains/capability/operations/operation_contract/output/spec.rs	implementation	agent_runtime	TPC-10	canonical per-operation output specification owner
 packages/agent/src/domains/capability/operations/operation_contract/output/types.rs	implementation	agent_runtime	TPC-10	canonical provider output type owner
 packages/agent/src/domains/capability/operations/operation_contract/policy.rs	implementation	agent_runtime	TPC-10	canonical operation effect and scope policy owner
-packages/agent/src/domains/capability/operations/operation_contract/presentation.rs	implementation	agent_runtime	TPC-hardening	canonical user-facing operation presentation metadata owner
+packages/agent/src/domains/capability/operations/operation_contract/presentation/capability_binding.rs	implementation	agent_runtime	TPC-hardening	canonical capability-binding presentation literal owner
+packages/agent/src/domains/capability/operations/operation_contract/presentation/direct.rs	implementation	agent_runtime	TPC-hardening	canonical direct-operation presentation literal owner
+packages/agent/src/domains/capability/operations/operation_contract/presentation/governance.rs	implementation	agent_runtime	TPC-hardening	canonical governance-operation presentation literal owner
+packages/agent/src/domains/capability/operations/operation_contract/presentation/mod.rs	implementation	agent_runtime	TPC-hardening	canonical user-facing presentation facade and exhaustive family router
+packages/agent/src/domains/capability/operations/operation_contract/presentation/records.rs	implementation	agent_runtime	TPC-hardening	canonical record-plane presentation literal owner
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/mod.rs	test	test_harness	TPC-hardening	frozen presentation oracle behavior and family-parity regression owner
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_capability_binding.rs	test	test_harness	TPC-hardening	independently reviewed capability-binding presentation oracle rows
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_direct.rs	test	test_harness	TPC-hardening	independently reviewed direct-operation presentation oracle rows
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_governance.rs	test	test_harness	TPC-hardening	independently reviewed governance-operation presentation oracle rows
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_records.rs	test	test_harness	TPC-hardening	independently reviewed record-plane presentation oracle rows
 packages/agent/src/domains/capability/operations/operation_contract/records.rs	implementation	agent_runtime	TPC-10	canonical record-plane input contract owner
 packages/agent/src/domains/capability/pool.rs	implementation	agent_runtime	TPC-10	canonical capability pool classification owner
 packages/agent/src/domains/capability_binding/route.rs	implementation	agent_runtime	TPC-10	governed capability route lifecycle owner

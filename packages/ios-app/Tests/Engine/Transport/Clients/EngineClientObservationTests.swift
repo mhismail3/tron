@@ -37,6 +37,43 @@ struct EngineClientObservationTests {
         #expect(rpc.connectionState == .disconnected)
     }
 
+    @Test("handled policy captures completed requests before any live session exists")
+    func testHandledConnectCreatesNoSession() async throws {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65530/engine")!,
+            bearerTokenProvider: { "fixture-token" },
+            sessionAttemptDirective: recorder.handle
+        )
+
+        await rpc.connect()
+
+        let request = try #require(recorder.requests.last)
+        #expect(request.url?.absoluteString == "ws://127.0.0.1:65530/engine")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-token")
+        #expect(rpc.engineConnection?.urlSession == nil)
+        #expect(rpc.engineConnection?.engineConnectionTask == nil)
+        #expect(rpc.connectionState == .disconnected)
+    }
+
+    @Test("manual retry and reconnect preserve the immutable handled policy")
+    func testHandledRetryAndReconnectRemainHandled() async {
+        let recorder = HostedEngineAttemptRecorder()
+        let rpc = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65529/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+
+        await rpc.manualRetry()
+        await rpc.disconnect()
+        await rpc.reconnect()
+
+        #expect(recorder.requests.count >= 2)
+        #expect(rpc.engineConnection?.urlSession == nil)
+        #expect(rpc.engineConnection?.engineConnectionTask == nil)
+        await rpc.disconnect()
+    }
+
     @Test("Connect policy discards stale disconnected transports")
     func testConnectPolicyDiscardsStaleDisconnectedTransport() {
         #expect(EngineClientConnectionPolicy.shouldSkipConnect(state: .disconnected) == false)
@@ -112,22 +149,21 @@ struct EngineClientObservationTests {
 
     @Test("Stream cursor store records subscription tail before first event")
     func testStreamCursorStorePersistsSubscriptionTail() {
-        let suiteName = "EngineClientObservationTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = EngineStreamCursorStore(userDefaults: defaults)
-        let key = EngineStreamCursorKey(
-            serverOrigin: "127.0.0.1:9847",
-            topic: "events.session",
-            sessionId: "session-a",
-            workspaceId: nil,
-            filterHash: "sessionId=session-a"
-        )
+        IsolatedTestState.withDefaults(label: "engine-client-observation-cursor") { defaults in
+            let store = EngineStreamCursorStore(userDefaults: defaults)
+            let key = EngineStreamCursorKey(
+                serverOrigin: "127.0.0.1:9847",
+                topic: "events.session",
+                sessionId: "session-a",
+                workspaceId: nil,
+                filterHash: "sessionId=session-a"
+            )
 
-        store.save(EngineStreamCursor(rawValue: 44), for: key)
-        store.save(EngineStreamCursor(rawValue: 12), for: key)
+            store.save(EngineStreamCursor(rawValue: 44), for: key)
+            store.save(EngineStreamCursor(rawValue: 12), for: key)
 
-        #expect(store.cursor(for: key) == EngineStreamCursor(rawValue: 44))
+            #expect(store.cursor(for: key) == EngineStreamCursor(rawValue: 44))
+        }
     }
 
     @Test("Session live subscriptions do not replay durable stream cursors")

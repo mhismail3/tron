@@ -26,6 +26,8 @@ const CAPABILITY_BINDING_TESTS_PATH: &str =
     "packages/agent/src/domains/capability_binding/tests.rs";
 const COCKPIT_VISIBILITY_PATH: &str =
     "packages/agent/src/domains/capability_binding/cockpit_visibility.rs";
+const IOS_COCKPIT_TAB_VIEWS_PATH: &str =
+    "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift";
 const README_PATH: &str = "packages/agent/docs/project-reference.md";
 
 fn repo_root() -> PathBuf {
@@ -406,6 +408,7 @@ fn cockpit_visibility_is_server_truth_not_local_storytelling() {
         read_repo_file("packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift");
     let ios_views =
         read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift");
+    let ios_tab_views = read_repo_file(IOS_COCKPIT_TAB_VIEWS_PATH);
     let evidence = read_repo_file(EVIDENCE_PATH);
 
     for required in [
@@ -429,16 +432,29 @@ fn cockpit_visibility_is_server_truth_not_local_storytelling() {
         );
     }
 
+    assert!(
+        ios_state.contains("routeStories"),
+        "iOS cockpit state must retain the server-owned route-story projection"
+    );
     for required in [
-        "routeStories",
-        "What Changed",
-        "CapabilityOperationDetailSheet",
+        "if !viewModel.overview.routeStories.isEmpty",
+        "Text(\"What Changed\")",
+        "ForEach(viewModel.overview.routeStories)",
+        "RouteStoryCard(story: story)",
     ] {
         assert!(
-            ios_state.contains(required) || ios_views.contains(required),
-            "iOS cockpit must render server-owned adaptation facts: {required}"
+            ios_tab_views.contains(required),
+            "the exact cockpit tab owner must render the correlated route-story fragment: {required}"
         );
     }
+    assert!(
+        ios_views.contains("CapabilityOperationDetailSheet"),
+        "the cockpit root sheet must retain operation-detail composition ownership"
+    );
+    assert!(
+        evidence.contains(IOS_COCKPIT_TAB_VIEWS_PATH),
+        "capstone evidence must name the exact route-story UI owner"
+    );
 
     assert!(
         evidence.contains("without raw IDs") || evidence.contains("no raw IDs"),

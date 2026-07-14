@@ -35,16 +35,19 @@ enum AppearanceMode: String, CaseIterable, Sendable {
 @MainActor
 @Observable
 final class AppearanceSettings {
-    static let shared = AppearanceSettings()
+    static let shared = AppearanceSettings(defaults: AppRuntimeStorage.current.defaults)
+
+    private let defaults: UserDefaults
 
     var mode: AppearanceMode {
         didSet {
-            UserDefaults.standard.set(mode.rawValue, forKey: "appearanceMode")
+            defaults.set(mode.rawValue, forKey: "appearanceMode")
         }
     }
 
-    private init() {
-        if let saved = UserDefaults.standard.string(forKey: "appearanceMode"),
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        if let saved = defaults.string(forKey: "appearanceMode"),
            let parsed = AppearanceMode(rawValue: saved) {
             self.mode = parsed
         } else {

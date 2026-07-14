@@ -174,13 +174,16 @@ struct DiagnosticsBundleBuilderTests {
     }
 
     private func makeHarness() async throws -> DiagnosticsHarness {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("DiagnosticsBundleBuilderTests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let database = EventDatabase(databasePath: directory.appendingPathComponent("events.db").path)
+        let testState = IsolatedTestState(label: "diagnostics-bundle")
+        let directory = testState.rootURL
+        let database = testState.makeDatabase()
         try await database.initialize()
         let engineClient = EngineClient(serverURL: URL(string: "ws://paired-server-required.invalid:1/engine")!)
-        let eventStoreManager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let eventStoreManager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let metricKitStore = MetricKitDiagnosticsStore(
             directoryURL: directory.appendingPathComponent("MetricKit", isDirectory: true)
         )
@@ -189,7 +192,8 @@ struct DiagnosticsBundleBuilderTests {
             database: database,
             eventStoreManager: eventStoreManager,
             engineClient: engineClient,
-            metricKitStore: metricKitStore
+            metricKitStore: metricKitStore,
+            testState: testState
         )
     }
 
@@ -241,6 +245,7 @@ private struct DiagnosticsHarness {
     let eventStoreManager: EventStoreManager
     let engineClient: EngineClient
     let metricKitStore: MetricKitDiagnosticsStore
+    let testState: IsolatedTestState
 
     func builder(
         now: @escaping () -> Date = { Date() },
@@ -265,7 +270,6 @@ private struct DiagnosticsHarness {
     }
 
     func cleanup() async {
-        await database.close()
-        try? FileManager.default.removeItem(at: directory)
+        await testState.cleanup()
     }
 }

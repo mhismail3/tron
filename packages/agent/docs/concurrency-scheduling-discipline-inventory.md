@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 130 scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 131 production scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,
@@ -40,17 +40,17 @@ artifacts visible to the CSD harness:
   `DispatchQueue`, `AsyncStream`, timers, debounce/coalescing markers, and
   `AsyncSemaphore`.
 
-Scheduler class distribution for the 130 production scheduling-surface rows:
+Scheduler class distribution for the 131 production scheduling-surface rows:
 
 | Scheduler class | Rows |
 |---|---:|
 | `timer_loop` | 40 |
 | `scoped_request_task` | 18 |
-| `debounce_or_coalescer` | 12 |
-| `main_actor_ui` | 17 |
-| `tracked_background_task` | 14 |
+| `debounce_or_coalescer` | 10 |
+| `main_actor_ui` | 18 |
+| `tracked_background_task` | 15 |
 | `actor_serialization` | 8 |
-| `external_callback_bridge` | 8 |
+| `external_callback_bridge` | 9 |
 | `view_scoped_task` | 7 |
 | `bounded_queue` | 4 |
 | `blocking_supervisor` | 1 |
@@ -78,8 +78,9 @@ Static-gate/predecessor rows: 27 `test_fixture` rows.
 | `EngineConnection` | `ios_websocket_transport` | Receive, ping, reconnect, open-timeout, and request-timeout tasks are stored and cancelled on disconnect, backgrounding, cleanup, and deinit. |
 | `EngineClient` | `ios_websocket_transport` | Stream subscriptions are deduplicated, ACK work coalesces to the latest cursor, and disconnect cancels ACK/observation tasks. |
 | `AsyncEventStream` | `ios_event_stream` | Continuations are removed on termination; default buffering is bounded with newest-value overload semantics. |
-| `EventStoreManager` | `ios_event_persistence` | Engine-client replacement cancels the previous global event task and prevents duplicate handling. |
-| `SessionRefreshService` | `ios_event_persistence` | Connected refresh and reconnect hooks are coalesced and cancellable. |
+| `ProductionAppRoot` | `ios_app_lifecycle` | The mounted application root owns bounded MainActor lifecycle/UI work; SwiftUI cancels view-scoped work and retained service owners cancel or coalesce their own tasks. `TronMobileApp` owns no task. |
+| `EventStoreManager` | `ios_event_persistence` | The weak-idle global lane, rapid replacement predecessors, and first/subsequent load chains have one idempotent terminal owner. Shutdown cancels and awaits accepted work before fixture database close; deinit cancellation is safety-only. |
+| `SessionRefreshService` | `ios_event_persistence` | Connected refresh and reconnect hooks coalesce; terminal shutdown marks stopped, removes the named hook, cancels and awaits debounce/inflight handles, and prevents respawn. |
 | `UIUpdateQueue` | `ios_chat_coordinators` | Equal-priority ordering is stable, text deltas coalesce, and reset cancels pending batch work. |
 | `ClientLogIngestionService` | `ios_diagnostics` | Uploads serialize, endpoint generation is respected, retry delay is cancellable, and stop cancels the loop. |
 | Camera and QR capture | `ios_chat_composer` / `ios_onboarding` | AVCapture start/stop runs on owner serial queues instead of global dispatch. |

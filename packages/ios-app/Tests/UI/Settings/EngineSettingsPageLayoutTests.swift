@@ -77,6 +77,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
 
     @MainActor
     func testEngineSettingsPrimitiveCardsRenderForVisualQA() throws {
+        let testState = IsolatedTestState(label: "engine-settings-render")
+        testState.registerTeardown(with: self)
         let settingsState = SettingsState()
         settingsState.isLoaded = true
         settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -88,7 +90,7 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
             selectedModelDisplayName: "GPT-5.5",
             updateServerSetting: { _ in }
         )
-        .environment(\.dependencies, DependencyContainer())
+        .environment(\.dependencies, testState.makeContainer())
         .frame(width: 430, height: 1_320)
         .background(Color(uiColor: .systemBackground))
 
@@ -113,16 +115,8 @@ final class EngineSettingsPageLayoutTests: XCTestCase {
         XCTAssertGreaterThan(image.size.width, 400)
         XCTAssertGreaterThan(image.size.height, 1_200)
 
-        let documentsURL = try XCTUnwrap(
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        )
-        let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
-            .map(URL.init(fileURLWithPath:))
-            ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        let outputURL = artifactRoot.appendingPathComponent("engine-settings-primitive-render.png")
-        try FileManager.default.createDirectory(
-            at: outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        let outputURL = try testState.artifactURL(
+            named: "engine-settings-primitive-render.png"
         )
         try XCTUnwrap(image.pngData()).write(to: outputURL)
         print("TRON_VISUAL_ARTIFACT_PATH=\(outputURL.path)")

@@ -7,16 +7,19 @@ import SQLite3
 final class DraftRepositoryTests: XCTestCase {
 
     var database: EventDatabase!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
-        database = EventDatabase()
+        testState = IsolatedTestState(label: "draft-repository")
+        testState.registerTeardown(with: self)
+        database = testState.makeDatabase()
         try await database.initialize()
         try await database.clearAll()
     }
 
     override func tearDown() async throws {
         try? await database.clearAll()
-        await database.close()
+        await testState.cleanup()
     }
 
     // MARK: - Helpers
@@ -243,19 +246,15 @@ final class DraftRepositoryTests: XCTestCase {
     }
 
     private func withFreshDatabase<T>(_ body: (EventDatabase) async throws -> T) async throws -> T {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let freshDatabase = EventDatabase(databasePath: directory.appendingPathComponent("drafts.db").path)
+        let freshDatabase = testState.makeDatabase(fileName: "fresh-drafts.db")
         try await freshDatabase.initialize()
 
         do {
             let result = try await body(freshDatabase)
             await freshDatabase.close()
-            try? FileManager.default.removeItem(at: directory)
             return result
         } catch {
             await freshDatabase.close()
-            try? FileManager.default.removeItem(at: directory)
             throw error
         }
     }

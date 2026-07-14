@@ -45,28 +45,24 @@ struct AppearanceSettingsTests {
     // MARK: - AppearanceSettings Persistence
 
     @Test func defaultModeIsDark() {
-        // Clear any stored value
-        UserDefaults.standard.removeObject(forKey: "appearanceMode")
-        // Singleton already initialized, but we can verify the default logic
-        let mode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: "appearanceMode") ?? "") ?? .dark
-        #expect(mode == .dark)
+        IsolatedTestState.withDefaults(label: "appearance-default") { defaults in
+            #expect(AppearanceSettings(defaults: defaults).mode == .dark)
+        }
     }
 
     @Test func modePersistsToUserDefaults() {
-        let settings = AppearanceSettings.shared
-        let originalMode = settings.mode
+        IsolatedTestState.withDefaults(label: "appearance-persistence") { defaults in
+            let settings = AppearanceSettings(defaults: defaults)
 
-        settings.mode = .light
-        #expect(UserDefaults.standard.string(forKey: "appearanceMode") == "light")
+            settings.mode = .light
+            #expect(defaults.string(forKey: "appearanceMode") == "light")
 
-        settings.mode = .auto
-        #expect(UserDefaults.standard.string(forKey: "appearanceMode") == "auto")
+            settings.mode = .auto
+            #expect(defaults.string(forKey: "appearanceMode") == "auto")
 
-        settings.mode = .dark
-        #expect(UserDefaults.standard.string(forKey: "appearanceMode") == "dark")
-
-        // Restore
-        settings.mode = originalMode
+            settings.mode = .dark
+            #expect(defaults.string(forKey: "appearanceMode") == "dark")
+        }
     }
 
 }

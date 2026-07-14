@@ -30,6 +30,23 @@ renders it immediately so the user sees pending parallel work before execution
 finishes. Reconnect reconstruction preserves that `generating` state when the
 server reports an in-flight invocation.
 
+## Stream Ownership and Terminal Drain
+
+`EventStoreManager` owns the current global event subscription without owning
+the shared `AsyncEventStream` bus. The idle subscription task captures the
+manager weakly. Client replacement is predecessor-chained—including the first
+load—so rapid A→B→C replacement cannot let events or projection loads from an
+older origin overtake the latest lane. Reconnect refresh stays behind
+`SessionRefreshService`'s single coalescing owner.
+
+Acceptance is the boundary for shutdown semantics: after the lane accepts an
+event, its database mutation and completion callback are awaited inline. The
+manager's shared terminal drain cancels and joins the global lane, awaits the
+refresh coordinator's terminal drain, then cancels and joins the replacement
+and load chain before fixture-owned database close. Late refresh requests are
+rejected, repeated shutdown callers await the same drain, and neither manager
+shutdown nor deinitialization finishes the shared event bus.
+
 ## Plugin Boundary
 
 Each live plugin parses one server event family into a UI-ready result and

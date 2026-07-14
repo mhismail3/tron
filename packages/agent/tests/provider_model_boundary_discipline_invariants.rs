@@ -467,10 +467,6 @@ fn predecessor_inventory_rows_record_pmbd_as_current_original_slice() {
             "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
             "Provider / Model Boundary Discipline",
         ),
-        (
-            "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv",
-            "Provider / Model Boundary Discipline",
-        ),
     ] {
         let source = read_repo_file(path);
         assert!(

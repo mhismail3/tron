@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-07-13 (the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
+> Last verified: 2026-07-14 (typed local-storage resolution and the consumer-facing chat/connection runtime-service facade have focused composition owners; the prompt composer uses native interactive Liquid Glass while its proportional Session Briefing context ring remains a background-free, mic-scaled glyph inside that surface and yields its slot throughout voice capture/transcription; the floating model/context pill stays removed; chat response/thinking rails were removed and final-response metadata now follows one live/replay projection contract; trusted APNs lifecycle registration and redacted server delivery were restored; a transparent icon-sized attachment-menu target keeps menu presentation from replacing the composer glass; Recent Inputs clear requires destructive confirmation; Markdown block parsing preserves nested ordered/unordered list hierarchy; the Dashboard is the session list's single server-truth cockpit, with one high-signal summary for capabilities, engine, activity, triggers, verification, and issues and one status-derived Activity presentation).
 
 ## Overview
 
@@ -251,9 +251,28 @@ discover front/back camera variants through `AVCaptureDevice` discovery, and
 remove the old video input before validating and attaching the replacement
 input so the old input does not make `canAddInput` fail.
 
+### Application process root
+
+`TronMobileApp` is only the process entry point. It resolves `AppRuntimeMode`
+before constructing the application graph and stores that graph through
+`AppBootstrap`. Presence of an Apple hosted-XCTest marker
+(`XCTestConfigurationFilePath`, `XCTestBundlePath`, or `XCInjectBundleInto`) is
+the sole authority for the inert hosted-unit-test root. The
+`TRON_APP_RUNTIME_MODE` TestAction value is audit evidence only: it cannot turn
+a normal app, preview, or separate UI-test process into a hosted process. In
+application mode the production-root factory is evaluated exactly once; in
+hosted mode it is never evaluated. `AppLifecycleEffects.live` is likewise
+construction-inert, and every notification-center, MetricKit, logger, or
+application-singleton lookup remains behind the application-mode callback
+guard.
+
 The shell mounts `ContentView` even before onboarding is complete.
-`TronMobileApp` owns one onboarding presenter for first-run setup, Engine → Servers
-pairing, and pairing URLs. `OnboardingSheetPresentation` starts that flow on a
+`ProductionAppRoot` owns one onboarding presenter for first-run setup, Engine → Servers
+pairing, and pairing URLs. It also applies the explicit soft scroll-edge style
+once at the application root for all descendant native SwiftUI scroll surfaces;
+the two app-owned `WKWebView` wrappers mirror that policy on every edge of their
+independent UIKit scroll views. System-owned controller hierarchies remain
+untouched. `OnboardingSheetPresentation` starts that flow on a
 medium detent, allows expansion to large when content needs more room, and uses
 compact iPad sizing so the connect form, QR-first pairing card, and setup pages
 share one geometry. On iPhone, onboarding pages do not scroll at the medium
@@ -407,6 +426,17 @@ miscellaneous facade. They must not encode product policy. Any fixed
 workflow-specific client removed in PET-8 must stay removed unless a later
 scorecard row proves it is boot infrastructure.
 
+Every WebSocket connect or manual-retry attempt builds the completed upgrade
+request and consults its injected `EngineSessionAttemptDirective` before
+constructing `URLSessionConfiguration`, a delegate, a `URLSession`, or a task.
+Production defaults to the unchanged live-session path. Tests that exercise
+connection state inject a deterministic handled outcome, making the request
+observable without opening a network session. The source guard evaluates
+constructor provenance independently inside each test-function or initializer
+scope, including aliases, so repeated local names cannot make unrelated tests
+safe or unsafe; no filename, suite, test, path, or binding-name exception can
+bypass that analysis.
+
 Engine child errors are normalized at the transport boundary. Canonical
 `details.failure` payloads stay authoritative; older or setup-time child errors
 that only carry `kind`, `message`, and `details` are preserved as
@@ -426,8 +456,39 @@ capability-binding cockpit overview, and worker lifecycle calls.
 `AgentCockpitProjection` remains a pure mapper from server-owned facts to UI
 rows; it does not own worker truth, module-activity truth, capability binding
 truth, or redaction policy.
+Its focused regression suites mirror the production seams:
+`WorkerLifecycleDTOTests` proves malformed catalog entries are retained as
+decode issues; core projection, module-activity mapping, general degradation,
+and lifecycle actions live in `AgentCockpitStateTests`; capability grouping,
+schema evidence, and malformed-catalog projection through the exact degraded
+Dashboard summary titled `Operations Need Review` live in
+`AgentCockpitDiscoveryStateTests`; generic Dashboard summary, count
+qualification, activity grouping, and user-facing copy live in
+`AgentCockpitPresentationTests`. One
+`AgentCockpitStateTestFixtures` namespace owns the shared synthetic catalog,
+resource, module-activity, and package builders used by those suites.
 `Support/Composition` is the production composition root allowed to wire those
-protocols to engine-owned clients.
+protocols to engine-owned clients. `DependencyContainerStorage` owns typed
+production/test resolution of defaults, Documents, and the event database;
+`DependencyContainer+RuntimeServices` owns the consumer-facing chat repository
+bundle and connection-lifecycle forwarding, while `DependencyContainer` keeps
+application assembly and active-server selection.
+
+`DependencyContainerRuntimeIO` is the single immutable runtime-I/O seam. Its
+production value preserves live URL-session attempts, the production
+`PairedServerTokenStore` Keychain backend, and `URLSessionPairingProbe`.
+Hosted tests inject a handled-attempt recorder, a task-owned in-memory token
+backend, and `StubPairingProbe`; that directive is forwarded into the initial
+`EngineClient` and every active-server rebuild. No process-mode boolean or
+environment lookup inside transport, pairing, or token storage may bypass the
+composition boundary.
+
+`PairedServerTokenStore.Backend` is an immutable, checked `Sendable` strategy;
+each of its three stored operations is `@Sendable`. Production operations
+capture no Keychain object and construct a fresh local `KeychainItem` for each
+call. Hosted operations capture only the existing lock-backed
+`HostedTestPairedServerTokenBackend`, so this concurrency contract does not
+change production Keychain behavior or the hosted in-memory token lifecycle.
 
 Transport tests mirror the production owners: retry policy tests live under
 `Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under
@@ -498,6 +559,14 @@ session sync clears and refetches event rows, and fork ancestor rows remain sour
 rather than copied client truth. Engine stream cursors are stored per server
 origin/topic/filter for ACK coalescing and diagnostics only; session history is
 reconstructed through server APIs, not replayed from cursor storage.
+The manager owns one weak-idle global subscription lane plus predecessor-chained
+replacement and load lanes. Once a stream event is accepted, its database and
+completion effects are awaited inline; shutdown is idempotent and terminal,
+cancels and joins the global lane, drains `SessionRefreshService`, then cancels
+and joins the load chain before an outer fixture closes `EventDatabase`.
+Replacement A→B→C therefore cannot allow an earlier client to overtake the
+latest lane, and shutdown never finishes the shared event bus or invents an app
+process-termination callback.
 Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
 prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
@@ -542,6 +611,33 @@ idle/editable, rendered as compact one-line previews with an ellipsis when
 later prompt lines are omitted, and clearable from the Recent Inputs sheet with an icon-only
 destructive toolbar action followed by explicit confirmation. It is not a server prompt-library
 resource, snippet catalog, routing plane, or generated management surface.
+
+Hosted test storage and I/O have explicit ownership rather than a claim of zero
+activity. `AppRuntimeStorage` gives the injected host a collision-proof named
+defaults suite with observable identity and idempotent process cleanup.
+`IsolatedTestState` is the only general test factory for named defaults,
+temporary roots, Documents directories, SQLite databases, visual artifacts,
+handled transport attempts, stub pairing probes, and injected token backends.
+Scopes emit a locked, parseable `TRON_TEST_SUITE_LIFECYCLE_V1` registration
+record before exposure. Cleanup cancels fixture work, awaits database close,
+removes the database/WAL/SHM and root, removes the named defaults persistent
+domain, proves that domain has no keys, and then emits exactly one matching
+cleanup record. Process fallback uses the same idempotent lifecycle owner.
+Each touched hosted token identity separately emits balanced, secret-free
+`TRON_TEST_KEYCHAIN_LIFECYCLE_V1` registration/cleanup records. Cleanup first
+drains every retained `EventStoreManager`, then terminally clears and proves
+all token backends empty, closes databases, removes files/defaults, and finally
+deregisters process fallback; hosted code never constructs the production
+Keychain item or a live pairing/session owner.
+CoreSimulator may retain a regular empty plist as the canonical backing
+envelope for a semantically removed domain; isolation evidence accepts it only
+when its exact suite identity was registered and cleaned in that invocation,
+matches one of the two owned suite grammars, parses as an empty dictionary, and
+lives directly under the current app container's Preferences directory.
+Task-owned DerivedData, result bundles, and
+declared fixture artifacts remain allowed ephemeral outputs. The supported
+claim is narrower: hosted unit tests do not read or write pre-existing user
+durable state and do not initiate a real network attempt.
 
 ## Event Handling
 
@@ -744,12 +840,18 @@ For shell-affecting changes:
 - Regenerate the project with `xcodegen generate` when files are added,
   deleted, or renamed.
 - Run `SourceGuardTests`, which compiles the full app/test target and enforces
-  deleted product roots.
+  deleted product roots, hosted-test storage ownership, and the explicit
+  no-network session-attempt seam.
+- For hosted isolation evidence, use a newly created exact-UDID simulator and
+  compare notification settings and scoped TCC rows as separate semantic
+  records. Do not infer notification authorization from TCC or compare the
+  whole simulator permission database.
 - For cockpit capability visibility changes, run the focused
   `WorkerLifecycleDTOTests`, `WorkerLifecycleClientTests`,
-  `AgentCockpitStateTests`, and `AgentCockpitViewModelTests` on the iPhone
-  simulator so server-owned DTO decoding, transport context, display shaping,
-  and degraded states stay covered.
+  `AgentCockpitStateTests`, `AgentCockpitDiscoveryStateTests`,
+  `AgentCockpitPresentationTests`, and `AgentCockpitViewModelTests` on the
+  iPhone simulator so server-owned DTO decoding, transport context, state,
+  discovery, display shaping, and degraded states stay covered.
 - Keep chat tests under the same owner names as production chat code:
   `Coordinators`, `Messaging`, `Navigation`, `State`, and `ViewModel`.
 - Capture iPhone and iPad simulator screenshots when UI behavior changes.

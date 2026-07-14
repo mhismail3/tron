@@ -28,7 +28,7 @@ autonomous self-update across every operation or live module-code execution.
 | Grant authorization | `packages/agent/src/engine/authority/grants/authorization.rs` |
 | iOS cockpit DTOs | `packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+CapabilityCockpit.swift` |
 | iOS cockpit state | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift` |
-| iOS cockpit UI | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
+| iOS cockpit UI | `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift` |
 | Modularity inventory | `packages/agent/docs/capability-modularity-inventory.tsv` |
 | Canonical README | `README.md` |
 

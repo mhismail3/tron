@@ -2,6 +2,13 @@ import Foundation
 
 // MARK: - WebSocket Service
 
+/// Pre-session directive consulted after the upgrade request is complete but
+/// before any URLSession object or task exists.
+enum EngineSessionAttemptDirective: Equatable, Sendable {
+    case openLiveSession
+    case handledFailure
+}
+
 @Observable
 @MainActor
 final class EngineConnection {
@@ -57,12 +64,23 @@ final class EngineConnection {
     /// Resolver invoked on every WS upgrade. `nil` sends no Authorization header.
     let bearerTokenProvider: BearerTokenProvider?
 
+    /// Production opens the live session. Tests that exercise connect/retry
+    /// state must inject a deterministic handled result.
+    let sessionAttemptDirective: (URLRequest) -> EngineSessionAttemptDirective
+
     /// Held strongly so delegate lifetime tracks the session.
     var sessionDelegate: EngineConnectionSessionDelegate?
 
-    init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
+    init(
+        serverURL: URL,
+        bearerTokenProvider: BearerTokenProvider? = nil,
+        sessionAttemptDirective: @escaping (URLRequest) -> EngineSessionAttemptDirective = { _ in
+            .openLiveSession
+        }
+    ) {
         self.serverURL = serverURL
         self.bearerTokenProvider = bearerTokenProvider
+        self.sessionAttemptDirective = sessionAttemptDirective
     }
 
     /// Build the URLRequest used for the WS upgrade.
@@ -138,6 +156,13 @@ final class EngineConnection {
         logger.logWebSocketState("Connecting", details: serverURL.absoluteString)
         logger.info("Connecting to \(self.serverURL.absoluteString)", category: .websocket)
 
+        let request = makeUpgradeRequest()
+        logger.info("WebSocket upgrade request: \(NetworkDiagnosticsFormatter.requestSummary(request))", category: .websocket)
+        guard sessionAttemptDirective(request) == .openLiveSession else {
+            connectionState = stateOnFailure
+            return
+        }
+
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 300
@@ -152,9 +177,6 @@ final class EngineConnection {
             delegateQueue: nil
         )
         urlSession = session
-
-        let request = makeUpgradeRequest()
-        logger.info("WebSocket upgrade request: \(NetworkDiagnosticsFormatter.requestSummary(request))", category: .websocket)
 
         logger.verbose("Creating WebSocket task...", category: .websocket)
         let task = session.webSocketTask(with: request)

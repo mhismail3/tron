@@ -23,6 +23,8 @@ const ROUTE_PATH: &str = "packages/agent/src/domains/capability_binding/route.rs
 const VALIDATION_PATH: &str = "packages/agent/src/domains/capability_binding/validation.rs";
 const COCKPIT_VISIBILITY_PATH: &str =
     "packages/agent/src/domains/capability_binding/cockpit_visibility.rs";
+const IOS_COCKPIT_TAB_VIEWS_PATH: &str =
+    "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift";
 const CAPABILITY_BINDING_TESTS_PATH: &str =
     "packages/agent/src/domains/capability_binding/tests.rs";
 const RESOURCE_DEFINITIONS_PATH: &str =
@@ -79,6 +81,17 @@ fn read_repo_file(path: &str) -> String {
     let full_path = repo_path(path);
     std::fs::read_to_string(&full_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
+}
+
+fn renders_route_story_section(source: &str) -> bool {
+    [
+        "if !viewModel.overview.routeStories.isEmpty",
+        "Text(\"What Changed\")",
+        "ForEach(viewModel.overview.routeStories)",
+        "RouteStoryCard(story: story)",
+    ]
+    .iter()
+    .all(|required| source.contains(required))
 }
 
 fn registry_operations() -> BTreeSet<String> {
@@ -189,11 +202,11 @@ fn dynamic_replacement_cockpit_projects_route_state() {
     );
     let ios_state =
         read_repo_file("packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift");
-    let ios_views =
-        read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift");
+    let ios_tab_views = read_repo_file(IOS_COCKPIT_TAB_VIEWS_PATH);
     let ios_detail = read_repo_file(
         "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift",
     );
+    let evidence = read_repo_file(EVIDENCE_PATH);
 
     for required in [
         "CAPABILITY_ROUTE_ACTIVATION_KIND",
@@ -201,7 +214,6 @@ fn dynamic_replacement_cockpit_projects_route_state() {
         "CAPABILITY_ROUTE_ROLLBACK_KIND",
         "activeRoutes",
         "routeStories",
-        "What Changed",
         "routedInvocations",
         "failedClosed",
         "rolledBack",
@@ -213,11 +225,28 @@ fn dynamic_replacement_cockpit_projects_route_state() {
             cockpit.contains(required)
                 || ios_dto.contains(required)
                 || ios_state.contains(required)
-                || ios_views.contains(required)
                 || ios_detail.contains(required),
             "dynamic replacement cockpit projection missing route marker {required}"
         );
     }
+
+    let stale_heading_only = r#"
+        VStack {
+            Text("What Changed")
+        }
+    "#;
+    assert!(
+        !renders_route_story_section(stale_heading_only),
+        "a stale route-story heading without the server-owned collection must not satisfy the rendering contract"
+    );
+    assert!(
+        renders_route_story_section(&ios_tab_views),
+        "the exact cockpit tab owner must conditionally render every server-owned route story"
+    );
+    assert!(
+        evidence.contains(IOS_COCKPIT_TAB_VIEWS_PATH),
+        "dynamic replacement evidence must name the exact route-story UI owner"
+    );
 }
 
 #[test]

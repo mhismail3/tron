@@ -177,7 +177,7 @@ extension SourceGuardTests {
             "actions.onHistoryNavigate?(selected)",
             "onPromptSent?(text)",
             "inputHistory.addToHistory(sentText)",
-            "UserDefaults.standard.removeObject(forKey: storageKey)",
+            "defaults.removeObject(forKey: storageKey)",
         ]
         let forbiddenFragments = [
             "Prompt" + "Library",

@@ -644,6 +644,8 @@ packages/ios-app/ShareExtension/ShareExtension.entitlements	retain	ios app	PCC-1
 packages/ios-app/ShareExtension/ShareExtensionProd.entitlements	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/ShareExtension/ShareViewController.swift	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/App/Lifecycle/AppRuntimeMode.swift	retain	ios support	PCC-10	Hosted unit-test runtime authority and isolated defaults ownership.
+packages/ios-app/Sources/App/Lifecycle/ProductionAppRoot.swift	retain	ios support	PCC-10	Production-only application composition root.
 packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Assets.xcassets/AccentColor.colorset/Contents.json	asset	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Assets.xcassets/AppIcon.appiconset/Contents.json	asset	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -895,7 +897,9 @@ packages/ios-app/Sources/Session/Timeline/Reconstruction/UnifiedEventTransformer
 packages/ios-app/Sources/Session/Timeline/Tokens/TokenRecord.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Session/Timeline/Tokens/TokenStateManager.swift	retain	ios session	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Composition/AppInitializer.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/Support/Composition/DependencyContainer+RuntimeServices.swift	retain	ios support	PCC-10	Consumer-facing chat repository assembly and connection lifecycle forwarding have a focused composition owner.
 packages/ios-app/Sources/Support/Composition/DependencyContainer.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift	retain	ios support	PCC-10	Typed production and test storage resolution has a focused composition owner.
 packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Composition/DependencyProviding.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift	retain	ios support	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1121,15 +1125,20 @@ packages/ios-app/Tests/Engine/Transport/Clients/SystemClientTests.swift	retain	i
 packages/ios-app/Tests/Engine/Transport/WebSocket/WebSocketAuthTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Engine/Transport/DeepLinks/DeepLinkRouterTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Infrastructure/AppLifecycle/AppDelegateTests.swift	retain	ios test	PCC-10	Hosted lifecycle isolation and notification-settings verification.
+packages/ios-app/Tests/Infrastructure/AppLifecycle/AppRuntimeModeTests.swift	retain	ios test	PCC-10	Hosted runtime authority and cleanup verification.
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClock.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClockTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Fakes/MockEngineTransport.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Fixtures/CapabilityTestFixtures.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Infrastructure/Fixtures/IsolatedTestState.swift	retain	ios test	PCC-10	Registered defaults, filesystem, database, and artifact test fixture owner.
 packages/ios-app/Tests/Infrastructure/Fixtures/ServerSettingsFixture.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/CleanupGuardTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/InfoPlistPrivacyTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+Budgets.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+BuildAndProject.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+RuntimeIsolation.swift	retain	ios test	PCC-10	Hosted runtime and durable test-state isolation static guard owner.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+RuntimeIsolationNetwork.swift	retain	ios test	PCC-10	Per-function network-attempt constructor provenance and egress static guard owner.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+CapabilityAbsence.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+Hierarchy.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+PrimitiveShellAbsence.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1571,16 +1580,11 @@ packages/agent/tests/concurrency_scheduling_discipline/scorecard_inventory.rs	re
 packages/agent/tests/concurrency_scheduling_discipline/static_guards.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline static guard module retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline/support.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant test support retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline_invariants.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant target retained after final closeout.
-packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries evidence manifest retained for the current campaign.
-packages/agent/docs/security-authority-capability-boundaries-inventory.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries inventory retained for the current campaign.
-packages/agent/docs/security-authority-capability-boundaries-inventory.tsv	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries machine-readable inventory retained for the current campaign.
-packages/agent/docs/security-authority-capability-boundaries-scorecard.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries scorecard retained for the current campaign.
-packages/agent/tests/security_authority_capability_boundaries/mod.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant module registry retained for the current campaign.
-packages/agent/tests/security_authority_capability_boundaries/platform_guards.rs	retain	sacb rust test	SACB-4	Active Security Authority Capability Boundaries platform guard module retained for the current campaign.
-packages/agent/tests/security_authority_capability_boundaries/scorecard_inventory.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries scorecard/inventory invariant module retained for the current campaign.
-packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries static guard module retained for the current campaign.
-packages/agent/tests/security_authority_capability_boundaries/support.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant test support retained for the current campaign.
-packages/agent/tests/security_authority_capability_boundaries_invariants.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant target retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries/mod.rs	retain	sacb rust test	SACB-0	Living Security Authority Capability Boundaries gate module registry retained for cross-cutting security verification.
+packages/agent/tests/security_authority_capability_boundaries/platform_guards.rs	retain	sacb rust test	SACB-4	Living Security Authority Capability Boundaries platform guards retained for secret custody, redaction, and pairing verification.
+packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	retain	sacb rust test	SACB-0	Living Security Authority Capability Boundaries static guards retained for transport, authority, execution, and worker isolation verification.
+packages/agent/tests/security_authority_capability_boundaries/support.rs	retain	sacb rust test	SACB-0	Minimal repository source-reader support retained for the living Security Authority Capability Boundaries guards.
+packages/agent/tests/security_authority_capability_boundaries_invariants.rs	retain	sacb rust test	SACB-0	Living Security Authority Capability Boundaries invariant target retained in CI with nine semantic guards.
 packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability evidence manifest retained after closeout.
 packages/agent/docs/observability-diagnostics-auditability-inventory.md	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability inventory retained after closeout.
 packages/agent/docs/observability-diagnostics-auditability-inventory.tsv	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability machine-readable inventory retained after closeout.
@@ -1698,7 +1702,10 @@ packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	retain
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitOperationDetailViews.swift	retain	ios cockpit UI owner	TPC-hardening	Capability operation detail views retained as the drill-down owner split from the cockpit discovery summary surface.
 packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift	retain	ios test	IOSAC-7	Worker lifecycle DTO tests retained for catalog/resource decoding coverage.
 packages/ios-app/Tests/Engine/Transport/Clients/WorkerLifecycleClientTests.swift	retain	ios test	IOSAC-7	Worker lifecycle client tests retained for existing function id and resource primitive coverage.
-packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	retain	ios test	IOSAC-7	Agent cockpit state tests retained for projection, action, and confirmation coverage.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitDiscoveryStateTests.swift	retain	ios test	IOSAC-7	Agent cockpit discovery tests retained for operation ownership and routes, authoritative empty projection, schema evidence, and malformed catalog degradation.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitPresentationTests.swift	retain	ios test	IOSAC-7	Agent cockpit presentation tests retained for Dashboard summaries, bounded counts, activity grouping, and user-facing labels.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTestFixtures.swift	retain	ios test	IOSAC-7	One shared fixture namespace retains synthetic catalog, resource, module-activity, and package builders for the focused cockpit suites.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	retain	ios test	IOSAC-7	Agent cockpit state tests retained for core projection, module activity, degradation, lifecycle actions, and confirmation coverage.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift	retain	ios test	IOSAC-7	Agent cockpit view model tests retained for refresh, proposal install, disabled actions, and ui_surface decoding.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTestFixtures.swift	retain	ios cockpit test owner	TPC-hardening	Cockpit view-model fixtures retained as the repository double and DTO-builder owner split from the spec file.
 packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	retain	ios engine protocol	Phase1-closeout	Transcription DTOs retained for approved local composer dictation readiness and result decoding.
@@ -2187,7 +2194,16 @@ packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationBriefPresen
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityInvocationGroupingTests.swift	retain	ios capability presentation test owner	PCC-10/capability-ui	Invocation grouping regressions retained for streaming and persisted transcript parity.
 packages/ios-app/Tests/UI/Chat/SessionListExpansionAccessibilityTests.swift	retain	ios dashboard test owner	PCC-10/dashboard-pagination	Project session expansion accessibility regressions retained for view-more and view-less behavior.
 packages/agent/docs/project-reference.md	retain	agent docs	PCC-10	Detailed cross-cutting reference moved behind the concise root README.
-packages/agent/src/domains/capability/operations/operation_contract/presentation.rs	retain	capability execute contract owner	PCC-10/capability-contract	User-facing operation metadata remains owner-private beside the canonical operation contract.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/capability_binding.rs	retain	capability execute presentation owner	PCC-10/capability-contract	Capability-binding presentation literals remain private behind the canonical presentation facade.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/direct.rs	retain	capability execute presentation owner	PCC-10/capability-contract	Direct-operation presentation literals remain private behind the canonical presentation facade.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/governance.rs	retain	capability execute presentation owner	PCC-10/capability-contract	Governance-operation presentation literals remain private behind the canonical presentation facade.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/mod.rs	retain	capability execute presentation facade owner	PCC-10/capability-contract	The exhaustive facade preserves one crate-visible presentation API and unknown-operation behavior.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/records.rs	retain	capability execute presentation owner	PCC-10/capability-contract	Record-plane presentation literals remain private behind the canonical presentation facade.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/mod.rs	retain	capability execute presentation test owner	PCC-10/capability-contract	Presentation oracle behavior, family parity, style, and unknown-operation regressions remain focused here.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_capability_binding.rs	retain	capability execute presentation test owner	PCC-10/capability-contract	Frozen capability-binding presentation rows retain independent provider-visible byte coverage.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_direct.rs	retain	capability execute presentation test owner	PCC-10/capability-contract	Frozen direct-operation presentation rows retain independent provider-visible byte coverage.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_governance.rs	retain	capability execute presentation test owner	PCC-10/capability-contract	Frozen governance-operation presentation rows retain independent provider-visible byte coverage.
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_records.rs	retain	capability execute presentation test owner	PCC-10/capability-contract	Frozen record-plane presentation rows retain independent provider-visible byte coverage.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitIssueState.swift	retain	ios Dashboard state owner	PCC-10/cockpit-ui	Dashboard issue aggregation remains presentation-only state over server-owned facts.
 packages/ios-app/Tests/Engine/Events/Plugins/AgentResponseCompletePluginTests.swift	retain	ios event test owner	PCC-10/chat-presentation	Final-response projection regressions remain covered by focused plugin tests.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitIssueStateTests.swift	retain	ios Dashboard test owner	PCC-10/cockpit-ui	Dashboard issue aggregation regressions remain covered by focused state tests.

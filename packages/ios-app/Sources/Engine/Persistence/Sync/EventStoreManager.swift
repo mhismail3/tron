@@ -26,6 +26,7 @@ final class EventStoreManager {
 
     let eventDB: EventDatabase
     private(set) var engineClient: EngineClient
+    let defaults: UserDefaults
     weak var draftStore: DraftStore?
 
     // MARK: - Observable State
@@ -88,17 +89,42 @@ final class EventStoreManager {
     /// Task for global event handling
     @ObservationIgnored
     private var globalEventTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var shutdownTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var isTerminal = false
+
+    private let globalEventStream: @MainActor (EngineClient) -> AsyncStream<ParsedEventV2>
+    private let acceptedEventHook: @MainActor (ParsedEventV2) async -> Void
 
     // MARK: - Initialization
 
-    init(eventDB: EventDatabase, engineClient: EngineClient) {
+    init(
+        eventDB: EventDatabase,
+        engineClient: EngineClient,
+        defaults: UserDefaults = .standard,
+        globalEventStream: @escaping @MainActor (EngineClient) -> AsyncStream<ParsedEventV2> = { $0.events },
+        acceptedEventHook: @escaping @MainActor (ParsedEventV2) async -> Void = { _ in }
+    ) {
         self.eventDB = eventDB
         self.engineClient = engineClient
+        self.defaults = defaults
+        self.globalEventStream = globalEventStream
+        self.acceptedEventHook = acceptedEventHook
         setupGlobalEventHandlers()
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            globalEventTask?.cancel()
+            loadSessionsTask?.cancel()
+            shutdownTask?.cancel()
+        }
     }
 
     /// Update the engine client (e.g., when server settings change)
     func updateEngineClient(_ client: EngineClient) {
+        guard !isTerminal else { return }
         engineClient = client
         sessionSynchronizer.updateEngineClient(client)
         setupGlobalEventHandlers()
@@ -108,264 +134,18 @@ final class EventStoreManager {
     /// Set up handlers for global events (events from all sessions)
     /// These events update session list state for ALL sessions, not just the active one.
     private func setupGlobalEventHandlers() {
-        // Cancel existing task to prevent duplicates when engine client is updated
-        globalEventTask?.cancel()
-
-        // Subscribe to async event stream for global events
-        // We don't filter by session ID here - we want events from ALL sessions
-        globalEventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in engineClient.events {
-                guard !Task.isCancelled else { break }
-                self.handleGlobalEventV2(event)
-            }
-        }
-    }
-
-    /// Handle global events for session list updates (plugin-based)
-    private func handleGlobalEventV2(_ event: ParsedEventV2) {
-        switch event.eventType {
-        case SessionProcessingChangedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? SessionProcessingChangedPlugin.Result {
-                guard sessions.contains(where: { $0.id == sessionId }) else { break }
-                setSessionProcessing(sessionId, isProcessing: result.isProcessing)
-                if result.isProcessing {
-                    sessionActivityStreamManager.handleEvent(.turnStart, sessionId: sessionId)
-                } else {
-                    sessionActivityStreamManager.handleEvent(.complete, sessionId: sessionId)
-                    Task { await self.finalizeSessionCompletion(sessionId: sessionId) }
-                }
-            }
-
-        case TurnStartPlugin.eventType:
-            if let sessionId = event.sessionId {
-                sessionActivityStreamManager.handleEvent(.turnStart, sessionId: sessionId)
-            }
-
-        case CompletePlugin.eventType:
-            if let sessionId = event.sessionId {
-                logger.info("Global: Session \(sessionId) completed processing", category: .session)
-                setSessionProcessing(sessionId, isProcessing: false)
-                sessionActivityStreamManager.handleEvent(.complete, sessionId: sessionId)
-                Task { await self.finalizeSessionCompletion(sessionId: sessionId) }
-            }
-
-        case ErrorPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? ErrorPlugin.Result {
-                logger.info("Global: Session \(sessionId) error: \(result.message)", category: .session)
-                setSessionProcessing(sessionId, isProcessing: false)
-                sessionActivityStreamManager.handleEvent(.error(message: result.message), sessionId: sessionId)
-                updateSessionActivitySummary(
-                    sessionId: sessionId,
-                    lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
-                )
-            }
-
-        // MARK: - Session Activity Events (routed via SessionActivityEvent)
-
-        case TextDeltaPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? TextDeltaPlugin.Result {
-                sessionActivityStreamManager.handleEvent(.textDelta(delta: result.delta), sessionId: sessionId)
-            }
-
-        case ThinkingDeltaPlugin.eventType:
-            if let sessionId = event.sessionId {
-                sessionActivityStreamManager.handleEvent(.thinkingDelta, sessionId: sessionId)
-            }
-
-        case CapabilityInvocationStartedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? CapabilityInvocationStartedPlugin.Result {
-                sessionActivityStreamManager.handleEvent(
-                    .capabilityInvocationStarted(identity: result.identity, invocationId: result.invocationId, arguments: result.arguments),
-                    sessionId: sessionId)
-            }
-
-        case CapabilityInvocationCompletedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? CapabilityInvocationCompletedPlugin.Result {
-                sessionActivityStreamManager.handleEvent(
-                    .capabilityInvocationCompleted(identity: result.identity, invocationId: result.invocationId, success: result.success, durationMs: result.duration),
-                    sessionId: sessionId)
-            }
-
-        case TurnFailedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? TurnFailedPlugin.Result {
-                sessionActivityStreamManager.handleEvent(.turnFailed(error: result.error), sessionId: sessionId)
-            }
-
-        // MARK: - Session Lifecycle Events
-
-        case SessionUpdatedPlugin.eventType:
-            if let result = event.getResult() as? SessionUpdatedPlugin.Result {
-                handleSessionUpdated(result)
-            }
-
-        case SessionCreatedPlugin.eventType:
-            if let result = event.getResult() as? SessionCreatedPlugin.Result {
-                handleSessionCreated(result)
-            }
-
-        case SessionArchivedPlugin.eventType:
-            if let result = event.getResult() as? SessionArchivedPlugin.Result {
-                handleSessionArchived(result)
-            }
-
-        case SessionUnarchivedPlugin.eventType:
-            if let result = event.getResult() as? SessionUnarchivedPlugin.Result {
-                handleSessionUnarchived(result)
-            }
-
-        case SessionDeletedPlugin.eventType:
-            if let result = event.getResult() as? SessionDeletedPlugin.Result {
-                handleSessionDeleted(result)
-            }
-
-        default:
-            break
-        }
-    }
-
-    /// Handle session.updated: update existing session metadata in the session list
-    private func handleSessionUpdated(_ result: SessionUpdatedPlugin.Result) {
-        let sessionId = result.sessionId
-        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else {
-            // Session not in our list — might be a new session on another device.
-            // Trigger a full list refresh to pick it up.
-            logger.info("Global: session.updated for unknown session \(sessionId), refreshing list", category: .session)
-            requestSessionRefresh(reason: .unknownSession)
-            return
-        }
-
-        logger.info("Global: session.updated for \(sessionId)", category: .session)
-        updateSession(at: index) { session in
-            if let title = result.title { session.title = title }
-            if let model = result.model { session.latestModel = model }
-            if let count = result.eventCount { session.eventCount = count }
-            if let count = result.turnCount { session.turnCount = count }
-            if let count = result.messageCount { session.messageCount = count }
-            if let tokens = result.inputTokens { session.inputTokens = tokens }
-            if let tokens = result.outputTokens { session.outputTokens = tokens }
-            if let tokens = result.lastTurnInputTokens { session.lastTurnInputTokens = tokens }
-            if let tokens = result.cacheReadTokens { session.cacheReadTokens = tokens }
-            if let tokens = result.cacheCreationTokens { session.cacheCreationTokens = tokens }
-            if let c = result.cost { session.cost = c }
-            if let activity = result.lastActivity { session.lastActivityAt = activity }
-            if let prompt = result.lastUserPrompt { session.lastUserPrompt = prompt }
-            if let response = result.lastAssistantResponse {
-                session.lastAssistantResponse = response
-            }
-            if let serverLines = result.activityLines {
-                session.lastActivityLines = serverLines.map { $0.toActivityLine() }
-            }
-        }
-
-        // Also persist to local DB so the data survives app restarts
-        if let session = sessions.first(where: { $0.id == sessionId }) {
-            Task {
-                do {
-                    try await self.eventDB.sessions.insert(session)
-                } catch {
-                    logger.error("Failed to persist session update for \(sessionId): \(error)", category: .database)
-                }
-            }
-        }
-    }
-
-    /// Handle session.created: add new session to session list
-    private func handleSessionCreated(_ result: SessionCreatedPlugin.Result) {
-        let sessionId = result.sessionId
-
-        // Don't add if already in list (e.g., we created it locally)
-        guard !sessions.contains(where: { $0.id == sessionId }) else { return }
-
-        logger.info("Global: session.created for \(sessionId) from another device", category: .session)
-
-        var newSession = CachedSession(
-            id: sessionId,
-            workspaceId: result.workingDirectory ?? "",
-            rootEventId: nil,
-            headEventId: nil,
-            title: result.title,
-            latestModel: result.model ?? "unknown",
-            workingDirectory: result.workingDirectory ?? "",
-            createdAt: result.lastActivity,
-            lastActivityAt: result.lastActivity,
-            archivedAt: nil,
-            eventCount: 0,
-            turnCount: 0,
-            messageCount: result.messageCount,
-            inputTokens: result.inputTokens,
-            outputTokens: result.outputTokens,
-            lastTurnInputTokens: result.lastTurnInputTokens,
-            cacheReadTokens: result.cacheReadTokens,
-            cacheCreationTokens: result.cacheCreationTokens,
-            cost: result.cost,
-            isFork: result.parentSessionId != nil,
-            serverOrigin: engineClient.serverOrigin
-        )
-        newSession.source = result.source
-        newSession.profile = result.profile
-
-        // Prepend new session (most recent first)
-        sessions.insert(newSession, at: 0)
-
-        // Persist to local DB
-        Task {
-            do {
-                try await self.eventDB.sessions.insert(newSession)
-            } catch {
-                logger.error("Failed to persist new session \(sessionId): \(error)", category: .database)
-            }
-        }
-    }
-
-    /// Handle session.archived: remove session from session list
-    private func handleSessionArchived(_ result: SessionArchivedPlugin.Result) {
-        let sessionId = result.sessionId
-        logger.info("Global: session.archived for \(sessionId)", category: .session)
-
-        // Remove from in-memory list and clear stream buffer
-        sessions.removeAll { $0.id == sessionId }
-        sessionActivityStreamManager.clearBuffer(for: sessionId)
-
-        // Remove from local DB
-        Task {
-            do {
-                try await self.eventDB.events.deleteBySession(sessionId)
-                try await self.eventDB.sessions.delete(sessionId)
-            } catch {
-                logger.error("Failed to clean up archived session \(sessionId) from DB: \(error)", category: .database)
-            }
-        }
-    }
-
-    /// Handle session.unarchived: re-fetch session from server and add to list
-    private func handleSessionUnarchived(_ result: SessionUnarchivedPlugin.Result) {
-        let sessionId = result.sessionId
-        logger.info("Global: session.unarchived for \(sessionId)", category: .session)
-
-        // Refresh from server to get the restored session.
-        requestSessionRefresh(reason: .serverHint)
-    }
-
-    /// Handle session.deleted: remove session from session list and local DB
-    private func handleSessionDeleted(_ result: SessionDeletedPlugin.Result) {
-        let sessionId = result.sessionId
-        logger.info("Global: session.deleted for \(sessionId)", category: .session)
-
-        sessions.removeAll { $0.id == sessionId }
-        sessionActivityStreamManager.clearBuffer(for: sessionId)
-        Task {
-            do {
-                try await self.eventDB.events.deleteBySession(sessionId)
-                try await self.eventDB.sessions.delete(sessionId)
-            } catch {
-                logger.error("Failed to clean up deleted session \(sessionId) from DB: \(error)", category: .database)
+        guard !isTerminal else { return }
+        let predecessor = globalEventTask
+        predecessor?.cancel()
+        let stream = globalEventStream(engineClient)
+        globalEventTask = Task { @MainActor [weak self] in
+            await predecessor?.value
+            guard !Task.isCancelled else { return }
+            for await event in stream {
+                guard let self else { return }
+                await self.acceptedEventHook(event)
+                await self.handleGlobalEventV2(event)
+                if Task.isCancelled { break }
             }
         }
     }
@@ -414,9 +194,9 @@ final class EventStoreManager {
 
     // MARK: - Session List (from EventDatabase)
 
-    /// Debounce task for loadSessions — coalesces rapid calls
+    /// Latest predecessor chain for immediate and debounced database loads.
     @ObservationIgnored
-    private var loadSessionsDebounceTask: Task<Void, Never>?
+    private var loadSessionsTask: Task<Void, Never>?
     /// Whether this is the first loadSessions call (skip debounce for initialize)
     @ObservationIgnored
     private var hasLoadedSessionsOnce = false
@@ -425,18 +205,46 @@ final class EventStoreManager {
     /// Debounced: rapid calls within 100ms are coalesced into a single execution.
     /// First call (during initialize) executes immediately.
     func loadSessions() {
-        if !hasLoadedSessionsOnce {
-            hasLoadedSessionsOnce = true
-            Task { await _loadSessionsImmediate() }
+        guard !isTerminal else { return }
+        let shouldDebounce = hasLoadedSessionsOnce
+        hasLoadedSessionsOnce = true
+        let predecessor = loadSessionsTask
+        predecessor?.cancel()
+        loadSessionsTask = Task { @MainActor [weak self] in
+            await predecessor?.value
+            if shouldDebounce {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+            }
+            guard let self, !self.isTerminal else { return }
+            await self._loadSessionsImmediate()
+        }
+    }
+
+    /// Idempotent terminal drain. The outer owner closes the database only
+    /// after this method has joined every accepted event, refresh, and load.
+    func shutdown() async {
+        if let shutdownTask {
+            await shutdownTask.value
             return
         }
 
-        loadSessionsDebounceTask?.cancel()
-        loadSessionsDebounceTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-            await self?._loadSessionsImmediate()
+        isTerminal = true
+        let globalTask = globalEventTask
+        let refreshCoordinator = refreshService
+        let loadTask = loadSessionsTask
+        let activityManager = sessionActivityStreamManager
+        globalTask?.cancel()
+
+        let drain = Task { @MainActor in
+            await globalTask?.value
+            await refreshCoordinator.shutdown()
+            loadTask?.cancel()
+            await loadTask?.value
+            activityManager.clearAll()
         }
+        shutdownTask = drain
+        await drain.value
     }
 
     /// Actual loadSessions implementation (called directly or after debounce).
@@ -493,7 +301,7 @@ final class EventStoreManager {
     /// Set the active session
     func setActiveSession(_ sessionId: String?) {
         activeSessionId = sessionId
-        UserDefaults.standard.set(sessionId, forKey: "tron.activeSessionId")
+        defaults.set(sessionId, forKey: "tron.activeSessionId")
     }
 
     /// Check if a session exists locally

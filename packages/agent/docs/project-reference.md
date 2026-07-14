@@ -212,17 +212,6 @@ Current living entry points:
   CSD taxonomy and scheduling-surface proof notes.
 - `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`:
   machine-readable CSD scheduling inventory used by static gates.
-- `packages/agent/docs/security-authority-capability-boundaries-scorecard.md`:
-  completed Security Authority Capability Boundaries scorecard for public
-  transport auth, authority grants, capability execution, worker isolation,
-  secrets, redaction, and pairing lifecycle proof.
-- `packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md`:
-  companion evidence manifest for SACB row checkpoints, verification logs, and
-  security boundary findings.
-- `packages/agent/docs/security-authority-capability-boundaries-inventory.md`:
-  completed SACB boundary taxonomy and security-surface proof notes.
-- `packages/agent/docs/security-authority-capability-boundaries-inventory.tsv`:
-  machine-readable SACB security boundary inventory used by static gates.
 - `packages/agent/docs/observability-diagnostics-auditability-scorecard.md`:
   completed Observability Diagnostics Auditability scorecard for proving
   session events, provider audits, primitive trace records, engine ledger rows,
@@ -532,8 +521,10 @@ Current living entry points:
   cancellation, timer/deadline, blocking-isolation, and closeout gates, with
   focused modules under `packages/agent/tests/concurrency_scheduling_discipline/`.
 - `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`:
-  completed SACB scorecard, inventory, CI wiring, and security boundary gates, with
-  focused modules under
+  nine living cross-cutting guards for public bearer and loopback boundaries,
+  public-context injection denial, grants and delegated budgets, capability
+  execution trust, external-worker ownership, internal invocation trust, secret
+  custody and redaction, and platform pairing lifecycle, with focused modules under
   `packages/agent/tests/security_authority_capability_boundaries/`.
 - `packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs`:
   cleanup scorecard, evidence, inventory, provider execute narrowing,
@@ -616,10 +607,10 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
 scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
 scorecard, the IOSAC cockpit baseline scorecard, the IARM restoration map
-scorecard, and the OPSAA cleanup scorecard.
+scorecard, the OPSAA cleanup scorecard, and the living SACB boundary gate.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -3126,11 +3117,12 @@ packages/ios-app/Sources/
   catalog entries surface catalog decode degradation instead of disappearing
   from projected counts. The primary chat shell does not mount a passive
   worker-runtime banner.
-- **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`.
+- **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`. `DependencyContainerRuntimeIO` selects immutable transport-attempt, pairing-probe, and paired-token backends once at that boundary and forwards the attempt directive into both the initial `EngineClient` and every active-server rebuild. Production remains live URL-session transport plus `URLSessionPairingProbe` and the production Keychain backend; hosted unit tests inject handled attempts, `StubPairingProbe`, and a task-owned in-memory token backend without environment checks inside those owners.
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
-- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`.
-- **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor.
+- **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while the production `PairedServerTokenStore.Backend` preserves the exact `KeychainItem(service: "com.tron.mobile.bearer", account: serverId)` contract. Pairing commit rollback restores the previous token for a failed re-pair or removes the candidate token for a failed new-server pairing. The server never stores the iOS pair list in `profiles/user/profile.toml`. Hosted token backends are injected, memory-only, and emit balanced secret-free `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` identity records; they never call Keychain.
+- **Live engine stream state**: Engine-owned transport treats subscription ids as WebSocket-local. UI/session code sees only repository connection state and parsed event streams; the engine layer clears active subscriptions on disconnect, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor. `EventStoreManager` predecessor-chains client replacement and load ownership, awaits database/completion effects for every accepted event, and uses one idempotent terminal drain: cancel/join the global lane, await `SessionRefreshService.shutdown()`, then cancel/join the load chain before an outer fixture closes its database. Shutdown does not finish the shared event bus or invent a process-termination hook.
+- **Hosted unit-test ownership**: `IsolatedTestState` is the only general hosted container/storage factory. It retains every manager, database, handled-attempt recorder, stub pairing probe, and token backend. Cleanup awaits the same terminal task for repeated callers and orders manager drain → token clear/proof/lifecycle emission → database close → root/defaults cleanup → process-fallback deregistration. Separate `TRON_TEST_SUITE_LIFECYCLE_V1` and `TRON_TEST_KEYCHAIN_LIFECYCLE_V1` ledgers must be complete, unique, set-equal, and secret-free; hosted tests prove no live network, OAuth, pairing-probe, or production Keychain owner is constructed.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Engine → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Engine shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings exposes the Logs sheet in every iOS build configuration from its toolbar so production installs can inspect or copy redacted local iOS logs without enabling verbose production logging; pairing lives under Settings -> Engine -> Servers without a duplicate Logs row. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with the active session id attached to each batch, client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic session-scoped batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.

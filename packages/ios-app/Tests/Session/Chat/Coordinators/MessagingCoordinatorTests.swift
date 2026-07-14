@@ -10,8 +10,11 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     var coordinator: MessagingCoordinator!
     var mockContext: MockMessagingContext!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
+        testState = IsolatedTestState(label: "messaging-coordinator")
+        testState.registerTeardown(with: self)
         mockContext = MockMessagingContext()
         coordinator = MessagingCoordinator()
     }
@@ -19,6 +22,7 @@ final class MessagingCoordinatorTests: XCTestCase {
     override func tearDown() async throws {
         coordinator = nil
         mockContext = nil
+        await testState.cleanup()
     }
 
     // MARK: - Send Message Validation Tests
@@ -90,7 +94,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     func testSendMessageDoesNotRecordRecentInputWhenLiveEventSubscriptionFails() async {
         // Given: Valid text, but the live stream cannot be established.
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
         mockContext.inputText = "Stream the response live"
         mockContext.ensureLiveEventSubscriptionShouldFail = true
@@ -110,7 +114,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     func testSendMessageDoesNotRecordRecentInputWhenServerSendFails() async {
         // Given: Valid text, but the server send request fails.
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
         mockContext.inputText = "Prompt that fails to send"
         mockContext.sendPromptShouldFail = true
@@ -131,7 +135,7 @@ final class MessagingCoordinatorTests: XCTestCase {
 
     func testSendMessageRecordsRecentInputAfterSuccessfulServerSend() async {
         // Given: Valid text with surrounding whitespace.
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
         mockContext.inputText = "  Prompt that sends successfully  "
 

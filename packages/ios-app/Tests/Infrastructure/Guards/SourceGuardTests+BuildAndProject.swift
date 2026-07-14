@@ -3,6 +3,82 @@ import Foundation
 
 extension SourceGuardTests {
 
+    @Test("application scroll edges use the explicit soft style")
+    func testApplicationScrollEdgesUseExplicitSoftStyle() throws {
+        let iosRoot = iosAppRoot()
+        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
+        let productionRootPath = "Sources/App/Lifecycle/ProductionAppRoot.swift"
+        let expectedWebViewOwners = Set([
+            "Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift",
+            "Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift",
+        ])
+        let edgeAssignments = [
+            "webView.scrollView.topEdgeEffect.style = .soft",
+            "webView.scrollView.leftEdgeEffect.style = .soft",
+            "webView.scrollView.bottomEdgeEffect.style = .soft",
+            "webView.scrollView.rightEdgeEffect.style = .soft",
+        ]
+
+        let productionRoot = try String(
+            contentsOf: iosRoot.appendingPathComponent(productionRootPath),
+            encoding: .utf8
+        )
+        #expect(
+            productionRoot.components(separatedBy: ".scrollEdgeEffectStyle(.soft, for: .all)").count - 1 == 1,
+            "ProductionAppRoot must own exactly one app-wide soft SwiftUI scroll-edge preference"
+        )
+
+        var webViewOwners: Set<String> = []
+        var automaticConfigurations: [String] = []
+        var hardConfigurations: [String] = []
+        for url in try swiftFiles(in: sourcesRoot) {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            let relativePath = url.path.replacingOccurrences(of: iosRoot.path + "/", with: "")
+            if source.contains("UIViewRepresentable"), source.contains("WKWebView(") {
+                webViewOwners.insert(relativePath)
+            }
+
+            let compactSource = source
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "\t", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+            if compactSource.contains(".scrollEdgeEffectStyle(.automatic,for:")
+                || compactSource.contains("EdgeEffect.style=.automatic") {
+                automaticConfigurations.append(relativePath)
+            }
+            if compactSource.contains(".scrollEdgeEffectStyle(.hard,for:")
+                || compactSource.contains("EdgeEffect.style=.hard") {
+                hardConfigurations.append(relativePath)
+            }
+        }
+
+        #expect(
+            webViewOwners == expectedWebViewOwners,
+            "Every app-owned WKWebView scroll view must be declared in the explicit soft-style contract: \(webViewOwners.sorted())"
+        )
+        for owner in expectedWebViewOwners {
+            let source = try String(
+                contentsOf: iosRoot.appendingPathComponent(owner),
+                encoding: .utf8
+            )
+            for assignment in edgeAssignments {
+                #expect(
+                    source.components(separatedBy: assignment).count - 1 == 1,
+                    "\(owner) must configure exactly one \(assignment)"
+                )
+            }
+        }
+
+        #expect(
+            automaticConfigurations.isEmpty,
+            "First-party sources must not delegate scroll-edge style to .automatic: \(automaticConfigurations.sorted())"
+        )
+        #expect(
+            hardConfigurations.isEmpty,
+            "First-party sources must not configure hard scroll edges: \(hardConfigurations.sorted())"
+        )
+    }
+
     @Test("feedback recipient has no tracked personal default")
     func testFeedbackRecipientConfigDefault() throws {
         let iosRoot = iosAppRoot()
@@ -60,7 +136,7 @@ extension SourceGuardTests {
             encoding: .utf8
         )
         let app = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/ProductionAppRoot.swift"),
             encoding: .utf8
         )
         let architectureDoc = try String(
@@ -128,6 +204,27 @@ extension SourceGuardTests {
     func testSecretStorageAndRedactionBoundaries() throws {
         let iosRoot = iosAppRoot()
 
+        func hasCheckedSendableTokenBackend(_ source: String) -> Bool {
+            let compact = source.components(separatedBy: .whitespacesAndNewlines).joined()
+            let requiredDeclarations = [
+                "structBackend:Sendable{",
+                "letsetToken:@Sendable(_token:String,_serverId:String)throws->Void",
+                "lettoken:@Sendable(_serverId:String)->String?",
+                "letremove:@Sendable(_serverId:String)throws->Void",
+            ]
+            guard requiredDeclarations.allSatisfy({ compact.contains($0) }) else {
+                return false
+            }
+            guard !compact.contains("@uncheckedSendable"),
+                  !compact.contains("nonisolated(unsafe)"),
+                  !compact.contains("staticvarproduction") else {
+                return false
+            }
+
+            let actorIsolationPattern = #"@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?(?:structBackend|static(?:let|var)production)"#
+            return compact.range(of: actorIsolationPattern, options: .regularExpression) == nil
+        }
+
         let pairedServerStore = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Pairing/PairedServerStore.swift"),
             encoding: .utf8
@@ -142,6 +239,10 @@ extension SourceGuardTests {
         )
         let dependencyContainer = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
+            encoding: .utf8
+        )
+        let runtimeIO = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer+RuntimeServices.swift"),
             encoding: .utf8
         )
         let redactor = try String(
@@ -168,7 +269,86 @@ extension SourceGuardTests {
 
         #expect(pairedServerTokenStore.contains("KeychainItem("))
         #expect(pairedServerTokenStore.contains("static let keychainServicePrefix = \"com.tron.mobile.bearer\""))
+        #expect(pairedServerTokenStore.contains("static let production = Backend("))
+        #expect(pairedServerTokenStore.contains("try makeProductionItem(for: id).set(token)"))
+        #expect(pairedServerTokenStore.contains("makeProductionItem(for: id).get()"))
+        #expect(pairedServerTokenStore.contains("try makeProductionItem(for: id).delete()"))
+        #expect(hasCheckedSendableTokenBackend(pairedServerTokenStore))
         #expect(!pairedServerTokenStore.contains("UserDefaults"))
+
+        let checkedSendabilityFixture = """
+        struct Backend: Sendable {
+            let setToken: @Sendable (_ token: String, _ serverId: String) throws -> Void
+            let token: @Sendable (_ serverId: String) -> String?
+            let remove: @Sendable (_ serverId: String) throws -> Void
+
+            static let production = Backend(
+                setToken: { _, _ in },
+                token: { _ in nil },
+                remove: { _ in }
+            )
+        }
+        """
+        let invalidSendabilityFixtures: [(name: String, source: String)] = [
+            (
+                "unchecked conformance",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "struct Backend: Sendable",
+                    with: "struct Backend: @unchecked Sendable"
+                )
+            ),
+            (
+                "main-actor production",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "static let production",
+                    with: "@MainActor static let production"
+                )
+            ),
+            (
+                "custom-global-actor backend",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "struct Backend: Sendable",
+                    with: "@TokenBackendActor struct Backend: Sendable"
+                )
+            ),
+            (
+                "unsafe nonisolated production",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "static let production",
+                    with: "nonisolated(unsafe) static let production"
+                )
+            ),
+            (
+                "computed production",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "static let production",
+                    with: "static var production"
+                )
+            ),
+            (
+                "conformance-only fix",
+                checkedSendabilityFixture.replacingOccurrences(of: "@Sendable ", with: "")
+            ),
+            (
+                "closures-only fix",
+                checkedSendabilityFixture.replacingOccurrences(of: ": Sendable", with: "")
+            ),
+            (
+                "partially annotated operations",
+                checkedSendabilityFixture.replacingOccurrences(
+                    of: "let remove: @Sendable",
+                    with: "let remove:"
+                )
+            ),
+        ]
+        #expect(hasCheckedSendableTokenBackend(checkedSendabilityFixture))
+        for fixture in invalidSendabilityFixtures {
+            #expect(
+                !hasCheckedSendableTokenBackend(fixture.source),
+                "Token backend sendability guard accepted the \(fixture.name) fixture"
+            )
+        }
+
         #expect(keychainItem.contains("kSecClassGenericPassword"))
         #expect(keychainItem.contains("kSecAttrAccessibleAfterFirstUnlock"))
         #expect(keychainItem.contains("**Access group:** intentionally unset"))
@@ -178,6 +358,10 @@ extension SourceGuardTests {
         #expect(dependencyContainer.contains("defaults.string(forKey: PairedServerStore.activeIdKey)"))
         #expect(dependencyContainer.contains("defaults.data(forKey: PairedServerStore.serversKey)"))
         #expect(dependencyContainer.contains("return tokenStore.token(forServerId: activeId)"))
+        #expect(dependencyContainer.contains("pairedServerTokenStore = runtimeIO.pairedServerTokenStore"))
+        #expect(runtimeIO.contains("pairedServerTokenStore: PairedServerTokenStore()"))
+        #expect(runtimeIO.contains("makePairingProbe: { URLSessionPairingProbe() }"))
+        #expect(runtimeIO.contains("sessionAttemptDirective: { _ in .openLiveSession }"))
         #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "bearer"#))
         #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "token"#))
 

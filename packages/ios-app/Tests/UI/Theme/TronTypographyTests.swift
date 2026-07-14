@@ -11,18 +11,31 @@ import UIKit
 @MainActor
 struct TronTypographyCodePresetTests {
 
+    private func withSettings<T>(_ body: (FontSettings) throws -> T) rethrows -> T {
+        try IsolatedTestState.withDefaults(label: "tron-typography") { defaults in
+            try body(FontSettings(defaults: defaults))
+        }
+    }
+
     /// Helper: create a UIFont via TronFontLoader with mono: true and verify it resolves to Recursive.
     private func assertRecursive(
         size: CGFloat,
         weight: TronFontLoader.Weight = .regular,
         sourceLocation: SourceLocation = #_sourceLocation
     ) {
-        let font = TronFontLoader.createUIFont(size: size, weight: weight, mono: true)
-        #expect(
-            font.familyName == "Recursive" || font.fontName.contains("Recursive"),
-            "Expected Recursive family, got \(font.familyName) (\(font.fontName))",
-            sourceLocation: sourceLocation
-        )
+        withSettings { settings in
+            let font = TronFontLoader.createUIFont(
+                size: size,
+                weight: weight,
+                mono: true,
+                settings: settings
+            )
+            #expect(
+                font.familyName == "Recursive" || font.fontName.contains("Recursive"),
+                "Expected Recursive family, got \(font.familyName) (\(font.fontName))",
+                sourceLocation: sourceLocation
+            )
+        }
     }
 
     /// Helper: with a non-Recursive font selected, verify a UIFont resolves to the selected family.
@@ -31,16 +44,20 @@ struct TronTypographyCodePresetTests {
         weight: TronFontLoader.Weight = .regular,
         sourceLocation: SourceLocation = #_sourceLocation
     ) {
-        let original = FontSettings.shared.selectedFamily
-        defer { FontSettings.shared.selectedFamily = original }
-
-        FontSettings.shared.selectedFamily = .alanSans
-        let font = TronFontLoader.createUIFont(size: size, weight: weight, mono: false)
-        #expect(
-            font.familyName == "Alan Sans" || font.fontName.contains("AlanSans"),
-            "Expected Alan Sans family, got \(font.familyName) (\(font.fontName))",
-            sourceLocation: sourceLocation
-        )
+        withSettings { settings in
+            settings.selectedFamily = .alanSans
+            let font = TronFontLoader.createUIFont(
+                size: size,
+                weight: weight,
+                mono: false,
+                settings: settings
+            )
+            #expect(
+                font.familyName == "Alan Sans" || font.fontName.contains("AlanSans"),
+                "Expected Alan Sans family, got \(font.familyName) (\(font.fontName))",
+                sourceLocation: sourceLocation
+            )
+        }
     }
 
     // MARK: - Code Presets (always Recursive Mono)
@@ -63,17 +80,20 @@ struct TronTypographyCodePresetTests {
     }
 
     @Test func codeFactoryAlwaysProducesRecursive() {
-        let original = FontSettings.shared.selectedFamily
-        defer { FontSettings.shared.selectedFamily = original }
-
-        // Even with a non-Recursive font selected, code() should produce Recursive
-        for family in FontFamily.allCases where family != .recursive {
-            FontSettings.shared.selectedFamily = family
-            let font = TronFontLoader.createUIFont(size: 14, weight: .regular, mono: true)
-            #expect(
-                font.familyName == "Recursive" || font.fontName.contains("Recursive"),
-                "code() should produce Recursive even with \(family.displayName) selected, got \(font.familyName)"
-            )
+        withSettings { settings in
+            for family in FontFamily.allCases where family != .recursive {
+                settings.selectedFamily = family
+                let font = TronFontLoader.createUIFont(
+                    size: 14,
+                    weight: .regular,
+                    mono: true,
+                    settings: settings
+                )
+                #expect(
+                    font.familyName == "Recursive" || font.fontName.contains("Recursive"),
+                    "code() should produce Recursive even with \(family.displayName) selected, got \(font.familyName)"
+                )
+            }
         }
     }
 
@@ -123,30 +143,42 @@ struct TronTypographyCodePresetTests {
     // MARK: - Edge Cases
 
     @Test func recursiveSelectedFontCodeAndMonoAreBothRecursive() {
-        let original = FontSettings.shared.selectedFamily
-        defer { FontSettings.shared.selectedFamily = original }
-
-        FontSettings.shared.selectedFamily = .recursive
-
-        let codeFont = TronFontLoader.createUIFont(size: 11, weight: .regular, mono: true)
-        let monoFont = TronFontLoader.createUIFont(size: 11, weight: .regular, mono: false)
-
-        // Both should be Recursive when Recursive is selected
-        #expect(codeFont.familyName == "Recursive" || codeFont.fontName.contains("Recursive"))
-        #expect(monoFont.familyName == "Recursive" || monoFont.fontName.contains("Recursive"))
+        withSettings { settings in
+            settings.selectedFamily = .recursive
+            let codeFont = TronFontLoader.createUIFont(
+                size: 11,
+                weight: .regular,
+                mono: true,
+                settings: settings
+            )
+            let monoFont = TronFontLoader.createUIFont(
+                size: 11,
+                weight: .regular,
+                mono: false,
+                settings: settings
+            )
+            #expect(codeFont.familyName == "Recursive" || codeFont.fontName.contains("Recursive"))
+            #expect(monoFont.familyName == "Recursive" || monoFont.fontName.contains("Recursive"))
+        }
     }
 
     @Test func codePresetDoesNotReactToFontChange() {
-        let original = FontSettings.shared.selectedFamily
-        defer { FontSettings.shared.selectedFamily = original }
-
-        FontSettings.shared.selectedFamily = .comme
-        let font1 = TronFontLoader.createUIFont(size: 11, weight: .regular, mono: true)
-
-        FontSettings.shared.selectedFamily = .ibmPlexSerif
-        let font2 = TronFontLoader.createUIFont(size: 11, weight: .regular, mono: true)
-
-        // Both should be Recursive regardless of selected font
-        #expect(font1.familyName == font2.familyName)
+        withSettings { settings in
+            settings.selectedFamily = .comme
+            let font1 = TronFontLoader.createUIFont(
+                size: 11,
+                weight: .regular,
+                mono: true,
+                settings: settings
+            )
+            settings.selectedFamily = .ibmPlexSerif
+            let font2 = TronFontLoader.createUIFont(
+                size: 11,
+                weight: .regular,
+                mono: true,
+                settings: settings
+            )
+            #expect(font1.familyName == font2.familyName)
+        }
     }
 }

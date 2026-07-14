@@ -135,6 +135,8 @@ extension SourceGuardTests {
         let iosRoot = iosAppRoot()
         let ownedPaths = [
             "Sources/App/Lifecycle/AppDelegate.swift",
+            "Sources/App/Lifecycle/AppRuntimeMode.swift",
+            "Sources/App/Lifecycle/ProductionAppRoot.swift",
             "Sources/App/Lifecycle/TronMobileApp.swift",
             "Sources/Engine/Transport/Clients/SystemClient.swift",
             "Sources/Support/Foundation/Notifications/APNsEnvironment.swift",
@@ -178,7 +180,7 @@ extension SourceGuardTests {
 
         let appLifecycle = try String(
             contentsOf: iosRoot.appendingPathComponent(
-                "Sources/App/Lifecycle/TronMobileApp.swift"
+                "Sources/App/Lifecycle/ProductionAppRoot.swift"
             ),
             encoding: .utf8
         )

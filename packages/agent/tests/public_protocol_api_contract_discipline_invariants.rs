@@ -456,7 +456,6 @@ fn predecessor_inventories_classify_ppacd_artifacts() {
         "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv",
         "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
     ] {
         let source = read_repo_file(predecessor);

@@ -41,7 +41,7 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             "Sources",
             "App",
             "Lifecycle",
-            "TronMobileApp.swift",
+            "ProductionAppRoot.swift",
         ])
         let presentation = try source(pathComponents: [
             "Sources",
@@ -110,7 +110,7 @@ final class OnboardingFlowLayoutTests: XCTestCase {
             "Sources",
             "App",
             "Lifecycle",
-            "TronMobileApp.swift",
+            "ProductionAppRoot.swift",
         ])
         let flow = try source(pathComponents: [
             "Sources",

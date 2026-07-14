@@ -25,13 +25,13 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     // MARK: - App Settings (Persisted)
 
     @ObservationIgnored
-    @AppStorage("workingDirectory") var workingDirectory = ""
+    @AppStorage var workingDirectory: String
 
     @ObservationIgnored
-    @AppStorage("defaultModel") var defaultModel = ""
+    @AppStorage var defaultModel: String
 
     @ObservationIgnored
-    @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = AppConstants.defaultWorkspace
+    @AppStorage var quickSessionWorkspace: String
 
     // MARK: - Core Services (Created Once)
 
@@ -63,11 +63,18 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     private let pairedServerDefaults: UserDefaults
 
-    /// Per-server bearer-token storage backed by Keychain. Owned here because
-    /// the bearer-token resolver closure captures a reference; same instance
-    /// is shared with onboarding and Settings for re-pair flows.
+    /// Documents root selected with the same typed storage input as drafts and
+    /// the database. Empty working-directory fallback must never bypass it.
     @ObservationIgnored
-    let pairedServerTokenStore = PairedServerTokenStore()
+    private let documentsURL: URL
+
+    /// Per-server bearer-token storage selected by the composition policy.
+    @ObservationIgnored
+    let pairedServerTokenStore: PairedServerTokenStore
+
+    /// One immutable I/O policy reused by initial and rebuilt server services.
+    @ObservationIgnored
+    private let runtimeIO: DependencyContainerRuntimeIO
 
     /// Default pairing probe used by the onboarding PairingStep. Held here
     /// so tests + previews can swap a `StubPairingProbe` without rebuilding
@@ -75,7 +82,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// on every call and we don't need one until the user lands on the
     /// Pairing step.
     @ObservationIgnored
-    lazy var pairingProbe: any PairingProbing = URLSessionPairingProbe()
+    lazy var pairingProbe: any PairingProbing = runtimeIO.makePairingProbe()
 
     // MARK: - Recreatable Services (When Server Changes)
 
@@ -132,19 +139,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Session context-control repository for Session Briefing.
     private(set) var contextControlRepository: any ContextControlRepository
 
-    var chatSessionServices: ChatSessionServices {
-        ChatSessionServices(
-            connection: connectionRepository,
-            events: sessionEventRepository,
-            sessions: sessionRepository,
-            agent: agentRepository,
-            models: modelRepository,
-            messages: messageRepository,
-            transcription: transcriptionRepository,
-            workerLifecycle: workerLifecycleRepository
-        )
-    }
-
     var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {
         Self.makeDiagnosticsEngineEndpoint(client: engineClient)
     }
@@ -178,30 +172,42 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     var effectiveWorkingDirectory: String {
         if workingDirectory.isEmpty {
-            return FileManager.default.urls(
-                for: .documentDirectory,
-                in: .userDomainMask
-            ).first?.path ?? "~"
+            return documentsURL.path
         }
         return workingDirectory
     }
 
     // MARK: - Initialization
 
-    init(pairedServerDefaults: UserDefaults = .standard) {
+    init(
+        storage: DependencyContainerStorage = .production(),
+        runtimeIO: DependencyContainerRuntimeIO = .production()
+    ) {
+        let pairedServerDefaults = storage.defaults
+        let documentsURL = storage.documentsURL
+        let db = storage.eventDatabase
+        _workingDirectory = AppStorage(
+            wrappedValue: "",
+            "workingDirectory",
+            store: pairedServerDefaults
+        )
+        _defaultModel = AppStorage(
+            wrappedValue: "",
+            "defaultModel",
+            store: pairedServerDefaults
+        )
+        _quickSessionWorkspace = AppStorage(
+            wrappedValue: AppConstants.defaultWorkspace,
+            "quickSessionWorkspace",
+            store: pairedServerDefaults
+        )
         self.pairedServerDefaults = pairedServerDefaults
+        self.documentsURL = documentsURL
+        self.runtimeIO = runtimeIO
+        pairedServerTokenStore = runtimeIO.pairedServerTokenStore
         pairedServerStore = PairedServerStore(defaults: pairedServerDefaults)
 
         // Initialize core services that persist across server changes.
-        guard let documentsURL = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first else {
-            preconditionFailure("Documents directory unavailable; cannot initialize iOS local projection stores")
-        }
-        guard let db = EventDatabase() else {
-            preconditionFailure("Documents directory unavailable; cannot initialize EventDatabase")
-        }
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
         deepLinkRouter = DeepLinkRouter()
@@ -227,7 +233,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                     tokenStore: tokenStore,
                     defaults: pairedServerDefaults
                 )
-            }
+            },
+            sessionAttemptDirective: runtimeIO.sessionAttemptDirective
         )
         engineClient = client
         clientLogIngestionService = ClientLogIngestionService(
@@ -247,7 +254,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         interactionPolicy = InteractionPolicy(connection: manager)
 
         // Initialize event store manager
-        eventStoreManager = EventStoreManager(eventDB: db, engineClient: client)
+        eventStoreManager = EventStoreManager(
+            eventDB: db,
+            engineClient: client,
+            defaults: pairedServerDefaults
+        )
 
         // Initialize repositories
         connectionRepository = DefaultAppConnectionRepository(client: client)
@@ -339,36 +350,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             activeServerSelectionVersion += 1
         }
         return plan
-    }
-
-    // MARK: - Connection Management
-
-    /// Connect to the server
-    func connect() async {
-        guard pairedServerStore.activeServer != nil else { return }
-        await engineClient.connect()
-    }
-
-    /// Disconnect from the server
-    func disconnect() async {
-        await engineClient.disconnect()
-    }
-
-    /// Set background state for battery optimization
-    func setBackgroundState(_ inBackground: Bool) {
-        engineClient.setBackgroundState(inBackground)
-    }
-
-    /// Verify connection is alive
-    func verifyConnection() async -> Bool {
-        guard pairedServerStore.activeServer != nil else { return false }
-        return await engineClient.verifyConnection()
-    }
-
-    /// Manual retry triggered from UI
-    func manualRetry() async {
-        guard pairedServerStore.activeServer != nil else { return }
-        await engineClient.manualRetry()
     }
 
     // MARK: - Settings Reload
@@ -493,7 +474,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                     tokenStore: tokenStore,
                     defaults: defaults
                 )
-            }
+            },
+            sessionAttemptDirective: runtimeIO.sessionAttemptDirective
         )
         engineClient = newClient
         clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))

@@ -8,19 +8,22 @@ final class DraftStoreTests: XCTestCase {
 
     var database: EventDatabase!
     var draftStore: DraftStore!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
-        database = EventDatabase()
+        testState = IsolatedTestState(label: "draft-store")
+        testState.registerTeardown(with: self)
+        database = testState.makeDatabase()
         try await database.initialize()
         try await database.clearAll()
-        draftStore = DraftStore(eventDatabase: database, documentsURL: FileManager.default.temporaryDirectory)
+        draftStore = DraftStore(eventDatabase: database, documentsURL: testState.documentsURL)
     }
 
     override func tearDown() async throws {
         // Clean up draft files
         draftStore.removeAllDraftFiles()
         try? await database.clearAll()
-        await database.close()
+        await testState.cleanup()
     }
 
     // MARK: - Helpers

@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-10 `passed_after_fix`; 594 state-surface rows inventoried and classified.
+Status: SOL-10 `passed_after_fix`; 823 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -40,20 +40,29 @@ owners. Phase 2 Slice 18A review follow-up added the touched
 `capability::execute` context authority gate for read-only memory query/decision
 evidence.
 The same follow-up records the touched runtime-grant unit test surface as a
-test fixture.
+test fixture. The dependency-container owner split adds focused runtime-service
+facade and typed storage-resolution rows without changing lifecycle authority.
+The Dashboard issue aggregation projection is a pure computed view over the
+current server-backed `AgentCockpitOverview` facts and retains no task state.
+Five split operation-presentation modules are immutable projections from the
+canonical `OperationId` registry. The application entry split records
+`AppRuntimeMode`/hosted-suite cleanup and `ProductionAppRoot` view/task state
+without assigning either canonical server truth. `EventStoreManager` now has
+separate projection and tracked runtime-task rows so accepted-event drain and
+database-last outer ownership are explicit.
 
 State class distribution:
 
 | State class | Rows |
 |---|---:|
-| `ephemeral_runtime` | 292 |
-| `projection_cache` | 124 |
-| `durable_substrate` | 81 |
+| `ephemeral_runtime` | 350 |
+| `projection_cache` | 223 |
+| `durable_substrate` | 147 |
 | `canonical_truth` | 41 |
 | `secret` | 16 |
-| `test_fixture` | 19 |
+| `test_fixture` | 24 |
 | `diagnostic_buffer` | 11 |
-| `local_device_preference` | 10 |
+| `local_device_preference` | 11 |
 
 ## SOL-2 Taxonomy Proof
 
@@ -150,8 +159,11 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Session event sync | `ios_engine_persistence` | `SessionSynchronizer` fetches events after the stored sync cursor, inserts server events, records the new cursor, clears and refetches rows on full sync, and fetches fork ancestors from the server without making iOS canonical truth. |
 | Stream cursors and ACKs | `ios_engine_persistence` / `engine_transport` | `EngineStreamCursorStore` keys cursors by origin/topic/session/workspace/filter hash. `EngineClient` stores cursors for ACK coalescing and diagnostics only; session history is reconstructed through server APIs. |
 | Connection runtime state | `engine_transport` | `EngineConnection`, `EngineClient`, and `ConnectionManager` cancel or clear receive, heartbeat, reconnect, open-timeout, request-timeout, stream-ACK, observation, and hook state on disconnect, cleanup, backgrounding, or deinit. |
+| Hosted runtime and production root | `ios_app_lifecycle` | `AppRuntimeMode` selects an inert hosted root from Apple XCTest markers and owns collision-proof named-suite cleanup; `ProductionAppRoot` alone owns application SwiftUI state and bounded lifecycle tasks. `TronMobileApp` retains only immutable bootstrap selection. |
+| Hosted runtime-I/O policy | `ios_composition` / `ios_engine_transport` | One immutable composition value propagates a handled pre-session directive, injected token backend, and stub pairing probe through initial and rebuilt hosted clients. Production keeps live sessions, `URLSessionPairingProbe`, and the exact Keychain facade. |
+| Event projection terminal owner | `ios_engine_persistence` | `EventStoreManager` weakly waits while idle, serializes replacement/load predecessors, awaits accepted event effects, and exposes one idempotent shutdown. Fixtures await manager and refresh/load drains before token retirement and database close; deinit cancellation is safety-only. |
 | Settings snapshot UI | `ios_session` | `SettingsState` loads and resets through server repositories, clears snapshots when the active server changes, overwrites every field from the active server, and rolls failed edits back to the last loaded snapshot. |
-| Paired servers and bearer tokens | `ios_pairing` / `ios_token_storage` | `PairedServerStore` owns the device-local paired-server list and active selection in `UserDefaults`; `PairedServerTokenStore` owns per-server bearer tokens in Keychain and removes them by paired-server id. |
+| Paired servers and bearer tokens | `ios_pairing` / `ios_token_storage` | `PairedServerStore` owns the device-local paired-server list and active selection in `UserDefaults`; production `PairedServerTokenStore` preserves exact per-server Keychain ownership, while hosted tests inject a lock-backed in-memory owner with secret-free balanced identity evidence. |
 | Drafts, history, and share handoff | `ios_storage` / `ios_share` | Draft saves are debounced and flushed/cleared by session lifecycle; input history is bounded and removes its `UserDefaults` key on clear; pending share content is App Group handoff state with save/load/clear boundaries. |
 | MetricKit diagnostics | `ios_diagnostics` | MetricKit payloads live in Application Support behind an `NSLock`, are written atomically, and are pruned by age, file count, and total bytes before diagnostics bundle inclusion. |
 | iOS architecture docs | `project_docs` | `packages/ios-app/docs/architecture.md` records that iOS owns projections, local device preferences, Keychain secrets, and diagnostic buffers, never canonical server truth. |

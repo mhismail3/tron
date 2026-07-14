@@ -3,6 +3,23 @@ import Testing
 
 @testable import TronMobile
 
+private final class LockedBearerToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    func read() -> String {
+        lock.withLock { value }
+    }
+
+    func replace(with value: String) {
+        lock.withLock { self.value = value }
+    }
+}
+
 /// Behavioral tests for `EngineConnection`'s bearer-token integration —
 /// Pairing bearer auth on the WS upgrade
 /// request, plus the new `.unauthorized` state machine path).
@@ -62,12 +79,12 @@ struct WebSocketAuthTests {
         // .unauthorized CTA, which writes a fresh token into the Keychain.
         // The provider closure must re-read on every connect so the next
         // attempt picks up the rotated token.
-        nonisolated(unsafe) var current = "old-token"
-        let ws = EngineConnection(serverURL: makeURL()) { current }
+        let current = LockedBearerToken("old-token")
+        let ws = EngineConnection(serverURL: makeURL()) { current.read() }
 
         #expect(ws.makeUpgradeRequest().value(forHTTPHeaderField: "Authorization") == "Bearer old-token")
 
-        current = "new-token"
+        current.replace(with: "new-token")
 
         #expect(ws.makeUpgradeRequest().value(forHTTPHeaderField: "Authorization") == "Bearer new-token")
     }
@@ -175,7 +192,15 @@ struct WebSocketAuthTests {
         // state should advance toward .connecting (and then likely fail
         // with .reconnecting since the URL is bogus — that's OK; the assert
         // is that we left .unauthorized).
-        let ws = EngineConnection(serverURL: makeURL())
+        var requests: [URLRequest] = []
+        let ws = EngineConnection(
+            serverURL: makeURL(),
+            sessionAttemptDirective: { request in
+                requests.append(request)
+                return .handledFailure
+            }
+        )
+        ws.setBackgroundState(true)
         ws.markUnauthorized(reason: "Server rejected authentication")
         #expect(ws.connectionState == .unauthorized(reason: "Server rejected authentication"))
 
@@ -184,6 +209,10 @@ struct WebSocketAuthTests {
         if case .unauthorized = ws.connectionState {
             Issue.record("manualRetry left state in .unauthorized")
         }
+        #expect(requests.count == 1)
+        #expect(requests.first?.url == makeURL())
+        #expect(ws.urlSession == nil)
+        #expect(ws.engineConnectionTask == nil)
     }
 
     // MARK: - Unpaired server path

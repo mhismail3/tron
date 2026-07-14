@@ -6,8 +6,8 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-30 during latest-session primitive hardening projection
-split inventory refresh.
+Last updated: 2026-07-14 during the dependency-container owner split
+inventory refresh.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -37,10 +37,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 1978 | Current package/config/test/doc boundaries |
+| `retain` | 2133 | Current package/config/test/doc boundaries |
 | `asset` | 70 | iOS/Mac resources and benchmark baselines |
 | `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **2055** | Whole repo plus retained inventory artifacts |
+| **Total** | **2210** | Whole repo plus retained inventory artifacts |
 
 ## Current Tracked Package Counts
 
@@ -49,10 +49,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 1189 |
-| `packages/ios-app` | 706 |
-| `packages/mac-app` | 123 |
-| `scripts` | 22 |
+| `packages/agent` | 1277 |
+| `packages/ios-app` | 771 |
+| `packages/mac-app` | 124 |
+| `scripts` | 23 |
 
 The count excludes untracked local build outputs. PCC-2 owns recurring local
 artifact hygiene and must not delete untracked local directories without user

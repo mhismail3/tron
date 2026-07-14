@@ -140,6 +140,8 @@ schemes:
     # testability, tests run against a debug build of the same module.
     test:
       config: Beta
+      environmentVariables:
+        TRON_APP_RUNTIME_MODE: hosted-unit-tests
       targets:
         - TronMobileTests
     profile:
@@ -159,6 +161,8 @@ schemes:
       config: Beta
     test:
       config: Beta
+      environmentVariables:
+        TRON_APP_RUNTIME_MODE: hosted-unit-tests
       targets:
         - TronMobileTests
     profile:
@@ -197,6 +201,8 @@ schemes:
       config: ProdDebug
     test:
       config: ProdDebug
+      environmentVariables:
+        TRON_APP_RUNTIME_MODE: hosted-unit-tests
       targets:
         - TronMobileTests
     profile:

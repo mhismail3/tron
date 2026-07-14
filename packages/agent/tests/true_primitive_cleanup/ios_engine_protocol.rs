@@ -67,12 +67,13 @@ fn ios_engine_protocol_roots_are_split_and_event_database_has_one_substrate() {
         "EventDatabase must expose only Documents-backed production storage plus explicit isolated test paths"
     );
 
-    let container =
-        read_repo_file("packages/ios-app/Sources/Support/Composition/DependencyContainer.swift");
+    let storage = read_repo_file(
+        "packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift",
+    );
     assert!(
-        container.contains("preconditionFailure(\"Documents directory unavailable")
-            && !container.contains("NSTemporaryDirectory() + \".tron/database/events.db\"")
-            && !container.contains("EventDatabase(temporaryCachePath:"),
-        "DependencyContainer must not silently switch the production event database substrate"
+        storage.contains("preconditionFailure(\"Documents directory unavailable")
+            && !storage.contains("NSTemporaryDirectory() + \".tron/database/events.db\"")
+            && !storage.contains("EventDatabase(temporaryCachePath:"),
+        "DependencyContainerStorage must not silently switch the production event database substrate"
     );
 }

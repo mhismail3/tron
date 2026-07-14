@@ -201,3 +201,121 @@ fn external_worker_outbound_scheduling_is_bounded_in_source() {
         );
     }
 }
+
+fn assert_contains_in_order(name: &str, source: &str, needles: &[&str]) {
+    let mut cursor = 0;
+    for needle in needles {
+        let relative = source[cursor..]
+            .find(needle)
+            .unwrap_or_else(|| panic!("{name} is missing ordered fragment `{needle}`"));
+        cursor += relative + needle.len();
+    }
+}
+
+fn task_cancel_is_joined(source: &str, owner: &str) -> bool {
+    source.contains(&format!("{owner}?.cancel()"))
+        && source.contains(&format!("await {owner}?.value"))
+}
+
+#[test]
+fn ios_terminal_task_owners_cancel_and_await_exact_handles() {
+    let manager =
+        read_repo_file("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift");
+    assert_contains_in_order(
+        "EventStoreManager terminal drain",
+        &manager,
+        &[
+            "globalTask?.cancel()",
+            "await globalTask?.value",
+            "await refreshCoordinator.shutdown()",
+            "loadTask?.cancel()",
+            "await loadTask?.value",
+        ],
+    );
+    assert!(manager.contains("if let shutdownTask"));
+    assert!(manager.contains("await shutdownTask.value"));
+
+    let refresh = read_repo_file(
+        "packages/ios-app/Sources/Engine/Persistence/Sync/SessionRefreshService.swift",
+    );
+    assert_contains_in_order(
+        "SessionRefreshService terminal drain",
+        &refresh,
+        &[
+            "isStopped = true",
+            "connectionManager?.cancelHook(label: Self.hookLabel)",
+            "pendingDebounceTask?.cancel()",
+            "acceptedInflightTask?.cancel()",
+            "await pendingDebounceTask?.value",
+            "await acceptedInflightTask?.value",
+        ],
+    );
+    assert!(refresh.contains("guard !isStopped else { return }"));
+    assert!(refresh.contains("if let shutdownTask"));
+    assert!(refresh.contains("await shutdownTask.value"));
+
+    let inventory = inventory_by_path();
+    assert_eq!(inventory.len(), 158, "CSD inventory row total changed");
+    assert_eq!(
+        inventory
+            .values()
+            .filter(|row| row.scheduler_class == "test_fixture")
+            .count(),
+        27,
+        "CSD test-fixture row total changed"
+    );
+    assert_eq!(
+        inventory
+            .values()
+            .filter(|row| row.scheduler_class != "test_fixture")
+            .count(),
+        131,
+        "CSD production row total changed"
+    );
+    for (scheduler_class, expected) in [
+        ("debounce_or_coalescer", 10),
+        ("main_actor_ui", 18),
+        ("tracked_background_task", 15),
+        ("external_callback_bridge", 9),
+    ] {
+        assert_eq!(
+            inventory
+                .values()
+                .filter(|row| row.scheduler_class == scheduler_class)
+                .count(),
+            expected,
+            "CSD `{scheduler_class}` row total changed"
+        );
+    }
+
+    assert_eq!(
+        inventory
+            .get("packages/ios-app/Sources/App/Lifecycle/ProductionAppRoot.swift")
+            .expect("ProductionAppRoot CSD row")
+            .scheduler_class,
+        "main_actor_ui"
+    );
+    assert_eq!(
+        inventory
+            .get("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift")
+            .expect("EventStoreManager CSD row")
+            .scheduler_class,
+        "tracked_background_task"
+    );
+    assert_eq!(
+        inventory
+            .get("packages/ios-app/Sources/Engine/Persistence/Sync/SessionRefreshService.swift")
+            .expect("SessionRefreshService CSD row")
+            .scheduler_class,
+        "debounce_or_coalescer"
+    );
+}
+
+#[test]
+fn cancellation_without_join_is_rejected_by_terminal_owner_detector() {
+    assert!(!task_cancel_is_joined("ownedTask?.cancel()", "ownedTask"));
+    assert!(task_cancel_is_joined(
+        "ownedTask?.cancel(); await ownedTask?.value",
+        "ownedTask"
+    ));
+}

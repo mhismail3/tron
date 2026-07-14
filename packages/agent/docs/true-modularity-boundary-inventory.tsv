@@ -565,6 +565,8 @@ packages/agent/src/transport/runtime/streams/tron.rs	rust	adapter	rust:transport
 packages/agent/src/transport/runtime/streams/turn.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
 packages/agent/src/transport/runtime/worker_heartbeat.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift	swift	composition-root	ios:app	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/App/Lifecycle/AppRuntimeMode.swift	swift	composition-root	ios:app	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/App/Lifecycle/ProductionAppRoot.swift	swift	composition-root	ios:app	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift	swift	composition-root	ios:app	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/ios-app/Sources/Engine/Events/Live/AsyncEventStream.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Engine/Events/Live/EventTypeRegistry.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
@@ -766,7 +768,9 @@ packages/ios-app/Sources/Session/Timeline/Reconstruction/UnifiedEventTransformer
 packages/ios-app/Sources/Session/Timeline/Tokens/TokenRecord.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Timeline/Tokens/TokenStateManager.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Composition/AppInitializer.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Support/Composition/DependencyContainer+RuntimeServices.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/ios-app/Sources/Support/Composition/DependencyContainer.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/ios-app/Sources/Support/Composition/DependencyProviding.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift	swift	contract	ios:diagnostics	may be shared across the owning boundary without concrete implementation imports
@@ -1429,7 +1433,11 @@ packages/agent/src/domains/capability/operations/operation_contract/output/spec.
 packages/agent/src/domains/capability/operations/operation_contract/output/types.rs	rust	implementation	capability:execute	owner-private canonical provider output algebra
 packages/agent/src/domains/capability/operations/operation_contract/output/tests.rs	rust	test-support	capability:execute	owner-private provider-safe envelope contract coverage
 packages/agent/src/domains/capability/operations/operation_contract/policy.rs	rust	implementation	capability:execute	owner-private effect, scope, and idempotency policy
-packages/agent/src/domains/capability/operations/operation_contract/presentation.rs	rust	implementation	capability:execute	owner-private user-facing operation presentation metadata
+packages/agent/src/domains/capability/operations/operation_contract/presentation/capability_binding.rs	rust	implementation	capability:execute	owner-private capability-binding presentation literals
+packages/agent/src/domains/capability/operations/operation_contract/presentation/direct.rs	rust	implementation	capability:execute	owner-private direct-operation presentation literals
+packages/agent/src/domains/capability/operations/operation_contract/presentation/governance.rs	rust	implementation	capability:execute	owner-private governance-operation presentation literals
+packages/agent/src/domains/capability/operations/operation_contract/presentation/mod.rs	rust	implementation	capability:execute	owner-private exhaustive presentation facade and family routing
+packages/agent/src/domains/capability/operations/operation_contract/presentation/records.rs	rust	implementation	capability:execute	owner-private record-plane presentation literals
 packages/agent/src/domains/capability/operations/operation_contract/records.rs	rust	implementation	capability:execute	owner-private durable record-plane structural schemas
 packages/agent/src/domains/capability/pool.rs	rust	implementation	rust:domain-capability	owner-private agent-facing operation and catalog classification projection
 packages/agent/src/domains/capability_binding/route.rs	rust	implementation	rust:domain-capability-binding	owner-private governed replacement route resolution and rollback

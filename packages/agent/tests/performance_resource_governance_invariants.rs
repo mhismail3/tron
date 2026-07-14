@@ -435,10 +435,6 @@ fn predecessor_inventory_rows_record_perf_as_next_original_slice() {
             "Performance / Resource Governance extends FSC timeout/cancellation proof",
         ),
         (
-            "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv",
-            "Performance / Resource Governance extends SACB resource-boundary proof",
-        ),
-        (
             "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
             "Performance / Resource Governance extends TPC retention proof",
         ),

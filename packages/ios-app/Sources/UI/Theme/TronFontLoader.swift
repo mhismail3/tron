@@ -64,12 +64,17 @@ enum TronFontLoader {
         weight: Weight = .regular,
         mono: Bool = false,
         casual: CGFloat? = nil,
-        family: FontFamily? = nil
+        family: FontFamily? = nil,
+        settings: FontSettings = .shared
     ) -> UIFont {
         let resolvedFamily = mono
-            ? (family ?? FontSettings.shared.selectedMonoFamily)
-            : (family ?? FontSettings.shared.selectedFamily)
-        let adjustedWeight = applyWeightPreference(weight.rawValue, for: resolvedFamily)
+            ? (family ?? settings.selectedMonoFamily)
+            : (family ?? settings.selectedFamily)
+        let adjustedWeight = applyWeightPreference(
+            weight.rawValue,
+            for: resolvedFamily,
+            settings: settings
+        )
         let clampedWeight = clampWeight(adjustedWeight, for: resolvedFamily)
 
         let descriptor: UIFontDescriptor
@@ -79,7 +84,8 @@ enum TronFontLoader {
                 weight: clampedWeight,
                 mono: mono,
                 casual: casual,
-                size: size
+                size: size,
+                settings: settings
             )
             descriptor = UIFontDescriptor(fontAttributes: [
                 .family: resolvedFamily.systemFamilyName,
@@ -113,9 +119,17 @@ enum TronFontLoader {
         weight: Weight = .regular,
         mono: Bool = false,
         casual: CGFloat? = nil,
-        family: FontFamily? = nil
+        family: FontFamily? = nil,
+        settings: FontSettings = .shared
     ) -> Font {
-        let uiFont = createUIFont(size: size, weight: weight, mono: mono, casual: casual, family: family)
+        let uiFont = createUIFont(
+            size: size,
+            weight: weight,
+            mono: mono,
+            casual: casual,
+            family: family,
+            settings: settings
+        )
         return Font(uiFont)
     }
 
@@ -127,13 +141,14 @@ enum TronFontLoader {
         weight: CGFloat,
         mono: Bool,
         casual: CGFloat?,
-        size: CGFloat
+        size: CGFloat,
+        settings: FontSettings
     ) -> [UInt32: CGFloat] {
         var variations: [UInt32: CGFloat] = [AxisTag.weight: weight]
 
         switch family {
         case .recursive:
-            let actualCasual = casual ?? FontSettings.shared.axisValue(for: .recursive, axis: .casual)
+            let actualCasual = casual ?? settings.axisValue(for: .recursive, axis: .casual)
             variations[AxisTag.mono] = mono ? 1.0 : 0.0
             variations[AxisTag.casual] = actualCasual
             variations[AxisTag.slant] = 0.0
@@ -157,9 +172,13 @@ enum TronFontLoader {
     /// Apply user weight preference as an offset from the default (400).
     /// If the user sets base weight to 500, all requested weights shift up by 100.
     @MainActor
-    private static func applyWeightPreference(_ requestedWeight: CGFloat, for family: FontFamily) -> CGFloat {
+    private static func applyWeightPreference(
+        _ requestedWeight: CGFloat,
+        for family: FontFamily,
+        settings: FontSettings
+    ) -> CGFloat {
         guard family.isVariable else { return requestedWeight }
-        let userBase = CGFloat(FontSettings.shared.axisValue(for: family, axis: .weight))
+        let userBase = CGFloat(settings.axisValue(for: family, axis: .weight))
         let offset = userBase - CGFloat(FontAxis.weight.defaultValue(for: family))
         return requestedWeight + offset
     }

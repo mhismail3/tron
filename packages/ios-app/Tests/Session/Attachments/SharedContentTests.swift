@@ -118,51 +118,55 @@ struct SharedContentBuildPromptTests {
 }
 
 @Suite("PendingShareService")
+@MainActor
 struct PendingShareServiceTests {
-    /// Use standard UserDefaults for testing (App Group suite requires entitlements)
-    private let store = UserDefaults(suiteName: "com.tron.test.share.\(UUID().uuidString)")!
-
     @Test("save and load round-trip")
     func saveAndLoad() {
-        let content = SharedContent(text: "Shared text", url: "https://example.com", timestamp: Date(timeIntervalSince1970: 1_000_000))
+        IsolatedTestState.withDefaults(label: "pending-share-round-trip") { store in
+            let content = SharedContent(text: "Shared text", url: "https://example.com", timestamp: Date(timeIntervalSince1970: 1_000_000))
 
-        PendingShareService.save(content, store: store)
-        let loaded = PendingShareService.load(store: store)
+            PendingShareService.save(content, store: store)
+            let loaded = PendingShareService.load(store: store)
 
-        #expect(loaded != nil)
-        #expect(loaded?.text == "Shared text")
-        #expect(loaded?.url == "https://example.com")
-        #expect(loaded?.timestamp == Date(timeIntervalSince1970: 1_000_000))
+            #expect(loaded != nil)
+            #expect(loaded?.text == "Shared text")
+            #expect(loaded?.url == "https://example.com")
+            #expect(loaded?.timestamp == Date(timeIntervalSince1970: 1_000_000))
+        }
     }
 
     @Test("load returns nil when nothing saved")
     func loadReturnsNilWhenEmpty() {
-        let emptyStore = UserDefaults(suiteName: "com.tron.test.share.empty.\(UUID().uuidString)")!
-        let result = PendingShareService.load(store: emptyStore)
-        #expect(result == nil)
+        IsolatedTestState.withDefaults(label: "pending-share-empty") { store in
+            #expect(PendingShareService.load(store: store) == nil)
+        }
     }
 
     @Test("clear removes pending share")
     func clearRemovesPendingShare() {
-        let content = SharedContent(text: "To be cleared", url: nil, timestamp: Date())
+        IsolatedTestState.withDefaults(label: "pending-share-clear") { store in
+            let content = SharedContent(text: "To be cleared", url: nil, timestamp: Date())
 
-        PendingShareService.save(content, store: store)
-        #expect(PendingShareService.load(store: store) != nil)
+            PendingShareService.save(content, store: store)
+            #expect(PendingShareService.load(store: store) != nil)
 
-        PendingShareService.clear(store: store)
-        #expect(PendingShareService.load(store: store) == nil)
+            PendingShareService.clear(store: store)
+            #expect(PendingShareService.load(store: store) == nil)
+        }
     }
 
     @Test("save overwrites previous content")
     func saveOverwritesPrevious() {
-        let first = SharedContent(text: "First", url: nil, timestamp: Date())
-        let second = SharedContent(text: "Second", url: "https://new.com", timestamp: Date())
+        IsolatedTestState.withDefaults(label: "pending-share-overwrite") { store in
+            let first = SharedContent(text: "First", url: nil, timestamp: Date())
+            let second = SharedContent(text: "Second", url: "https://new.com", timestamp: Date())
 
-        PendingShareService.save(first, store: store)
-        PendingShareService.save(second, store: store)
+            PendingShareService.save(first, store: store)
+            PendingShareService.save(second, store: store)
 
-        let loaded = PendingShareService.load(store: store)
-        #expect(loaded?.text == "Second")
-        #expect(loaded?.url == "https://new.com")
+            let loaded = PendingShareService.load(store: store)
+            #expect(loaded?.text == "Second")
+            #expect(loaded?.url == "https://new.com")
+        }
     }
 }

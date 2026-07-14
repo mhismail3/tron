@@ -17,15 +17,19 @@ final class ContentViewCoordinatorTests: XCTestCase {
     /// since it initializes synchronously (async init is separate).
     private var container: DependencyContainer!
     private var coordinator: ContentViewCoordinator!
+    private var testState: IsolatedTestState!
 
     override func setUp() async throws {
-        container = DependencyContainer()
+        testState = IsolatedTestState(label: "content-view-coordinator")
+        testState.registerTeardown(with: self)
+        container = testState.makeContainer()
         coordinator = ContentViewCoordinator(dependencies: container)
     }
 
     override func tearDown() async throws {
         coordinator = nil
         container = nil
+        await testState.cleanup()
     }
 
     // MARK: - Initial State

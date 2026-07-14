@@ -9,7 +9,11 @@
 //! malformed identities before an invocation reaches domain policy.
 //! Server-owned presentation metadata gives every operation a concise behavior
 //! description and a natural verb-first display name for native discovery UI;
-//! canonical operation identifiers remain the stable invocation keys.
+//! canonical operation identifiers remain the stable invocation keys. A private
+//! presentation facade routes the typed registry exhaustively into literal
+//! owners aligned with the four input-schema families. Tests freeze the ordered
+//! provider-visible tuples byte-for-byte and require facade, oracle, and schema
+//! family ownership to remain identical.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;

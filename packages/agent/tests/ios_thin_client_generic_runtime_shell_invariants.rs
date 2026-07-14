@@ -645,7 +645,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "release-install-upgrade-rollback-discipline-inventory.tsv",
         "observability-diagnostics-auditability-inventory.tsv",
         "data-integrity-storage-evolution-migration-discipline-inventory.tsv",
-        "security-authority-capability-boundaries-inventory.tsv",
         "concurrency-scheduling-discipline-inventory.tsv",
         "state-ownership-lifecycle-inventory.tsv",
     ];
@@ -666,7 +665,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv",
-        "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv",
         "packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv",
         "packages/agent/docs/state-ownership-lifecycle-inventory.tsv",
     ] {

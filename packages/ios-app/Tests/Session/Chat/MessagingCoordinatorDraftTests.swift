@@ -5,8 +5,11 @@ import XCTest
 final class MessagingCoordinatorDraftTests: XCTestCase {
     var coordinator: MessagingCoordinator!
     var mockContext: MockMessagingContext!
+    var testState: IsolatedTestState!
 
     override func setUp() async throws {
+        testState = IsolatedTestState(label: "messaging-drafts")
+        testState.registerTeardown(with: self)
         mockContext = MockMessagingContext()
         coordinator = MessagingCoordinator()
     }
@@ -14,13 +17,14 @@ final class MessagingCoordinatorDraftTests: XCTestCase {
     override func tearDown() async throws {
         coordinator = nil
         mockContext = nil
+        await testState.cleanup()
     }
 
     func testSendMessageClearsDraftAfterSend() async {
-        let db = EventDatabase()!
+        let db = testState.makeDatabase(fileName: "clears.db")
         try! await db.initialize()
         try! await db.clearAll()
-        let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
+        let store = DraftStore(eventDatabase: db, documentsURL: testState.documentsURL)
         mockContext.draftStore = store
 
         let draftState = InputBarState()
@@ -40,14 +44,13 @@ final class MessagingCoordinatorDraftTests: XCTestCase {
 
         store.removeAllDraftFiles()
         try? await db.clearAll()
-        await db.close()
     }
 
     func testSendMessagePreservesDraftOnPreAcceptServerError() async {
-        let db = EventDatabase()!
+        let db = testState.makeDatabase(fileName: "preserves.db")
         try! await db.initialize()
         try! await db.clearAll()
-        let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
+        let store = DraftStore(eventDatabase: db, documentsURL: testState.documentsURL)
         mockContext.draftStore = store
 
         let draftState = InputBarState()
@@ -66,6 +69,5 @@ final class MessagingCoordinatorDraftTests: XCTestCase {
 
         store.removeAllDraftFiles()
         try? await db.clearAll()
-        await db.close()
     }
 }

@@ -6,6 +6,17 @@ import XCTest
 /// These tests focus on the supporting data structures and types.
 @MainActor
 final class CachedSessionTests: XCTestCase {
+    private var testState: IsolatedTestState!
+
+    override func setUp() async throws {
+        testState = IsolatedTestState(label: "event-store-manager")
+        testState.registerTeardown(with: self)
+    }
+
+    override func tearDown() async throws {
+        await testState.cleanup()
+        testState = nil
+    }
 
     func testCachedSessionIdentifiable() {
         let session = createTestSession(id: "test-123")
@@ -138,7 +149,11 @@ final class CachedSessionTests: XCTestCase {
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
         )
         let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let existing = EventStoreManager.makeLocalNewSessionCache(
             sessionId: "new-local-session",
             workspaceId: "/tmp/tron-fixtures/Project",
@@ -170,7 +185,11 @@ final class CachedSessionTests: XCTestCase {
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
         )
         let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let existing = createTestSession(
             id: "cached-title-session",
             title: "Project",
@@ -197,7 +216,11 @@ final class CachedSessionTests: XCTestCase {
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
         )
         let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let existing = EventStoreManager.makeLocalNewSessionCache(
             sessionId: "new-local-session",
             workspaceId: "/tmp/tron-fixtures/Project",
@@ -229,7 +252,11 @@ final class CachedSessionTests: XCTestCase {
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
         )
         let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let existing = createTestSession(
             id: "cached-title-session",
             title: "Project",
@@ -256,7 +283,11 @@ final class CachedSessionTests: XCTestCase {
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
         )
         let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let existing = createTestSession(
             id: "cached-title-session",
             title: "Project",
@@ -285,7 +316,11 @@ final class CachedSessionTests: XCTestCase {
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
         )
         let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: engineClient,
+            defaults: testState.defaults
+        )
         let existing = createTestSession(
             id: "local-title-session",
             title: "Accepted generated title",
@@ -305,6 +340,103 @@ final class CachedSessionTests: XCTestCase {
 
         XCTAssertNil(merged.title)
         XCTAssertEqual(merged.listTitle, "New Session")
+    }
+
+    func testIdleGlobalSubscriptionDoesNotRetainManager() async {
+        let stream = ControlledGlobalEventStream()
+        let client = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65523/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        weak var weakManager: EventStoreManager?
+        var manager: EventStoreManager? = EventStoreManager(
+            eventDB: testState.makeDatabase(fileName: "idle-release.db"),
+            engineClient: client,
+            defaults: testState.defaults,
+            globalEventStream: { _ in stream.stream }
+        )
+        weakManager = manager
+
+        manager = nil
+
+        XCTAssertNil(weakManager)
+        stream.finish()
+    }
+
+    func testShutdownWaitsForAcceptedEventAndIsIdempotent() async {
+        let stream = ControlledGlobalEventStream()
+        let gate = AcceptedEventGate()
+        let completion = AsyncCompletionProbe()
+        let client = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65522/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        let manager = EventStoreManager(
+            eventDB: testState.makeDatabase(fileName: "accepted-drain.db"),
+            engineClient: client,
+            defaults: testState.defaults,
+            globalEventStream: { _ in stream.stream },
+            acceptedEventHook: { _ in await gate.suspendAcceptedEvent() }
+        )
+
+        stream.send(.unknown("accepted.event"))
+        await gate.waitUntilAccepted()
+        let shutdown = Task { @MainActor in
+            await manager.shutdown()
+            await completion.markComplete()
+        }
+        await Task.yield()
+        let completedBeforeRelease = await completion.isComplete
+        XCTAssertFalse(completedBeforeRelease)
+
+        await gate.releaseAcceptedEvent()
+        await shutdown.value
+        let completedAfterRelease = await completion.isComplete
+        XCTAssertTrue(completedAfterRelease)
+        async let repeatedA: Void = manager.shutdown()
+        async let repeatedB: Void = manager.shutdown()
+        _ = await (repeatedA, repeatedB)
+    }
+
+    func testRapidClientReplacementAcceptsOnlyLatestLane() async {
+        let clientA = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65521/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        let clientB = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65520/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        let clientC = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65519/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+        let streams = GlobalEventStreamFactory()
+        streams.install(clientA)
+        streams.install(clientB)
+        streams.install(clientC)
+        let accepted = AcceptedEventCapture()
+        let manager = EventStoreManager(
+            eventDB: testState.makeDatabase(fileName: "replacement-chain.db"),
+            engineClient: clientA,
+            defaults: testState.defaults,
+            globalEventStream: streams.stream,
+            acceptedEventHook: { event in await accepted.record(event.eventType) }
+        )
+
+        manager.updateEngineClient(clientB)
+        manager.updateEngineClient(clientC)
+        streams.send(.unknown("old-a"), to: clientA)
+        streams.send(.unknown("intermediate-b"), to: clientB)
+        streams.send(.unknown("latest-c"), to: clientC)
+        await accepted.waitForCount(1)
+        await manager.shutdown()
+
+        let acceptedValues = await accepted.values
+        XCTAssertEqual(acceptedValues, ["latest-c"])
+        XCTAssertEqual(streams.subscriptionCount(for: clientA), 1)
+        XCTAssertEqual(streams.subscriptionCount(for: clientB), 1)
+        XCTAssertEqual(streams.subscriptionCount(for: clientC), 1)
     }
 
     // MARK: - Helper
@@ -376,6 +508,100 @@ final class CachedSessionTests: XCTestCase {
             activityLines: nil
         )
     }
+}
+
+@MainActor
+private final class ControlledGlobalEventStream {
+    let stream: AsyncStream<ParsedEventV2>
+    private let continuation: AsyncStream<ParsedEventV2>.Continuation
+
+    init() {
+        var captured: AsyncStream<ParsedEventV2>.Continuation!
+        stream = AsyncStream { captured = $0 }
+        continuation = captured
+    }
+
+    func send(_ event: ParsedEventV2) {
+        continuation.yield(event)
+    }
+
+    func finish() {
+        continuation.finish()
+    }
+}
+
+@MainActor
+private final class GlobalEventStreamFactory {
+    private var streams: [ObjectIdentifier: ControlledGlobalEventStream] = [:]
+    private var subscriptions: [ObjectIdentifier: Int] = [:]
+
+    func install(_ client: EngineClient) {
+        streams[ObjectIdentifier(client)] = ControlledGlobalEventStream()
+    }
+
+    func stream(for client: EngineClient) -> AsyncStream<ParsedEventV2> {
+        let key = ObjectIdentifier(client)
+        subscriptions[key, default: 0] += 1
+        return streams[key]!.stream
+    }
+
+    func send(_ event: ParsedEventV2, to client: EngineClient) {
+        streams[ObjectIdentifier(client)]?.send(event)
+    }
+
+    func subscriptionCount(for client: EngineClient) -> Int {
+        subscriptions[ObjectIdentifier(client), default: 0]
+    }
+}
+
+private actor AcceptedEventGate {
+    private var accepted = false
+    private var acceptedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func suspendAcceptedEvent() async {
+        accepted = true
+        acceptedWaiters.forEach { $0.resume() }
+        acceptedWaiters.removeAll()
+        await withCheckedContinuation { releaseContinuation = $0 }
+    }
+
+    func waitUntilAccepted() async {
+        if accepted { return }
+        await withCheckedContinuation { acceptedWaiters.append($0) }
+    }
+
+    func releaseAcceptedEvent() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor AsyncCompletionProbe {
+    private(set) var isComplete = false
+
+    func markComplete() {
+        isComplete = true
+    }
+}
+
+private actor AcceptedEventCapture {
+    private var captured: [String] = []
+    private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+    func record(_ value: String) {
+        captured.append(value)
+        let ready = waiters.filter { captured.count >= $0.0 }
+        waiters.removeAll { captured.count >= $0.0 }
+        ready.forEach { $0.1.resume() }
+    }
+
+    func waitForCount(_ count: Int) async {
+        if captured.count >= count { return }
+        await withCheckedContinuation { waiters.append((count, $0)) }
+    }
+
+    var values: [String] { captured }
 }
 
 // MARK: - SyncState Tests

@@ -1,5 +1,23 @@
 use super::support::*;
 
+fn contains_direct_user_defaults_standard(source: &str) -> bool {
+    let without_swift_whitespace: String = source
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+    without_swift_whitespace.contains("UserDefaults.standard")
+}
+
+#[test]
+fn direct_user_defaults_standard_detector_rejects_whitespace_variation() {
+    let direct_standard_access = "UserDefaults . standard.removeObject(forKey: storageKey)";
+
+    assert!(
+        contains_direct_user_defaults_standard(direct_standard_access),
+        "direct UserDefaults.standard access must be detected after normalizing Swift whitespace"
+    );
+}
+
 #[test]
 fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     let architecture = read_repo_file("packages/ios-app/docs/architecture.md");
@@ -57,12 +75,31 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         );
     }
 
+    let dependency_storage = read_repo_file(
+        "packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift",
+    );
+    for required in [
+        "static func production(",
+        "defaults: () -> UserDefaults = { .standard }",
+        "FileManager.default.urls(for: .documentDirectory",
+        "eventDatabase: () -> EventDatabase? = { EventDatabase() }",
+        "preconditionFailure(\"Documents directory unavailable; cannot initialize iOS local projection stores\")",
+        "preconditionFailure(\"Documents directory unavailable; cannot initialize EventDatabase\")",
+    ] {
+        assert!(
+            dependency_storage.contains(required),
+            "DependencyContainerStorage iOS state lifecycle missing `{required}`"
+        );
+    }
+
     let dependency_container =
         read_repo_file("packages/ios-app/Sources/Support/Composition/DependencyContainer.swift");
     for required in [
-        "preconditionFailure(\"Documents directory unavailable; cannot initialize iOS local projection stores\")",
-        "preconditionFailure(\"Documents directory unavailable; cannot initialize EventDatabase\")",
-        "let db = EventDatabase()",
+        "storage: DependencyContainerStorage = .production(),",
+        "runtimeIO: DependencyContainerRuntimeIO = .production()",
+        "pairedServerTokenStore = runtimeIO.pairedServerTokenStore",
+        "sessionAttemptDirective: runtimeIO.sessionAttemptDirective",
+        "let db = storage.eventDatabase",
         "eventStoreManager.draftStore = draftStore",
         "selectPairedServer",
         "eventStoreManager.updateEngineClient(newClient)",
@@ -79,21 +116,27 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "NSTemporaryDirectory()",
     ] {
         assert!(
-            !dependency_container.contains(forbidden),
-            "DependencyContainer must not retain alternate production state path `{forbidden}`"
+            !dependency_container.contains(forbidden) && !dependency_storage.contains(forbidden),
+            "iOS composition owners must not retain alternate production state path `{forbidden}`"
         );
     }
 
     let event_store_manager =
         read_repo_file("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift");
     for required in [
-        "globalEventTask?.cancel()",
-        "globalEventTask = Task",
+        "let predecessor = globalEventTask",
+        "predecessor?.cancel()",
+        "await predecessor?.value",
+        "for await event in stream",
+        "guard let self else { return }",
+        "await self.acceptedEventHook(event)",
+        "await self.handleGlobalEventV2(event)",
+        "func shutdown() async",
+        "await globalTask?.value",
+        "await refreshCoordinator.shutdown()",
+        "await loadTask?.value",
         "sessionSynchronizer.updateEngineClient(client)",
         "setupGlobalEventHandlers()",
-        "handleSessionDeleted",
-        "handleSessionArchived",
-        "handleSessionUnarchived",
     ] {
         assert!(
             event_store_manager.contains(required),
@@ -288,6 +331,10 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "func setToken",
         "func token(forServerId",
         "func remove(serverId",
+        "static let production = Backend(",
+        "try makeProductionItem(for: id).set(token)",
+        "makeProductionItem(for: id).get()",
+        "try makeProductionItem(for: id).delete()",
         "account: id",
     ] {
         assert!(
@@ -317,16 +364,25 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     for required in [
         "storageKey = \"tron.inputHistory\"",
         "maxHistorySize = 100",
+        "private let defaults: UserDefaults",
+        "init(defaults: UserDefaults = AppRuntimeStorage.current.defaults)",
+        "self.defaults = defaults",
+        "defaults.data(forKey: storageKey)",
+        "defaults.set(data, forKey: storageKey)",
+        "defaults.removeObject(forKey: storageKey)",
         "history = Array(history.prefix(maxHistorySize))",
         "resetNavigation()",
         "clearHistory()",
-        "UserDefaults.standard.removeObject",
     ] {
         assert!(
             history_store.contains(required),
             "InputHistoryStore local lifecycle missing `{required}`"
         );
     }
+    assert!(
+        !contains_direct_user_defaults_standard(&history_store),
+        "InputHistoryStore must use its injected defaults owner, not UserDefaults.standard"
+    );
 
     let shared_content =
         read_repo_file("packages/ios-app/Sources/Support/Share/SharedContent.swift");
@@ -382,6 +438,8 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     let inventory = inventory_by_path();
     for required in [
         "packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift",
+        "packages/ios-app/Sources/App/Lifecycle/AppRuntimeMode.swift",
+        "packages/ios-app/Sources/App/Lifecycle/ProductionAppRoot.swift",
         "packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift",
         "packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift",
         "packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Sync.swift",
@@ -390,7 +448,9 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift",
         "packages/ios-app/Sources/Engine/Transport/Retry/ConnectionManager.swift",
         "packages/ios-app/Sources/Session/Chat/State/SettingsState.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyContainer+RuntimeServices.swift",
         "packages/ios-app/Sources/Support/Composition/DependencyContainer.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyContainerStorage.swift",
         "packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift",
         "packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift",
         "packages/ios-app/Sources/Support/Share/SharedContent.swift",
@@ -412,5 +472,50 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
             .filter(|(path, _)| path.starts_with("packages/ios-app/Sources/"))
             .all(|(_, rows)| rows.iter().all(|row| row.state_class != "canonical_truth")),
         "iOS source inventory rows must not claim canonical server truth"
+    );
+
+    let all_rows: Vec<&InventoryRow> = inventory.values().flatten().collect();
+    assert_eq!(all_rows.len(), 823, "SOL inventory row total drifted");
+    assert_eq!(
+        all_rows
+            .iter()
+            .filter(|row| row.state_class == "projection_cache")
+            .count(),
+        223,
+        "SOL projection_cache total drifted"
+    );
+    assert_eq!(
+        all_rows
+            .iter()
+            .filter(|row| row.state_class == "ephemeral_runtime")
+            .count(),
+        350,
+        "SOL ephemeral_runtime total drifted"
+    );
+    let manager_rows = inventory
+        .get("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift")
+        .expect("EventStoreManager inventory rows");
+    assert!(manager_rows.iter().any(|row| {
+        row.state_surface == "eventstoremanager_session_projection_userdefaults_sqlite"
+            && row.state_class == "projection_cache"
+    }));
+    assert!(manager_rows.iter().any(|row| {
+        row.state_surface == "eventstoremanager_global_event_refresh_load_tasks"
+            && row.state_class == "ephemeral_runtime"
+            && row
+                .concurrency_or_task_guard
+                .contains("accepted events are awaited inline")
+    }));
+
+    let mut missing = all_rows
+        .iter()
+        .filter(|row| row.path.contains("operation_contract/presentation/"))
+        .filter(|row| row.state_class != "projection_cache")
+        .map(|row| row.path.as_str())
+        .collect::<Vec<_>>();
+    missing.sort_unstable();
+    assert!(
+        missing.is_empty(),
+        "presentation rows must remain projections: {missing:?}"
     );
 }

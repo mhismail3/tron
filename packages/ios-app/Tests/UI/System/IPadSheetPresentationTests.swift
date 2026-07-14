@@ -95,7 +95,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     func testRepresentativeAppSheetsUseCanonicalIPadSizing() throws {
         let expected: [(path: [String], fragment: String)] = [
             (
-                ["Sources", "App", "Lifecycle", "TronMobileApp.swift"],
+                ["Sources", "App", "Lifecycle", "ProductionAppRoot.swift"],
                 ".adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .compactForm, phoneBackground: .clear)"
             ),
             (

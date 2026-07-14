@@ -184,6 +184,8 @@ fn inventory_is_structured_and_covers_cockpit_surfaces() {
         "IOSAC-SOURCE-01",
         "IOSAC-SOURCE-02",
         "IOSAC-SOURCE-05",
+        "IOSAC-SOURCE-05A",
+        "IOSAC-SOURCE-05B",
         "IOSAC-SOURCE-06",
         "IOSAC-SOURCE-07",
         "IOSAC-SOURCE-08",
@@ -193,6 +195,9 @@ fn inventory_is_structured_and_covers_cockpit_surfaces() {
         "IOSAC-TEST-01",
         "IOSAC-TEST-02",
         "IOSAC-TEST-03",
+        "IOSAC-TEST-03A",
+        "IOSAC-TEST-03B",
+        "IOSAC-TEST-03C",
         "IOSAC-TEST-04",
         "IOSAC-TEST-05",
         "IOSAC-GATE-01",
@@ -330,8 +335,15 @@ fn cockpit_decodes_live_catalog_resources_and_runtime_surfaces() {
         ],
     );
     assert_contains_all(
-        "packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitPresentation.swift",
-        &["Catalog Degraded", "Operations Need Review"],
+        "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitDiscoveryStateTests.swift",
+        &[
+            "Projection reports malformed catalog entries as degraded",
+            "func projectionReportsMalformedCatalogEntriesAsDegraded()",
+            "let summary = AgentCockpitPresentation.dashboardSummary(for: overview)",
+            "#expect(summary.statusKind == .degraded)",
+            "#expect(summary.title == \"Operations Need Review\")",
+            "#expect(summary.detail == \"1 capability entry could not be decoded\")",
+        ],
     );
 
     assert_contains_all(
@@ -494,8 +506,35 @@ fn focused_swift_tests_cover_cockpit_protocol_state_surfaces_and_theme() {
         "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift",
         &[
             "Projection derives workers functions packages activity and approval status",
-            "Projection reports malformed catalog entries as degraded",
+            "Projection preserves degraded module activity state",
             "Package actions require confirmation and disable unsafe lifecycle states",
+        ],
+    );
+    assert_contains_all(
+        "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitDiscoveryStateTests.swift",
+        &[
+            "Projection renders capability cockpit operation ownership and attempts without raw owner text",
+            "Present empty capability projection stays authoritative",
+            "Projection reports malformed catalog entries as degraded",
+        ],
+    );
+    assert_contains_all(
+        "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitPresentationTests.swift",
+        &[
+            "Dashboard quiet state is concise and does not repeat Idle",
+            "Dashboard groups activity by server-owned state without duplicating items",
+            "Cockpit presentation keeps top-level labels user-facing",
+        ],
+    );
+    assert_contains_all(
+        "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTestFixtures.swift",
+        &[
+            "enum AgentCockpitStateTestFixtures",
+            "static func sampleCatalogSnapshot(",
+            "static func sampleResource(",
+            "static func sampleModuleActivityOverview(",
+            "static func samplePackageRow(",
+            "static func sampleDegradedModuleActivityOverview(",
         ],
     );
     assert_contains_all(

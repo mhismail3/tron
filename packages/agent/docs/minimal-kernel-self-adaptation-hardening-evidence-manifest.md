@@ -35,7 +35,7 @@ runtime behavior.
 | Memory prompt context projection | `packages/agent/src/domains/memory/prompt_trace.rs` |
 | Durable jobs domain | `packages/agent/src/domains/jobs/mod.rs`; `packages/agent/src/domains/jobs/service.rs` |
 | Transport boundary | `packages/agent/src/transport/engine/mod.rs` |
-| iOS cockpit state/UI | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift` |
+| iOS cockpit state/UI | `packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift`; `packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitTabViews.swift` |
 | Canonical README | `README.md` |
 
 ## Evidence

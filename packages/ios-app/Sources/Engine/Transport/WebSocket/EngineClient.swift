@@ -140,13 +140,12 @@ final class EngineClient: EngineTransport {
 
     private let serverURL: URL
 
-    /// Bearer-token resolver passed through to the underlying `EngineConnection`
-    /// on every `connect()`. Re-evaluated at upgrade time, so token rotations
-    /// (e.g. user re-pairs after `.unauthorized`) flow through without
-    /// recreating the EngineClient.
+    /// Bearer-token resolver re-evaluated for every WebSocket upgrade.
     @ObservationIgnored
     private let bearerTokenProvider: BearerTokenProvider?
 
+    @ObservationIgnored
+    private let sessionAttemptDirective: (URLRequest) -> EngineSessionAttemptDirective
     /// Server origin string (host:port) for tagging sessions
     var serverOrigin: String {
         let host = serverURL.host ?? "localhost"
@@ -157,11 +156,15 @@ final class EngineClient: EngineTransport {
     init(
         serverURL: URL,
         bearerTokenProvider: BearerTokenProvider? = nil,
-        streamCursorStore: EngineStreamCursorStore = EngineStreamCursorStore()
+        streamCursorStore: EngineStreamCursorStore = EngineStreamCursorStore(),
+        sessionAttemptDirective: @escaping (URLRequest) -> EngineSessionAttemptDirective = { _ in
+            .openLiveSession
+        }
     ) {
         self.serverURL = serverURL
         self.bearerTokenProvider = bearerTokenProvider
         self.streamCursorStore = streamCursorStore
+        self.sessionAttemptDirective = sessionAttemptDirective
     }
 
     deinit {
@@ -209,9 +212,7 @@ final class EngineClient: EngineTransport {
             engineConnection = nil
         }
 
-        // Set connecting state BEFORE creating WebSocket to prevent concurrent attempts.
-        // This is critical: if another connect() call comes in during the await below,
-        // it will see .connecting state and bail out.
+        // Set connecting before creating the transport so concurrent attempts bail out.
         connectionState = .connecting
 
         logger.info("Initializing connection to \(self.serverURL.absoluteString)", category: .engine)
@@ -242,9 +243,7 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     private var observationTask: Task<Void, Never>?
 
-    /// Continuation-based observation loop that mirrors EngineConnection.connectionState.
-    /// Cancelled in disconnect() — no recursive re-registration needed.
-    /// Syncs state at the TOP of each iteration so the initial state is never missed.
+    /// Continuation-based observation loop that mirrors the connection state.
     private func startConnectionStateObservation() {
         observationTask?.cancel()
         observationTask = Task { [weak self] in
@@ -283,7 +282,11 @@ final class EngineClient: EngineTransport {
 
     private func installEngineConnection() -> EngineConnection {
         clearActiveStreamSubscriptions(reason: "installing a new engine transport")
-        let ws = EngineConnection(serverURL: serverURL, bearerTokenProvider: bearerTokenProvider)
+        let ws = EngineConnection(
+            serverURL: serverURL,
+            bearerTokenProvider: bearerTokenProvider,
+            sessionAttemptDirective: sessionAttemptDirective
+        )
         self.engineConnection = ws
 
         // Observe connection state via @Observable property.

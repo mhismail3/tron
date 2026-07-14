@@ -4,14 +4,15 @@ import XCTest
 
 @MainActor
 final class RecentInputHistoryTests: XCTestCase {
-    private let storageKey = "tron.inputHistory"
+    private var testState: IsolatedTestState!
 
     override func setUp() async throws {
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        testState = IsolatedTestState(label: "recent-input-history")
+        testState.registerTeardown(with: self)
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        await testState.cleanup()
     }
 
     private func render<V: View>(_ view: V) {
@@ -20,7 +21,7 @@ final class RecentInputHistoryTests: XCTestCase {
     }
 
     func testRecentInputHistoryMenuActionVisibilityRequiresLocalHistoryIdleAndEditable() {
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.clearHistory()
 
         XCTAssertFalse(RecentInputHistoryPresentation.shouldShowMenuAction(
@@ -83,7 +84,7 @@ final class RecentInputHistoryTests: XCTestCase {
     }
 
     func testRecentInputsSheetConstructs() {
-        let history = InputHistoryStore()
+        let history = InputHistoryStore(defaults: testState.defaults)
         history.addToHistory("Draft a short release note")
 
         render(
@@ -99,7 +100,7 @@ final class RecentInputHistoryTests: XCTestCase {
         var inserted: String?
 
         let sheet = RecentInputHistorySheet(
-            historyStore: InputHistoryStore(),
+            historyStore: InputHistoryStore(defaults: testState.defaults),
             onSelect: { inserted = $0 }
         )
         sheet.onSelect(selected)

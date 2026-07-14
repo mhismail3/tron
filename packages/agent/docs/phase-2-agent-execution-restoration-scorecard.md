@@ -265,9 +265,6 @@ Inspected planning sources:
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`
 - `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md`
-- `packages/agent/docs/security-authority-capability-boundaries-scorecard.md`
-- `packages/agent/docs/security-authority-capability-boundaries-inventory.md`
-- `packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md`
 - `packages/agent/docs/concurrency-scheduling-discipline-scorecard.md`
 - `packages/agent/docs/concurrency-scheduling-discipline-inventory.md`
 - `packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md`

@@ -299,7 +299,7 @@ extension EventStoreManager {
         try await eventDB.clearAll()
         clearSessions()
         setActiveSessionId(nil)
-        UserDefaults.standard.removeObject(forKey: "tron.activeSessionId")
+        defaults.removeObject(forKey: "tron.activeSessionId")
         logger.info("Cleared all local data", category: .session)
     }
 

@@ -542,8 +542,6 @@ fn active_readme_and_predecessor_inventories_do_not_claim_saa_complete_current_a
         "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
         "packages/agent/docs/primitive-code-cleanup-inventory.md",
         "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv",
-        "packages/agent/docs/security-authority-capability-boundaries-inventory.md",
-        "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv",
     ] {
         let source = read_repo_file(path);
         for forbidden in [
@@ -688,7 +686,6 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
         | "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv"
         | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
-        | "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv"
         | "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv"
         | "packages/agent/tests/hierarchical_rearchitecture/scorecard_inventory.rs" => {
             Some(ResidueClass::HistoricalCleanupEvidence)
