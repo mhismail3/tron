@@ -4,7 +4,7 @@
 //! Durable truth is still the session event store: lifecycle commands delegate
 //! to [`SessionManager`], which updates the event-store facade and then clears
 //! reconstructable runtime projections such as sequence counters, compaction
-//! handlers, and active-session cache entries.
+//! handlers, and reconstructed-session cache entries.
 //!
 //! ## Submodules
 //!

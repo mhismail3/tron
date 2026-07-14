@@ -5,7 +5,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `core` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
-//! | `session_manager` | Session CRUD, active session cache, fork |
+//! | `session_manager` | Session CRUD, reconstructed-state cache, prompt eviction guard, fork |
 //! | `session_reconstructor` | Rebuild session state from persisted events |
 //! | `agent_runner` | High-level primitive run and event ordering |
 //! | `agent_factory` | Creates `TronAgent` instances with provider and `execute` capability |
@@ -19,7 +19,7 @@
 //! ## Entry Points
 //!
 //! - [`core::Orchestrator`] coordinates sessions, runs, and stream broadcast.
-//! - [`session_manager::SessionManager`] owns the active-session cache and
+//! - [`session_manager::SessionManager`] owns the reconstructed-state cache and
 //!   delegates durable session lifecycle truth to the event store.
 //! - [`recovery::recover_incomplete_turns`] replays orphaned streaming journals
 //!   during startup.

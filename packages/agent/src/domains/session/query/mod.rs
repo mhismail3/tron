@@ -130,7 +130,7 @@ impl SessionQueryService {
             let items: Vec<Value> = sessions
                 .into_iter()
                 .map(|session| {
-                    let is_active = session_manager.is_active(&session.id);
+                    let is_cached = session_manager.is_cached(&session.id);
                     let is_running = orchestrator.has_active_run(&session.id);
                     let preview = previews.get(&session.id);
                     json!({
@@ -141,7 +141,8 @@ impl SessionQueryService {
                         "createdAt": session.created_at,
                         "lastActivity": session.last_activity_at,
                         "endedAt": session.ended_at,
-                        "isActive": is_active,
+                        // Wire compatibility: `isActive` means cache residency.
+                        "isActive": is_cached,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
                         "eventCount": session.event_count,

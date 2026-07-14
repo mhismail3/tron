@@ -19,8 +19,8 @@ async fn create_session() {
         .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
     assert!(!sid.is_empty());
-    assert!(mgr.is_active(&sid));
-    assert_eq!(mgr.active_count(), 1);
+    assert!(mgr.is_cached(&sid));
+    assert_eq!(mgr.cached_count(), 1);
 }
 
 #[tokio::test]
@@ -30,14 +30,14 @@ async fn resume_session() {
         .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
-    // Drop from active cache
+    // Drop from the projection cache.
     mgr.invalidate_session(&sid);
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 
     // Resume should reconstruct
     let state = mgr.resume_session(&sid).unwrap();
     assert_eq!(state.model, "test-model");
-    assert!(mgr.is_active(&sid));
+    assert!(mgr.is_cached(&sid));
 }
 
 #[tokio::test]
@@ -55,7 +55,7 @@ async fn resume_already_active() {
         Arc::ptr_eq(&first, &second),
         "cache must reuse one projection"
     );
-    assert_eq!(mgr.active_count(), 1);
+    assert_eq!(mgr.cached_count(), 1);
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn end_session() {
         .unwrap();
 
     mgr.end_session(&sid).unwrap();
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 }
 
 /// Anchors the wire contract that `session.end` is an actively emitted
@@ -192,11 +192,11 @@ async fn archive_and_unarchive() {
         .unwrap();
 
     mgr.archive_session(&sid).unwrap();
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 
     mgr.unarchive_session(&sid).unwrap();
     // Unarchive makes it available but doesn't add to active map
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 }
 
 #[tokio::test]
@@ -207,7 +207,7 @@ async fn delete_session() {
         .unwrap();
 
     mgr.delete_session(&sid).unwrap();
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 }
 
 #[tokio::test]
@@ -276,13 +276,13 @@ async fn evict_idle_session() {
     let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     // Force last_accessed to the past
-    if let Some(cached) = mgr.active_sessions.get(&sid) {
+    if let Some(cached) = mgr.cached_sessions.get(&sid) {
         *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
     }
 
     let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
     assert_eq!(evicted, 1);
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 }
 
 #[tokio::test]
@@ -292,23 +292,31 @@ async fn evict_preserves_recent_session() {
 
     let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
     assert_eq!(evicted, 0);
-    assert!(mgr.is_active(&sid));
+    assert!(mgr.is_cached(&sid));
 }
 
 #[tokio::test]
-async fn evict_preserves_processing_session() {
+async fn cold_prompt_resume_is_pinned_until_cleanup() {
     let mgr = make_manager();
     let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
-    // Mark as processing and make it old
-    let _ = mgr.mark_processing(&sid);
-    if let Some(cached) = mgr.active_sessions.get(&sid) {
+    mgr.invalidate_session(&sid);
+    assert!(!mgr.is_cached(&sid));
+
+    let state = mgr.resume_session_for_prompt(&sid).unwrap();
+    assert_eq!(state.model, "m");
+    let ordinary_resume = mgr.resume_session(&sid).unwrap();
+    assert!(Arc::ptr_eq(&state, &ordinary_resume));
+    if let Some(cached) = mgr.cached_sessions.get(&sid) {
         *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
     }
 
     let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
-    assert_eq!(evicted, 0, "processing session must not be evicted");
-    assert!(mgr.is_active(&sid));
+    assert_eq!(evicted, 0, "prompt-pinned session must not be evicted");
+    assert!(mgr.is_cached(&sid));
+
+    mgr.invalidate_session(&sid);
+    assert!(!mgr.is_cached(&sid));
 }
 
 #[tokio::test]
@@ -317,16 +325,16 @@ async fn evicted_session_reconstructs_on_resume() {
     let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     // Evict it
-    if let Some(cached) = mgr.active_sessions.get(&sid) {
+    if let Some(cached) = mgr.cached_sessions.get(&sid) {
         *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
     }
     let _ = mgr.evict_idle_sessions(Duration::from_secs(3600));
-    assert!(!mgr.is_active(&sid));
+    assert!(!mgr.is_cached(&sid));
 
     // Resume should reconstruct
     let state = mgr.resume_session(&sid).unwrap();
     assert_eq!(state.model, "m");
-    assert!(mgr.is_active(&sid));
+    assert!(mgr.is_cached(&sid));
 }
 
 #[tokio::test]
@@ -335,14 +343,14 @@ async fn evict_mixed_idle_and_active() {
     let idle = mgr.create_session("m", "/tmp", Some("idle")).unwrap();
     let recent = mgr.create_session("m", "/tmp", Some("recent")).unwrap();
 
-    if let Some(cached) = mgr.active_sessions.get(&idle) {
+    if let Some(cached) = mgr.cached_sessions.get(&idle) {
         *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
     }
 
     let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
     assert_eq!(evicted, 1);
-    assert!(!mgr.is_active(&idle));
-    assert!(mgr.is_active(&recent));
+    assert!(!mgr.is_cached(&idle));
+    assert!(mgr.is_cached(&recent));
 }
 
 #[tokio::test]
@@ -353,8 +361,8 @@ async fn evict_zero_ttl_evicts_all_idle() {
 
     let evicted = mgr.evict_idle_sessions(Duration::ZERO);
     assert_eq!(evicted, 2);
-    assert!(!mgr.is_active(&s1));
-    assert!(!mgr.is_active(&s2));
+    assert!(!mgr.is_cached(&s1));
+    assert!(!mgr.is_cached(&s2));
 }
 
 #[tokio::test]
@@ -362,16 +370,4 @@ async fn evict_empty_map_is_noop() {
     let mgr = make_manager();
     let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
     assert_eq!(evicted, 0);
-}
-
-#[tokio::test]
-async fn processing_flag_lifecycle() {
-    let mgr = make_manager();
-    let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
-
-    assert!(!mgr.is_processing(&sid));
-    mgr.mark_processing(&sid);
-    assert!(mgr.is_processing(&sid));
-    mgr.clear_processing(&sid);
-    assert!(!mgr.is_processing(&sid));
 }

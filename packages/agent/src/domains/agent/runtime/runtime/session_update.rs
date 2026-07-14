@@ -26,7 +26,7 @@ pub async fn resume_prompt_session(
 ) -> Result<Arc<ReconstructedState>, CapabilityError> {
     run_blocking_task("agent.prompt.resume", move || {
         session_manager
-            .resume_session(&session_id)
+            .resume_session_for_prompt(&session_id)
             .map_err(|error| CapabilityError::Internal {
                 message: error.to_string(),
             })

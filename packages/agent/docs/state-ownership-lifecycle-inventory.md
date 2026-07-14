@@ -97,7 +97,7 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 
 | Surface | Owner | Lifecycle proof |
 |---|---|---|
-| Session manager active cache | `agent_orchestrator` | `SessionManager` owns only reconstructable active-session cache state: insert on create/resume, remove on end/delete, idle eviction through `retain`, and processing flags set/cleared around active turns. Dead `SessionManager::plan_mode` state was deleted. |
+| Session manager projection cache | `agent_orchestrator` | `SessionManager` owns only reconstructable session projections: insert on create/resume, remove on end/delete, idle eviction through `retain`, and a monotonic prompt-run eviction pin removed with the cache entry at cleanup. The orchestrator run registry separately owns activity and same-session concurrency. Dead `SessionManager::plan_mode` state was deleted. |
 | Orchestrator active runs | `agent_orchestrator` | `StartedRun` owns active-run registration and semaphore permit release through `Drop`; retained sessions use `RetainGuard` drop cleanup. |
 | Sequence and compaction runtime state | `agent_orchestrator` | Sequence counters and compaction handlers are owner-private maps with remove/clear paths on session cleanup and orchestrator shutdown. |
 | Invocation abort registry | `agent_orchestrator` | `InvocationAbortRegistry` owns session/id cancellation tokens; `InvocationAbortGuard` unregisters entries on drop and abort paths cancel matching tokens. |
@@ -127,7 +127,7 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Surface | Owner | Lifecycle proof |
 |---|---|---|
 | Session lifecycle wrappers | `session_lifecycle` | Create normalizes working directories and initializes sequence counters; fork initializes a child counter; archive/unarchive mutates reversible `ended_at` row state; delete removes active-session projections and calls session-scoped event-store cleanup. |
-| Session manager active cache | `agent_orchestrator` | Active session entries insert on create/resume/fork, remove on end/delete, retain only while recent or processing, and rebuild on resume from event-store truth after eviction or restart. |
+| Session manager projection cache | `agent_orchestrator` | Session projections insert on create/resume/fork, remove on end/delete, remain while recent or pinned by an active prompt, and rebuild on resume from event-store truth after eviction or restart. |
 | Event-store create transaction | `session_event_store` | Session creation owns workspace get/create, session row insertion, root `session.start` event insertion, root/head updates, and counter initialization in one event-store boundary. |
 | Append ordering and payload refs | `session_event_store` / `shared_storage` | Appends acquire the session lock, derive `MAX(sequence) + 1`, enforce `UNIQUE(session_id, sequence)`, store large payloads as shared-storage refs, and update session head/counters atomically. |
 | Forked ancestor history | `session_event_store` | Fork creates a child session row and `session.fork` root event parented to the source event; reconstruction follows the ordered cross-session ancestor chain without copying source-session truth. |

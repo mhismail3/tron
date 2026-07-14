@@ -316,13 +316,13 @@ mod tests {
     #[test]
     fn context_has_orchestrator() {
         let ctx = make_test_context();
-        assert!(ctx.orchestrator.can_accept_session());
+        assert_eq!(ctx.orchestrator.active_run_count(), 0);
     }
 
     #[test]
     fn context_has_session_manager() {
         let ctx = make_test_context();
-        assert_eq!(ctx.session_manager.active_count(), 0);
+        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
     }
 
     #[tokio::test]
@@ -332,7 +332,7 @@ mod tests {
             .session_manager
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
-        assert_eq!(ctx.orchestrator.active_session_count(), 1);
+        assert_eq!(ctx.orchestrator.cached_session_count(), 1);
     }
 
     #[test]
@@ -515,8 +515,8 @@ mod tests {
     #[test]
     fn make_test_context_populates_all_fields() {
         let ctx = make_test_context();
-        assert!(ctx.orchestrator.can_accept_session());
-        assert_eq!(ctx.session_manager.active_count(), 0);
+        assert_eq!(ctx.orchestrator.active_run_count(), 0);
+        assert_eq!(ctx.orchestrator.cached_session_count(), 0);
         assert!(ctx.event_store.list_workspaces().is_ok());
         assert!(!ctx.settings_path.as_os_str().is_empty());
     }

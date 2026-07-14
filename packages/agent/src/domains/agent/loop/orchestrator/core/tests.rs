@@ -19,21 +19,18 @@ fn make_orchestrator() -> Orchestrator {
 #[test]
 fn create_orchestrator() {
     let orch = make_orchestrator();
-    assert_eq!(orch.max_concurrent_sessions(), MAX_CONCURRENT_SESSIONS);
-    assert_eq!(orch.active_session_count(), 0);
-    assert!(orch.can_accept_session());
+    assert_eq!(orch.cached_session_count(), 0);
 }
 
 #[tokio::test]
 async fn create_session_through_orchestrator() {
     let orch = make_orchestrator();
-    let sid = orch
+    let _ = orch
         .session_manager()
         .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
-    assert_eq!(orch.active_session_count(), 1);
-    assert!(orch.is_session_busy(&sid));
+    assert_eq!(orch.cached_session_count(), 1);
 }
 
 #[tokio::test]
@@ -47,21 +44,6 @@ async fn subscribe_to_events() {
 
     let event = rx.try_recv().unwrap();
     assert_eq!(event.event_type(), "agent_start");
-}
-
-#[tokio::test]
-async fn max_concurrent_enforced() {
-    let orch = make_orchestrator();
-
-    for i in 0..MAX_CONCURRENT_SESSIONS {
-        let _ = orch
-            .session_manager()
-            .create_session("model", &format!("/tmp/{i}"), None)
-            .unwrap();
-    }
-
-    assert_eq!(orch.active_session_count(), MAX_CONCURRENT_SESSIONS);
-    assert!(!orch.can_accept_session());
 }
 
 // --- Run tracking tests ---
@@ -272,28 +254,6 @@ async fn shutdown_clears_invocations() {
 
     orch.shutdown().await.unwrap();
     assert!(rx.await.is_err()); // sender was dropped
-}
-
-// --- is_session_busy advisory tests ---
-
-#[test]
-fn is_session_busy_reflects_active_run() {
-    let orch = make_orchestrator();
-    assert!(!orch.is_session_busy("s1"));
-    let run = orch.begin_run("s1", "run_1").unwrap();
-    assert!(orch.is_session_busy("s1"));
-    drop(run);
-    assert!(!orch.is_session_busy("s1"));
-}
-
-#[tokio::test]
-async fn is_session_busy_reflects_active_session() {
-    let orch = make_orchestrator();
-    let sid = orch
-        .session_manager()
-        .create_session("model", "/tmp", Some("test"))
-        .unwrap();
-    assert!(orch.is_session_busy(&sid));
 }
 
 // --- Sequence counter tests ---

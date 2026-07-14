@@ -248,15 +248,17 @@ fn ensure_worker_peer_is_loopback(addr: SocketAddr) -> Result<(), StatusCode> {
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let connections = state.engine_clients.connection_count();
-    let sessions = state.runtime_context.orchestrator.active_session_count();
-    let resp = health::health_check(state.start_time, connections, sessions);
+    // Wire compatibility: `active_sessions` reports cached session projections.
+    let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
+    let resp = health::health_check(state.start_time, connections, cached_sessions);
     Json(resp)
 }
 
 /// GET /health/deep — Deep health check with per-subsystem results.
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.engine_clients.connection_count();
-    let sessions = state.runtime_context.orchestrator.active_session_count();
+    // Wire compatibility: `active_sessions` reports cached session projections.
+    let cached_sessions = state.runtime_context.orchestrator.cached_session_count();
     let event_store = state.runtime_context.event_store.clone();
     let tron_home = crate::domains::settings::profile::tron_home_dir();
     let response = state
@@ -265,7 +267,7 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
             Ok(health::deep_health_check(
                 state.start_time,
                 connections,
-                sessions,
+                cached_sessions,
                 &event_store,
                 &tron_home,
             ))
@@ -278,7 +280,7 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
             status: "unhealthy".into(),
             uptime_secs: state.start_time.elapsed().as_secs(),
             connections,
-            active_sessions: sessions,
+            active_sessions: cached_sessions,
             checks: vec![health::DeepHealthCheck {
                 name: "deepHealth".into(),
                 status: "fail".into(),
@@ -380,7 +382,7 @@ mod tests {
     fn runtime_context_accessible() {
         let server = make_server();
         let ctx = server.runtime_context();
-        assert!(ctx.orchestrator.can_accept_session());
+        assert_eq!(ctx.orchestrator.active_run_count(), 0);
     }
 
     #[tokio::test]

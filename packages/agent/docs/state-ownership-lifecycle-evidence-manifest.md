@@ -20,7 +20,7 @@ and
 | SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with an initial 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. SOL-4 added two narrower runtime service rows, SOL-6 added the session lifecycle module contract row, and SOL-8 added the iOS architecture state-ownership doc row, bringing the TSV to 480 rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Closed. | SOL-1 state inventory checkpoint |
 | SOL-2 | passed_after_fix | Added and passed owner-scoped truth taxonomy guards over the TSV: allowed classes are documented; `unclassified_owner` is rejected; iOS/script/CI/docs rows cannot claim canonical server truth; canonical truth is restricted to session event-store, settings profile, and shared profile owners; secret rows are restricted to auth/Keychain/token owners; local device preferences remain iOS-local. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture` -> exit 0. | Closed. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | passed_after_fix | Source-backed bootstrap lifecycle proof now covers directories, bearer-token materialization, canonical DB policy, generation archive, process flock, integrity check, migrations, shared storage schema, logging, startup retention/size-budget maintenance, engine host durable catalog hydration, domain/worker registration, crash-journal recovery, background task registration, bind, graceful shutdown, log flush, and final checkpoint. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_server_bootstrap_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation targets listed in the SOL-3 evidence section passed. | Closed. | SOL-3 server bootstrap lifecycle checkpoint |
-| SOL-4 | passed_after_fix | Deleted dead `SessionManager::plan_mode` state and added source-backed runtime lifecycle proof for active-session cache flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and app bootstrap task registration. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-4 evidence passed. | Closed. | SOL-4 runtime task and memory lifecycle checkpoint |
+| SOL-4 | passed_after_fix | Deleted dead `SessionManager::plan_mode` state and added source-backed runtime lifecycle proof for session-cache eviction pins, run/retain RAII guards, sequence/compaction cleanup, invocation abort guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and app bootstrap task registration. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-4 evidence passed. | Closed. | SOL-4 runtime task and memory lifecycle checkpoint |
 | SOL-5 | passed_after_fix | Added source-backed durable substrate proof for the engine ledger, idempotency rows, queues, streams, resource versions, grants, leases, audit-only compensation records, state store revisions, payload refs, retention, checkpoint, export, and SQLite/in-memory primitive store bundles. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_engine_durable_substrate_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-5 evidence passed. | Closed. | SOL-5 engine durable substrate lifecycle checkpoint |
 | SOL-6 | passed_after_fix | Removed dead single-event physical deletion and added source-backed session/event-store lifecycle proof for create, resume, append, fork, end, archive, unarchive, delete, query, reconstruction, export, and session-scoped cleanup. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_session_event_store_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-6 evidence passed. | Closed. | SOL-6 session event-store lifecycle checkpoint |
 | SOL-7 | passed_after_fix | Fixed Google credential refresh so persisted tokens are updated only after the refresh path acquires the process-local refresh mutex, auth file lock, and fresh disk snapshot; tightened all OAuth refresh paths so persistence failures fail refresh instead of using stale durable truth; added source-backed proof for sparse settings writes/rollback, profile runtime snapshots, auth.json materialization, bearer-token lifecycle, OAuth pending-flow TTL, canonical auth write boundaries, provider refresh persistence, and ephemeral model-provider auth copies. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_settings_auth_secrets_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-7 evidence passed. | Closed. | SOL-7 settings auth secrets checkpoint |
@@ -114,10 +114,11 @@ Bootstrap lifecycle proof:
 Runtime task and memory lifecycle proof:
 
 - `SessionManager::plan_mode`, `set_plan_mode`, and `is_plan_mode` were deleted;
-  session manager state is now the reconstructable active-session cache plus
-  explicit processing flags.
-- Active sessions have cache insert/remove/retain paths, idle eviction, and
-  processing flags that are set for active work and cleared afterward.
+  session manager state is now reconstructable session projections plus a
+  monotonic prompt-run eviction pin.
+- Session projections have cache insert/remove/retain paths and idle eviction;
+  prompt resume pins the projection atomically, while prompt cleanup removes
+  the cache entry. The run registry remains the activity/concurrency owner.
 - Orchestrator active runs are guarded by `StartedRun` drop cleanup; retained
   sessions are guarded by `RetainGuard` drop cleanup; sequence counters,
   compaction handlers, invocation abort tokens, and capability pending calls
@@ -191,12 +192,12 @@ Session/event-store lifecycle proof:
   cross-session chain owned by the event store.
 - End, archive, unarchive, and delete are explicit session lifecycle paths:
   end appends `session.end`; archive sets `ended_at`; unarchive clears
-  `ended_at`; delete removes the active cache entry, clears sequence and
+  `ended_at`; delete removes the projection cache entry, clears sequence and
   compaction projections, emits `SessionDeleted`, and calls session-scoped
   event-store cleanup.
 - Runtime session-manager state is a reconstructable projection over event-store
-  truth. Active sessions insert on create/resume/fork, remove on end/delete,
-  idle eviction skips processing sessions, and resume rebuilds missing cache
+  truth. Session projections insert on create/resume/fork, remove on end/delete,
+  idle eviction skips prompt-pinned entries, and resume rebuilds missing cache
   entries from stored session state.
 - Query, reconstruction, and export paths remain event-store owned: resume/list
   read session rows and previews, state reconstruction resolves blob-backed

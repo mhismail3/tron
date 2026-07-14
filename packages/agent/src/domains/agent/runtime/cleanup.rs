@@ -34,7 +34,6 @@ impl PromptRunCleanup {
     }
 
     pub(super) fn release(&mut self) {
-        self.session_manager.clear_processing(&self.session_id);
         self.session_manager.invalidate_session(&self.session_id);
         let _ = self.started_run.take();
     }

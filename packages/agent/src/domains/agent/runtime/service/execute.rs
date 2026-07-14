@@ -63,7 +63,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         "agent prompt run started"
     );
 
-    let _ = session_manager.mark_processing(&session_id);
     let mut run_cleanup =
         PromptRunCleanup::new(started_run, session_manager.clone(), session_id.clone());
     let cancel_token = run_cleanup.cancel_token();

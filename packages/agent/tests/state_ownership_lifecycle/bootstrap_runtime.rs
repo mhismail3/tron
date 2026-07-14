@@ -169,17 +169,18 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
         );
     }
     for required in [
-        "active_sessions: DashMap<String, CachedSession>",
+        "cached_sessions: DashMap<String, CachedSession>",
         "state: Arc<ReconstructedState>",
         "last_accessed: Mutex<Instant>",
-        "is_processing: AtomicBool",
+        "eviction_pinned: AtomicBool",
+        "AtomicBool::new(eviction_pinned)",
         "insert(session_id.clone()",
-        "insert(session_id.to_owned()",
-        "active_sessions.remove",
-        "active_sessions.retain",
-        "cached.is_processing.load",
-        "cached.is_processing.store(true",
-        "cached.is_processing.store(false",
+        "cached_sessions.entry(session_id.to_owned())",
+        "Entry::Vacant",
+        "cached_sessions.remove",
+        "cached_sessions.retain",
+        "cached.eviction_pinned.load",
+        "self.eviction_pinned.store(true",
     ] {
         assert!(
             session_manager.contains(required),

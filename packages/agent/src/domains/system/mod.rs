@@ -191,7 +191,8 @@ fn system_info_value(payload: &Value, deps: &Deps, allow_server_context: bool) -
     json!({
         "version": env!("CARGO_PKG_VERSION"),
         "uptime": deps.server_start_time.elapsed().as_secs(),
-        "activeSessions": deps.orchestrator.active_session_count(),
+        // Wire compatibility: `activeSessions` reports cached session projections.
+        "activeSessions": deps.orchestrator.cached_session_count(),
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "runtime": "agent",

@@ -429,29 +429,13 @@ impl Orchestrator {
         }
     }
 
-    /// Check if a session is busy (currently processing).
+    /// Number of reconstructed session projections currently cached.
     ///
-    /// This is an **advisory** check — it reads from two independent data stores
-    /// (`active_runs` and `session_manager`) without a single atomic transaction.
-    /// Callers should tolerate stale results. The authoritative guard is
-    /// `begin_run()`, which rejects duplicate runs under its own lock.
-    pub fn is_session_busy(&self, session_id: &str) -> bool {
-        self.has_active_run(session_id) || self.session_manager.is_active(session_id)
-    }
-
-    /// Active session count.
-    pub fn active_session_count(&self) -> usize {
-        self.session_manager.active_count()
-    }
-
-    /// Maximum concurrent session limit.
-    pub fn max_concurrent_sessions(&self) -> usize {
-        MAX_CONCURRENT_SESSIONS
-    }
-
-    /// Whether we can accept another concurrent session.
-    pub fn can_accept_session(&self) -> bool {
-        self.session_manager.active_count() < MAX_CONCURRENT_SESSIONS
+    /// The health and `system.info` wire contracts retain their historical
+    /// `active_sessions` / `activeSessions` names for this cache-residency value.
+    /// Active run truth lives in `RunRegistry` and is exposed separately.
+    pub(crate) fn cached_session_count(&self) -> usize {
+        self.session_manager.cached_count()
     }
 
     /// Register a capability invocation, returning a receiver for the result.

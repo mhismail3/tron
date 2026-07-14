@@ -29,11 +29,11 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         &[
             "pub fn create_session",
             ".create_session(model, workspace_path, title, None)",
-            "active_sessions",
+            "cached_sessions",
             "pub fn resume_session",
             "session_reconstructor::reconstruct",
             "pub fn end_session",
-            "active_sessions.remove(session_id)",
+            "cached_sessions.remove(session_id)",
             ".append(&AppendOptions",
             "EventType::SessionEnd",
             ".end_session(session_id)",
@@ -44,7 +44,7 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "head_event_id",
         ".fork(",
         "pub fn archive_session",
-        "active_sessions.remove(session_id)",
+        "cached_sessions.remove(session_id)",
         ".end_session(session_id)",
         "pub fn unarchive_session",
         ".clear_session_ended(session_id)",
@@ -52,8 +52,8 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         ".delete_session(session_id)",
         "pub fn evict_idle_sessions",
         "retain(|session_id, cached|",
-        "pub fn mark_processing",
-        "pub fn clear_processing",
+        "pub(in crate::domains::agent) fn resume_session_for_prompt",
+        "pub fn invalidate_session",
     ] {
         assert!(
             session_manager.contains(required),
