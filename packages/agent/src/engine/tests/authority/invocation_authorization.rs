@@ -1,6 +1,6 @@
 use super::*;
 use crate::engine::authority::grants::{
-    ConsumeGrantInvocationBudget, DeriveGrant, SqliteEngineGrantStore,
+    ConsumeGrantInvocationBudget, DeriveGrant, EngineGrantLifecycle, SqliteEngineGrantStore,
 };
 
 #[tokio::test]
@@ -582,6 +582,97 @@ fn sqlite_grant_store_consumes_remaining_invocations_durably() {
     assert_eq!(persisted.budget["remainingInvocations"], json!(0));
     assert_eq!(persisted.revision, 2);
     assert!(persisted.updated_at > persisted.created_at);
+}
+
+#[test]
+fn sqlite_grant_store_revokes_obsolete_bootstrap_trees_on_open() {
+    fn derive_fixture(
+        store: &mut SqliteEngineGrantStore,
+        grant_id: &str,
+        parent_grant_id: &str,
+        can_delegate: bool,
+    ) {
+        store
+            .derive(DeriveGrant {
+                grant_id: Some(grant(grant_id)),
+                parent_grant_id: grant(parent_grant_id),
+                subject_actor_id: None,
+                subject_worker_id: None,
+                subject_invocation_id: None,
+                allowed_capabilities: vec!["demo::read".to_owned()],
+                allowed_namespaces: vec!["demo".to_owned()],
+                allowed_authority_scopes: vec!["demo.read".to_owned()],
+                allowed_resource_kinds: vec!["artifact".to_owned()],
+                resource_selectors: vec!["kind:artifact".to_owned()],
+                file_roots: vec!["*".to_owned()],
+                network_policy: "none".to_owned(),
+                max_risk: RiskLevel::Low,
+                budget: json!({"remainingInvocations": 2}),
+                expires_at: None,
+                can_delegate,
+                provenance: json!({"source": "bootstrap-retirement-fixture"}),
+                trace_id: trace(&format!("{grant_id}-derive")),
+            })
+            .unwrap();
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("grant-bootstrap-reconciliation.sqlite");
+    let obsolete_root_id = grant("test-grant");
+    let second_obsolete_root_id = grant("grant:test");
+    let obsolete_child_id = grant("obsolete-bootstrap-child");
+    let mut store = SqliteEngineGrantStore::open(&db_path).unwrap();
+    derive_fixture(&mut store, obsolete_root_id.as_str(), "grant", true);
+    derive_fixture(&mut store, second_obsolete_root_id.as_str(), "grant", false);
+    derive_fixture(
+        &mut store,
+        obsolete_child_id.as_str(),
+        obsolete_root_id.as_str(),
+        false,
+    );
+    drop(store);
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    assert_eq!(
+        conn.execute(
+            "UPDATE engine_grants
+             SET parent_grant_id = NULL, provenance_json = ?2
+             WHERE grant_id IN (?1, ?3)",
+            rusqlite::params![
+                obsolete_root_id.as_str(),
+                json!({"source": "engine.bootstrap"}).to_string(),
+                second_obsolete_root_id.as_str()
+            ],
+        )
+        .unwrap(),
+        2
+    );
+    drop(conn);
+
+    let reopened = SqliteEngineGrantStore::open(&db_path).unwrap();
+    for grant_id in [
+        &obsolete_root_id,
+        &second_obsolete_root_id,
+        &obsolete_child_id,
+    ] {
+        let retired = reopened.inspect(grant_id).unwrap().unwrap();
+        assert_eq!(retired.lifecycle, EngineGrantLifecycle::Revoked);
+        assert_eq!(retired.revision, 2);
+    }
+    let current_root = reopened.inspect(&grant("grant")).unwrap().unwrap();
+    assert_eq!(current_root.lifecycle, EngineGrantLifecycle::Active);
+    drop(reopened);
+
+    let reopened_again = SqliteEngineGrantStore::open(&db_path).unwrap();
+    for grant_id in [
+        &obsolete_root_id,
+        &second_obsolete_root_id,
+        &obsolete_child_id,
+    ] {
+        let retired = reopened_again.inspect(grant_id).unwrap().unwrap();
+        assert_eq!(retired.lifecycle, EngineGrantLifecycle::Revoked);
+        assert_eq!(retired.revision, 2, "retirement must be idempotent");
+    }
 }
 
 #[tokio::test]

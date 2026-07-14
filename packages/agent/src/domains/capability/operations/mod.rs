@@ -395,7 +395,7 @@ mod tests {
             causal_context: CausalContext::new(
                 ActorId::new("agent:unsupported-operation-test").expect("actor id"),
                 ActorKind::Agent,
-                AuthorityGrantId::new("test-grant").expect("grant id"),
+                AuthorityGrantId::new("manual-grant").expect("grant id"),
                 TraceId::new("unsupported-operation-trace").expect("trace id"),
             )
             .with_session_id(session_id),

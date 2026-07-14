@@ -36,8 +36,11 @@
 //! INVARIANT: pathless execute operations do not require working-directory
 //! metadata. When metadata or a relative path is present, authorization
 //! normalizes it and enforces canonical file-root containment before dispatch.
+//! INVARIANT: test-only bootstrap ids never seed production stores. Opening a
+//! durable store revokes obsolete engine-bootstrap roots and every descendant
+//! so an upgrade cannot retain retired wildcard authority.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use chrono::Utc;
@@ -68,6 +71,10 @@ use derivation::{ensure_child_narrows_parent, ensure_parent_can_derive, validate
 use model::TEST_BOOTSTRAP_GRANT_IDS;
 use model::{bootstrap_grant, grant_event, grant_from_request};
 use sqlite_codec::{json_string, risk_as_str, row_to_grant, sqlite_err};
+
+pub(crate) fn is_bootstrap_grant_id(grant_id: &AuthorityGrantId) -> bool {
+    model::is_bootstrap_grant_id(grant_id.as_str())
+}
 
 /// In-memory grant store.
 #[derive(Clone, Debug)]
@@ -292,8 +299,9 @@ impl SqliteEngineGrantStore {
                ON engine_grant_events(grant_id, occurred_at);",
         )
         .map_err(|err| sqlite_err("grant.init", err.to_string()))?;
-        let store = Self { conn };
+        let mut store = Self { conn };
         store.seed_bootstrap_grants()?;
+        store.revoke_obsolete_bootstrap_trees()?;
         Ok(store)
     }
 
@@ -505,6 +513,63 @@ impl SqliteEngineGrantStore {
             }
         }
         Ok(())
+    }
+
+    fn revoke_obsolete_bootstrap_trees(&mut self) -> Result<()> {
+        let grants = self.load_all_grants()?;
+        let mut children = BTreeMap::<AuthorityGrantId, Vec<AuthorityGrantId>>::new();
+        let mut pending = Vec::new();
+        for grant in &grants {
+            if let Some(parent_grant_id) = &grant.parent_grant_id {
+                children
+                    .entry(parent_grant_id.clone())
+                    .or_default()
+                    .push(grant.grant_id.clone());
+                continue;
+            }
+            let is_engine_bootstrap =
+                grant.provenance.get("source").and_then(Value::as_str) == Some("engine.bootstrap");
+            let is_retired_bootstrap =
+                model::RETIRED_BOOTSTRAP_GRANT_IDS.contains(&grant.grant_id.as_str());
+            if is_retired_bootstrap
+                || (is_engine_bootstrap && !is_bootstrap_grant_id(&grant.grant_id))
+            {
+                pending.push(grant.grant_id.clone());
+            }
+        }
+
+        let mut obsolete = BTreeSet::new();
+        while let Some(grant_id) = pending.pop() {
+            if !obsolete.insert(grant_id.clone()) {
+                continue;
+            }
+            if let Some(child_ids) = children.get(&grant_id) {
+                pending.extend(child_ids.iter().cloned());
+            }
+        }
+
+        let trace_id = TraceId::new("engine-bootstrap-reconciliation")?;
+        for grant_id in obsolete {
+            self.revoke(&grant_id, trace_id.clone())?;
+        }
+        Ok(())
+    }
+
+    fn load_all_grants(&self) -> Result<Vec<EngineGrant>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM engine_grants ORDER BY created_at ASC")
+            .map_err(|err| sqlite_err("grant.bootstrap_reconciliation.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map([], row_to_grant)
+            .map_err(|err| sqlite_err("grant.bootstrap_reconciliation", err.to_string()))?;
+        let mut grants = Vec::new();
+        for row in rows {
+            grants.push(row.map_err(|err| {
+                sqlite_err("grant.bootstrap_reconciliation.row", err.to_string())
+            })?);
+        }
+        Ok(grants)
     }
 
     fn insert_grant(&self, grant: &EngineGrant) -> Result<()> {

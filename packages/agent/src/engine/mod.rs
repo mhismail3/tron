@@ -291,9 +291,7 @@ pub use runtime::worker_protocol::{
 /// Return whether a grant id is one of the engine-owned bootstrap roots.
 #[must_use]
 pub(crate) fn is_bootstrap_authority_grant_id(grant_id: &AuthorityGrantId) -> bool {
-    authority::grants::BOOTSTRAP_GRANT_IDS
-        .iter()
-        .any(|bootstrap| grant_id.as_str() == *bootstrap)
+    authority::grants::is_bootstrap_grant_id(grant_id)
 }
 
 #[cfg(test)]

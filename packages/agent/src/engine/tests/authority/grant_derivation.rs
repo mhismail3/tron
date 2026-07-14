@@ -225,6 +225,13 @@ async fn grant_derivation_rejects_broader_child_grants() {
 async fn bootstrap_grants_are_explicit_engine_owned_roots() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
 
+    for test_only_id in ["test-grant", "grant:test"] {
+        assert!(
+            !crate::engine::authority::grants::BOOTSTRAP_GRANT_IDS.contains(&test_only_id),
+            "test-only grant {test_only_id} must not seed production stores"
+        );
+    }
+
     for grant_id in crate::engine::authority::grants::BOOTSTRAP_GRANT_IDS {
         let inspected = handle
             .invoke(host_invocation(

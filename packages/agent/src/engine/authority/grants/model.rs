@@ -187,9 +187,9 @@ pub const BOOTSTRAP_GRANT_IDS: &[&str] = &[
     "agent-capability-runtime",
     "capability-grant",
     "prompt-runtime",
-    "test-grant",
-    "grant:test",
 ];
+
+pub(super) const RETIRED_BOOTSTRAP_GRANT_IDS: &[&str] = &["test-grant", "grant:test"];
 
 #[cfg(test)]
 pub(super) const TEST_BOOTSTRAP_GRANT_IDS: &[&str] = &[
@@ -199,6 +199,21 @@ pub(super) const TEST_BOOTSTRAP_GRANT_IDS: &[&str] = &[
     "agent-grant",
     "admin-grant",
 ];
+
+pub(super) fn is_bootstrap_grant_id(grant_id: &str) -> bool {
+    BOOTSTRAP_GRANT_IDS.contains(&grant_id) || test_bootstrap_grant_ids().contains(&grant_id)
+}
+
+fn test_bootstrap_grant_ids() -> &'static [&'static str] {
+    #[cfg(test)]
+    {
+        TEST_BOOTSTRAP_GRANT_IDS
+    }
+    #[cfg(not(test))]
+    {
+        &[]
+    }
+}
 
 pub(super) fn bootstrap_grant(grant_id: &str) -> EngineGrant {
     let now = Utc::now();

@@ -1322,6 +1322,8 @@ run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
 scoped to the exact primitive function, no
 namespace authority, state read/write support, and `networkPolicy: none`; the
+production bootstrap set excludes test fixture grants, and opening the durable
+authority store revokes any retired engine-bootstrap root and its descendants.
 worker rejects bootstrap grants, public caller contexts, and system-scoped
 state. File and process operations additionally require trusted working
 directory metadata before resolving paths. Trace records use those trusted facts
