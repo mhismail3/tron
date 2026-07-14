@@ -5,7 +5,8 @@
 //! events + in-flight state are returned in one response. Non-forked sessions
 //! use session-local sequence order; forked sessions use the ordered ancestor
 //! chain, not just events physically owned by the child session, so clients
-//! render inherited history at the fork point.
+//! render inherited history at the fork point. Durable rows and events are read
+//! from `EventStore` directly; the agent cache contributes no query truth.
 //!
 //! ## In-flight reconciliation
 //!
@@ -107,7 +108,6 @@ impl SessionReconstructionService {
         let limit = Some(effective_limit);
 
         let event_store = deps.event_store.clone();
-        let session_manager = deps.session_manager.clone();
         let orchestrator = deps.orchestrator.clone();
         let sid = session_id.clone();
         let cursor_event_id = before_event_id.clone();
@@ -116,10 +116,10 @@ impl SessionReconstructionService {
         let (events, has_more, session_metadata) =
             run_blocking_task("session.reconstruct.load", move || {
                 // Verify session exists
-                let session = session_manager
+                let session = event_store
                     .get_session(&sid)
                     .map_err(|e| CapabilityError::Internal {
-                        message: e.to_string(),
+                        message: format!("Persistence error: {e}"),
                     })?
                     .ok_or_else(|| CapabilityError::NotFound {
                         code: errors::SESSION_NOT_FOUND.into(),

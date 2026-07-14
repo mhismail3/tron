@@ -4,7 +4,9 @@
 //! over immutable creation/session-ID keys beneath one server-issued
 //! `snapshotAsOf` boundary. Mutable activity cannot move a row between pages,
 //! and clients can assemble a generous bounded snapshot without one unbounded
-//! database read.
+//! database read. Single-session row lookups read `EventStore` directly;
+//! `SessionManager` retains resume/cache behavior and the bounded list adapter
+//! also used by orchestrator shutdown.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -177,13 +179,13 @@ impl SessionQueryService {
         deps: &Deps,
         session_id: String,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
+        let event_store = deps.event_store.clone();
         let session_id_for_head = session_id.clone();
         run_blocking_task("session.get_head", move || {
-            let session = session_manager
+            let session = event_store
                 .get_session(&session_id_for_head)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -206,10 +208,10 @@ impl SessionQueryService {
         let event_store = deps.event_store.clone();
         let session_id_for_state = session_id.clone();
         run_blocking_task("session.get_state", move || {
-            let session = session_manager
+            let session = event_store
                 .get_session(&session_id_for_state)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -259,14 +261,13 @@ impl SessionQueryService {
     /// unbounded — the payload is serialized in memory before being
     /// returned, which matches how `session.reconstruct` already behaves.
     pub(crate) async fn export(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let session_id_for_export = session_id.clone();
         run_blocking_task("session.export", move || {
-            let session = session_manager
+            let session = event_store
                 .get_session(&session_id_for_export)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),
@@ -320,14 +321,13 @@ impl SessionQueryService {
         limit: Option<usize>,
         before_id: Option<String>,
     ) -> Result<Value, CapabilityError> {
-        let session_manager = deps.session_manager.clone();
         let event_store = deps.event_store.clone();
         let session_id_for_history = session_id.clone();
         run_blocking_task("session.get_history", move || {
-            let _ = session_manager
+            let _ = event_store
                 .get_session(&session_id_for_history)
                 .map_err(|error| CapabilityError::Internal {
-                    message: error.to_string(),
+                    message: format!("Persistence error: {error}"),
                 })?
                 .ok_or_else(|| CapabilityError::NotFound {
                     code: errors::SESSION_NOT_FOUND.into(),

@@ -260,16 +260,6 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Get session info.
-    pub(in crate::domains) fn get_session(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<crate::domains::session::event_store::SessionRow>, RuntimeError> {
-        self.event_store
-            .get_session(session_id)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))
-    }
-
     /// List sessions.
     pub(in crate::domains) fn list_sessions(
         &self,

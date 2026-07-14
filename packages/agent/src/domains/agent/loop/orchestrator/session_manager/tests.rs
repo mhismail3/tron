@@ -251,17 +251,6 @@ async fn list_sessions_filters_by_workspace_path_and_offset() {
 }
 
 #[tokio::test]
-async fn get_session() {
-    let mgr = make_manager();
-    let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"))
-        .unwrap();
-
-    let session = mgr.get_session(&sid).unwrap();
-    assert!(session.is_some());
-}
-
-#[tokio::test]
 async fn session_not_found() {
     let mgr = make_manager();
     let result = mgr.resume_session("nonexistent");

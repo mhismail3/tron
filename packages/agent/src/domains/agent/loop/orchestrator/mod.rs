@@ -20,7 +20,9 @@
 //!
 //! - [`core::Orchestrator`] coordinates sessions, runs, and stream broadcast.
 //! - [`session_manager::SessionManager`] owns the reconstructed-state cache and
-//!   delegates durable session lifecycle truth to the event store.
+//!   delegates durable session lifecycle mutation to the event store;
+//!   single-session query owners read rows from the event store directly, while
+//!   the bounded list adapter is also used by orchestrator shutdown.
 //! - The runtime reconstruction projection contains only execution inputs used
 //!   on resume; prompt-request and agent-construction owners retain configuration
 //!   policy.
