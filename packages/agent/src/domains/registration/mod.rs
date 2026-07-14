@@ -8,10 +8,15 @@
 //! that tool performs direct primitive operations rather than catalog routing.
 //! The registration entrypoint is crate-private: transport setup is the
 //! server-facing facade, while this module owns the concrete domain-worker
-//! wiring. `module_registry` owns the manifest resource contract, while
+//! wiring. `catalog` owns shared capability contract types and stable
+//! registration identities without maintaining a second domain enumeration.
+//! `module_registry` owns the manifest resource contract, while
 //! `module_manifests` owns the ordered first-party payload composition.
 //! Registration installs both before any domain worker or function; the engine
 //! owns only generic type registration and version-preserving reconciliation.
+//! The complete production composition validates function ownership,
+//! canonical identity uniqueness, and stream-topic boundaries before either
+//! registration path mutates the engine catalog.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -80,7 +85,6 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     let handle = &ctx.engine_host;
     install_module_manifest_resources_for_setup(handle)?;
     for module in domain_worker_modules(ctx)? {
-        validate_domain_stream_topics(&module)?;
         handle.register_worker_for_setup(module.worker, false)?;
         for function in module.functions {
             handle.register_function_for_setup(
@@ -97,7 +101,6 @@ async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineRe
     let handle = &ctx.engine_host;
     install_module_manifest_resources(handle).await?;
     for module in domain_worker_modules(ctx)? {
-        validate_domain_stream_topics(&module)?;
         handle.register_worker(module.worker, false).await?;
         for function in module.functions {
             handle
@@ -154,7 +157,34 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         session::worker_module(&deps)?,
     ];
     modules.extend(model::worker_modules(&deps)?);
+    validate_domain_composition(&modules)?;
+    for module in &modules {
+        validate_domain_stream_topics(module)?;
+    }
     Ok(modules)
+}
+
+fn validate_domain_composition(modules: &[DomainWorkerModule]) -> EngineResult<()> {
+    let mut function_ids = BTreeSet::new();
+    for module in modules {
+        for function in &module.functions {
+            if function.definition.owner_worker != module.worker.id {
+                return Err(EngineError::PolicyViolation(format!(
+                    "function {} is owned by {} but composed under domain worker {}",
+                    function.definition.id.as_str(),
+                    function.definition.owner_worker.as_str(),
+                    module.worker.id.as_str()
+                )));
+            }
+            if !function_ids.insert(function.definition.id.as_str()) {
+                return Err(EngineError::PolicyViolation(format!(
+                    "duplicate canonical function id {} in domain composition",
+                    function.definition.id.as_str()
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()> {
@@ -173,6 +203,12 @@ fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()
         if topic.trim().is_empty() {
             return Err(EngineError::PolicyViolation(format!(
                 "domain worker {} declares an empty stream topic",
+                module.worker.id.as_str()
+            )));
+        }
+        if !topic.contains('.') {
+            return Err(EngineError::PolicyViolation(format!(
+                "domain worker {} stream topic {topic} must use domain-scoped dotted form",
                 module.worker.id.as_str()
             )));
         }
@@ -297,12 +333,48 @@ mod tests {
     }
 
     #[test]
+    fn stream_topic_validation_rejects_unscoped_topics() {
+        let module = test_module(&["events"], vec!["events"]);
+        let Err(error) = validate_domain_stream_topics(&module) else {
+            panic!("unscoped topic must fail");
+        };
+        assert!(error.to_string().contains("domain-scoped dotted form"));
+    }
+
+    #[test]
     fn stream_topic_validation_rejects_undeclared_function_topics() {
         let module = test_module(&["test.events"], vec!["other.events"]);
         let Err(error) = validate_domain_stream_topics(&module) else {
             panic!("undeclared topic must fail");
         };
         assert!(error.to_string().contains("undeclared domain stream topic"));
+    }
+
+    #[test]
+    fn domain_composition_rejects_duplicate_function_ids() {
+        let mut module = test_module(&[], vec![]);
+        module.functions.push(module.functions[0].clone());
+
+        let Err(error) = validate_domain_composition(&[module]) else {
+            panic!("duplicate canonical function id must fail");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate canonical function id")
+        );
+    }
+
+    #[test]
+    fn domain_composition_rejects_function_owner_drift() {
+        let mut module = test_module(&[], vec![]);
+        module.functions[0].definition.owner_worker =
+            WorkerId::new("other").expect("valid wrong owner");
+
+        let Err(error) = validate_domain_composition(&[module]) else {
+            panic!("function owner drift must fail");
+        };
+        assert!(error.to_string().contains("composed under domain worker"));
     }
 
     #[tokio::test]

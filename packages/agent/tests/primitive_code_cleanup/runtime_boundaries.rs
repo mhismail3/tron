@@ -41,19 +41,6 @@ fn small_rust_domains_stay_collapsed_to_single_worker_modules() {
             );
         }
     }
-
-    let domain_catalog = read_repo_file("packages/agent/src/domains/registration/catalog.rs");
-    for required in [
-        "super::blob::capabilities()?",
-        "super::logs::capabilities()?",
-        "super::message::capabilities()?",
-        "super::system::capabilities()?",
-    ] {
-        assert!(
-            domain_catalog.contains(required),
-            "domain catalog must use collapsed small-domain owner `{required}`"
-        );
-    }
 }
 
 #[test]
