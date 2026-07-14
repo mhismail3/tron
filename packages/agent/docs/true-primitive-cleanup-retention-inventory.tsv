@@ -2135,11 +2135,7 @@ packages/agent/src/domains/capability/operations/operation_contract/presentation
 packages/agent/src/domains/capability/operations/operation_contract/presentation/governance.rs	implementation	agent_runtime	TPC-hardening	canonical governance-operation presentation literal owner
 packages/agent/src/domains/capability/operations/operation_contract/presentation/mod.rs	implementation	agent_runtime	TPC-hardening	canonical user-facing presentation facade and exhaustive family router
 packages/agent/src/domains/capability/operations/operation_contract/presentation/records.rs	implementation	agent_runtime	TPC-hardening	canonical record-plane presentation literal owner
-packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/mod.rs	test	test_harness	TPC-hardening	frozen presentation oracle behavior and family-parity regression owner
-packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_capability_binding.rs	test	test_harness	TPC-hardening	independently reviewed capability-binding presentation oracle rows
-packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_direct.rs	test	test_harness	TPC-hardening	independently reviewed direct-operation presentation oracle rows
-packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_governance.rs	test	test_harness	TPC-hardening	independently reviewed governance-operation presentation oracle rows
-packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/oracle_records.rs	test	test_harness	TPC-hardening	independently reviewed record-plane presentation oracle rows
+packages/agent/src/domains/capability/operations/operation_contract/presentation/tests/mod.rs	test	test_harness	TPC-hardening	exhaustive presentation style, representative compatibility, and unknown-operation regression owner
 packages/agent/src/domains/capability/operations/operation_contract/records.rs	implementation	agent_runtime	TPC-10	canonical record-plane input contract owner
 packages/agent/src/domains/capability/pool.rs	implementation	agent_runtime	TPC-10	canonical capability pool classification owner
 packages/agent/src/domains/capability_binding/route.rs	implementation	agent_runtime	TPC-10	governed capability route lifecycle owner

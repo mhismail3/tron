@@ -11,9 +11,9 @@
 //! description and a natural verb-first display name for native discovery UI;
 //! canonical operation identifiers remain the stable invocation keys. A private
 //! presentation facade routes the typed registry exhaustively into literal
-//! owners aligned with the four input-schema families. Tests freeze the ordered
-//! provider-visible tuples byte-for-byte and require facade, oracle, and schema
-//! family ownership to remain identical.
+//! owners aligned with the four input-schema families. Tests require every
+//! operation to have one presentation and one matching schema-family owner,
+//! with representative provider-visible compatibility cases for each family.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;

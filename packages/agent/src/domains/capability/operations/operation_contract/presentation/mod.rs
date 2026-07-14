@@ -14,18 +14,19 @@
 //! | records | Presentation literals for record-plane operations |
 //! | governance | Presentation literals for governance and supervised-runtime operations |
 //! | capability_binding | Presentation literals for capability-binding and route operations |
-//! | tests | Frozen provider-visible oracle, schema-family parity, style, and unknown-operation coverage |
+//! | tests | Exhaustiveness, style, representative compatibility, and unknown-operation coverage |
 //!
 //! # Invariants
 //!
 //! - operation_presentation retains the crate-visible facade and returns
 //!   None when OperationId::parse rejects an unknown operation.
-//! - presentation_entry is the only family-selection point. Its exhaustive
+//! - presentation is the only family-selection point. Its exhaustive
 //!   match has no wildcard, so adding an operation requires explicit metadata.
 //! - Child modules are private and their constants are visible only to this
 //!   parent; they do not own or repeat canonical operation strings.
 //! - Display names and descriptions are provider/native-visible contract bytes
-//!   frozen by an independently reviewed ordered oracle.
+//!   owned by the family modules; representative boundary cases protect their
+//!   projection without duplicating the complete literal registry in tests.
 
 use super::OperationId;
 
@@ -43,48 +44,11 @@ pub(crate) struct OperationPresentation {
     pub(crate) description: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PresentationEntry {
-    presentation: OperationPresentation,
-    #[cfg(test)]
-    family: PresentationFamily,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PresentationFamily {
-    Direct,
-    Records,
-    Governance,
-    CapabilityBinding,
-}
-
-#[cfg(test)]
-impl PresentationFamily {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Direct => "direct",
-            Self::Records => "records",
-            Self::Governance => "governance",
-            Self::CapabilityBinding => "capability_binding",
-        }
-    }
-}
-
 pub(crate) fn operation_presentation(operation: &str) -> Option<OperationPresentation> {
     OperationId::parse(operation).map(presentation)
 }
 
-fn presentation(operation: OperationId) -> OperationPresentation {
-    presentation_entry(operation).presentation
-}
-
-#[cfg(test)]
-fn presentation_family(operation: OperationId) -> PresentationFamily {
-    presentation_entry(operation).family
-}
-
-const fn presentation_entry(operation: OperationId) -> PresentationEntry {
+const fn presentation(operation: OperationId) -> OperationPresentation {
     match operation {
         OperationId::Observe => direct::OBSERVE,
         OperationId::StateGet => direct::STATE_GET,
