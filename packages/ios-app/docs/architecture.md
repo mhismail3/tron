@@ -845,10 +845,12 @@ For shell-affecting changes:
 - Run `SourceGuardTests`, which compiles the full app/test target and enforces
   deleted product roots, hosted-test storage ownership, and the explicit
   no-network session-attempt seam.
-- For hosted isolation evidence, use a newly created exact-UDID simulator and
-  compare notification settings and scoped TCC rows as separate semantic
-  records. Do not infer notification authorization from TCC or compare the
-  whole simulator permission database.
+- Prove hosted lifecycle isolation through injected `AppLifecycleEffects` and
+  the explicit storage, token, and runtime-I/O seams. Ambient simulator
+  notification authorization is not a unit-test oracle because it is not
+  owned by the test process. External isolation runs may compare scoped TCC
+  rows on a newly created exact-UDID simulator, but never the whole permission
+  database.
 - For cockpit capability visibility changes, run the focused
   `WorkerLifecycleDTOTests`, `WorkerLifecycleClientTests`,
   `AgentCockpitStateTests`, `AgentCockpitDiscoveryStateTests`,

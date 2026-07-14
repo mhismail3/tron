@@ -198,23 +198,24 @@ Application Support, App Group, and production-pairing sentinels, start a
 loopback connection recorder for that seeded pairing, and capture these
 separate baselines:
 
-1. Run the focused `AppDelegateTests` probe through the Beta test host. Require
-   notification authorization to be `.notDetermined` and retain the canonical
-   authorization/alert/sound/badge record.
+1. Run the focused `AppDelegateTests` through the Beta test host. Require the
+   hosted callbacks to leave every injected lifecycle effect at zero and the
+   application callbacks to preserve their live semantics.
 2. Read only sorted TCC rows for the exact built app and extension bundle IDs,
    comparing service, client, client type, authorization value, and reason.
 3. Hash and semantically decode the App Group canary; inventory the seeded
    defaults, database, and durable trees.
 
 Run focused lifecycle, storage, cleanup, transport, guard, and hosted-render
-tests before all `TronMobileTests`. Then rerun the real notification probe and
-capture the scoped TCC, App Group, defaults, database, durable-tree, registered
-scope, and recorder post-state. Require identical protected records and zero
-recorder accepts/bytes. Do not launch a normal or UI-test app until these
-post-snapshots pass; notification settings and TCC are distinct proofs. Only
-then may a normal Beta launch/background-to-active negative require a recorder
-accept, followed by the separate onboarding UI-validation cases. Terminate
-owned processes and verify deletion of the exact task UDID at the end.
+tests before all `TronMobileTests`. Then capture the scoped TCC, App Group,
+defaults, database, durable-tree, registered-scope, and recorder post-state.
+Require identical protected records and zero recorder accepts/bytes. Ambient
+simulator notification authorization is not an isolation oracle because the
+test process does not own it. Do not launch a normal or UI-test app until these
+post-snapshots pass. Only then may a normal Beta launch/background-to-active
+negative require a recorder accept, followed by the separate onboarding
+UI-validation cases. Terminate owned processes and verify deletion of the exact
+task UDID at the end.
 
 For every hosted invocation, parse only complete
 `TRON_TEST_SUITE_LIFECYCLE_V1` records. Registration and cleanup identities

@@ -2,7 +2,6 @@ import Foundation
 import Testing
 import UIKit
 import UserNotifications
-import XCTest
 
 @testable import TronMobile
 
@@ -104,27 +103,5 @@ struct AppDelegateTests {
     func defaultDelegateIsHosted() {
         let delegate = AppDelegate()
         #expect(delegate.runtimeMode == .hostedUnitTests)
-    }
-
-    @Test("target notification authorization remains not determined")
-    func realNotificationSettingsProbe() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        #expect(settings.authorizationStatus == .notDetermined)
-        // This canonical record is compared before and after the full hosted
-        // suite. Notification authorization is deliberately not inferred from
-        // an opaque TCC database hash.
-        let record = [
-            "alert=\(settings.alertSetting.rawValue)",
-            "authorization=\(settings.authorizationStatus.rawValue)",
-            "badge=\(settings.badgeSetting.rawValue)",
-            "sound=\(settings.soundSetting.rawValue)",
-        ].joined(separator: ";")
-        print("TRON_NOTIFICATION_SETTINGS_RECORD \(record)")
-        XCTContext.runActivity(named: "Canonical notification settings") { activity in
-            let attachment = XCTAttachment(string: record)
-            attachment.name = "tron-notification-settings-record"
-            attachment.lifetime = .keepAlways
-            activity.add(attachment)
-        }
     }
 }
