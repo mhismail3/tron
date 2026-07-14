@@ -3,19 +3,18 @@ import Foundation
 // MARK: - Default Model Repository
 
 /// Default implementation of ModelRepository.
-/// Wraps ModelClient and provides observable caching behavior.
+/// Owns the active server's observable model catalog and five-minute TTL.
 @Observable
 @MainActor
 final class DefaultModelRepository: ModelRepository {
     private let modelClient: ModelClientProtocol
+    private var cacheTime: Date?
+    private let cacheTTL: TimeInterval = 300
 
     // MARK: - Observable State
 
     /// Cached models from the last fetch
     private(set) var cachedModels: [ModelInfo] = []
-
-    /// Whether models are currently being loaded
-    private(set) var isLoading = false
 
     // MARK: - Initialization
 
@@ -26,11 +25,16 @@ final class DefaultModelRepository: ModelRepository {
     // MARK: - ModelRepository
 
     func list(forceRefresh: Bool = false) async throws -> [ModelInfo] {
-        isLoading = true
-        defer { isLoading = false }
+        if !forceRefresh,
+           let cacheTime,
+           Date().timeIntervalSince(cacheTime) < cacheTTL {
+            return cachedModels
+        }
 
-        let models = try await modelClient.list(forceRefresh: forceRefresh)
+        let models = try await modelClient.list()
+        ModelNameFormatter.updateFromServer(models)
         cachedModels = models
+        cacheTime = Date()
         return models
     }
 
@@ -56,9 +60,6 @@ final class DefaultModelRepository: ModelRepository {
 
     func invalidateCache() {
         cachedModels = []
-        // Also invalidate the underlying client cache if possible
-        if let client = modelClient as? ModelClient {
-            client.invalidateCache()
-        }
+        cacheTime = nil
     }
 }

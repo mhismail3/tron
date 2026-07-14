@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Observation
 @testable import TronMobile
 
 /// Tests for ModelPickerState
@@ -10,8 +11,10 @@ struct ModelPickerStateTests {
 
     // MARK: - Test Helpers
 
-    /// Mock model client for testing
-    final class MockModelClient: ModelClientProtocol {
+    /// Repository double whose snapshot can be seeded without production test hooks.
+    @Observable
+    final class MockModelRepository: ModelRepository {
+        var cachedModels: [ModelInfo] = []
         var listCallCount = 0
         var listResult: [ModelInfo] = []
         var listShouldThrow = false
@@ -22,31 +25,34 @@ struct ModelPickerStateTests {
         var switchResult: ModelSwitchResult?
         var switchShouldThrow = false
         var reasoningLevelResult: ReasoningLevelResult?
+        var onSwitch: (() -> Void)?
 
         func list(forceRefresh: Bool) async throws -> [ModelInfo] {
             listCallCount += 1
             if listShouldThrow {
                 throw TestError.mockError
             }
+            cachedModels = listResult
             return listResult
         }
 
         func switchModel(
-            _ sessionId: String,
-            model: String,
+            sessionId: String,
+            to modelId: String,
             idempotencyKey: EngineIdempotencyKey
         ) async throws -> ModelSwitchResult {
             switchCallCount += 1
             switchSessionId = sessionId
-            switchModelId = model
+            switchModelId = modelId
+            onSwitch?()
             if switchShouldThrow {
                 throw TestError.mockError
             }
-            return switchResult ?? ModelSwitchResult(previousModel: "", newModel: model)
+            return switchResult ?? ModelSwitchResult(previousModel: "", newModel: modelId)
         }
 
         func setReasoningLevel(
-            _ sessionId: String,
+            sessionId: String,
             level: String,
             idempotencyKey: EngineIdempotencyKey
         ) async throws -> ReasoningLevelResult {
@@ -55,6 +61,10 @@ struct ModelPickerStateTests {
                 newLevel: level,
                 changed: true
             )
+        }
+
+        func invalidateCache() {
+            cachedModels = []
         }
 
         enum TestError: Error {
@@ -89,33 +99,20 @@ struct ModelPickerStateTests {
 
     // MARK: - Initial State Tests
 
-    @Test("Initial state has empty cached models")
-    func testInitialState_cachedModelsEmpty() {
-        let mockClient = MockModelClient()
-        let state = ModelPickerState(modelClient: mockClient)
+    @Test("Initial state has no optimistic model")
+    func testInitialState_hasNoOptimisticModel() {
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
 
-        #expect(state.cachedModels.isEmpty)
-        #expect(!state.isLoadingModels)
         #expect(state.optimisticModelName == nil)
     }
 
     // MARK: - Display Name Tests
 
-    @Test("Display name returns optimistic when set")
-    func testDisplayModelName_returnsOptimisticWhenSet() {
-        let mockClient = MockModelClient()
-        let state = ModelPickerState(modelClient: mockClient)
-        state.setOptimisticModelName("claude-sonnet-4-20250514")
-
-        let result = state.displayModelName(current: "claude-opus-4-20250514")
-
-        #expect(result == "claude-sonnet-4-20250514")
-    }
-
     @Test("Display name returns current when no optimistic")
     func testDisplayModelName_returnsCurrentWhenNoOptimistic() {
-        let mockClient = MockModelClient()
-        let state = ModelPickerState(modelClient: mockClient)
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
 
         let result = state.displayModelName(current: "claude-opus-4-20250514")
 
@@ -126,11 +123,11 @@ struct ModelPickerStateTests {
 
     @Test("Current model info finds matching model")
     func testCurrentModelInfo_findsMatchingModel() {
-        let mockClient = MockModelClient()
-        let state = ModelPickerState(modelClient: mockClient)
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-opus-4-20250514", name: "Claude Opus 4")
         let otherModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4")
-        state.setCachedModels([otherModel, targetModel])
+        repository.cachedModels = [otherModel, targetModel]
 
         let result = state.currentModelInfo(current: "claude-opus-4-20250514")
 
@@ -139,67 +136,85 @@ struct ModelPickerStateTests {
 
     @Test("Current model info returns nil when not found")
     func testCurrentModelInfo_returnsNilWhenNotFound() {
-        let mockClient = MockModelClient()
-        let state = ModelPickerState(modelClient: mockClient)
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
         let model = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
-        state.setCachedModels([model])
+        repository.cachedModels = [model]
 
         let result = state.currentModelInfo(current: "claude-opus-4-20250514")
 
         #expect(result == nil)
     }
 
-    @Test("Current model info uses optimistic name when set")
-    func testCurrentModelInfo_usesOptimisticWhenSet() {
-        let mockClient = MockModelClient()
-        let state = ModelPickerState(modelClient: mockClient)
+    @Test("Repository catalog observation flows through picker metadata lookup")
+    func testRepositoryCatalogObservationFlowsThroughPicker() {
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
+        let changed = DispatchSemaphore(value: 0)
+
+        withObservationTracking {
+            _ = state.currentModelInfo(current: "claude-opus-4-20250514")
+        } onChange: {
+            changed.signal()
+        }
+        repository.cachedModels = [Self.makeModelInfo(id: "claude-opus-4-20250514")]
+
+        #expect(changed.wait(timeout: .now() + 1) == .success)
+    }
+
+    @Test("Display helpers use the optimistic model during a switch")
+    func testDisplayHelpers_useOptimisticModelDuringSwitch() async {
+        let repository = MockModelRepository()
+        let state = ModelPickerState(modelRepository: repository)
         let opusModel = Self.makeModelInfo(id: "claude-opus-4-20250514")
         let sonnetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
-        state.setCachedModels([opusModel, sonnetModel])
-        state.setOptimisticModelName("claude-sonnet-4-20250514")
+        repository.cachedModels = [opusModel, sonnetModel]
+        var displayedName: String?
+        var displayedModelId: String?
+        repository.onSwitch = {
+            displayedName = state.displayModelName(current: opusModel.id)
+            displayedModelId = state.currentModelInfo(current: opusModel.id)?.id
+        }
 
-        // Current is opus but optimistic is sonnet
-        let result = state.currentModelInfo(current: "claude-opus-4-20250514")
+        await state.switchModel(
+            to: sonnetModel,
+            sessionId: "test-session",
+            currentModel: opusModel.id,
+            onOptimisticSet: { _ in },
+            onSuccess: { _, _ in },
+            onError: { _, _ in },
+            onContextRefresh: { }
+        )
 
-        #expect(result?.id == "claude-sonnet-4-20250514")
+        #expect(displayedName == sonnetModel.id)
+        #expect(displayedModelId == sonnetModel.id)
     }
 
     // MARK: - Prefetch Models Tests
 
-    @Test("Prefetch models sets loading true then false")
-    func testPrefetchModels_setsLoadingTrueThenFalse() async {
-        let mockClient = MockModelClient()
-        mockClient.listResult = [Self.makeModelInfo(id: "claude-opus-4-20250514")]
-        let state = ModelPickerState(modelClient: mockClient)
-
-        await state.prefetchModels(onContextUpdate: { _ in })
-
-        // After completion, loading should be false
-        #expect(!state.isLoadingModels)
-    }
-
-    @Test("Prefetch models populates cached models")
-    func testPrefetchModels_populatesCachedModels() async {
-        let mockClient = MockModelClient()
+    @Test("Prefetch delegates catalog ownership to the repository")
+    func testPrefetchModels_delegatesCatalogOwnership() async {
+        let repository = MockModelRepository()
         let models = [
             Self.makeModelInfo(id: "claude-opus-4-20250514"),
             Self.makeModelInfo(id: "claude-sonnet-4-20250514")
         ]
-        mockClient.listResult = models
-        let state = ModelPickerState(modelClient: mockClient)
+        repository.listResult = models
+        let state = ModelPickerState(modelRepository: repository)
 
         await state.prefetchModels(onContextUpdate: { _ in })
 
-        #expect(state.cachedModels.count == 2)
-        #expect(state.cachedModels[0].id == "claude-opus-4-20250514")
+        #expect(repository.listCallCount == 1)
+        #expect(repository.cachedModels.map(\.id) == models.map(\.id))
+        #expect(state.currentModelInfo(current: models[0].id)?.id == models[0].id)
     }
 
     @Test("Prefetch models calls onContextUpdate")
     func testPrefetchModels_callsOnContextUpdate() async {
-        let mockClient = MockModelClient()
+        let repository = MockModelRepository()
         let models = [Self.makeModelInfo(id: "claude-opus-4-20250514")]
-        mockClient.listResult = models
-        let state = ModelPickerState(modelClient: mockClient)
+        repository.listResult = models
+        let state = ModelPickerState(modelRepository: repository)
         var receivedModels: [ModelInfo]?
 
         await state.prefetchModels(onContextUpdate: { models in
@@ -212,26 +227,27 @@ struct ModelPickerStateTests {
 
     @Test("Prefetch models handles error gracefully")
     func testPrefetchModels_handlesError_keepsEmptyList() async {
-        let mockClient = MockModelClient()
-        mockClient.listShouldThrow = true
-        let state = ModelPickerState(modelClient: mockClient)
+        let repository = MockModelRepository()
+        repository.listShouldThrow = true
+        let state = ModelPickerState(modelRepository: repository)
+        var contextUpdateCalled = false
 
-        await state.prefetchModels(onContextUpdate: { _ in })
+        await state.prefetchModels(onContextUpdate: { _ in contextUpdateCalled = true })
 
-        #expect(state.cachedModels.isEmpty)
-        #expect(!state.isLoadingModels)
+        #expect(repository.cachedModels.isEmpty)
+        #expect(!contextUpdateCalled)
     }
 
     // MARK: - Switch Model Tests
 
     @Test("Switch model sets optimistic name")
     func testSwitchModel_setsOptimisticName() async {
-        let mockClient = MockModelClient()
-        mockClient.switchResult = ModelSwitchResult(
+        let repository = MockModelRepository()
+        repository.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",
             newModel: "claude-sonnet-4-20250514"
         )
-        let state = ModelPickerState(modelClient: mockClient)
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
 
         // Use a continuation to capture the optimistic state during switch
@@ -253,12 +269,12 @@ struct ModelPickerStateTests {
 
     @Test("Switch model calls engine protocol with correct params")
     func testSwitchModel_callsEngineProtocolWithCorrectParams() async {
-        let mockClient = MockModelClient()
-        mockClient.switchResult = ModelSwitchResult(
+        let repository = MockModelRepository()
+        repository.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",
             newModel: "claude-sonnet-4-20250514"
         )
-        let state = ModelPickerState(modelClient: mockClient)
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
 
         await state.switchModel(
@@ -271,19 +287,19 @@ struct ModelPickerStateTests {
             onContextRefresh: { }
         )
 
-        #expect(mockClient.switchCallCount == 1)
-        #expect(mockClient.switchSessionId == "test-session-123")
-        #expect(mockClient.switchModelId == "claude-sonnet-4-20250514")
+        #expect(repository.switchCallCount == 1)
+        #expect(repository.switchSessionId == "test-session-123")
+        #expect(repository.switchModelId == "claude-sonnet-4-20250514")
     }
 
     @Test("Switch model clears optimistic on success")
     func testSwitchModel_clearsOptimisticOnSuccess() async {
-        let mockClient = MockModelClient()
-        mockClient.switchResult = ModelSwitchResult(
+        let repository = MockModelRepository()
+        repository.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",
             newModel: "claude-sonnet-4-20250514"
         )
-        let state = ModelPickerState(modelClient: mockClient)
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
 
         await state.switchModel(
@@ -301,12 +317,12 @@ struct ModelPickerStateTests {
 
     @Test("Switch model calls onSuccess with correct models")
     func testSwitchModel_callsOnSuccessCallback() async {
-        let mockClient = MockModelClient()
-        mockClient.switchResult = ModelSwitchResult(
+        let repository = MockModelRepository()
+        repository.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",
             newModel: "claude-sonnet-4-20250514"
         )
-        let state = ModelPickerState(modelClient: mockClient)
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
         var receivedPrevious: String?
         var receivedNew: String?
@@ -330,12 +346,12 @@ struct ModelPickerStateTests {
 
     @Test("Switch model calls onContextRefresh on success")
     func testSwitchModel_callsOnContextRefresh() async {
-        let mockClient = MockModelClient()
-        mockClient.switchResult = ModelSwitchResult(
+        let repository = MockModelRepository()
+        repository.switchResult = ModelSwitchResult(
             previousModel: "claude-opus-4-20250514",
             newModel: "claude-sonnet-4-20250514"
         )
-        let state = ModelPickerState(modelClient: mockClient)
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
         var refreshCalled = false
 
@@ -354,9 +370,9 @@ struct ModelPickerStateTests {
 
     @Test("Switch model clears optimistic on failure")
     func testSwitchModel_clearsOptimisticOnFailure() async {
-        let mockClient = MockModelClient()
-        mockClient.switchShouldThrow = true
-        let state = ModelPickerState(modelClient: mockClient)
+        let repository = MockModelRepository()
+        repository.switchShouldThrow = true
+        let state = ModelPickerState(modelRepository: repository)
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
 
         await state.switchModel(
@@ -455,13 +471,13 @@ struct ModelPickerStateTests {
 
     @Test("Switch model calls onError callback with error message")
     func testSwitchModel_callsOnErrorCallback() async {
-        let mockClient = MockModelClient()
-        mockClient.switchShouldThrow = true
-        let state = ModelPickerState(modelClient: mockClient)
-        state.setCachedModels([
+        let repository = MockModelRepository()
+        repository.switchShouldThrow = true
+        let state = ModelPickerState(modelRepository: repository)
+        repository.cachedModels = [
             Self.makeModelInfo(id: "claude-opus-4-20250514"),
             Self.makeModelInfo(id: "claude-sonnet-4-20250514")
-        ])
+        ]
         let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
         var receivedError: String?
         var receivedRevertModel: ModelInfo?

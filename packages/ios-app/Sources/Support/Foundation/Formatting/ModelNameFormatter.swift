@@ -7,7 +7,8 @@ import os
 /// Uses server-provided metadata when available, then deterministic ID heuristics.
 enum ModelNameFormatter {
 
-    /// Lock-protected server model cache. Written by ModelClient, read from any context.
+    /// Lock-protected server model cache. Written by `DefaultModelRepository`
+    /// after a server fetch and read from any context.
     private static let _serverModels = OSAllocatedUnfairLock<[String: ModelInfo]>(initialState: [:])
 
     /// Thread-safe snapshot of all server models. Copies the entire dictionary.

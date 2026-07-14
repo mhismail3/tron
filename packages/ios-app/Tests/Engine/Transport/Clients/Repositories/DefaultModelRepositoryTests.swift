@@ -4,10 +4,9 @@ import XCTest
 // MARK: - Mock Model Client for Repository Testing
 
 @MainActor
-final class MockModelClientForRepository {
+final class MockModelClientForRepository: ModelClientProtocol {
     // List
     var listCallCount = 0
-    var lastListForceRefresh: Bool?
     var listResultToReturn: [ModelInfo] = []
     var listError: Error?
 
@@ -19,9 +18,8 @@ final class MockModelClientForRepository {
     var switchModelError: Error?
     var reasoningLevelResultToReturn: ReasoningLevelResult?
 
-    func list(forceRefresh: Bool) async throws -> [ModelInfo] {
+    func list() async throws -> [ModelInfo] {
         listCallCount += 1
-        lastListForceRefresh = forceRefresh
         if let error = listError {
             throw error
         }
@@ -62,67 +60,17 @@ final class MockModelClientForRepository {
     }
 }
 
-// MARK: - Mock Model Repository for Caching Tests
-
-@MainActor
-final class MockModelRepository: ModelRepository {
-    var cachedModels: [ModelInfo] = []
-    var isLoading: Bool = false
-
-    private let mockClient: MockModelClientForRepository
-    private var cacheTime: Date?
-    private let cacheTTL: TimeInterval = 300 // 5 minutes
-
-    init(mockClient: MockModelClientForRepository) {
-        self.mockClient = mockClient
-    }
-
-    func list(forceRefresh: Bool) async throws -> [ModelInfo] {
-        if !forceRefresh, let cacheTime = cacheTime, Date().timeIntervalSince(cacheTime) < cacheTTL {
-            return cachedModels
-        }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        let models = try await mockClient.list(forceRefresh: forceRefresh)
-        cachedModels = models
-        cacheTime = Date()
-        return models
-    }
-
-    func switchModel(
-        sessionId: String,
-        to modelId: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> ModelSwitchResult {
-        try await mockClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
-    }
-
-    func setReasoningLevel(
-        sessionId: String,
-        level: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> ReasoningLevelResult {
-        try await mockClient.setReasoningLevel(sessionId, level: level, idempotencyKey: idempotencyKey)
-    }
-
-    func invalidateCache() {
-        cacheTime = nil
-    }
-}
-
 // MARK: - DefaultModelRepository Tests
 
 @MainActor
 final class DefaultModelRepositoryTests: XCTestCase {
 
     var mockClient: MockModelClientForRepository!
-    var repository: MockModelRepository!
+    var repository: DefaultModelRepository!
 
     override func setUp() async throws {
         mockClient = MockModelClientForRepository()
-        repository = MockModelRepository(mockClient: mockClient)
+        repository = DefaultModelRepository(modelClient: mockClient)
     }
 
     override func tearDown() async throws {
@@ -184,6 +132,15 @@ final class DefaultModelRepositoryTests: XCTestCase {
         XCTAssertEqual(repository.cachedModels[0].id, "model-1")
     }
 
+    func test_list_updatesFormatterFromFetchedCatalog() async throws {
+        let modelId = "repository-owned-formatter-model"
+        mockClient.listResultToReturn = [createMockModel(id: modelId)]
+
+        _ = try await repository.list(forceRefresh: false)
+
+        XCTAssertEqual(ModelNameFormatter.format(modelId, style: .short), "Test Model")
+    }
+
     func test_list_throwsError() async throws {
         // Given
         mockClient.listError = NSError(domain: "Test", code: 1, userInfo: nil)
@@ -233,7 +190,7 @@ final class DefaultModelRepositoryTests: XCTestCase {
 
     // MARK: - Cache Invalidation Tests
 
-    func test_invalidateCache_clearsCacheTime() async throws {
+    func test_invalidateCache_clearsCatalogAndForcesReload() async throws {
         // Given - Populate cache
         mockClient.listResultToReturn = [createMockModel(id: "model-1")]
         _ = try await repository.list(forceRefresh: false)
@@ -241,6 +198,7 @@ final class DefaultModelRepositoryTests: XCTestCase {
 
         // When
         repository.invalidateCache()
+        XCTAssertTrue(repository.cachedModels.isEmpty)
 
         // Then - Next call should hit the client
         _ = try await repository.list(forceRefresh: false)

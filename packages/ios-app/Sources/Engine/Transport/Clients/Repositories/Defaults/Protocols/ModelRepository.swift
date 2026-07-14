@@ -2,15 +2,11 @@ import Foundation
 
 // MARK: - Model Repository Protocol
 
-/// Repository protocol for model operations.
-/// Provides caching and abstraction over ModelClient.
+/// Repository protocol for model operations and the active server's catalog cache.
 @MainActor
 protocol ModelRepository: AnyObject {
     /// Cached models from the last fetch
     var cachedModels: [ModelInfo] { get }
-
-    /// Whether models are currently being loaded
-    var isLoading: Bool { get }
 
     /// List available models with optional caching.
     /// - Parameter forceRefresh: Bypass cache and fetch fresh data

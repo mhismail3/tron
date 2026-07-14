@@ -449,6 +449,9 @@ for mounted chat sessions, `AppConnectionRepository` for connection state,
 `SessionEventRepository` for live events, `SettingsRepository` for settings
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
+`ModelClient` is transport-only; `DefaultModelRepository` owns the active
+server's five-minute model catalog, refresh, and invalidation policy, while
+`ModelPickerState` owns only optimistic switch presentation.
 `WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
 resource, catalog-discovery report, module-activity overview,
 capability-binding cockpit overview, and worker lifecycle calls.

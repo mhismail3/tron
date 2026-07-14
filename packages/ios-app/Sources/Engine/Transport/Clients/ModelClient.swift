@@ -1,10 +1,10 @@
 import Foundation
 
 /// Protocol for model client operations.
-/// Allows dependency injection for testing ModelPickerState.
+/// Provides the transport seam used by `DefaultModelRepository`.
 @MainActor
 protocol ModelClientProtocol {
-    func list(forceRefresh: Bool) async throws -> [ModelInfo]
+    func list() async throws -> [ModelInfo]
     func switchModel(
         _ sessionId: String,
         model: String,
@@ -18,13 +18,8 @@ protocol ModelClientProtocol {
 }
 
 /// Client for model-related engine capabilities.
-/// Handles model switching and listing with caching.
+/// Thinly maps model operations onto engine capabilities.
 final class ModelClient: EngineDomainClient, ModelClientProtocol {
-
-    // Model list cache (5-minute TTL to reduce redundant server calls)
-    private var modelCache: [ModelInfo]?
-    private var modelCacheTime: Date?
-    private let modelCacheTTL: TimeInterval = 300 // 5 minutes
 
     // MARK: - Model Methods
 
@@ -51,28 +46,14 @@ final class ModelClient: EngineDomainClient, ModelClientProtocol {
         return result
     }
 
-    /// List available models with client-side caching (5-minute TTL)
-    /// - Parameter forceRefresh: Bypass cache and fetch fresh data
-    func list(forceRefresh: Bool = false) async throws -> [ModelInfo] {
-        // Return cached models if still valid
-        if !forceRefresh,
-           let cached = modelCache,
-           let cacheTime = modelCacheTime,
-           Date().timeIntervalSince(cacheTime) < modelCacheTTL {
-            return cached
-        }
-
+    /// List available models from the engine.
+    func list() async throws -> [ModelInfo] {
         _ = try requireTransport().requireConnection()
 
         let result: ModelListResult = try await invokeRead(
             "model::list",
             EmptyParams()
         )
-
-        // Update cache and name formatter
-        modelCache = result.models
-        modelCacheTime = Date()
-        ModelNameFormatter.updateFromServer(result.models)
 
         return result.models
     }
@@ -95,9 +76,4 @@ final class ModelClient: EngineDomainClient, ModelClientProtocol {
         )
     }
 
-    /// Invalidate the model cache (e.g., after API key changes)
-    func invalidateCache() {
-        modelCache = nil
-        modelCacheTime = nil
-    }
 }

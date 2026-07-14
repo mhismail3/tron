@@ -1,18 +1,10 @@
 import Foundation
 
-/// State object managing model picker operations.
-/// Extracts model-related state and operations from ChatView.
-/// Handles prefetching, optimistic updates, and model switching.
+/// Owns optimistic model-switch presentation and delegates model truth to the repository.
 @Observable
 @MainActor
 final class ModelPickerState {
     // MARK: - Published State
-
-    /// Cached list of available models
-    private(set) var cachedModels: [ModelInfo] = []
-
-    /// Whether models are currently being loaded
-    private(set) var isLoadingModels = false
 
     /// Optimistic model name during switch (for instant UI feedback)
     private(set) var optimisticModelName: String?
@@ -27,10 +19,6 @@ final class ModelPickerState {
         self.modelRepository = modelRepository
     }
 
-    convenience init(modelClient: ModelClientProtocol) {
-        self.init(modelRepository: ModelClientRepositoryAdapter(modelClient: modelClient))
-    }
-
     // MARK: - Display Helpers
 
     /// Display name: optimistic if pending, else actual current model
@@ -41,7 +29,7 @@ final class ModelPickerState {
     /// Find model info by current model name (uses optimistic if set)
     func currentModelInfo(current: String) -> ModelInfo? {
         let displayName = displayModelName(current: current)
-        return cachedModels.first { $0.id == displayName }
+        return modelRepository.cachedModels.first { $0.id == displayName }
     }
 
     // MARK: - Model Operations
@@ -49,13 +37,9 @@ final class ModelPickerState {
     /// Prefetch available models from server
     /// - Parameter onContextUpdate: Callback with fetched models for context window updates
     func prefetchModels(onContextUpdate: @escaping ([ModelInfo]) -> Void) async {
-        isLoadingModels = true
-        defer { isLoadingModels = false }
-
         guard let models = try? await modelRepository.list(forceRefresh: false) else {
             return
         }
-        cachedModels = models
         onContextUpdate(models)
     }
 
@@ -96,63 +80,8 @@ final class ModelPickerState {
         } catch {
             // Revert optimistic update on failure
             optimisticModelName = nil
-            let revertModel = cachedModels.first { $0.id == previousModel }
+            let revertModel = modelRepository.cachedModels.first { $0.id == previousModel }
             onError(error.localizedDescription, revertModel)
         }
-    }
-
-    // MARK: - Test Helpers (internal for tests)
-
-    /// Set cached models directly (for testing)
-    func setCachedModels(_ models: [ModelInfo]) {
-        cachedModels = models
-    }
-
-    /// Set optimistic model name directly (for testing)
-    func setOptimisticModelName(_ name: String?) {
-        optimisticModelName = name
-    }
-}
-
-@MainActor
-private final class ModelClientRepositoryAdapter: ModelRepository {
-    private let modelClient: ModelClientProtocol
-    private(set) var cachedModels: [ModelInfo] = []
-    private(set) var isLoading = false
-
-    init(modelClient: ModelClientProtocol) {
-        self.modelClient = modelClient
-    }
-
-    func list(forceRefresh: Bool) async throws -> [ModelInfo] {
-        isLoading = true
-        defer { isLoading = false }
-        let models = try await modelClient.list(forceRefresh: forceRefresh)
-        cachedModels = models
-        return models
-    }
-
-    func switchModel(
-        sessionId: String,
-        to modelId: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> ModelSwitchResult {
-        try await modelClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
-    }
-
-    func setReasoningLevel(
-        sessionId: String,
-        level: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> ReasoningLevelResult {
-        try await modelClient.setReasoningLevel(
-            sessionId,
-            level: level,
-            idempotencyKey: idempotencyKey
-        )
-    }
-
-    func invalidateCache() {
-        cachedModels = []
     }
 }
