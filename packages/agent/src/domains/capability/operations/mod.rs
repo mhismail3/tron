@@ -1,10 +1,13 @@
 //! Primitive execute operations for the bare engine loop.
 //!
 //! `capability::execute` is the only model-facing tool on this branch. It
-//! performs one direct host primitive operation, records trace evidence for
-//! canonical operations before structural/context validation, rejects bootstrap
-//! grants, requires least-privilege authority, and keeps delegated operations
-//! bound to trusted runtime context. Module-owned program-execution
+//! performs one direct host primitive operation, rejects bootstrap grants,
+//! requires trusted context and durable least-privilege authority before any
+//! trace mutation, then records canonical-operation trace evidence before
+//! structural payload validation. It revalidates each durable
+//! grant's exact operation claim, canonical risk, static authority scopes,
+//! base resource kinds/selectors, and network policy before dispatch.
+//! Module-owned program-execution
 //! follow-ups must prove the inspected module runtime's delegated job ref
 //! matches the requested job resource before status, cancellation, or cleanup
 //! can read or mutate job state; procedural module-pack operations similarly
@@ -76,7 +79,7 @@ use common::{
     compact_json, error_capability_result, internal, invalid, ok_result, optional_str,
     optional_u64, required_str, result_value,
 };
-use context::validate_execute_context;
+use context::{validate_execute_authority, validate_execute_identity};
 use trace::{complete_trace_record, started_rejected_trace_record, started_trace_record};
 
 pub(crate) use operation_contract::provider_result_text;
@@ -114,7 +117,7 @@ pub(crate) async fn execute_value(
         .to_owned();
     if attempted_operation == OperationId::ReplayManifest.as_str() {
         operation_contract::validate_payload(&invocation.payload)?;
-        validate_execute_context(invocation, &attempted_operation)?;
+        validate_execute_authority(invocation, &attempted_operation, &deps.engine_host).await?;
         info!(
             component = "agent.execute",
             agent_event = "execute_operation_trace_bypassed",
@@ -131,10 +134,12 @@ pub(crate) async fn execute_value(
     }
 
     let Some(operation_id) = OperationId::parse(&attempted_operation) else {
+        validate_execute_identity(invocation, &attempted_operation, &deps.engine_host).await?;
         return trace_rejected_operation(invocation, deps, &attempted_operation);
     };
 
     let operation = attempted_operation;
+    validate_execute_authority(invocation, &operation, &deps.engine_host).await?;
     let operation_at = Utc::now();
     let started_at = operation_at.to_rfc3339();
     let start = Instant::now();
@@ -173,9 +178,7 @@ pub(crate) async fn execute_value(
         "primitive execute trace record started"
     );
 
-    let result = match operation_contract::validate_payload(&invocation.payload)
-        .and_then(|()| validate_execute_context(invocation, &operation))
-    {
+    let result = match operation_contract::validate_payload(&invocation.payload) {
         Ok(()) => dispatch::execute_operation(operation_id, invocation, deps, operation_at).await,
         Err(error) => Err(error),
     };
@@ -353,8 +356,8 @@ mod tests {
     use super::*;
     use crate::domains::session::event_store::AgentTraceListOptions;
     use crate::engine::{
-        ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, FunctionId,
-        InvocationId, TraceId,
+        ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant, FunctionId,
+        InvocationId, RiskLevel, TraceId,
     };
     use crate::shared::server::test_support::make_test_context;
 
@@ -369,7 +372,6 @@ mod tests {
         assert!(redacted.contains("authority grant <redacted> requires"));
         assert!(!redacted.contains("authority_grant_019f3a"));
     }
-
     #[tokio::test]
     async fn unsupported_operation_is_persisted_as_a_failed_trace() {
         let ctx = make_test_context();
@@ -384,6 +386,32 @@ mod tests {
             apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let session_id = "unsupported-operation-trace-session";
+        let actor_id = ActorId::new(format!("agent:{session_id}")).expect("actor id");
+        let grant_id = ctx
+            .engine_host
+            .derive_authority_grant(DeriveGrant {
+                grant_id: Some(AuthorityGrantId::new("unsupported-operation-grant").unwrap()),
+                parent_grant_id: AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+                subject_actor_id: Some(actor_id.clone()),
+                subject_worker_id: None,
+                subject_invocation_id: None,
+                allowed_capabilities: vec!["capability::execute".to_owned()],
+                allowed_namespaces: vec!["__no_namespace_authority__".to_owned()],
+                allowed_authority_scopes: vec!["capability.execute".to_owned()],
+                allowed_resource_kinds: Vec::new(),
+                resource_selectors: Vec::new(),
+                file_roots: vec!["/tmp".to_owned()],
+                network_policy: "none".to_owned(),
+                max_risk: RiskLevel::Medium,
+                budget: json!({"remainingInvocations": 1}),
+                expires_at: None,
+                can_delegate: false,
+                provenance: json!({"operation": "guessed_operation"}),
+                trace_id: TraceId::new("unsupported-operation-grant-trace").unwrap(),
+            })
+            .await
+            .expect("derive rejection grant")
+            .grant_id;
         let invocation = Invocation {
             id: InvocationId::new("unsupported-operation-invocation").expect("invocation id"),
             function_id: FunctionId::new("capability::execute").expect("function id"),
@@ -393,9 +421,9 @@ mod tests {
                 "unsafePayload": "sensitive-fixture-value"
             }),
             causal_context: CausalContext::new(
-                ActorId::new("agent:unsupported-operation-test").expect("actor id"),
+                actor_id,
                 ActorKind::Agent,
-                AuthorityGrantId::new("manual-grant").expect("grant id"),
+                grant_id,
                 TraceId::new("unsupported-operation-trace").expect("trace id"),
             )
             .with_session_id(session_id),

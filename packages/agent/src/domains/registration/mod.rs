@@ -463,7 +463,7 @@ mod tests {
                     "maxRisk": "medium",
                     "budget": {"remainingInvocations": 1},
                     "canDelegate": false,
-                    "provenance": {"source": "registration-test"}
+                    "provenance": {"source": "registration-test", "operation": "observe"}
                 }),
                 CausalContext::new(
                     ActorId::new("system:registration-test").expect("actor id"),

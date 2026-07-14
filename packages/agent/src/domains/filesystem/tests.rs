@@ -466,6 +466,7 @@ async fn execute_filesystem_write_requires_idempotency_at_provider_boundary() {
         session_id,
         workspace_id,
         root.path(),
+        "filesystem_write",
     )
     .await;
     let error = invoke_error(
@@ -509,7 +510,14 @@ async fn execute_rejects_unsupported_file_write_operation() {
             "path": "unsupported.txt",
             "content": "bypass"
         }),
-        execute_context(&ctx, root.path(), "unsupported-file-write-rejected", true).await,
+        execute_context(
+            &ctx,
+            root.path(),
+            "unsupported-file-write-rejected",
+            "file_write",
+            true,
+        )
+        .await,
     )
     .await;
     assert!(
@@ -546,7 +554,14 @@ async fn execute_filesystem_write_commit_refuses_truncated_existing_hash() {
             "commit": true,
             "idempotencyKey": "execute-large-write-refused"
         }),
-        execute_context(&ctx, root.path(), "execute-large-write-refused", true).await,
+        execute_context(
+            &ctx,
+            root.path(),
+            "execute-large-write-refused",
+            "filesystem_write",
+            true,
+        )
+        .await,
     )
     .await;
     assert!(error.contains("hash is unavailable"), "{error}");
@@ -572,7 +587,14 @@ async fn execute_filesystem_apply_patch_refuses_truncated_preview() {
             "commit": true,
             "idempotencyKey": "execute-large-patch-refused"
         }),
-        execute_context(&ctx, root.path(), "execute-large-patch-refused", true).await,
+        execute_context(
+            &ctx,
+            root.path(),
+            "execute-large-patch-refused",
+            "filesystem_apply_patch",
+            true,
+        )
+        .await,
     )
     .await;
     assert!(error.contains("refuses files larger"), "{error}");
@@ -639,6 +661,7 @@ async fn execute_context(
     ctx: &ServerRuntimeContext,
     root: &Path,
     key: &str,
+    operation: &str,
     idempotent: bool,
 ) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
@@ -652,6 +675,7 @@ async fn execute_context(
         &session_id,
         &workspace_id,
         root,
+        operation,
     )
     .await;
     let mut context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
@@ -680,7 +704,9 @@ async fn derive_execute_grant(
     session_id: &str,
     workspace_id: &str,
     root: &Path,
+    operation: &str,
 ) -> AuthorityGrantId {
+    let max_risk = crate::domains::capability::operation_risk(operation).unwrap_or("medium");
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -695,10 +721,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": ["kind:patch_proposal", "kind:materialized_file"],
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": 2},
                 "canDelegate": false,
-                "provenance": {"source": "filesystem_test"}
+                "provenance": {"source": "filesystem_test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:filesystem-test").unwrap(),
@@ -708,7 +734,7 @@ async fn derive_execute_grant(
             )
             .with_scope("grant.write")
             .with_session_id(session_id)
-            .with_idempotency_key(format!("derive-{workspace_id}")),
+            .with_idempotency_key(format!("derive-{workspace_id}-{operation}")),
         ))
         .await;
     assert_eq!(

@@ -372,6 +372,7 @@ impl<'a> WebFixture<'a> {
             session_id,
             &workspace_id,
             root.path().to_str().unwrap(),
+            "web_fetch",
             network_policy,
             allowed_authority_scopes,
             allowed_resource_kinds,
@@ -537,6 +538,9 @@ impl<'a> WebFixture<'a> {
     }
 
     async fn grant_for_payload(&self, payload: &Value) -> AuthorityGrantId {
+        let operation = payload["operation"]
+            .as_str()
+            .expect("web execute operation");
         let mut selectors = self.resource_selectors.clone();
         for resource_id in payload
             .as_object()
@@ -556,9 +560,6 @@ impl<'a> WebFixture<'a> {
         }
         selectors.sort();
         selectors.dedup();
-        if selectors == self.resource_selectors {
-            return self.grant_id.clone();
-        }
         let authority_scopes = self
             .allowed_authority_scopes
             .iter()
@@ -570,13 +571,21 @@ impl<'a> WebFixture<'a> {
             .map(String::as_str)
             .collect::<Vec<_>>();
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
+        let network_policy = match operation {
+            "web_fetch" | "web_robots_check" => self.network_policy.as_str(),
+            _ => crate::domains::capability::authority_policy(operation)
+                .expect("web operation authority policy")
+                .network_policy()
+                .as_str(),
+        };
         derive_execute_grant(
             self.ctx,
             &self.actor_id,
             &self.session_id,
             &self.workspace_id,
             self.root.path().to_str().expect("root path"),
-            &self.network_policy,
+            operation,
+            network_policy,
             &authority_scopes,
             &resource_kinds,
             &selector_refs,
@@ -591,11 +600,18 @@ async fn derive_execute_grant(
     session_id: &str,
     workspace_id: &str,
     root: &str,
+    operation: &str,
     network_policy: &str,
     allowed_authority_scopes: &[&str],
     allowed_resource_kinds: &[&str],
     resource_selectors: &[&str],
 ) -> AuthorityGrantId {
+    let max_risk = match crate::domains::capability::operation_risk(operation)
+        .expect("web execute operation risk")
+    {
+        "high" | "critical" => "high",
+        _ => "medium",
+    };
     let grant = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -610,10 +626,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": resource_selectors,
                 "fileRoots": [root],
                 "networkPolicy": network_policy,
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": 20},
                 "canDelegate": false,
-                "provenance": {"source": "web-test"}
+                "provenance": {"source": "web-test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:web-test").expect("actor id"),
@@ -625,7 +641,7 @@ async fn derive_execute_grant(
             .with_session_id(session_id.to_owned())
             .with_workspace_id(workspace_id.to_owned())
             .with_idempotency_key(format!(
-                "derive-{session_id}-{network_policy}-{}-{}-{}",
+                "derive-{session_id}-{operation}-{network_policy}-{}-{}-{}",
                 allowed_authority_scopes.join("."),
                 allowed_resource_kinds.join("."),
                 resource_selectors.join(".")

@@ -230,6 +230,7 @@ async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_
     let mismatch_read_grant = fixture
         .followup_grant(
             "mismatch-read",
+            "module_program_execution_status",
             &[&runtime_a],
             &[&job_b],
             FollowupAccess::Read,
@@ -254,6 +255,7 @@ async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_
     let mismatch_cleanup_grant = fixture
         .followup_grant(
             "mismatch-cleanup",
+            "module_program_execution_cleanup",
             &[&runtime_a],
             &[&job_b],
             FollowupAccess::Write,
@@ -325,6 +327,7 @@ async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_
     let mismatch_cancel_grant = fixture
         .followup_grant(
             "mismatch-cancel",
+            "module_program_execution_cancel",
             &[&runtime_c],
             &[&job_d],
             FollowupAccess::Write,
@@ -360,6 +363,7 @@ async fn module_program_execution_followups_reject_mismatched_runtime_job_pairs_
     let cleanup_grant = fixture
         .followup_grant(
             "cleanup-running-test-jobs",
+            "module_program_execution_cancel",
             &[&runtime_c, &runtime_d],
             &[&job_c, &job_d],
             FollowupAccess::Write,
@@ -416,6 +420,7 @@ async fn subagent_launch_activates_accepted_module_pack_with_reviewable_result_r
     .await;
     let subagent_grant = fixture
         .subagent_grant(
+            "subagent_launch",
             &fixture.runtime_resource_id,
             &fixture.subagent_task_resource_id("subagent-task-alpha", "subagent-launch-key"),
         )
@@ -472,13 +477,20 @@ async fn subagent_launch_activates_accepted_module_pack_with_reviewable_result_r
         .as_str()
         .expect("job id")
         .to_owned();
+    let result_grant = fixture
+        .subagent_grant(
+            "subagent_result",
+            &runtime_resource_id,
+            &subagent_task_resource_id,
+        )
+        .await;
 
     let mut terminal_result = None;
     for index in 0..100 {
         let result = fixture
             .invoke_with_grant(
                 &format!("subagent-result-{index}"),
-                subagent_grant.clone(),
+                result_grant.clone(),
                 None,
                 json!({
                     "operation": "subagent_result",
@@ -570,6 +582,7 @@ async fn subagent_launch_partial_replay_recovers_existing_delegated_job_refs() {
             "subagent-partial-replay-launch",
             fixture
                 .subagent_grant(
+                    "subagent_launch",
                     &fixture.runtime_resource_id,
                     &fixture.subagent_task_resource_id(
                         "subagent-partial-task",
@@ -675,6 +688,7 @@ impl<'a> Fixture<'a> {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         self.derive_grant(
             &format!("start-{}", short_fingerprint(runtime_resource_ids)),
+            "module_program_execution_start",
             &[
                 "capability.execute",
                 "module_runtime.read",
@@ -708,6 +722,7 @@ impl<'a> Fixture<'a> {
                 "status-{}",
                 short_fingerprint(&[runtime_resource_id, job_resource_id])
             ),
+            "module_program_execution_status",
             &[runtime_resource_id],
             &[job_resource_id],
             FollowupAccess::Read,
@@ -725,6 +740,7 @@ impl<'a> Fixture<'a> {
                 "cleanup-{}",
                 short_fingerprint(&[runtime_resource_id, job_resource_id])
             ),
+            "module_program_execution_cleanup",
             &[runtime_resource_id],
             &[job_resource_id],
             FollowupAccess::Write,
@@ -734,6 +750,7 @@ impl<'a> Fixture<'a> {
 
     async fn subagent_grant(
         &self,
+        operation: &str,
         runtime_resource_id: &str,
         subagent_task_resource_id: &str,
     ) -> AuthorityGrantId {
@@ -751,6 +768,7 @@ impl<'a> Fixture<'a> {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         self.derive_grant(
             &format!("subagent-{}", short_fingerprint(&[runtime_resource_id])),
+            operation,
             &[
                 "capability.execute",
                 "subagents.read",
@@ -780,6 +798,7 @@ impl<'a> Fixture<'a> {
     async fn followup_grant(
         &self,
         suffix: &str,
+        operation: &str,
         runtime_resource_ids: &[&str],
         job_resource_ids: &[&str],
         access: FollowupAccess,
@@ -813,6 +832,7 @@ impl<'a> Fixture<'a> {
         let selector_refs = selectors.iter().map(String::as_str).collect::<Vec<_>>();
         self.derive_grant(
             suffix,
+            operation,
             &scopes,
             &[
                 "module_runtime_state",
@@ -937,16 +957,23 @@ impl<'a> Fixture<'a> {
     async fn derive_grant(
         &self,
         suffix: &str,
+        operation: &str,
         scopes: &[&str],
         resource_kinds: &[&str],
         selectors: &[&str],
     ) -> AuthorityGrantId {
+        let max_risk = match crate::domains::capability::operation_risk(operation) {
+            Some("low" | "medium") => RiskLevel::Medium,
+            Some("high" | "critical") => RiskLevel::High,
+            other => panic!("unsupported operation risk for {operation}: {other:?}"),
+        };
         let grant = self
             .ctx
             .engine_host
             .derive_authority_grant(DeriveGrant {
                 grant_id: Some(
-                    AuthorityGrantId::new(format!("module-program-execution-{suffix}")).unwrap(),
+                    AuthorityGrantId::new(format!("module-program-execution-{operation}-{suffix}"))
+                        .unwrap(),
                 ),
                 parent_grant_id: AuthorityGrantId::new("agent-capability-runtime").unwrap(),
                 subject_actor_id: Some(self.actor_id.clone()),
@@ -965,11 +992,14 @@ impl<'a> Fixture<'a> {
                     .collect(),
                 file_roots: vec![self.root.display().to_string()],
                 network_policy: "none".to_owned(),
-                max_risk: RiskLevel::Medium,
+                max_risk,
                 budget: json!({"remainingInvocations": 250, "remainingProcessMs": 120000}),
                 expires_at: None,
                 can_delegate: false,
-                provenance: json!({"source": "module_program_execution_test"}),
+                provenance: json!({
+                    "source": "module_program_execution_test",
+                    "operation": operation
+                }),
                 trace_id: TraceId::new(format!("trace-module-program-grant-{suffix}")).unwrap(),
             })
             .await

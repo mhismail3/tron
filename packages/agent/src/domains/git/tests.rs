@@ -586,7 +586,7 @@ async fn execute_git_status_uses_single_provider_tool_boundary() {
                 "operation": "git_status",
                 "path": "."
             }),
-            execute_context(&ctx, repo.path(), "execute-git-status").await,
+            execute_context(&ctx, repo.path(), "execute-git-status", "git_status").await,
         ))
         .await;
     assert_eq!(result.error, None, "execute failed: {:?}", result.error);
@@ -1627,6 +1627,7 @@ async fn execute_git_branch_start_rejects_bad_context_and_missing_required_field
                 &ctx,
                 repo.path(),
                 "git-branch-start-missing-metadata",
+                "git_branch_start",
             )
             .await,
         ))
@@ -2381,6 +2382,7 @@ async fn execute_git_commit_rejects_bad_context_path_message_and_reason() {
                 &ctx,
                 repo.path(),
                 "git-commit-missing-metadata",
+                "git_commit",
             )
             .await,
         ))
@@ -2623,12 +2625,16 @@ async fn execute_git_ok(
     key: &str,
     payload: Value,
 ) -> Value {
+    let operation = payload["operation"]
+        .as_str()
+        .expect("git execute operation")
+        .to_owned();
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("capability::execute").unwrap(),
             payload,
-            execute_context_with_idempotency(ctx, root, key).await,
+            execute_context_with_idempotency(ctx, root, key, &operation).await,
         ))
         .await;
     assert_eq!(result.error, None, "execute failed: {:?}", result.error);
@@ -2650,12 +2656,16 @@ async fn execute_git_error(
     key: &str,
     payload: Value,
 ) -> String {
+    let operation = payload["operation"]
+        .as_str()
+        .expect("git execute operation")
+        .to_owned();
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new("capability::execute").unwrap(),
             payload,
-            execute_context_with_idempotency(ctx, root, key).await,
+            execute_context_with_idempotency(ctx, root, key, &operation).await,
         ))
         .await;
     result.error.expect("execute should fail").to_string()
@@ -2786,12 +2796,25 @@ async fn assert_git_branch_start_lifecycle_event(
     );
 }
 
-async fn execute_context(ctx: &ServerRuntimeContext, root: &Path, key: &str) -> CausalContext {
+async fn execute_context(
+    ctx: &ServerRuntimeContext,
+    root: &Path,
+    key: &str,
+    operation: &str,
+) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
     let session_id = format!("{key}-session");
     let workspace_id = format!("{key}-workspace");
     let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
-    let grant_id = derive_execute_grant(ctx, &actor_id, trace_id.clone(), &session_id, root).await;
+    let grant_id = derive_execute_grant(
+        ctx,
+        &actor_id,
+        trace_id.clone(),
+        &session_id,
+        root,
+        operation,
+    )
+    .await;
     CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
         .with_scope("capability.execute")
         .with_session_id(session_id)
@@ -2811,8 +2834,9 @@ async fn execute_context_with_idempotency(
     ctx: &ServerRuntimeContext,
     root: &Path,
     key: &str,
+    operation: &str,
 ) -> CausalContext {
-    execute_context(ctx, root, key)
+    execute_context(ctx, root, key, operation)
         .await
         .with_idempotency_key(key.to_owned())
 }
@@ -2821,12 +2845,21 @@ async fn execute_context_without_working_directory(
     ctx: &ServerRuntimeContext,
     root: &Path,
     key: &str,
+    operation: &str,
 ) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
     let session_id = format!("{key}-session");
     let workspace_id = format!("{key}-workspace");
     let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
-    let grant_id = derive_execute_grant(ctx, &actor_id, trace_id.clone(), &session_id, root).await;
+    let grant_id = derive_execute_grant(
+        ctx,
+        &actor_id,
+        trace_id.clone(),
+        &session_id,
+        root,
+        operation,
+    )
+    .await;
     CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
         .with_scope("capability.execute")
         .with_session_id(session_id)
@@ -2845,7 +2878,14 @@ async fn derive_execute_grant(
     trace_id: TraceId,
     session_id: &str,
     root: &Path,
+    operation: &str,
 ) -> AuthorityGrantId {
+    let max_risk = match crate::domains::capability::operation_risk(operation)
+        .expect("git execute operation risk")
+    {
+        "high" | "critical" => "high",
+        _ => "medium",
+    };
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -2860,10 +2900,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": ["kind:git_index_change", "kind:git_commit", "kind:git_branch_start"],
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": 3},
                 "canDelegate": false,
-                "provenance": {"source": "git_test"}
+                "provenance": {"source": "git_test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:git-test").unwrap(),
@@ -2873,7 +2913,7 @@ async fn derive_execute_grant(
             )
             .with_scope("grant.write")
             .with_session_id(session_id)
-            .with_idempotency_key(format!("derive-{session_id}")),
+            .with_idempotency_key(format!("derive-{session_id}-{operation}")),
         ))
         .await;
     assert_eq!(

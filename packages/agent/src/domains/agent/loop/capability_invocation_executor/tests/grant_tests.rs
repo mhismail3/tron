@@ -1315,6 +1315,10 @@ async fn unsupported_operation_runtime_grant_is_rejection_only() {
     assert!(grant.resource_selectors.is_empty());
     assert_eq!(grant.network_policy, "none");
     assert!(!grant.can_delegate);
+    assert_eq!(
+        grant.provenance["operation"],
+        json!("definitely_not_a_real_operation")
+    );
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

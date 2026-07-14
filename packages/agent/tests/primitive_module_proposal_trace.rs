@@ -92,6 +92,7 @@ async fn derive_module_proposal_execute_grant(
                 "canDelegate": false,
                 "provenance": {
                     "source": "primitive_trace_module_proposal_test",
+                    "operation": "module_proposal_record",
                     "sessionId": session_id,
                     "workspaceId": workspace_id,
                     "providerInvocationId": provider_invocation_id,
@@ -200,6 +201,7 @@ async fn rejected_module_proposal_trace_uses_safe_request_projection() {
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "trace_list",
             "provider-call-module-proposal-trace-list-1",
             "trace-module-proposal-list-1",
         )
@@ -271,6 +273,7 @@ async fn rejected_module_proposal_trace_uses_safe_request_projection() {
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "trace_get",
             "provider-call-module-proposal-trace-get-1",
             "trace-module-proposal-get-1",
         )

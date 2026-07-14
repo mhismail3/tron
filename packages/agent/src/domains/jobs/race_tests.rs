@@ -39,7 +39,9 @@ async fn cancel_request_version_conflict_does_not_drop_runtime_terminal_output()
     let hook = super::support::install_finalize_race_hook(job_resource_id.clone());
 
     let ctx_for_cancel = ctx.clone();
-    let cancel_context = fixture.execute_context(Some("jobs-finalize-cancel-race-stop"));
+    let cancel_context = fixture
+        .execute_context_for("job_cancel", Some("jobs-finalize-cancel-race-stop"))
+        .await;
     let cancel_job_resource_id = job_resource_id.clone();
     let cancel_task = tokio::spawn(async move {
         invoke_ok(
@@ -83,22 +85,21 @@ async fn cancel_request_version_conflict_does_not_drop_runtime_terminal_output()
 struct ExecuteFixture<'a> {
     ctx: &'a ServerRuntimeContext,
     actor_id: ActorId,
-    grant_id: AuthorityGrantId,
     trace_id: TraceId,
     root: &'a Path,
+    job_resource_id: Option<String>,
 }
 
 impl<'a> ExecuteFixture<'a> {
     async fn new(ctx: &'a ServerRuntimeContext, root: &'a Path) -> Self {
         let trace_id = TraceId::new("jobs-finalize-cancel-race").unwrap();
         let actor_id = ActorId::new("agent:jobs-finalize-cancel-race-session").unwrap();
-        let grant_id = derive_execute_grant(ctx, &actor_id, trace_id.clone(), root, None).await;
         Self {
             ctx,
             actor_id,
-            grant_id,
             trace_id,
             root,
+            job_resource_id: None,
         }
     }
 
@@ -107,18 +108,16 @@ impl<'a> ExecuteFixture<'a> {
             .get("idempotencyKey")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        invoke_ok(self.ctx, payload, self.execute_context(key.as_deref())).await
+        let operation = payload["operation"]
+            .as_str()
+            .expect("job execute operation")
+            .to_owned();
+        let context = self.execute_context_for(&operation, key.as_deref()).await;
+        invoke_ok(self.ctx, payload, context).await
     }
 
     async fn scope_to_job(&mut self, job_resource_id: &str) {
-        self.grant_id = derive_execute_grant(
-            self.ctx,
-            &self.actor_id,
-            self.trace_id.clone(),
-            self.root,
-            Some(job_resource_id),
-        )
-        .await;
+        self.job_resource_id = Some(job_resource_id.to_owned());
     }
 
     async fn wait_for_state(&self, job_resource_id: &str, state: &str) -> Value {
@@ -137,11 +136,24 @@ impl<'a> ExecuteFixture<'a> {
         panic!("job {job_resource_id} did not reach {state}");
     }
 
-    fn execute_context(&self, idempotency_key: Option<&str>) -> CausalContext {
+    async fn execute_context_for(
+        &self,
+        operation: &str,
+        idempotency_key: Option<&str>,
+    ) -> CausalContext {
+        let grant_id = derive_execute_grant(
+            self.ctx,
+            &self.actor_id,
+            self.trace_id.clone(),
+            self.root,
+            operation,
+            self.job_resource_id.as_deref(),
+        )
+        .await;
         let mut context = CausalContext::new(
             self.actor_id.clone(),
             ActorKind::Agent,
-            self.grant_id.clone(),
+            grant_id,
             self.trace_id.clone(),
         )
         .with_scope("capability.execute")
@@ -195,8 +207,15 @@ async fn derive_execute_grant(
     actor_id: &ActorId,
     trace_id: TraceId,
     root: &Path,
+    operation: &str,
     job_resource_id: Option<&str>,
 ) -> AuthorityGrantId {
+    let max_risk = match crate::domains::capability::operation_risk(operation)
+        .expect("job execute operation risk")
+    {
+        "high" | "critical" => "high",
+        _ => "medium",
+    };
     let mut resource_selectors = vec![
         "kind:agent_state".to_owned(),
         "kind:job_process".to_owned(),
@@ -206,8 +225,10 @@ async fn derive_execute_grant(
         resource_selectors.push(format!("resource:{job_resource_id}"));
     }
     let derive_key = match job_resource_id {
-        Some(job_resource_id) => format!("derive-jobs-finalize-cancel-race:{job_resource_id}"),
-        None => "derive-jobs-finalize-cancel-race:create".to_owned(),
+        Some(job_resource_id) => {
+            format!("derive-jobs-finalize-cancel-race:{operation}:{job_resource_id}")
+        }
+        None => format!("derive-jobs-finalize-cancel-race:{operation}:create"),
     };
     let result = ctx
         .engine_host
@@ -229,10 +250,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": resource_selectors,
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": 20},
                 "canDelegate": false,
-                "provenance": {"source": "jobs_race_test"}
+                "provenance": {"source": "jobs_race_test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:jobs-race-test").unwrap(),

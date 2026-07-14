@@ -32,6 +32,7 @@ async fn job_start_requires_network_policy_none() {
         session_id,
         workspace_id,
         root.path(),
+        "job_start",
         "loopback",
         4,
         None,
@@ -74,6 +75,7 @@ async fn job_start_requires_idempotency_at_execute_boundary() {
         session_id,
         workspace_id,
         root.path(),
+        "job_start",
         "none",
         4,
         None,
@@ -673,6 +675,7 @@ impl<'a> ExecuteFixture<'a> {
             &session_id,
             &workspace_id,
             root,
+            "job_start",
             "none",
             40,
             None,
@@ -734,9 +737,10 @@ impl<'a> ExecuteFixture<'a> {
     }
 
     async fn grant_for_payload(&self, payload: &Value) -> AuthorityGrantId {
-        let Some(job_resource_id) = payload.get("jobResourceId").and_then(Value::as_str) else {
-            return self.grant_id.clone();
-        };
+        let operation = payload["operation"]
+            .as_str()
+            .expect("job execute operation");
+        let job_resource_id = payload.get("jobResourceId").and_then(Value::as_str);
         derive_execute_grant(
             self.ctx,
             &self.actor_id,
@@ -744,9 +748,10 @@ impl<'a> ExecuteFixture<'a> {
             &self.session_id,
             &self.workspace_id,
             self.root,
+            operation,
             "none",
             40,
-            Some(job_resource_id),
+            job_resource_id,
         )
         .await
     }
@@ -870,10 +875,17 @@ async fn derive_execute_grant(
     session_id: &str,
     workspace_id: &str,
     root: &Path,
+    operation: &str,
     network_policy: &str,
     remaining_invocations: u64,
     job_resource_id: Option<&str>,
 ) -> AuthorityGrantId {
+    let max_risk = match crate::domains::capability::operation_risk(operation)
+        .expect("job execute operation risk")
+    {
+        "high" | "critical" => "high",
+        _ => "medium",
+    };
     let mut resource_selectors = vec![
         "kind:agent_state".to_owned(),
         "kind:job_process".to_owned(),
@@ -903,10 +915,10 @@ async fn derive_execute_grant(
                 "resourceSelectors": resource_selectors,
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": network_policy,
-                "maxRisk": "medium",
+                "maxRisk": max_risk,
                 "budget": {"remainingInvocations": remaining_invocations},
                 "canDelegate": false,
-                "provenance": {"source": "jobs_test"}
+                "provenance": {"source": "jobs_test", "operation": operation}
             }),
             CausalContext::new(
                 ActorId::new("system:jobs-test").unwrap(),
@@ -917,7 +929,7 @@ async fn derive_execute_grant(
             .with_scope("grant.write")
             .with_session_id(session_id)
             .with_idempotency_key(format!(
-                "derive-{workspace_id}-{network_policy}-{selector_key}"
+                "derive-{workspace_id}-{operation}-{network_policy}-{selector_key}"
             )),
         ))
         .await;

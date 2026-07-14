@@ -1278,10 +1278,11 @@ autonomous self-update across every operation.
 `catalog_inspect` also projects operation-specific contracts for provider-safe
 trace and web operations. `execute::trace_list` and `execute::trace_get` show the
 model the safe record shape and redaction guarantees before invocation.
-Canonical operations start a safe trace before their exact payload and trusted
-runtime-context gates, so structural or context rejection remains inspectable
-without storing the raw request; unknown operation names use the same redacted
-failed-trace contract. Whole
+Canonical operations verify trusted actor/session context and exact durable
+operation authority before any trace mutation, then start a trace before exact
+payload validation so structural rejection remains inspectable. Unknown
+operation names use the redacted failed-trace contract only when a trusted
+rejection grant carries that exact unsupported-operation claim. Whole
 session trace proof is point-in-time: agents call `trace_list` after the
 operations being audited or explicitly qualify that later operations are not
 covered. Final answers should explicitly say provider transcript tool-call ids
@@ -1320,11 +1321,18 @@ validated operation per call.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
-scoped to the exact primitive function, no
-namespace authority, state read/write support, and `networkPolicy: none`; the
+scoped to the exact primitive function and operation, no namespace authority,
+a bounded wrapper-compatible risk covering the canonical operation risk, the
+static authority scopes for that operation, and
+the operation's base resource kinds/selectors and network policy. Before
+dispatch, the capability domain resolves the durable grant and revalidates all
+of those static facts, so a surviving read-only or rejection grant cannot be
+replayed as a mutating operation. Conditional selectors and resource kinds,
+file roots, and payload-specific authority remain enforced by their owning
+domain and the engine authorizer. The
 production bootstrap set excludes test fixture grants, and opening the durable
 authority store revokes any retired engine-bootstrap root and its descendants.
-worker rejects bootstrap grants, public caller contexts, and system-scoped
+The worker rejects bootstrap grants, public caller contexts, and system-scoped
 state. File and process operations additionally require trusted working
 directory metadata before resolving paths. Trace records use those trusted facts
 directly instead of inferring provider ownership from model id strings.
@@ -2309,7 +2317,8 @@ read/write authority, so operation search and schema inspection cannot carry
 scratch-state write privileges. Unsupported operation names derive a
 rejection-only `capability::execute` child grant with no resources, selectors,
 or network authority so the canonical validator can return structured recovery
-and record a redacted failed trace; that grant cannot dispatch domain behavior.
+and record a redacted failed trace after matching trusted actor/session and
+operation-claim checks; that grant cannot dispatch domain behavior.
 Public wire context does not accept `authorityScopes` or
 `runtimeMetadata`; runtime metadata is reserved for trusted engine and
 agent-owned execution paths. `execute` is the primitive operation boundary.

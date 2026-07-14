@@ -29,6 +29,7 @@ async fn execute_replay_manifest_is_read_only_and_does_not_create_trace_record()
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "replay_manifest",
             "provider-call-replay-1",
             "trace-replay-1",
         )
@@ -87,6 +88,7 @@ async fn execute_catalog_search_does_not_require_working_directory_metadata() {
         &created.session.id,
         &created.session.workspace_id,
         workspace.path().to_str().unwrap(),
+        "catalog_search",
         "provider-call-catalog-1",
         "none",
     )
@@ -154,6 +156,7 @@ async fn execute_catalog_search_emits_structured_agent_logs() {
         &created.session.id,
         &created.session.workspace_id,
         workspace.path().to_str().unwrap(),
+        "catalog_search",
         "provider-call-catalog-log-1",
         "none",
     )
@@ -257,6 +260,7 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "filesystem_write",
             "provider-call-write-1",
             "trace-write-1",
         )
@@ -286,6 +290,7 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "trace_list",
             "provider-call-list-1",
             "trace-list-1",
         )
@@ -326,6 +331,7 @@ async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it(
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "trace_get",
             "provider-call-get-1",
             "trace-get-1",
         )
@@ -415,6 +421,7 @@ async fn execute_process_run_expands_home_alias_in_trace_working_directory() {
                 &created.session.id,
                 &created.session.workspace_id,
                 "~",
+                "process_run",
                 "provider-call-pwd-1",
                 "trace-pwd-1",
             )
@@ -523,6 +530,7 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "log_recent",
             "provider-call-logs-1",
             "trace-logs-1",
         )
@@ -562,6 +570,7 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
         &created.session.id,
         &created.session.workspace_id,
         workspace.path().to_str().unwrap(),
+        "log_recent",
         "provider-call-logs-2",
         "none",
     )
@@ -702,6 +711,7 @@ async fn execute_rejects_system_scoped_state() {
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
+            "state_set",
             "provider-call-state-denied-1",
             "trace-state-denied-1",
         )
@@ -737,6 +747,7 @@ async fn execute_process_run_requires_none_network_policy() {
         &created.session.id,
         &created.session.workspace_id,
         workspace.path().to_str().unwrap(),
+        "process_run",
         "provider-call-process-loopback-1",
         "loopback",
     )

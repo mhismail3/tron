@@ -3,10 +3,13 @@
 //! Each model-launched primitive call first derives a non-delegable child grant
 //! from `agent-capability-runtime` with the current canonical working directory
 //! as its only file root, `networkPolicy none`, no namespace authority, and the
-//! exact target function being invoked. The derived grant id and its bounded
-//! operation authority scopes, not the bootstrap runtime grant alone, are then
+//! exact target function and operation being invoked. The derived grant id and
+//! its bounded risk and operation authority scopes, not the bootstrap runtime
+//! grant alone, are then
 //! placed in the engine causal context for `capability::execute` so downstream
-//! domains can enforce goal, prompt-artifact, program-execution, resource,
+//! capability dispatch can revalidate the exact operation claim and canonical
+//! static scopes, base resource custody, and network policy before downstream
+//! domains enforce goal, prompt-artifact, program-execution, resource,
 //! filesystem, and Git contracts without wildcard selectors.
 //! Catalog discovery calls are intentionally narrower than generic execute
 //! calls: `catalog_search` and `catalog_inspect` derive only the execute wrapper
@@ -20,9 +23,9 @@
 //! operations; non-state operations never receive implicit state capabilities.
 //! Unsupported operation names receive only a rejection-only child grant with
 //! `capability::execute`, no resource selectors, and `networkPolicy none`. That
-//! grant exists solely so the canonical operation validator can return
-//! structured recovery guidance and persist a redacted failed trace; it cannot
-//! authorize domain behavior.
+//! grant exists solely so unsupported-operation handling can return structured
+//! recovery guidance and persist a redacted failed trace; its operation claim
+//! cannot authorize any supported domain behavior.
 //!
 //! Durable capability lifecycle ownership stays in the turn runner. When a
 //! session event persister is available, the executor only returns the

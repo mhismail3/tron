@@ -560,10 +560,18 @@ impl ShadowFixture {
         operation: &str,
         source: &Invocation,
     ) -> Value {
+        let execute_grant_id = derive_operation_bound_execute_grant(
+            &self.capability_deps,
+            &self.session_id,
+            key,
+            operation,
+            &source.causal_context.authority_grant_id,
+        )
+        .await;
         let mut context = CausalContext::new(
             ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
             ActorKind::Agent,
-            source.causal_context.authority_grant_id.clone(),
+            execute_grant_id,
             TraceId::new(format!("trace-{key}")).expect("trace id"),
         )
         .with_session_id(self.session_id.clone())
@@ -1581,10 +1589,21 @@ impl RouteFixture {
         grant_id: AuthorityGrantId,
         scopes: &[String],
     ) -> Value {
+        let operation = payload["operation"]
+            .as_str()
+            .expect("execute operation is required");
+        let execute_grant_id = derive_operation_bound_execute_grant(
+            &self.capability_deps,
+            &self.session_id,
+            key,
+            operation,
+            &grant_id,
+        )
+        .await;
         let mut context = CausalContext::new(
             ActorId::new(format!("agent:{}", self.session_id)).expect("agent actor id"),
             ActorKind::Agent,
-            grant_id,
+            execute_grant_id,
             TraceId::new(format!("trace-{key}")).expect("trace id"),
         )
         .with_session_id(self.session_id.clone())
@@ -4813,6 +4832,90 @@ async fn derive_grant(
         })
         .await
         .expect("derive grant")
+        .grant_id
+}
+
+async fn derive_operation_bound_execute_grant(
+    deps: &crate::domains::capability::Deps,
+    session_id: &str,
+    key: &str,
+    operation: &str,
+    source_grant_id: &AuthorityGrantId,
+) -> AuthorityGrantId {
+    let source = deps
+        .engine_host
+        .inspect_authority_grant(source_grant_id)
+        .await
+        .expect("inspect source grant")
+        .expect("source grant exists");
+    let max_risk = match crate::domains::capability::operation_risk(operation) {
+        Some("low") => RiskLevel::Low,
+        Some("medium") => RiskLevel::Medium,
+        Some("high") => RiskLevel::High,
+        other => panic!("unsupported operation risk for {operation}: {other:?}"),
+    };
+    let policy = crate::domains::capability::authority_policy(operation)
+        .expect("operation authority policy");
+    let mut allowed_authority_scopes = source.allowed_authority_scopes;
+    allowed_authority_scopes.extend(
+        policy
+            .base_scope_additions()
+            .iter()
+            .map(|scope| (*scope).to_owned()),
+    );
+    allowed_authority_scopes.sort();
+    allowed_authority_scopes.dedup();
+    let mut allowed_resource_kinds = source.allowed_resource_kinds;
+    allowed_resource_kinds.extend(
+        policy
+            .resource_kind_policy()
+            .base_kinds()
+            .iter()
+            .map(|kind| (*kind).to_owned()),
+    );
+    allowed_resource_kinds.sort();
+    allowed_resource_kinds.dedup();
+    let mut resource_selectors = source.resource_selectors;
+    resource_selectors.extend(
+        policy
+            .resource_kind_policy()
+            .base_kinds()
+            .iter()
+            .map(|kind| format!("kind:{kind}")),
+    );
+    resource_selectors.sort();
+    resource_selectors.dedup();
+    deps.engine_host
+        .derive_authority_grant(DeriveGrant {
+            grant_id: Some(
+                AuthorityGrantId::new(format!("capability-binding-execute-{session_id}-{key}"))
+                    .expect("grant id"),
+            ),
+            parent_grant_id: AuthorityGrantId::new("engine-system").expect("parent grant"),
+            subject_actor_id: Some(
+                ActorId::new(format!("agent:{session_id}")).expect("agent actor id"),
+            ),
+            subject_worker_id: None,
+            subject_invocation_id: None,
+            allowed_capabilities: source.allowed_capabilities,
+            allowed_namespaces: source.allowed_namespaces,
+            allowed_authority_scopes,
+            allowed_resource_kinds,
+            resource_selectors,
+            file_roots: source.file_roots,
+            network_policy: policy.network_policy().as_str().to_owned(),
+            max_risk,
+            budget: json!({"class": "operation_bound_capability_binding_test"}),
+            expires_at: source.expires_at,
+            can_delegate: false,
+            provenance: json!({
+                "source": "capability_binding_test",
+                "operation": operation
+            }),
+            trace_id: TraceId::new(format!("trace-execute-grant-{key}")).expect("trace id"),
+        })
+        .await
+        .expect("derive operation-bound execute grant")
         .grant_id
 }
 

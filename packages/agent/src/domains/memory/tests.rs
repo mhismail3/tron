@@ -1134,9 +1134,10 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
     )
     .await;
 
-    let execute_grant = derive_execute_grant(
+    let query_list_grant = derive_execute_grant(
         &ctx,
-        "private-authority-evidence-grant",
+        "private-authority-evidence-query-list",
+        "memory_query_list",
         query_resource_id,
         decision_resource_id,
     )
@@ -1145,7 +1146,7 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
         &ctx,
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
         json!({"operation": "memory_query_list"}),
-        agent_context("memory-private-authority-query-list", execute_grant.clone())
+        agent_context("memory-private-authority-query-list", query_list_grant)
             .with_scope("capability.execute")
             .with_scope(super::READ_SCOPE),
     )
@@ -1160,7 +1161,14 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
         }),
         agent_context(
             "memory-private-authority-query-inspect",
-            execute_grant.clone(),
+            derive_execute_grant(
+                &ctx,
+                "private-authority-evidence-query-inspect",
+                "memory_query_inspect",
+                query_resource_id,
+                decision_resource_id,
+            )
+            .await,
         )
         .with_scope("capability.execute")
         .with_scope(super::READ_SCOPE),
@@ -1173,7 +1181,14 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
         json!({"operation": "memory_decision_list"}),
         agent_context(
             "memory-private-authority-decision-list",
-            execute_grant.clone(),
+            derive_execute_grant(
+                &ctx,
+                "private-authority-evidence-decision-list",
+                "memory_decision_list",
+                query_resource_id,
+                decision_resource_id,
+            )
+            .await,
         )
         .with_scope("capability.execute")
         .with_scope(super::READ_SCOPE),
@@ -1187,9 +1202,19 @@ async fn query_and_decision_list_inspect_scrub_private_authority_evidence() {
             "operation": "memory_decision_inspect",
             "decisionResourceId": decision_resource_id
         }),
-        agent_context("memory-private-authority-decision-inspect", execute_grant)
-            .with_scope("capability.execute")
-            .with_scope(super::READ_SCOPE),
+        agent_context(
+            "memory-private-authority-decision-inspect",
+            derive_execute_grant(
+                &ctx,
+                "private-authority-evidence-decision-inspect",
+                "memory_decision_inspect",
+                query_resource_id,
+                decision_resource_id,
+            )
+            .await,
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
     )
     .await
     .expect("decision inspect");
@@ -1308,9 +1333,10 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
     let decision_resource_id = decision["decisionResourceId"]
         .as_str()
         .expect("decision id");
-    let execute_grant = derive_execute_grant(
+    let query_list_grant = derive_execute_grant(
         &ctx,
-        "memory-execute-grant",
+        "memory-execute-query-list",
+        "memory_query_list",
         query_resource_id,
         decision_resource_id,
     )
@@ -1320,7 +1346,7 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         &ctx,
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
         json!({"operation": "memory_query_list"}),
-        agent_context("memory-execute-query-list", execute_grant.clone())
+        agent_context("memory-execute-query-list", query_list_grant)
             .with_scope("capability.execute")
             .with_scope(super::READ_SCOPE),
     )
@@ -1347,9 +1373,19 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
             "operation": "memory_decision_inspect",
             "decisionResourceId": decision_resource_id
         }),
-        agent_context("memory-execute-decision-inspect", execute_grant.clone())
-            .with_scope("capability.execute")
-            .with_scope(super::READ_SCOPE),
+        agent_context(
+            "memory-execute-decision-inspect",
+            derive_execute_grant(
+                &ctx,
+                "memory-execute-decision-inspect",
+                "memory_decision_inspect",
+                query_resource_id,
+                decision_resource_id,
+            )
+            .await,
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
     )
     .await
     .expect("execute decision inspect");
@@ -1370,9 +1406,19 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
             "operation": "memory_query_inspect",
             "queryResourceId": query_resource_id
         }),
-        agent_context("memory-execute-query-inspect", execute_grant.clone())
-            .with_scope("capability.execute")
-            .with_scope(super::READ_SCOPE),
+        agent_context(
+            "memory-execute-query-inspect",
+            derive_execute_grant(
+                &ctx,
+                "memory-execute-query-inspect",
+                "memory_query_inspect",
+                query_resource_id,
+                decision_resource_id,
+            )
+            .await,
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
     )
     .await
     .expect("execute query inspect");
@@ -1386,9 +1432,19 @@ async fn execute_can_read_only_inspect_query_and_decision_evidence() {
         &ctx,
         crate::domains::capability::contract::EXECUTE_FUNCTION_ID,
         json!({"operation": "memory_decision_list"}),
-        agent_context("memory-execute-decision-list", execute_grant)
-            .with_scope("capability.execute")
-            .with_scope(super::READ_SCOPE),
+        agent_context(
+            "memory-execute-decision-list",
+            derive_execute_grant(
+                &ctx,
+                "memory-execute-decision-list",
+                "memory_decision_list",
+                query_resource_id,
+                decision_resource_id,
+            )
+            .await,
+        )
+        .with_scope("capability.execute")
+        .with_scope(super::READ_SCOPE),
     )
     .await
     .expect("execute decision list");
@@ -1713,9 +1769,15 @@ fn client_context(trace_id: &str) -> CausalContext {
 async fn derive_execute_grant(
     ctx: &ServerRuntimeContext,
     suffix: &str,
+    operation: &str,
     query_resource_id: &str,
     decision_resource_id: &str,
 ) -> AuthorityGrantId {
+    let max_risk = match crate::domains::capability::operation_risk(operation) {
+        Some("low" | "medium") => RiskLevel::Medium,
+        Some("high" | "critical") => RiskLevel::High,
+        other => panic!("unsupported operation risk for {operation}: {other:?}"),
+    };
     let grant = ctx
         .engine_host
         .derive_authority_grant(DeriveGrant {
@@ -1745,11 +1807,14 @@ async fn derive_execute_grant(
             ],
             file_roots: vec!["/tmp".to_owned()],
             network_policy: "none".to_owned(),
-            max_risk: RiskLevel::Medium,
+            max_risk,
             budget: json!({"class": "memory_query_decision_test"}),
             expires_at: None,
             can_delegate: false,
-            provenance: json!({"source": "memory_query_decision_test"}),
+            provenance: json!({
+                "source": "memory_query_decision_test",
+                "operation": operation
+            }),
             trace_id: TraceId::new(format!("trace-{suffix}")).unwrap(),
         })
         .await

@@ -117,7 +117,8 @@
 //! per-record detail after `trace_list` returns an exact `traceRecordId`, which
 //! is deliberately distinct from the causal `traceId`. Unsupported operation
 //! names receive a rejection-only child grant and are persisted as failed trace
-//! records without their raw request before they return; provider-byte budgeting
+//! records without their raw request only after trusted actor/session context and
+//! the grant's exact unsupported-operation claim are verified; provider-byte budgeting
 //! retains a bounded newest-first record subset instead of deleting the complete
 //! records collection, while exact operation/status filters let the agent isolate
 //! omitted failures without guessing record ids. Trace
@@ -233,7 +234,8 @@
 //! working directory from trusted `CausalContext` runtime metadata, not from
 //! model-id string parsing, shell aliases, caller-supplied public context, or
 //! process-cwd inference. `capability::execute` rejects bootstrap/root grants and
-//! runs only with derived scoped grants whose file roots, state authority, and
+//! runs only with derived scoped grants whose durable operation claim, maximum
+//! risk, static authority scopes, base resource kinds/selectors, file roots, and
 //! network policy match the requested primitive operation. Working-directory
 //! metadata is required only for file/process operations; catalog discovery must
 //! remain pure metadata inspection or resource-backed report creation. Replay
