@@ -3,46 +3,8 @@ import Foundation
 
 extension SourceGuardTests {
 
-    @Test("hosted runtime flag is unit-test-only in source and generated schemes")
-    func testHostedRuntimeFlagIsUnitTestOnly() throws {
-        let iosRoot = iosAppRoot()
-        let project = try String(
-            contentsOf: iosRoot.appendingPathComponent("project.yml"),
-            encoding: .utf8
-        )
-        #expect(occurrences(of: "TRON_APP_RUNTIME_MODE: hosted-unit-tests", in: project) == 3)
-
-        for schemeName in ["Tron", "Tron Beta", "Tron Fast"] {
-            let scheme = try String(
-                contentsOf: iosRoot.appendingPathComponent(
-                    "TronMobile.xcodeproj/xcshareddata/xcschemes/\(schemeName).xcscheme"
-                ),
-                encoding: .utf8
-            )
-            let testAction = try #require(
-                sourceBlock(in: scheme, startingWith: "<TestAction", endingWith: "</TestAction>")
-            )
-            #expect(occurrences(of: #"key = "TRON_APP_RUNTIME_MODE""#, in: scheme) == 1)
-            #expect(testAction.contains(#"key = "TRON_APP_RUNTIME_MODE""#))
-            #expect(testAction.contains(#"value = "hosted-unit-tests""#))
-        }
-
-        let uiScheme = try String(
-            contentsOf: iosRoot.appendingPathComponent(
-                "TronMobile.xcodeproj/xcshareddata/xcschemes/Tron UI Validation.xcscheme"
-            ),
-            encoding: .utf8
-        )
-        #expect(!uiScheme.contains("TRON_APP_RUNTIME_MODE"))
-
-        let uiSection = try #require(
-            sourceBlock(in: project, startingWith: "  Tron UI Validation:", endingWith: "  Tron Fast:")
-        )
-        #expect(!uiSection.contains("TRON_APP_RUNTIME_MODE"))
-    }
-
-    @Test("hosted bootstrap cannot construct production application state")
-    func testHostedBootstrapOwnsNoProductionState() throws {
+    @Test("hosted bootstrap cannot construct production or fixture state")
+    func testHostedBootstrapOwnsNoProductionOrFixtureState() throws {
         let iosRoot = iosAppRoot()
         let wrapper = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
@@ -57,9 +19,11 @@ extension SourceGuardTests {
             encoding: .utf8
         )
 
-        #expect(wrapper.contains("private let bootstrap: AppBootstrap<ProductionAppRoot>"))
-        #expect(wrapper.contains("bootstrap = AppBootstrap(mode: mode)"))
-        #expect(wrapper.contains("HostedUnitTestRoot()"))
+        #expect(wrapper.contains("private let productionRoot: ProductionAppRoot?"))
+        #expect(wrapper.contains("if AppRuntimeMode.current.runsApplicationLifecycle"))
+        #expect(wrapper.contains("productionRoot = ProductionAppRoot()"))
+        #expect(wrapper.contains("productionRoot = nil"))
+        #expect(wrapper.contains("Color.clear"))
         for forbidden in [
             "DependencyContainer(",
             "EventDatabase(",
@@ -72,23 +36,15 @@ extension SourceGuardTests {
             #expect(!wrapper.contains(forbidden), "TronMobileApp wrapper owns \(forbidden)")
         }
 
-        let hostedRoot = try #require(
-            sourceBlock(
-                in: runtime,
-                startingWith: "struct HostedUnitTestRoot: View",
-                endingWith: "/// Synchronous cleanup registry"
-            )
-        )
         for forbidden in [
-            "DependencyContainer",
             "UserDefaults",
             "FileManager",
-            "NotificationCenter",
-            "MetricKit",
-            "Task {",
-            "EngineConnection",
+            "HostedTestSuiteLifecycle",
+            "CleanupRegistry",
+            "atexit",
+            "TRON_APP_RUNTIME_MODE",
         ] {
-            #expect(!hostedRoot.contains(forbidden), "hosted root owns \(forbidden)")
+            #expect(!runtime.contains(forbidden), "runtime-mode owner contains \(forbidden)")
         }
 
         #expect(productionRoot.contains("@State private var container: DependencyContainer"))

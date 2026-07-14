@@ -156,10 +156,10 @@ a task-owned in-memory `PairedServerTokenStore.Backend`. Do not construct a
 live session, `URLSessionPairingProbe`, the production token backend, or an
 OAuth owner in a hosted unit-test path.
 
-Named-suite cleanup is semantic and test-only. Both owned suite factories emit
-a versioned registration record before exposure, remove the exact persistent
-domain during cleanup, prove that the domain is nil or an empty dictionary,
-and emit one matching cleanup record. Repeated and process-fallback cleanup use
+Named-suite cleanup is semantic and test-only. `IsolatedTestState` emits a
+versioned registration record before exposure, removes the exact persistent
+domain during cleanup, proves that the domain is nil or an empty dictionary,
+and emits one matching cleanup record. Repeated and process-fallback cleanup use
 the same idempotent owner and cannot duplicate the cleanup event. Tests must
 not discover, unlink, or synchronize CoreSimulator preference backing files;
 `cfprefsd` may materialize an empty plist after the process exits.

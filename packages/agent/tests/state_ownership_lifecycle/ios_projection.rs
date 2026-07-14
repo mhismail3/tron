@@ -365,7 +365,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "storageKey = \"tron.inputHistory\"",
         "maxHistorySize = 100",
         "private let defaults: UserDefaults",
-        "init(defaults: UserDefaults = AppRuntimeStorage.current.defaults)",
+        "init(defaults: UserDefaults)",
         "self.defaults = defaults",
         "defaults.data(forKey: storageKey)",
         "defaults.set(data, forKey: storageKey)",
@@ -381,7 +381,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     }
     assert!(
         !contains_direct_user_defaults_standard(&history_store),
-        "InputHistoryStore must use its injected defaults owner, not UserDefaults.standard"
+        "InputHistoryStore must require its defaults owner, not reach for UserDefaults.standard"
     );
 
     let shared_content =

@@ -35,7 +35,7 @@ enum AppearanceMode: String, CaseIterable, Sendable {
 @MainActor
 @Observable
 final class AppearanceSettings {
-    static let shared = AppearanceSettings(defaults: AppRuntimeStorage.current.defaults)
+    static let shared = AppearanceSettings(defaults: .standard)
 
     private let defaults: UserDefaults
 

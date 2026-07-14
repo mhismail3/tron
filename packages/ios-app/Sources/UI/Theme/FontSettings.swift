@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class FontSettings {
-    static let shared = FontSettings(defaults: AppRuntimeStorage.current.defaults)
+    static let shared = FontSettings(defaults: .standard)
 
     private let defaults: UserDefaults
 

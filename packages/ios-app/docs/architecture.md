@@ -254,14 +254,13 @@ input so the old input does not make `canAddInput` fail.
 ### Application process root
 
 `TronMobileApp` is only the process entry point. It resolves `AppRuntimeMode`
-before constructing the application graph and stores that graph through
-`AppBootstrap`. Presence of an Apple hosted-XCTest marker
+before constructing the application graph and stores the production root only
+for application launches. Presence of an Apple hosted-XCTest marker
 (`XCTestConfigurationFilePath`, `XCTestBundlePath`, or `XCInjectBundleInto`) is
-the sole authority for the inert hosted-unit-test root. The
-`TRON_APP_RUNTIME_MODE` TestAction value is audit evidence only: it cannot turn
-a normal app, preview, or separate UI-test process into a hosted process. In
-application mode the production-root factory is evaluated exactly once; in
-hosted mode it is never evaluated. `AppLifecycleEffects.live` is likewise
+the sole authority for the inert hosted-unit-test root; schemes carry no
+parallel runtime-mode setting. Application and separate UI-test launches build
+`ProductionAppRoot`, while an injected unit-test host mounts only an
+accessibility-hidden clear view. `AppLifecycleEffects.live` is likewise
 construction-inert, and every notification-center, MetricKit, logger, or
 application-singleton lookup remains behind the application-mode callback
 guard.
@@ -613,11 +612,12 @@ destructive toolbar action followed by explicit confirmation. It is not a server
 resource, snippet catalog, routing plane, or generated management surface.
 
 Hosted test storage and I/O have explicit ownership rather than a claim of zero
-activity. `AppRuntimeStorage` gives the injected host a collision-proof named
-defaults suite with observable identity and idempotent process cleanup.
-`IsolatedTestState` is the only general test factory for named defaults,
+activity. The injected app root itself owns no storage. `IsolatedTestState` in
+the test target is the only general factory for named defaults,
 temporary roots, Documents directories, SQLite databases, visual artifacts,
 handled transport attempts, stub pairing probes, and injected token backends.
+Its suite lifecycle ledger and synchronous process-fallback registry also live
+entirely in the test target; production sources contain only the mode guard.
 Scopes emit a locked, parseable `TRON_TEST_SUITE_LIFECYCLE_V1` registration
 record before exposure. Cleanup cancels fixture work, awaits database close,
 removes the database/WAL/SHM and root, removes the named defaults persistent
@@ -632,7 +632,7 @@ Keychain item or a live pairing/session owner.
 CoreSimulator may retain a regular empty plist as the canonical backing
 envelope for a semantically removed domain; isolation evidence accepts it only
 when its exact suite identity was registered and cleaned in that invocation,
-matches one of the two owned suite grammars, parses as an empty dictionary, and
+matches the owned fixture-suite grammar, parses as an empty dictionary, and
 lives directly under the current app container's Preferences directory.
 Task-owned DerivedData, result bundles, and
 declared fixture artifacts remain allowed ephemeral outputs. The supported

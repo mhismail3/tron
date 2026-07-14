@@ -272,7 +272,7 @@ final class IsolatedTestState {
     private let tokenBackendRegistry = HostedTestTokenBackendRegistry()
     private let keychainLifecycleEmitter: HostedTestKeychainLifecycleEmitter
     private let suiteLifecycle: HostedTestSuiteLifecycle
-    private let cleanupRegistry: AppRuntimeCleanupRegistry
+    private let cleanupRegistry: HostedTestCleanupRegistry
     private var cleanupTask: Task<Void, Never>?
     private var isTerminal = false
     private var processCleanupRegistration: UUID?
@@ -283,7 +283,7 @@ final class IsolatedTestState {
         label: String = "state",
         lifecycleEmitter: HostedTestSuiteLifecycleEmitter = .standard,
         keychainLifecycleEmitter: HostedTestKeychainLifecycleEmitter = .standard,
-        cleanupRegistry: AppRuntimeCleanupRegistry = .shared
+        cleanupRegistry: HostedTestCleanupRegistry = .shared
     ) {
         let normalizedLabel = label
             .map { $0.isLetter || $0.isNumber ? $0 : "-" }
@@ -444,7 +444,7 @@ final class IsolatedTestState {
     static func withDefaults<T>(
         label: String = "defaults",
         lifecycleEmitter: HostedTestSuiteLifecycleEmitter = .standard,
-        cleanupRegistry: AppRuntimeCleanupRegistry = .shared,
+        cleanupRegistry: HostedTestCleanupRegistry = .shared,
         _ body: (UserDefaults) throws -> T
     ) rethrows -> T {
         let state = IsolatedTestState(
@@ -459,7 +459,7 @@ final class IsolatedTestState {
     static func withState<T>(
         label: String = "state",
         lifecycleEmitter: HostedTestSuiteLifecycleEmitter = .standard,
-        cleanupRegistry: AppRuntimeCleanupRegistry = .shared,
+        cleanupRegistry: HostedTestCleanupRegistry = .shared,
         _ body: (IsolatedTestState) async throws -> T
     ) async rethrows -> T {
         let state = IsolatedTestState(

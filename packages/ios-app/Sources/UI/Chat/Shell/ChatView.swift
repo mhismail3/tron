@@ -16,7 +16,7 @@ struct ChatView: View {
 
     // Convenience accessor
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
-    @State var inputHistory = InputHistoryStore()
+    @State var inputHistory = InputHistoryStore(defaults: .standard)
     @State var scrollCoordinator = ScrollStateCoordinator()
     @State var taskCoordinator: ChatViewTaskCoordinator
 

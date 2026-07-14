@@ -121,7 +121,7 @@ struct PairedServerTokenStoreTests {
     func throwAndProcessFallbackCleanup() throws {
         struct ProbeError: Error {}
         let capture = KeychainLifecycleCapture()
-        let registry = AppRuntimeCleanupRegistry()
+        let registry = HostedTestCleanupRegistry()
         let (backend, _) = makeBackend(capture: capture)
         let registration = registry.register { backend.cleanup() }
 

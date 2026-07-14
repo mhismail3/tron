@@ -67,10 +67,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     override convenience init() {
         self.init(
-            runtimeMode: AppRuntimeMode.resolve(
-                environment: ProcessInfo.processInfo.environment,
-                arguments: ProcessInfo.processInfo.arguments
-            ),
+            runtimeMode: .current,
             effects: .live
         )
     }
@@ -110,9 +107,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         effects.logRegistrationFailure(error)
     }
 
-    func applicationWillTerminate(_ application: UIApplication) {
-        AppRuntimeStorage.cleanupCurrentIfInitialized()
-    }
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {

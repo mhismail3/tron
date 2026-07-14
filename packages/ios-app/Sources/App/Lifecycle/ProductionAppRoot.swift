@@ -32,10 +32,7 @@ struct ProductionAppRoot: View {
     /// (the literal key `"onboardingComplete"`). When false, the app still
     /// mounts the session list and presents `OnboardingFlowView` through the
     /// central onboarding sheet presenter.
-    @AppStorage(
-        "onboardingComplete",
-        store: AppRuntimeStorage.current.defaults
-    ) private var onboardingComplete: Bool = false
+    @AppStorage("onboardingComplete") private var onboardingComplete: Bool = false
 
     @Environment(\.scenePhase) private var scenePhase
 

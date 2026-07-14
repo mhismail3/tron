@@ -16,7 +16,7 @@ final class InputHistoryStore {
 
     private var tempInput: String = ""
 
-    init(defaults: UserDefaults = AppRuntimeStorage.current.defaults) {
+    init(defaults: UserDefaults) {
         self.defaults = defaults
         loadHistory()
     }

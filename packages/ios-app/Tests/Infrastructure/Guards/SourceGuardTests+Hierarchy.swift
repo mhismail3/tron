@@ -447,7 +447,9 @@ extension SourceGuardTests {
         let requiredFiles = [
             "Tests/Infrastructure/AppLifecycle/AppDelegateTests.swift",
             "Tests/Infrastructure/AppLifecycle/AppRuntimeModeTests.swift",
+            "Tests/Infrastructure/Fixtures/HostedTestLifecycle.swift",
             "Tests/Infrastructure/Fixtures/IsolatedTestState.swift",
+            "Tests/Infrastructure/Fixtures/IsolatedTestStateTests.swift",
         ]
 
         let missingRequired = requiredRoots

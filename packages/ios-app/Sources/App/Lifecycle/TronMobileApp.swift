@@ -7,24 +7,23 @@ import SwiftUI
 struct TronMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    private let bootstrap: AppBootstrap<ProductionAppRoot>
+    private let productionRoot: ProductionAppRoot?
 
     init() {
-        let mode = AppRuntimeMode.resolve(
-            environment: ProcessInfo.processInfo.environment,
-            arguments: ProcessInfo.processInfo.arguments
-        )
-        bootstrap = AppBootstrap(mode: mode) {
-            ProductionAppRoot()
+        if AppRuntimeMode.current.runsApplicationLifecycle {
+            productionRoot = ProductionAppRoot()
+        } else {
+            productionRoot = nil
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            if let productionRoot = bootstrap.productionRoot {
+            if let productionRoot {
                 productionRoot
             } else {
-                HostedUnitTestRoot()
+                Color.clear
+                    .accessibilityHidden(true)
             }
         }
     }
