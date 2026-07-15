@@ -141,7 +141,7 @@ case "$1" in
     stop)      cmd_stop ;;
     restart)   cmd_restart ;;
     logs)      shift; query_logs "$@" ;;
-    errors)    cmd_errors ;;
+    errors)    query_logs --level error --limit 20 ;;
     login)     shift; cmd_login "$@" ;;
     auth)      shift; cmd_auth "$@" ;;
     uninstall) shift; cmd_uninstall "$@" ;;

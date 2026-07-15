@@ -983,19 +983,6 @@ cmd_uninstall() {
     echo ""
 }
 
-cmd_errors() {
-    if [ -f "$DB_PATH" ]; then
-        echo -e "${RED}Recent errors from database:${NC}"
-        sqlite3 -header -column "$DB_PATH" \
-            "SELECT timestamp as time, level, message
-             FROM logs
-             WHERE level_num >= 50
-             ORDER BY timestamp DESC
-             LIMIT 20;" 2>/dev/null || echo "  No logs table found"
-    fi
-
-}
-
 cmd_rollback() {
     local skip_confirm=false
 

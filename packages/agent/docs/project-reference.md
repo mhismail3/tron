@@ -1035,7 +1035,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron login` | Authenticate with a provider after the server has initialized auth storage (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token from either the workspace or installed CLI (forces every paired iOS device to pair again) |
 | `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
-| `tron errors` | Show recent errors |
+| `tron errors` | Show the newest 20 error-or-higher rows through the canonical `tron logs --level error --limit 20` query |
 
 ### Build Profiles
 
