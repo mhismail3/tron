@@ -26,8 +26,6 @@ final class SettingsState {
     // MARK: - Load State
 
     var isLoaded = false
-    var availableModels: [ModelInfo] = []
-    var isLoadingModels = false
     var loadError: String?
 
     // MARK: - Init
@@ -58,34 +56,6 @@ final class SettingsState {
         }
     }
 
-    func reload(
-        settingsRepository: any SettingsRepository,
-        modelRepository: any ModelRepository,
-        acceptResult: @escaping @MainActor () -> Bool = { true }
-    ) async {
-        clearServerSnapshot()
-        await load(using: settingsRepository, acceptResult: acceptResult)
-        guard acceptResult() else { return }
-        await loadModels(using: modelRepository, acceptResult: acceptResult)
-    }
-
-    func loadModels(
-        using modelRepository: any ModelRepository,
-        acceptResult: @escaping @MainActor () -> Bool = { true }
-    ) async {
-        isLoadingModels = true
-        do {
-            let models = try await modelRepository.list(forceRefresh: false)
-            guard acceptResult() else { return }
-            availableModels = models
-        } catch {
-            guard acceptResult() else { return }
-            // Silently fail — models are optional
-        }
-        guard acceptResult() else { return }
-        isLoadingModels = false
-    }
-
     // MARK: - Reset
 
     /// Reset settings to server defaults through the engine. The server applies its own defaults
@@ -106,8 +76,6 @@ final class SettingsState {
     func clearServerSnapshot() {
         isLoaded = false
         loadError = nil
-        availableModels = []
-        isLoadingModels = false
         lastLoadedSettings = nil
     }
 

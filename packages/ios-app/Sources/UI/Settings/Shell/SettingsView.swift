@@ -72,7 +72,9 @@ struct SettingsView: View {
     }
 
     private var selectedModelDisplayName: String {
-        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.defaultModel }) {
+        if let model = dependencies.modelRepository.cachedModels.first(where: {
+            $0.id == settingsState.defaultModel
+        }) {
             return model.formattedModelName
         }
         return settingsState.defaultModel.shortModelName
@@ -224,13 +226,16 @@ struct SettingsView: View {
             await dependencies.manualRetry()
             return
         }
-        await settingsState.reload(
-            settingsRepository: dependencies.settingsRepository,
-            modelRepository: dependencies.modelRepository
-        ) {
+        settingsState.clearServerSnapshot()
+        await settingsState.load(using: dependencies.settingsRepository) {
             dependencies.pairedServerStore.activeServer?.id == activeServer.id
                 && dependencies.activeServerSelectionVersion == selectionVersion
         }
+        guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
+              dependencies.activeServerSelectionVersion == selectionVersion else {
+            return
+        }
+        _ = try? await dependencies.modelRepository.list(forceRefresh: false)
     }
 
     func startOnboarding(prefill server: PairedServer? = nil) {

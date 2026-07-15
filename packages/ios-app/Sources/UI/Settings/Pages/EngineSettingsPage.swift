@@ -49,7 +49,7 @@ struct EngineSettingsPage: View {
         }
         .sheet(isPresented: $showDefaultModelPicker) {
             ModelPickerSheet(
-                models: settingsState.availableModels,
+                models: dependencies.modelRepository.cachedModels,
                 currentModelId: settingsState.defaultModel,
                 onSelect: { model in
                     settingsState.defaultModel = model.id

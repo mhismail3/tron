@@ -13,8 +13,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertFalse(state.isLoaded)
-        XCTAssertTrue(state.availableModels.isEmpty)
-        XCTAssertFalse(state.isLoadingModels)
         XCTAssertNil(state.loadError)
         XCTAssertFalse(state.transcriptionEnabled)
     }
@@ -77,14 +75,11 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         state.isLoaded = true
         state.loadError = "old error"
-        state.isLoadingModels = true
 
         state.clearServerSnapshot()
 
         XCTAssertFalse(state.isLoaded)
         XCTAssertNil(state.loadError)
-        XCTAssertTrue(state.availableModels.isEmpty)
-        XCTAssertFalse(state.isLoadingModels)
     }
 
     func testClearServerSnapshotClearsRollbackAnchor() throws {
