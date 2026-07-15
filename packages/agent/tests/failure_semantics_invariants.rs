@@ -362,6 +362,9 @@ fn failure_semantics_closeout_rejects_unapproved_runtime_failure_construction() 
         path.starts_with("packages/agent/src/")
             && path.ends_with(".rs")
             && !path.contains("/tests/")
+            // Colocated unit-test modules deliberately construct terminal fixtures.
+            && !path.ends_with("/tests.rs")
+            && !path.ends_with("/test_utils.rs")
     }) {
         let source = read_repo_file(&path);
         assert!(
