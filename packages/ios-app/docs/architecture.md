@@ -568,6 +568,13 @@ Documents is unavailable; startup fails at the composition boundary instead of s
 Tests and diagnostics harnesses may create explicit isolated database paths, but
 those paths are not production recovery modes.
 
+`TokenRecord` is the server-projected per-turn token DTO, not an independent
+state owner. `ContextTrackingState` is the sole mounted owner of live token and
+context-window presentation state. On resume, `UnifiedEventTransformer`
+reconstructs accumulated usage and the last context size into
+`ReconstructedState`, which the chat view model applies to that same owner;
+there is no parallel client-side token history.
+
 `EventStoreManager` owns the client generation for each persistence operation;
 it passes one strongly captured client into every page of that operation.
 Incremental pagination, cursor advancement, and in-operation ancestor resolution therefore
