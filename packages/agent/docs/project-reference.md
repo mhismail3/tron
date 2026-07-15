@@ -1608,7 +1608,10 @@ shutdown cancellation, and retention cleanup. Startup and lifecycle
 read/cleanup reconciliation scans scoped running jobs internally so older
 pre-startup stale records cannot be hidden behind a public list page of live or
 post-startup rows; targeted status/log/cancel also rechecks the addressed
-resource after scope validation without mutating unrelated scopes.
+resource after scope validation without mutating unrelated scopes. Domain
+composition creates one jobs runtime and startup boundary per server instance;
+the direct jobs worker and all `capability::execute` jobs/program adapters share
+that state rather than a process-global registry or independent cutoffs.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, job-owned network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are

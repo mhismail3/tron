@@ -8,8 +8,10 @@
 //! that tool performs direct primitive operations rather than catalog routing.
 //! The registration entrypoint is crate-private: transport setup is the
 //! server-facing facade, while this module owns the concrete domain-worker
-//! wiring. `catalog` owns shared capability contract types and stable
-//! registration identities without maintaining a second domain enumeration.
+//! wiring, including the single jobs runtime state shared by the jobs worker
+//! and capability adapters. `catalog` owns shared capability contract types
+//! and stable registration identities without maintaining a second domain
+//! enumeration.
 //! `module_registry` owns the manifest resource contract, while
 //! `module_manifests` owns the ordered first-party payload composition.
 //! Registration installs both before any domain worker or function; the engine
@@ -113,9 +115,10 @@ async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineRe
 
 fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainWorkerModule>> {
     let deps = DomainRegistrationContext::from_context(ctx);
+    let jobs_runtime = jobs::RuntimeState::new();
     let mut modules = vec![
         system::worker_module(&deps)?,
-        capability::worker_module(&deps)?,
+        capability::worker_module(&deps, jobs_runtime.clone())?,
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
         device::worker_module(&deps)?,
@@ -139,7 +142,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         module_activity::worker_module(&deps)?,
         web_research::worker_module(&deps)?,
         memory::worker_module(&deps)?,
-        jobs::worker_module(&deps)?,
+        jobs::worker_module(&deps, jobs_runtime)?,
         git::worker_module(&deps)?,
         web::worker_module(&deps)?,
         tool_sources::worker_module(&deps)?,

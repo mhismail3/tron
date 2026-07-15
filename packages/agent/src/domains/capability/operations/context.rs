@@ -203,7 +203,6 @@ fn invalid(message: impl Into<String>) -> CapabilityError {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
     use serde_json::json;
 
     use super::*;
@@ -292,9 +291,7 @@ mod tests {
             event_store: ctx.event_store.clone(),
             session_manager: ctx.session_manager.clone(),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
-            jobs_reconcile: crate::domains::jobs::service::ReconcileContext {
-                startup_cutoff: Utc::now(),
-            },
+            jobs: crate::domains::jobs::RuntimeState::new(),
             apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         };
         let workspace = tempfile::tempdir().expect("workspace");

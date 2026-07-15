@@ -63,7 +63,7 @@ pub(super) async fn module_program_execution_start(
     let job = match jobs::service::start_job_value(
         &deps.engine_host,
         deps.shutdown_coordinator.clone(),
-        jobs::runtime(),
+        deps.jobs.runtime(),
         invocation,
         &start_payload,
     )
@@ -225,8 +225,8 @@ pub(super) async fn module_program_execution_cancel(
     inspect_bound_runtime(invocation, deps, job_resource_id).await?;
     let cancel = jobs::service::cancel_job_value(
         &deps.engine_host,
-        jobs::runtime(),
-        deps.jobs_reconcile.clone(),
+        deps.jobs.runtime(),
+        deps.jobs.reconcile(),
         invocation,
         &invocation.payload,
     )
@@ -289,8 +289,8 @@ pub(super) async fn module_program_execution_cleanup(
     inspect_bound_runtime(invocation, deps, job_resource_id).await?;
     let cleanup = jobs::service::cleanup_job_resource_value(
         &deps.engine_host,
-        jobs::runtime(),
-        deps.jobs_reconcile.clone(),
+        deps.jobs.runtime(),
+        deps.jobs.reconcile(),
         invocation,
         &invocation.payload,
     )
@@ -424,8 +424,8 @@ async fn redacted_job_status(
 ) -> Result<Value, CapabilityError> {
     jobs::service::redacted_job_status_value(
         &deps.engine_host,
-        jobs::runtime(),
-        deps.jobs_reconcile.clone(),
+        deps.jobs.runtime(),
+        deps.jobs.reconcile(),
         invocation,
         &json!({"jobResourceId": job_resource_id}),
     )

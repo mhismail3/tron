@@ -187,7 +187,10 @@
 //! runtime supervision state, and trace-redact requests/results so provider
 //! output remains bounded refs/fingerprints/truncation/duration/exit/timeout/
 //! cancellation/cleanup metadata rather than raw command, code, stdio, logs,
-//! paths, env, pids, grant ids, or raw job/output payloads.
+//! paths, env, pids, grant ids, or raw job/output payloads. Direct job and
+//! module-program adapters receive the same composition-owned jobs runtime as
+//! the jobs worker instead of maintaining a second process registry or startup
+//! boundary.
 //! File/Git module-pack activation is metadata and authority only: the existing
 //! `filesystem_*` and selected `git_*` operation values remain inside this
 //! primitive, but derived grants use exact filesystem/Git/resource scopes,
@@ -279,7 +282,6 @@ use crate::domains::registration::worker::{
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
 use crate::shared::server::error_mapping::capability_error_to_engine;
-use chrono::Utc;
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -289,20 +291,18 @@ pub(crate) struct Deps {
     pub(crate) session_manager: Arc<SessionManager>,
     pub(crate) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
-    pub(crate) jobs_reconcile: jobs::service::ReconcileContext,
+    pub(crate) jobs: jobs::RuntimeState,
     pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
 }
 
 impl Deps {
-    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext, jobs: jobs::RuntimeState) -> Self {
         Self {
             engine_host: deps.engine_host.clone(),
             event_store: Arc::clone(&deps.event_store),
             session_manager: Arc::clone(&deps.session_manager),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
-            jobs_reconcile: jobs::service::ReconcileContext {
-                startup_cutoff: Utc::now(),
-            },
+            jobs,
             apns_runtime: deps.apns_runtime.clone(),
         }
     }
@@ -310,8 +310,9 @@ impl Deps {
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
+    jobs: jobs::RuntimeState,
 ) -> crate::engine::Result<DomainWorkerModule> {
-    let domain_deps = Deps::from_engine(deps);
+    let domain_deps = Deps::from_engine(deps, jobs);
     let mut registrations = function_registrations(contract::capabilities()?, domain_deps)?;
     for registration in &mut registrations {
         merge_metadata(

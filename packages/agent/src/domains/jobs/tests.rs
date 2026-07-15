@@ -582,6 +582,65 @@ async fn cancel_after_process_exit_preserves_completion_and_output() {
 }
 
 #[tokio::test]
+async fn capability_started_job_is_owned_by_direct_jobs_worker_runtime() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    if !sandbox_available() {
+        return;
+    }
+
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-cross-route").await;
+    let marker = root.path().join("started");
+    let start = fixture
+        .invoke_ok(json!({
+            "operation": "job_start",
+            "command": "touch started; sleep 10",
+            "timeoutMs": 10000,
+            "maxOutputBytes": 1000,
+            "idempotencyKey": "jobs-cross-route-start"
+        }))
+        .await;
+    let job_resource_id = job_resource_id(&start);
+    wait_for_path(&marker).await;
+
+    let cancel = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(super::CANCEL_FUNCTION).unwrap(),
+            json!({
+                "jobResourceId": job_resource_id,
+                "reason": "cross-route ownership test"
+            }),
+            CausalContext::new(
+                ActorId::new("engine-client").unwrap(),
+                ActorKind::Client,
+                AuthorityGrantId::new("engine-transport").unwrap(),
+                TraceId::new("jobs-cross-route-cancel").unwrap(),
+            )
+            .with_scope(super::WRITE_SCOPE)
+            .with_session_id(&fixture.session_id)
+            .with_workspace_id(&fixture.workspace_id)
+            .with_runtime_metadata(
+                RUNTIME_METADATA_WORKING_DIRECTORY,
+                root.path().display().to_string(),
+            )
+            .with_idempotency_key("jobs-cross-route-cancel"),
+        ))
+        .await;
+    assert_eq!(cancel.error, None, "direct cancel failed: {cancel:?}");
+    assert_eq!(
+        cancel.value.expect("direct cancel value")["status"],
+        json!("cancel_requested")
+    );
+
+    let status = fixture.wait_for_state(&job_resource_id, "cancelled").await;
+    assert_eq!(
+        jobs_details(&status)["job"]["terminal"]["cancelled"],
+        json!(true)
+    );
+}
+
+#[tokio::test]
 async fn shutdown_cancels_running_job_and_records_terminal_state() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");
