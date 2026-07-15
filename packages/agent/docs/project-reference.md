@@ -208,18 +208,6 @@ Current living entry points:
   completed CPE settings/profile/env taxonomy and proof notes.
 - `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
   machine-readable CPE settings/profile/env inventory used by static gates.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md`:
-  completed Release / Install / Upgrade / Rollback Discipline scorecard for Mac
-  app install/update, LaunchAgent/SMAppService ownership, `tron dev`,
-  contributor deploy, rollback, setup/uninstall, generated projects, docs, CI,
-  and verification.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md`:
-  companion evidence manifest for RIURD lineage, stale-branch quarantine,
-  source findings, command results, and residual risks.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md`:
-  completed RIURD release/install lifecycle taxonomy and proof notes.
-- `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv`:
-  machine-readable RIURD release/install inventory used by static gates.
 - `packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`:
   completed iOS Thin Client / Generic Runtime Shell scorecard for proving the
   iOS app remains a thin `/engine` client with robust settings, pairing, logs,
@@ -424,11 +412,10 @@ Current living entry points:
   completed CPE gates for scorecard/evidence, inventory coverage, default drift,
   strict schema, sparse overlay, env ownership, iOS settings parity, Mac sparse
   seed, README/CI wiring, and predecessor inventory rows.
-- `packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs`:
-  completed RIURD gates for scorecard/evidence, inventory coverage, port/process
-  ownership, hidden deploy absence, setup/install/uninstall preservation,
-  fail-closed deploy/rollback, generated project policy, README/CI wiring, and
-  predecessor inventory rows.
+- `packages/agent/tests/release_install_lifecycle_invariants.rs`: source-owned
+  checks for contributor port/process ownership, hidden deploy absence,
+  setup/install/uninstall preservation, fail-closed deploy/rollback, generated
+  project policy, and hosted Mac release packaging.
 - `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`:
   completed IOSTC gates for scorecard/evidence, inventory coverage, README/CI
   wiring, deleted iOS product panels, successor/server-ownership residue,

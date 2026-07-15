@@ -19,7 +19,7 @@ Stale branch policy: `codex/ios-thin-client-generic-runtime-shell` at `3cec727e1
 | Server error/recovery | IOSTC-6 | `ConnectionErrorClassifierTests`, `EngineConnectionReconnectTests`, `ServerRestartingPluginTests`, `StreamingRecoveryTests`, `SendBlockReasonTests`, and settings unavailable-state source prove narrow disconnected, reconnecting, unauthorized, restart, and retry/send-disabled behavior. |
 | Diagnostics/persistence | IOSTC-7 | `DiagnosticsRedactorTests`, `DiagnosticsBundleBuilderTests`, `ClientLogIngestionServiceTests`, `MetricKitDiagnosticsStoreTests`, `DatabaseSchemaTests`, `EventDatabaseTests`, and repository tests prove redacted bounded diagnostics and projection-cache ownership. |
 | Generated project proof | IOSTC-8 | `project.yml` is the source; `TronMobile.xcodeproj/project.pbxproj` contains the focused test files used for simulator validation; CI and release workflows regenerate and diff the tracked project. |
-| Predecessor wiring | IOSTC-9 | HRA, PCC, TPC, PPACD, CPE, RIURD, ODA, SACB, CSD, and SOL inventories include IOSTC classification or predecessor rows where their closed guards require discoverability. |
+| Predecessor wiring | IOSTC-9 | HRA, PCC, TPC, PPACD, CPE, ODA, SACB, CSD, and SOL inventories include IOSTC classification or predecessor rows where their closed guards require discoverability. |
 
 ## Verification Matrix
 
@@ -30,7 +30,6 @@ Stale branch policy: `codex/ios-thin-client-generic-runtime-shell` at `3cec727e1
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | IOSTC-1,IOSTC-2,IOSTC-4,IOSTC-8,IOSTC-9,IOSTC-10 | Passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture` | IOSTC-9 | Passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test configuration_profile_environment_discipline_invariants -- --nocapture` | IOSTC-4,IOSTC-9 | Passed. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test release_install_upgrade_rollback_discipline_invariants -- --nocapture` | IOSTC-8,IOSTC-9 | Passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` | IOSTC-7,IOSTC-9 | Passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | IOSTC-2,IOSTC-9 | Passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | IOSTC-9 | Passed. |
@@ -53,11 +52,8 @@ No development server, LaunchAgent, SMAppService action, manual deploy, or produ
 
 ## Failed Attempts And Fixes
 
-- `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` initially failed because the existing SOL predecessor row for `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv` used unsupported `state_class` value `durable_documentation`. The row was corrected to the allowed proof-artifact class `test_fixture`, then the command was rerun successfully.
 - `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` initially failed because the TPC markdown summary still reported pre-IOSTC counts for `docs`, `test`, `docs/static gates`, and `test_harness`. The summary counts were regenerated from `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`, then the command was rerun successfully.
 - `scripts/tron ci fmt check clippy test` initially failed in `primitive_code_cleanup_invariants` because the new IOSTC Rust static gate wrote deleted product terms verbatim while scanning iOS sources. The IOSTC guard now builds those scan tokens from fragments, preserving coverage without reintroducing retired names into a new static gate, then the full CI command was rerun successfully.
-- A later `scripts/tron ci fmt check clippy test` run failed in `security_authority_capability_boundaries_invariants` because SACB marker scanning required explicit inventory rows for IOSTC artifacts and RIURD closeout files that mention auth, authority, tokens, or capability boundaries. The SACB inventory now classifies those files as `static_gate` boundaries, then the full CI command was rerun successfully.
-- A later `scripts/tron ci fmt check clippy test` run failed in `off_plan_saa_authorship_teardown_cleanup_invariants` because IOSTC inventory, scorecard, and evidence files intentionally mention self-adapting-agent UI only as forbidden successor residue; the same OPSAA audit also required classifying the RIURD scorecard lineage mention of OPSAA. OPSAA now classifies those IOSTC files as retained original hardening with successor-scope wording and the RIURD scorecard as lineage-only historical cleanup context, while the IOSTC Rust guard fragments its scan token so static gates do not reintroduce an active SAA surface, then the full CI command was rerun successfully.
 
 ## Residual Risk
 

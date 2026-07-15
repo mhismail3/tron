@@ -667,8 +667,7 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
     match path {
         "README.md"
         | "packages/agent/docs/project-reference.md"
-        | "packages/agent/docs/restoration-retrospective-audit-status.md"
-        | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md" => {
+        | "packages/agent/docs/restoration-retrospective-audit-status.md" => {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
         "packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md"

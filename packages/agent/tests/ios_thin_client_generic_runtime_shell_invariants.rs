@@ -649,7 +649,6 @@ fn predecessor_inventory_wiring_is_recorded() {
     let predecessors = [
         "public-protocol-api-contract-discipline-inventory.tsv",
         "configuration-profile-environment-discipline-inventory.tsv",
-        "release-install-upgrade-rollback-discipline-inventory.tsv",
         "observability-diagnostics-auditability-inventory.tsv",
     ];
     for predecessor in predecessors {
@@ -662,7 +661,6 @@ fn predecessor_inventory_wiring_is_recorded() {
     for path in [
         "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
         "packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv",
-        "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
     ] {
         let predecessor = read_repo_file(path);

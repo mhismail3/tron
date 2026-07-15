@@ -449,7 +449,6 @@ fn predecessor_inventories_classify_pmc_artifacts() {
         TARGET_PATH,
     ];
     for predecessor in [
-        "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",
         "packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv",
         "packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv",
         "packages/agent/docs/performance-resource-governance-inventory.tsv",
