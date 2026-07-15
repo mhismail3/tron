@@ -15,7 +15,7 @@
 #   bundle-agent.sh --profile debug # build debug profile instead
 #   bundle-agent.sh --skip-build    # assume target/release/tron exists
 #   bundle-agent.sh --source PATH   # explicit path to prebuilt tron
-#   bundle-agent.sh --clean         # remove ignored staged helper binaries
+#   bundle-agent.sh --clean         # remove ignored staged helper payloads
 #
 # Exit codes:
 #   0  — staged binary is up to date
@@ -80,8 +80,9 @@ done
 # --- clean mode ----------------------------------------------------------
 
 if [ "$do_clean" -eq 1 ]; then
-    rm -f "$STAGING_PATH" "$WORKER_STAGING_PATH" "$DEV_STAGING_PATH" "$DEV_WORKER_STAGING_PATH"
-    echo "cleaned ignored staged helper binaries"
+    rm -f "$STAGING_PATH" "$WORKER_STAGING_PATH" "$DEV_STAGING_PATH" "$DEV_WORKER_STAGING_PATH" \
+        "$HELPER_RESOURCES/AppIcon.icns" "$DEV_HELPER_RESOURCES/AppIcon.icns"
+    echo "cleaned ignored staged helper payloads"
     exit 0
 fi
 

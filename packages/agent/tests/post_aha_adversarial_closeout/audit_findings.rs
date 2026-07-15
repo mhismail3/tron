@@ -237,7 +237,7 @@ fn mac_source_guards_cover_wrapper_contracts() {
             "required roots",
             "banned roots",
             "helper-resource layout",
-            "staged-binary policy",
+            "generated helper payload policy",
             "bundle-agent --clean",
         ] {
             if !guard.contains(required) {

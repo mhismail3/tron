@@ -72,13 +72,14 @@ packages/mac-app/scripts/bundle-agent.sh --skip-build
 # Or, to use a binary built elsewhere:
 packages/mac-app/scripts/bundle-agent.sh --source /absolute/path/to/tron
 
-# Or, to wipe only the ignored helper executables (for a clean `xcodebuild`):
+# Or, to wipe the ignored generated helper payloads:
 packages/mac-app/scripts/bundle-agent.sh --clean
 ```
 
-`--clean` preserves the tracked helper-resource layout: both LaunchAgent plists,
-both helper `Info.plist` files, and helper icons stay in the repository. It only
-removes ignored payload binaries under each helper's `Contents/MacOS/`.
+`--clean` removes the ignored helper binaries and per-helper icon copies. It
+preserves the single tracked icon source, both LaunchAgent plists, and both
+helper `Info.plist` files. The next staging run recreates both icon copies from
+`Sources/Resources/AppIcon.icns` before Xcode copies and signs the helper apps.
 
 The two helper `Info.plist` files and two LaunchAgent plists under
 `Sources/Resources/Library` are the authoritative packaged metadata.

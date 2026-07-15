@@ -125,9 +125,8 @@ The CLI dispatcher stays in `scripts/tron`, workspace command families live in
 installed `tron-cli` live in `scripts/tron-lib.d/`. The Mac wrapper remains an
 observer/manager through `SMAppService`; script modules must not become a
 second production policy owner. `Sources/Resources/AppIcon.icns` is likewise
-the single helper-icon source: contributor setup and install copy it into the
-installed CLI payload before the shared bundle helper assembles a local helper
-app.
+the single helper-icon source; ignored per-helper copies are staging outputs,
+not independently maintained resources.
 
 ### Protocol-bounded subprocess surface
 

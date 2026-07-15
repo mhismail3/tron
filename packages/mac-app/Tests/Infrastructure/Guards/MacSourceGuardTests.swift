@@ -150,9 +150,7 @@ struct MacSourceGuardTests {
             "Sources/Resources/Library/LaunchAgents/com.tron.server.plist",
             "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist",
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist",
-            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Info.plist",
-            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns",
         ]
 
         for relativePath in trackedResources {
@@ -192,6 +190,11 @@ struct MacSourceGuardTests {
         let bundleScript = try Self.read(macRoot, "scripts/bundle-agent.sh")
         #expect(bundleScript.contains("tracked_plists=("))
         #expect(bundleScript.contains("tracked helper metadata is missing"))
+        for destination in ["HELPER_RESOURCES", "DEV_HELPER_RESOURCES"] {
+            #expect(
+                bundleScript.contains("cp \"$RESOURCES_DIR/AppIcon.icns\" \"$\(destination)/AppIcon.icns\"")
+            )
+        }
         for plistVariable in [
             "HELPER_INFO_PLIST",
             "DEV_HELPER_INFO_PLIST",
@@ -202,21 +205,23 @@ struct MacSourceGuardTests {
         }
     }
 
-    @Test("staged-binary policy keeps helper executables ignored")
-    func stagedBinaryPolicyKeepsHelperExecutablesIgnored() throws {
+    @Test("generated helper payload policy keeps outputs ignored")
+    func generatedHelperPayloadPolicyKeepsOutputsIgnored() throws {
         let macRoot = try Self.macAppRoot()
         let repoRoot = macRoot
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let ignoredBinaries = [
+        let ignoredPayloads = [
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron",
             "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron",
             "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron-program-worker",
+            "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns",
+            "Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns",
         ]
         let gitignore = try Self.read(macRoot, ".gitignore")
 
-        for relativePath in ignoredBinaries {
+        for relativePath in ignoredPayloads {
             let repoRelativePath = "packages/mac-app/\(relativePath)"
             #expect(!gitignore.contains("!\(relativePath)"))
             #expect(gitignore.contains(relativePath))
@@ -227,8 +232,8 @@ struct MacSourceGuardTests {
         }
     }
 
-    @Test("bundle-agent --clean removes only ignored staged binaries")
-    func bundleAgentCleanRemovesOnlyIgnoredStagedBinaries() throws {
+    @Test("bundle-agent --clean removes only ignored staged payloads")
+    func bundleAgentCleanRemovesOnlyIgnoredStagedPayloads() throws {
         let macRoot = try Self.macAppRoot()
         let script = try Self.read(macRoot, "scripts/bundle-agent.sh")
         let cleanBlock = try #require(script.range(of: "if [ \"$do_clean\" -eq 1 ]; then"))
@@ -241,10 +246,12 @@ struct MacSourceGuardTests {
         #expect(block.contains("$WORKER_STAGING_PATH"))
         #expect(block.contains("$DEV_STAGING_PATH"))
         #expect(block.contains("$DEV_WORKER_STAGING_PATH"))
+        #expect(block.contains("$HELPER_RESOURCES/AppIcon.icns"))
+        #expect(block.contains("$DEV_HELPER_RESOURCES/AppIcon.icns"))
         #expect(!block.contains("rm -rf"))
         #expect(!block.contains("HELPER_BUNDLE"))
         #expect(!block.contains("LAUNCH_AGENT_PLIST"))
-        #expect(script.contains("remove ignored staged helper binaries"))
+        #expect(script.contains("remove ignored staged helper payloads"))
     }
 
     private static func macAppRoot(filePath: String = #filePath) throws -> URL {
