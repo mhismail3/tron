@@ -269,7 +269,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         sessionEventRepository = DefaultSessionEventRepository(client: client)
         modelRepository = DefaultModelRepository(modelClient: client.model)
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
-        agentRepository = DefaultAgentRepository(agentClient: client.agent)
+        agentRepository = client.agent
         settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
@@ -490,7 +490,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         sessionEventRepository = DefaultSessionEventRepository(client: newClient)
         modelRepository = DefaultModelRepository(modelClient: newClient.model)
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
-        agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
+        agentRepository = newClient.agent
         settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)

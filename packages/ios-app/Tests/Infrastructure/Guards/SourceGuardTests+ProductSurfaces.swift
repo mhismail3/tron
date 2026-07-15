@@ -10,10 +10,8 @@ extension SourceGuardTests {
             "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
             "Sources/Engine/Transport/Clients/AgentClient.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
-            "Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
             "Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
             "Tests/Engine/Transport/Clients/AgentClientTests.swift",
-            "Tests/Engine/Transport/Clients/Repositories/DefaultAgentRepositoryTests.swift",
             "Tests/Engine/Protocol/EngineProtocolTypesTests.swift",
         ]
         let forbiddenNeedles: [(String, String)] = [

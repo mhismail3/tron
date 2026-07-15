@@ -2,7 +2,7 @@ import Foundation
 
 /// Client for agent-related engine capabilities.
 /// Handles prompts, abort, state queries, and capability results.
-final class AgentClient: EngineDomainClient {
+final class AgentClient: EngineDomainClient, AgentRepository {
 
     // MARK: - Agent Methods
 

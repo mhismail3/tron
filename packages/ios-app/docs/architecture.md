@@ -466,6 +466,9 @@ are concrete adapters over the narrower `EngineTransport` contract; repository
 protocols are the sole consumer-facing injection boundary, and concrete client
 tests use `EngineTransport` directly. No second whole-client or per-domain
 client protocol mirrors those concrete surfaces.
+`AgentClient` fulfills the narrow `AgentRepository` contract directly because
+that boundary adds no policy or state; policy-owning repositories such as
+`DefaultModelRepository` remain separate adapters.
 `ModelClient` is transport-only; `DefaultModelRepository` owns the active
 server's five-minute model catalog, refresh, and invalidation policy, while
 `ModelPickerState` owns only optimistic switch presentation.

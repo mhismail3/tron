@@ -393,7 +393,7 @@ final class ChatViewModelFindMessageTests: XCTestCase {
             connection: DeepLinkTestConnectionRepository(),
             events: DeepLinkTestSessionEventRepository(),
             sessions: sessions,
-            agent: DefaultAgentRepository(agentClient: AgentClient(transport: transport)),
+            agent: AgentClient(transport: transport),
             models: DefaultModelRepository(modelClient: ModelClient(transport: transport)),
             messages: DefaultMessageRepository(messageClient: MessageClient(transport: transport)),
             transcription: DefaultTranscriptionRepository(client: TranscriptionClient(transport: transport)),

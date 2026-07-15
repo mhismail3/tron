@@ -14,7 +14,7 @@ extension ChatViewModel {
                 connection: DefaultAppConnectionRepository(client: engineClient),
                 events: DefaultSessionEventRepository(client: engineClient),
                 sessions: DefaultSessionRepository(sessionClient: engineClient.session),
-                agent: DefaultAgentRepository(agentClient: engineClient.agent),
+                agent: engineClient.agent,
                 models: DefaultModelRepository(modelClient: engineClient.model),
                 messages: DefaultMessageRepository(messageClient: engineClient.message),
                 transcription: DefaultTranscriptionRepository(client: engineClient.transcription),

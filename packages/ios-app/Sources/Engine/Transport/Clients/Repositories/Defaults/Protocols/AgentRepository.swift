@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Agent Repository Protocol
 
 /// Repository protocol for agent operations.
-/// Provides abstraction over AgentClient for agent interactions.
+/// Keeps session consumers transport-agnostic and is fulfilled directly by `AgentClient`.
 @MainActor
 protocol AgentRepository: AnyObject {
     /// Send a prompt to the agent.
