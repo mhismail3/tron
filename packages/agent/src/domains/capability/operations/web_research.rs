@@ -13,11 +13,8 @@ pub(super) async fn web_research_request_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::record_request_value_at(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn web_research_request_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::list_request_value(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn web_research_request_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::inspect_request_value(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -79,11 +70,8 @@ pub(super) async fn web_research_review_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::record_review_value_at(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -100,11 +88,8 @@ pub(super) async fn web_research_review_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::list_review_value(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -124,11 +109,8 @@ pub(super) async fn web_research_review_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::inspect_review_value(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -145,11 +127,8 @@ pub(super) async fn web_research_source_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::record_source_value_at(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -166,11 +145,8 @@ pub(super) async fn web_research_source_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::list_source_value(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -190,11 +166,8 @@ pub(super) async fn web_research_source_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let web_research = crate::domains::web_research::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::web_research::service::inspect_source_value(
-        &web_research,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

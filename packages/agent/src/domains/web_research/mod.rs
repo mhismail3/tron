@@ -32,7 +32,9 @@
 //! credentials, local paths, commands, source code, file contents, raw grant or
 //! authority ids, token-like strings, personal-info literals, debug payloads,
 //! hidden chain-of-thought, package-manager output, or raw dependency
-//! artifacts. All operations require `networkPolicy: none`.
+//! artifacts. All operations require `networkPolicy: none`. Services consume
+//! `EngineHostHandle` directly; this domain owns no parallel dependency or
+//! engine-state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -44,11 +46,6 @@ mod records;
 mod resource_store;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{
     WEB_RESEARCH_REQUEST_KIND, WEB_RESEARCH_REQUEST_SCHEMA_ID, WEB_RESEARCH_REVIEW_KIND,
