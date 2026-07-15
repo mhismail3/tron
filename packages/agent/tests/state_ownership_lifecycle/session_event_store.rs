@@ -292,7 +292,7 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
     let session_update =
         read_repo_file("packages/agent/src/domains/agent/runtime/runtime/session_update.rs");
     let update_loader_signature = session_update
-        .split_once("pub(in crate::domains::agent::runtime) async fn load_session_update_data(")
+        .split_once("pub(in crate::domains::agent::runtime) async fn load_session_update_event(")
         .expect("session-update loader must remain runtime-owned")
         .1
         .split_once(") ->")
@@ -303,6 +303,8 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         !update_loader_signature.contains("session_manager"),
         "durable session-update reads must not advertise session-cache ownership"
     );
+    assert!(session_update.contains("TronEvent::SessionUpdated"));
+    assert!(!session_update.contains("struct SessionUpdateData"));
 
     let completion =
         read_repo_file("packages/agent/src/domains/agent/runtime/service/completion.rs");
@@ -310,4 +312,5 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         !completion.contains("session_manager"),
         "prompt completion must depend on EventStore, not SessionManager"
     );
+    assert!(!completion.contains("TronEvent::SessionUpdated"));
 }

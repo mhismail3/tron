@@ -9,10 +9,10 @@
 //! plan-level owner of accepted invocation causality; execution moves that value
 //! into its turn and completion path. Completion derives `agent_result` text and
 //! its event reference after the turn's synchronous persistence calls have
-//! committed, then reads the durable session update directly from `EventStore`;
-//! it does not retain session-cache ownership. Durable prior-history
-//! reconstruction and the new `message.user` append are prerequisites for
-//! provider construction and model execution;
+//! committed, then emits the runtime-owned durable session-update projection;
+//! it does not rebuild that wire event or retain session-cache ownership.
+//! Durable prior-history reconstruction and the new `message.user` append are
+//! prerequisites for provider construction and model execution;
 //! either persistence failure releases the run without opening a provider
 //! stream. Prompt-run composition derives broadcast access from its authoritative
 //! orchestrator and owns its event persister; the session cache retains only
@@ -28,7 +28,7 @@ use crate::domains::agent::r#loop::types::{AgentConfig, RunContext};
 
 use super::cleanup::{PromptRunCleanup, ShutdownCancelForwarder};
 use crate::domains::agent::runtime::runtime::{
-    build_user_content_override, build_user_event_payload, load_session_update_data,
+    build_user_content_override, build_user_event_payload, load_session_update_event,
     persist_user_message_event, resume_prompt_session,
 };
 use crate::engine::{CausalContext, FunctionId, InvocationId};

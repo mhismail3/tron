@@ -1,20 +1,14 @@
-use super::{ActivitySummaryLine, Duration, MessagePreview, ReconstructedState};
+use super::{Duration, ReconstructedState};
 use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::EventStore;
+use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_PERSISTENCE_ERROR,
 };
 use std::sync::Arc;
-
-pub(in crate::domains::agent::runtime) struct SessionUpdateData {
-    pub(in crate::domains::agent::runtime) session:
-        crate::domains::session::event_store::SessionRow,
-    pub(in crate::domains::agent::runtime) preview: Option<MessagePreview>,
-    pub(in crate::domains::agent::runtime) activity_lines: Vec<ActivitySummaryLine>,
-}
 
 const SESSION_UPDATE_LOAD_ATTEMPTS: usize = 40;
 const SESSION_UPDATE_LOAD_RETRY_DELAY: Duration = Duration::from_millis(25);
@@ -53,16 +47,16 @@ fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> CapabilityE
     CapabilityError::from_failure(failure)
 }
 
-pub(in crate::domains::agent::runtime) async fn load_session_update_data(
+pub(in crate::domains::agent::runtime) async fn load_session_update_event(
     event_store: Arc<EventStore>,
     session_id: String,
-) -> Result<Option<SessionUpdateData>, CapabilityError> {
+) -> Result<Option<TronEvent>, CapabilityError> {
     run_blocking_task("agent.prompt.session_update", move || {
         let mut last_busy_error = None;
 
         for attempt in 1..=SESSION_UPDATE_LOAD_ATTEMPTS {
-            match load_session_update_data_once(&event_store, &session_id) {
-                Ok(data) => return Ok(data),
+            match load_session_update_event_once(&event_store, &session_id) {
+                Ok(event) => return Ok(event),
                 Err(error)
                     if session_update_read_error_is_busy(&error)
                         && attempt < SESSION_UPDATE_LOAD_ATTEMPTS =>
@@ -87,10 +81,10 @@ pub(in crate::domains::agent::runtime) async fn load_session_update_data(
     .await
 }
 
-fn load_session_update_data_once(
+fn load_session_update_event_once(
     event_store: &EventStore,
     session_id: &str,
-) -> crate::domains::session::event_store::Result<Option<SessionUpdateData>> {
+) -> crate::domains::session::event_store::Result<Option<TronEvent>> {
     let Some(session) = event_store.get_session(session_id)? else {
         return Ok(None);
     };
@@ -107,15 +101,34 @@ fn load_session_update_data_once(
         Err(_) => Vec::new(),
     };
 
-    Ok(Some(SessionUpdateData {
-        session,
-        preview,
-        activity_lines,
+    let (last_user_prompt, last_assistant_response) = preview.map_or((None, None), |preview| {
+        (preview.last_user_prompt, preview.last_assistant_response)
+    });
+
+    Ok(Some(TronEvent::SessionUpdated {
+        base: BaseEvent::now(session_id),
+        title: session.title,
+        model: Some(session.latest_model),
+        event_count: Some(session.event_count),
+        turn_count: Some(session.turn_count),
+        message_count: Some(session.message_count),
+        input_tokens: Some(session.total_input_tokens),
+        output_tokens: Some(session.total_output_tokens),
+        last_turn_input_tokens: Some(session.last_turn_input_tokens),
+        cache_read_tokens: Some(session.total_cache_read_tokens),
+        cache_creation_tokens: Some(session.total_cache_creation_tokens),
+        cost: Some(session.total_cost),
+        last_activity: session.last_activity_at,
+        is_active: false,
+        last_user_prompt,
+        last_assistant_response,
+        parent_session_id: session.parent_session_id,
+        activity_lines: Some(activity_lines),
     }))
 }
 
 #[cfg(test)]
-mod session_update_data_tests {
+mod session_update_event_tests {
     use super::*;
 
     #[test]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::{
-    PromptEngineCausality, PromptRunCleanup, load_session_update_data,
+    PromptEngineCausality, PromptRunCleanup, load_session_update_event,
     publish_prompt_runtime_stream,
 };
 use crate::engine::{
@@ -324,41 +324,16 @@ async fn emit_session_update(
     broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     session_id: &str,
 ) {
-    match load_session_update_data(event_store.clone(), session_id.to_owned()).await {
-        Ok(Some(update)) => {
-            let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::SessionUpdated {
-                base: crate::shared::protocol::events::BaseEvent::now(session_id),
-                title: update.session.title.clone(),
-                model: Some(update.session.latest_model.clone()),
-                event_count: Some(update.session.event_count),
-                turn_count: Some(update.session.turn_count),
-                message_count: Some(update.session.message_count),
-                input_tokens: Some(update.session.total_input_tokens),
-                output_tokens: Some(update.session.total_output_tokens),
-                last_turn_input_tokens: Some(update.session.last_turn_input_tokens),
-                cache_read_tokens: Some(update.session.total_cache_read_tokens),
-                cache_creation_tokens: Some(update.session.total_cache_creation_tokens),
-                cost: Some(update.session.total_cost),
-                last_activity: update.session.last_activity_at.clone(),
-                is_active: false,
-                last_user_prompt: update
-                    .preview
-                    .as_ref()
-                    .and_then(|preview| preview.last_user_prompt.clone()),
-                last_assistant_response: update
-                    .preview
-                    .as_ref()
-                    .and_then(|preview| preview.last_assistant_response.clone()),
-                parent_session_id: update.session.parent_session_id.clone(),
-                activity_lines: Some(update.activity_lines),
-            });
+    match load_session_update_event(event_store.clone(), session_id.to_owned()).await {
+        Ok(Some(event)) => {
+            let _ = broadcast.emit(event);
         }
         Ok(None) => {}
         Err(error) => {
             warn!(
                 session_id = %session_id,
                 error = %error,
-                "failed to load session update data"
+                "failed to load session update event"
             );
         }
     }
