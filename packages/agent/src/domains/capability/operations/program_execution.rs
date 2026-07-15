@@ -13,12 +13,9 @@ pub(super) async fn program_execution_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let program_execution_deps = crate::domains::program_execution::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::program_execution::service::record_program_execution_record_value_at(
-            &program_execution_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
             operation_at,
@@ -35,11 +32,8 @@ pub(super) async fn program_execution_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let program_execution_deps = crate::domains::program_execution::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::program_execution::service::list_program_execution_value(
-        &program_execution_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -59,11 +53,8 @@ pub(super) async fn program_execution_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let program_execution_deps = crate::domains::program_execution::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::program_execution::service::inspect_program_execution_value(
-        &program_execution_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

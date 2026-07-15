@@ -47,12 +47,9 @@ pub(super) async fn module_program_execution_start(
         ));
     }
 
-    let program_execution_deps = program_execution::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let program_payload = program_execution_payload(&invocation.payload, &runtime)?;
     let program = program_execution::service::record_program_execution_record_value_at(
-        &program_execution_deps,
+        &deps.engine_host,
         invocation,
         &program_payload,
         operation_at,
