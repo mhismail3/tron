@@ -265,8 +265,6 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
         "record_failed_contributor_deploy()",
         "\"deploy\" \"$new_commit\" \"$previous_commit\" \"rolled_back\"",
         "\"deploy\" \"$new_commit\" \"$previous_commit\" \"failed\"",
-        "TRON_DEPLOYMENT_COMMIT=\"$new_commit\"",
-        "TRON_DEPLOYMENT_PREVIOUS_COMMIT=\"$previous_commit\"",
         "restore_contributor_pair_plan || return 1",
         "discard_contributor_pair_backup rollback",
         "begin_contributor_pair_update manual-deploy || return 1",
@@ -343,19 +341,19 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
         "restore_runtime_cli_payload || return 1",
         "rollback must restore the signed bundle before exposing its matching CLI",
     );
+    let rollback_failure_tail = service
+        .split_once("Rollback restored the backup, but the service did not become healthy")
+        .map(|(_, tail)| tail)
+        .expect("manual rollback missing unhealthy-backup failure marker");
+    assert!(
+        rollback_failure_tail.contains("exit 1"),
+        "manual rollback health failure must exit nonzero"
+    );
     assert_order(
         &service,
         "if ! service_is_running || ! wait_for_service_health 12; then",
-        "write_deployment_result \"rolled_back\" \"Manual rollback\"",
+        "Service restarted from healthy backup",
         "manual rollback success must be health-gated",
-    );
-    let rollback_failure_tail = service
-        .split_once("write_deployment_result \"failed\" \"Manual rollback did not pass health\"")
-        .map(|(_, tail)| tail)
-        .expect("manual rollback missing failed deployment evidence marker");
-    assert!(
-        rollback_failure_tail.contains("exit 1"),
-        "manual rollback health failure must exit nonzero after recording evidence"
     );
     let rollback_success = service
         .split_once("Service restarted from healthy backup")
@@ -364,6 +362,23 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     assert!(
         rollback_success.contains("discard_contributor_pair_backup rollback || exit 1"),
         "manual rollback must atomically retire its pair backup after health passes"
+    );
+
+    let logs = read_repo_file("scripts/tron-lib.d/logs.sh");
+    let deployment_sources = format!("{manual}\n{service}\n{logs}");
+    for retired_writer in ["write_deployment_result", "TRON_DEPLOYMENT_"] {
+        assert!(
+            !deployment_sources.contains(retired_writer),
+            "scripts must not recreate the retired deployment-result writer: {retired_writer}"
+        );
+    }
+    assert!(
+        !manual.contains("last-deployment.json") && !logs.contains("last-deployment.json"),
+        "restart-sentinel.json must remain the sole manual-deploy outcome projection"
+    );
+    assert!(
+        service.contains("\"$CONTRIBUTOR_DIR/last-deployment.json\""),
+        "uninstall must remove the retired result file left by older installations"
     );
 }
 

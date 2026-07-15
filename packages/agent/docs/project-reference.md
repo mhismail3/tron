@@ -3166,7 +3166,11 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 7. Leaves complete Tron Home, managed-profile, and secure auth initialization to Rust server startup.
 8. Starts the contributor service and waits for `/health`.
 9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.
-10. If start or health fails, restores `contributor-pair.bak/`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, writes `last-deployment.json`, and exits nonzero.
+10. If start or health fails, restores `contributor-pair.bak/`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, and exits nonzero.
+
+`restart-sentinel.json` is the sole durable manual-deploy outcome projection.
+Its status drives the preflight blocker, while its commit fields retain
+transition context without a second write-only result file.
 
 ### Install Directory
 
@@ -3214,7 +3218,6 @@ Rust server startup completes the `profiles`, `workspace`, and `internal` roots 
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
     |   +-- deployed-commit        Last contributor helper commit that passed `/health`
-    |   +-- last-deployment.json   Last manual deploy/rollback result
     |   +-- restart-sentinel.json  Manual deploy restart state; `restarting` is a preflight blocker
     |   +-- Tron-Deploy.app        Contributor-only service bundle used by `tron install` / `manual-deploy`
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle

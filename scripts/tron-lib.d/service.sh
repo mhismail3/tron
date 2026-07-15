@@ -1052,7 +1052,6 @@ cmd_rollback() {
         launchd_start "$PLIST_NAME"
         if ! service_is_running || ! wait_for_service_health 12; then
             print_error "Rollback restored the backup, but the service did not become healthy"
-            write_deployment_result "failed" "Manual rollback did not pass health"
             exit 1
         fi
         local pid
@@ -1061,8 +1060,6 @@ cmd_rollback() {
         discard_contributor_pair_backup rollback || exit 1
         end_contributor_pair_update || exit 1
     fi
-
-    write_deployment_result "rolled_back" "Manual rollback"
 
     echo ""
     print_success "Rollback complete!"

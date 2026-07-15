@@ -143,23 +143,17 @@ restore_contributor_backup() {
 record_failed_contributor_deploy() {
     local new_commit="$1"
     local previous_commit="$2"
-    local failure_reason="$3"
     local restored=false
 
     if restore_contributor_backup; then
         restored=true
         write_restart_sentinel \
             "deploy" "$new_commit" "$previous_commit" "rolled_back" || true
-        failure_reason="$failure_reason; rolled back to previous helper and CLI"
         discard_contributor_pair_backup rollback || return 1
     else
         write_restart_sentinel \
             "deploy" "$new_commit" "$previous_commit" "failed" || true
-        failure_reason="$failure_reason; paired rollback failed"
     fi
-    TRON_DEPLOYMENT_COMMIT="$new_commit" \
-        TRON_DEPLOYMENT_PREVIOUS_COMMIT="$previous_commit" \
-        write_deployment_result "failed" "$failure_reason" || true
     if $restored; then
         end_contributor_pair_update || true
     fi
@@ -362,29 +356,28 @@ cmd_manual_deploy() {
     # Create and locally sign the contributor helper. Production distribution
     # signing and notarization belong only to the hosted Mac release workflow.
     print_status "Creating app bundle..."
-    local preparation_failure=""
+    local preparation_failed=false
     if ! create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"; then
-        preparation_failure="Failed to create candidate helper bundle"
+        preparation_failed=true
     elif ! codesign_bundle "$INSTALLED_BUNDLE" \
         || ! validate_contributor_bundle "$INSTALLED_BUNDLE"; then
-        preparation_failure="Failed to sign candidate helper bundle"
+        preparation_failed=true
     else
         print_status "Updating launchd plist..."
         if ! create_launchd_plist; then
-            preparation_failure="Failed to update contributor launchd plist"
+            preparation_failed=true
         elif ! write_restart_sentinel \
             "deploy" "$new_commit" "$previous_commit" "restarting"; then
-            preparation_failure="Failed to record contributor restart state"
+            preparation_failed=true
         else
             print_status "Starting service..."
             if ! launchd_start "$PLIST_NAME"; then
-                preparation_failure="Failed to request contributor helper start"
+                preparation_failed=true
             fi
         fi
     fi
-    if [ -n "$preparation_failure" ]; then
-        record_failed_contributor_deploy \
-            "$new_commit" "$previous_commit" "$preparation_failure" || return 1
+    if $preparation_failed; then
+        record_failed_contributor_deploy "$new_commit" "$previous_commit" || return 1
     fi
 
     if service_is_running && wait_for_service_health 12; then
@@ -393,20 +386,15 @@ cmd_manual_deploy() {
         print_success "Service started (PID: ${pid:-unknown})"
 
         # Health check passed. Only now does the candidate become the deployed truth.
-        local finalization_failure=""
+        local finalization_failed=false
         if ! printf '%s\n' "$new_commit" > "$DEPLOYED_COMMIT_FILE"; then
-            finalization_failure="Failed to record deployed contributor commit"
+            finalization_failed=true
         elif ! write_restart_sentinel \
             "deploy" "$new_commit" "$previous_commit" "completed"; then
-            finalization_failure="Failed to complete contributor restart state"
-        elif ! TRON_DEPLOYMENT_COMMIT="$new_commit" \
-            TRON_DEPLOYMENT_PREVIOUS_COMMIT="$previous_commit" \
-            write_deployment_result "success"; then
-            finalization_failure="Failed to record successful contributor deployment"
+            finalization_failed=true
         fi
-        if [ -n "$finalization_failure" ]; then
-            record_failed_contributor_deploy \
-                "$new_commit" "$previous_commit" "$finalization_failure" || return 1
+        if $finalization_failed; then
+            record_failed_contributor_deploy "$new_commit" "$previous_commit" || return 1
         fi
         discard_contributor_pair_backup || return 1
         end_contributor_pair_update || return 1
@@ -417,9 +405,7 @@ cmd_manual_deploy() {
             print_error "Service failed to start!"
         fi
 
-        record_failed_contributor_deploy \
-            "$new_commit" "$previous_commit" \
-            "Service failed to start or pass health" || return 1
+        record_failed_contributor_deploy "$new_commit" "$previous_commit" || return 1
     fi
 
     echo ""
