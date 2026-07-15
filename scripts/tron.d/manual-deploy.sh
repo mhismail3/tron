@@ -267,7 +267,10 @@ cmd_manual_deploy() {
     done
 
     require_project_dir
-    require_installed
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Contributor service is not installed. Run: tron install"
+        exit 1
+    fi
 
     # Abort if dev takeover is active
     if ! service_is_running; then

@@ -35,6 +35,9 @@ source "$SCRIPT_DIR/tron-lib.sh"
 # WORKSPACE-ONLY CONFIGURATION
 #=============================================================================
 
+# Contributor helper bundles built by workspace-only install/deploy commands.
+TRON_BUNDLE_ID="com.tron.agent"
+
 # Rust workspace
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"

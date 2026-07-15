@@ -470,6 +470,19 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     }
     let tron = read_repo_file("scripts/tron");
     let installed_cli = read_repo_file("scripts/tron-cli");
+    assert!(
+        tron.contains("TRON_BUNDLE_ID=\"com.tron.agent\""),
+        "the workspace entrypoint must own its contributor helper bundle identifier"
+    );
+    assert!(
+        !tron_lib.contains("TRON_BUNDLE_ID") && !tron_lib.contains("require_installed"),
+        "the installed shared CLI library must not retain workspace-only bundle or install helpers"
+    );
+    assert!(
+        manual.contains("if [ ! -f \"$PLIST_PATH\" ]; then")
+            && manual.contains("Contributor service is not installed. Run: tron install"),
+        "manual deploy must own its contributor-install prerequisite"
+    );
     for (path, source) in [
         ("scripts/tron-lib.sh", tron_lib.as_str()),
         ("scripts/tron", tron.as_str()),

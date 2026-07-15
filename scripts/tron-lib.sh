@@ -16,7 +16,6 @@ BIN_DIR="$HOME/.local/bin"
 # Contributor app bundle paths. Production Mac distribution lives at
 # `/Applications/Tron.app` and is registered by the Swift wrapper via SMAppService;
 # these bundles are only for shell-script development flows.
-TRON_BUNDLE_ID="com.tron.agent"
 RUN_DIR="$TRON_HOME/internal/run"
 USER_PROFILE_FILE="$TRON_HOME/profiles/user/profile.toml"
 CONTRIBUTOR_DIR="$RUN_DIR"
@@ -98,13 +97,6 @@ show_runtime_command_help() {
 #=============================================================================
 # UTILITY FUNCTIONS
 #=============================================================================
-
-require_installed() {
-    if [ ! -f "$PLIST_PATH" ]; then
-        print_error "Contributor service is not installed. Run: tron install"
-        exit 1
-    fi
-}
 
 confirm_action() {
     read -p "$1 (y/N) " -n 1 -r
