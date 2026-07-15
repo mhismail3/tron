@@ -109,11 +109,13 @@ SwiftUI plumbing: injected via `.environment(\.environmentSetup, …)` on the ro
 
 ### Validation and side-effect boundaries
 
+`MacRuntimeVariant` owns wrapper identity and application-placement policy.
 `ExistingInstallDetector` owns bundled-helper validation: helper app,
-executable, LaunchAgent plist, and signature. `InstallStep` orchestrates that
-validation and passes the active `EnvironmentSetup.launchAgentPlistPath`
-directly to `LaunchAgentManaging` for registration. The composition seam does
-not duplicate those helper paths or revalidate them through a second planner.
+executable, LaunchAgent plist, signature, and registration classification.
+`InstallStep` orchestrates that validation and passes the active
+`EnvironmentSetup.launchAgentPlistPath` directly to `LaunchAgentManaging` for
+registration. The composition seam does not duplicate those helper paths or
+revalidate them through a second planner.
 `PairingURLBuilder` and `QRCodeGenerator` are likewise emitter-only production
 owners. The iOS `PairingURLParser` owns runtime consumption; QR decoding stays
 in the Mac test target so the wrapper does not ship a second inverse parser or

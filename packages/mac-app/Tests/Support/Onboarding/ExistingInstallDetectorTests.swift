@@ -136,31 +136,6 @@ struct ExistingInstallDetectorTests {
         }
     }
 
-    @Test("release bundle must live at /Applications/Tron.app")
-    func releaseLocationGuard() {
-        let problem = ExistingInstallDetector.validateApplicationLocation(
-            bundleURL: URL(fileURLWithPath: "/Users/example/Downloads/Tron.app", isDirectory: true),
-            bundleIdentifier: "com.tron.mac"
-        )
-        #expect(problem?.contains("/Applications") == true)
-
-        let devProblem = ExistingInstallDetector.validateApplicationLocation(
-            bundleURL: URL(fileURLWithPath: "/tmp/TronMac.app", isDirectory: true),
-            bundleIdentifier: "com.tron.mac.dev"
-        )
-        #expect(devProblem == nil)
-    }
-
-    @Test("unsupported wrapper bundle ids are rejected")
-    func unsupportedWrapperBundleID() {
-        let problem = ExistingInstallDetector.validateApplicationLocation(
-            bundleURL: URL(fileURLWithPath: "/tmp/Tron.app", isDirectory: true),
-            bundleIdentifier: "example.tron"
-        )
-
-        #expect(problem?.contains("Unsupported") == true)
-    }
-
     @Test("LaunchAgent plist requires current BundleProgram and associated wrapper IDs")
     func launchAgentPlistIsCurrent() {
         let plist = trackedLaunchAgentPlist(named: "com.tron.server.plist")

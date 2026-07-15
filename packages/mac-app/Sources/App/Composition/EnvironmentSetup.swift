@@ -144,7 +144,7 @@ struct EnvironmentSetup: Sendable {
             ExistingInstallDetector.detect()
         },
         validateApplicationLocation: {
-            ExistingInstallDetector.validateApplicationLocation()
+            MacRuntimeVariant.detect().locationProblem
         },
         validateBundledHelper: {
             ExistingInstallDetector.validateBundledHelper()
