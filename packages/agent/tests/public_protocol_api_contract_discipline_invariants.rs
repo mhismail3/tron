@@ -274,12 +274,6 @@ fn ppacd_wiring_is_present_in_readme_local_ci_and_github_ci() {
         );
     }
 
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    assert!(
-        quality.contains(TARGET_NAME),
-        "local tron ci test target list missing {TARGET_NAME}"
-    );
-
     let ci = read_repo_file(".github/workflows/ci.yml");
     assert!(
         ci.contains("run: scripts/tron ci test"),

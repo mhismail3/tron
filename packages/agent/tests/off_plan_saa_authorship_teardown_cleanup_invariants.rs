@@ -313,10 +313,7 @@ fn active_saa_docs_tests_and_static_targets_are_absent() {
         );
     }
 
-    for path in [
-        "scripts/tron.d/quality.sh",
-        "packages/agent/docs/project-reference.md",
-    ] {
+    for path in ["packages/agent/docs/project-reference.md"] {
         let source = read_repo_file(path);
         assert!(
             source.contains(INVARIANT_TARGET),

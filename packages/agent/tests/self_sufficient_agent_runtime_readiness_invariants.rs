@@ -132,45 +132,6 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .collect()
 }
 
-fn parse_quality_closeout_targets() -> Vec<String> {
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let mut targets = Vec::new();
-    let mut in_array = false;
-    for line in quality.lines() {
-        if line.contains("local closeout_test_targets=(") {
-            in_array = true;
-            continue;
-        }
-        if in_array {
-            let trimmed = line.trim();
-            if trimmed == ")" {
-                break;
-            }
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            targets.push(trimmed.to_owned());
-        }
-    }
-    assert!(
-        !targets.is_empty(),
-        "local closeout_test_targets array not found"
-    );
-    targets
-}
-
-fn assert_github_delegates_to_local_ci_test() {
-    let ci = read_repo_file(".github/workflows/ci.yml");
-    assert!(
-        ci.contains("run: scripts/tron ci test"),
-        "GitHub Rust quality must delegate to the local test owner"
-    );
-    assert!(
-        !ci.contains("Run Rust-owned closeout target set") && !ci.contains("cargo test --test "),
-        "GitHub CI must not duplicate the local closeout target list"
-    );
-}
-
 fn active_text_files() -> Vec<String> {
     git_ls_files()
         .into_iter()

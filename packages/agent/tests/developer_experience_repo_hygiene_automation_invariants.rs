@@ -107,33 +107,6 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .collect()
 }
 
-fn parse_quality_closeout_targets() -> Vec<String> {
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let mut targets = Vec::new();
-    let mut in_array = false;
-    for line in quality.lines() {
-        if line.contains("local closeout_test_targets=(") {
-            in_array = true;
-            continue;
-        }
-        if in_array {
-            let trimmed = line.trim();
-            if trimmed == ")" {
-                break;
-            }
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            targets.push(trimmed.to_owned());
-        }
-    }
-    assert!(
-        !targets.is_empty(),
-        "local closeout_test_targets array not found"
-    );
-    targets
-}
-
 fn cargo_discovered_integration_targets() -> BTreeSet<String> {
     let manifest: toml::Value = read_repo_file("packages/agent/Cargo.toml")
         .parse()
@@ -166,28 +139,74 @@ fn cargo_discovered_integration_targets() -> BTreeSet<String> {
         .collect()
 }
 
-fn validate_quality_target_schedule(
-    discovered: &BTreeSet<String>,
-    scheduled: &[String],
-) -> Result<(), &'static str> {
-    let unique: BTreeSet<_> = scheduled.iter().cloned().collect();
-    if unique.len() != scheduled.len() {
-        return Err("duplicate scheduled target");
-    }
-    if scheduled.last().map(String::as_str) != Some("integration") {
-        return Err("serial integration target must remain last");
-    }
-    if !discovered.is_subset(&unique) {
-        return Err("missing discovered targets");
-    }
-    if !unique.is_subset(discovered) {
-        return Err("stale scheduled targets");
-    }
-    Ok(())
+fn quality_discovered_integration_targets() -> Vec<String> {
+    let output = Command::new("bash")
+        .args([
+            "-c",
+            "source scripts/tron.d/quality.sh && discover_cargo_integration_test_targets",
+        ])
+        .env("RUST_WORKSPACE", repo_path("packages/agent"))
+        .current_dir(repo_root())
+        .output()
+        .expect("quality target discovery should start");
+    assert!(
+        output.status.success(),
+        "quality target discovery failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("quality target discovery should be UTF-8")
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }
 
-fn owned_targets(values: &[&str]) -> Vec<String> {
-    values.iter().map(|value| (*value).to_owned()).collect()
+fn probe_quality_run_tests(
+    targets: &[&str],
+    failing_target: Option<&str>,
+) -> (bool, Vec<String>, String) {
+    let workspace = tempfile::tempdir().expect("quality probe workspace should exist");
+    let tests_dir = workspace.path().join("tests");
+    std::fs::create_dir(&tests_dir).expect("quality probe tests directory should exist");
+    for target in targets {
+        std::fs::write(tests_dir.join(format!("{target}.rs")), "")
+            .expect("quality probe target should be writable");
+    }
+    let call_log = workspace.path().join("cargo-calls.log");
+    let output = Command::new("bash")
+        .args([
+            "-c",
+            r#"
+source "$QUALITY_SCRIPT"
+print_status() { :; }
+print_success() { :; }
+cargo() {
+    printf '%s\n' "$*" >> "$CALL_LOG"
+    if [ -n "$FAIL_TARGET" ] && [[ " $* " == *" --test $FAIL_TARGET "* ]]; then
+        return 1
+    fi
+    return 0
+}
+run_tests
+"#,
+        ])
+        .env("QUALITY_SCRIPT", repo_path("scripts/tron.d/quality.sh"))
+        .env("RUST_WORKSPACE", workspace.path())
+        .env("CALL_LOG", &call_log)
+        .env("FAIL_TARGET", failing_target.unwrap_or(""))
+        .current_dir(workspace.path())
+        .output()
+        .expect("quality run_tests probe should start");
+    let calls = std::fs::read_to_string(call_log)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    (
+        output.status.success(),
+        calls,
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
 }
 
 fn assert_github_delegates_to_local_ci_test() {
@@ -287,12 +306,6 @@ fn dxrha_artifacts_and_static_gate_wiring_exist() {
             "README must mention DXRHA artifact or target: {required}"
         );
     }
-
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    assert!(
-        quality.contains(TARGET_NAME),
-        "scripts/tron.d/quality.sh must own the DXRHA invariant target"
-    );
 
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(
@@ -468,8 +481,8 @@ fn dxrha_inventory_is_structured_and_covers_required_workflow_surfaces() {
 }
 
 #[test]
-fn local_and_github_static_gate_targets_match_exactly() {
-    let local_targets = parse_quality_closeout_targets();
+fn local_ci_derives_cargo_targets_and_github_delegates() {
+    let local_targets = quality_discovered_integration_targets();
     let discovered_targets = cargo_discovered_integration_targets();
     assert_github_delegates_to_local_ci_test();
     let quality = read_repo_file("scripts/tron.d/quality.sh");
@@ -498,45 +511,52 @@ fn local_and_github_static_gate_targets_match_exactly() {
         rust_job.contains("fetch-depth: 0"),
         "Rust CI needs full history for baseline-lineage invariants"
     );
+    let mut expected_targets = discovered_targets
+        .iter()
+        .filter(|target| target.as_str() != "integration")
+        .cloned()
+        .collect::<Vec<_>>();
     assert!(
-        local_targets.contains(&TARGET_NAME.to_owned()),
-        "DXRHA target must be in the closeout set"
+        discovered_targets.contains("integration"),
+        "Cargo's serial integration target must remain tracked"
     );
-    validate_quality_target_schedule(&discovered_targets, &local_targets)
-        .unwrap_or_else(|error| panic!("local CI target schedule drifted from Cargo: {error}"));
-}
+    expected_targets.push("integration".to_owned());
+    assert_eq!(local_targets, expected_targets);
 
-#[test]
-fn closeout_schedule_validator_rejects_every_drift_shape() {
-    let discovered = ["alpha", "beta", "integration"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+    let (succeeded, calls, stderr) =
+        probe_quality_run_tests(&["zeta", "integration", "alpha"], None);
+    assert!(succeeded, "quality run_tests probe failed: {stderr}");
+    assert_eq!(
+        calls,
+        vec![
+            "test --workspace --lib --bins -- --quiet --test-threads=1".to_owned(),
+            "test --test alpha -- --quiet".to_owned(),
+            "test --test zeta -- --quiet".to_owned(),
+            "test --test integration -- --test-threads=1 --quiet".to_owned(),
+        ]
+    );
 
-    for (schedule, expected) in [
-        (owned_targets(&["alpha", "beta", "integration"]), Ok(())),
-        (
-            owned_targets(&["alpha", "integration"]),
-            Err("missing discovered targets"),
-        ),
-        (
-            owned_targets(&["alpha", "beta", "stale", "integration"]),
-            Err("stale scheduled targets"),
-        ),
-        (
-            owned_targets(&["alpha", "beta", "beta", "integration"]),
-            Err("duplicate scheduled target"),
-        ),
-        (
-            owned_targets(&["alpha", "integration", "beta"]),
-            Err("serial integration target must remain last"),
-        ),
-    ] {
-        assert_eq!(
-            validate_quality_target_schedule(&discovered, &schedule),
-            expected
-        );
-    }
+    let (succeeded, calls, _) =
+        probe_quality_run_tests(&["integration", "beta", "alpha"], Some("alpha"));
+    assert!(
+        !succeeded,
+        "quality run_tests must fail with its first target"
+    );
+    assert_eq!(
+        calls,
+        vec![
+            "test --workspace --lib --bins -- --quiet --test-threads=1".to_owned(),
+            "test --test alpha -- --quiet".to_owned(),
+        ]
+    );
+
+    let (succeeded, calls, stderr) = probe_quality_run_tests(&["alpha"], None);
+    assert!(!succeeded, "quality run_tests must require integration");
+    assert!(
+        calls.is_empty(),
+        "missing integration must fail before Cargo"
+    );
+    assert!(stderr.contains("serial integration test target is missing"));
 }
 
 #[test]

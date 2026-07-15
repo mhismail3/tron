@@ -1059,7 +1059,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
-| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; Cargo auto-discovers tracked top-level integration-test sources, while the `test` step explicitly schedules that exact set and keeps `integration` last and serial |
+| `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | First-time project setup |
@@ -3389,14 +3389,14 @@ cargo test --quiet           # Quiet output
 
 The agent is a single `tron` crate, so `cargo test` runs everything: library unit tests, app/bootstrap tests, integration tests, doc tests, and static gates. Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
 
-For repository CI, Cargo's default auto-discovery of tracked top-level
+For repository CI, Cargo's default auto-discovery of top-level
 `packages/agent/tests/*.rs` files owns the integration-target fact set.
-`scripts/tron ci test` orders and runs that exact set explicitly, with
-`integration` final and serial because it shares process-global test-server
-plumbing. The developer-experience repository invariant rejects missing,
-stale, and duplicate schedule entries and verifies the final serial target;
-GitHub Actions delegates to `scripts/tron ci test` rather than carrying a
-second target list.
+`scripts/tron ci test` derives that set from the same source layout, runs each
+target once in deterministic order, and reserves `integration` for the final
+serial invocation because it shares process-global test-server plumbing. The
+developer-experience repository invariant compares the derived schedule with
+Cargo and verifies GitHub Actions delegates to `scripts/tron ci test` rather
+than carrying a second target list.
 
 ### iOS Tests
 
@@ -3414,35 +3414,12 @@ tron ci fmt check            # Subset: formatting + compilation
 tron ci clippy test          # Subset: linting + tests
 ```
 
-`tron ci test` runs Rust lib/bin tests serially first, then the named closeout targets:
-`db_path_guard`, `primitive_engine_teardown_plan_invariants`,
-`determinism_replayability_invariants`,
-`hierarchical_rearchitecture_invariants`,
-`post_hra_adversarial_hardening_invariants`,
-`post_aha_adversarial_closeout_invariants`,
-`concurrency_scheduling_discipline_invariants`,
-`security_authority_capability_boundaries_invariants`,
-`observability_diagnostics_auditability_invariants`,
-`off_plan_saa_authorship_teardown_cleanup_invariants`,
-`data_integrity_storage_evolution_migration_discipline_invariants`,
-`public_protocol_api_contract_discipline_invariants`,
-`provider_model_boundary_discipline_invariants`,
-`performance_resource_governance_invariants`,
-`configuration_profile_environment_discipline_invariants`,
-`release_install_upgrade_rollback_discipline_invariants`,
-`ios_thin_client_generic_runtime_shell_invariants`,
-`developer_experience_repo_hygiene_automation_invariants`,
-`self_sufficient_agent_runtime_readiness_invariants`,
-`primitive_minimality_closure_invariants`,
-`baseline_pre_restoration_closure_invariants`,
-`self_updating_worker_runtime_foundation_invariants`,
-`ios_self_adapting_agent_cockpit_baseline_invariants`,
-`ios_affordance_restoration_map_invariants`,
-`primitive_trace_execution`, and
-serial `integration`. GitHub delegates to this command instead of maintaining a
-second closeout-target list, and runs the Rust quality path for every repository
-change because the invariant targets inspect code, docs, scripts, workflows,
-and client source.
+`tron ci test` runs Rust lib/bin tests serially first, then derives and executes
+each top-level Cargo integration target sequentially and fail-fast. The
+`integration` target runs last with one test thread. GitHub delegates to this
+command instead of maintaining a second target list, and runs the Rust quality
+path for every repository change because integration targets may inspect code,
+docs, scripts, workflows, and client source.
 
 Before restoring any feature from the primitive baseline feature index, the
 feature slice must satisfy the BPRC pre-restoration entry contract: worker or

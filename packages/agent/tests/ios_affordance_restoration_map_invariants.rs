@@ -369,45 +369,6 @@ fn old_deleted_or_renamed_ios_affordance_paths() -> Vec<String> {
     .collect()
 }
 
-fn parse_quality_closeout_targets() -> Vec<String> {
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let mut targets = Vec::new();
-    let mut in_array = false;
-    for line in quality.lines() {
-        if line.contains("local closeout_test_targets=(") {
-            in_array = true;
-            continue;
-        }
-        if in_array {
-            let trimmed = line.trim();
-            if trimmed == ")" {
-                break;
-            }
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            targets.push(trimmed.to_owned());
-        }
-    }
-    assert!(
-        !targets.is_empty(),
-        "local closeout_test_targets array not found"
-    );
-    targets
-}
-
-fn assert_github_delegates_to_local_ci_test() {
-    let ci = read_repo_file(".github/workflows/ci.yml");
-    assert!(
-        ci.contains("run: scripts/tron ci test"),
-        "GitHub Rust quality must delegate to the local test owner"
-    );
-    assert!(
-        !ci.contains("Run Rust-owned closeout target set") && !ci.contains("cargo test --test "),
-        "GitHub CI must not duplicate the local closeout target list"
-    );
-}
-
 #[test]
 fn artifacts_lineage_and_docs_wiring_exist() {
     assert_current_lineage_base();
@@ -1072,26 +1033,4 @@ fn apns_transport_is_restored_without_fixed_notification_product_planes() {
             );
         }
     }
-}
-
-#[test]
-fn static_gate_is_wired_in_local_and_github_closeout_targets() {
-    let local_targets = parse_quality_closeout_targets();
-    assert_github_delegates_to_local_ci_test();
-    let iarm_index = local_targets
-        .iter()
-        .position(|target| target == TARGET_NAME)
-        .expect("IARM target must be wired into closeout targets");
-    let iosac_index = local_targets
-        .iter()
-        .position(|target| target == "ios_self_adapting_agent_cockpit_baseline_invariants")
-        .expect("IOSAC target must stay wired");
-    let primitive_trace_index = local_targets
-        .iter()
-        .position(|target| target == "primitive_trace_execution")
-        .expect("primitive trace target must stay wired");
-    assert!(
-        iosac_index < iarm_index && iarm_index < primitive_trace_index,
-        "IARM should run after IOSAC and before primitive trace"
-    );
 }

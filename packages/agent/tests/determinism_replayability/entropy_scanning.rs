@@ -19,15 +19,6 @@ fn drc_entropy_inventory_names_replay_critical_patterns() {
 }
 
 #[test]
-fn replay_entropy_guard_module_is_wired_to_closeout_target() {
-    let source = read_source_tree_text();
-    assert!(
-        source.contains("determinism_replayability_invariants"),
-        "local/GitHub closeout wiring must run the DRC invariant target"
-    );
-}
-
-#[test]
 fn replay_critical_entropy_is_allow_listed() {
     let patterns = [
         EntropyPattern {

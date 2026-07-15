@@ -107,8 +107,6 @@ fn oda_scorecard_weights_sum_to_100_and_current_score_matches_closed_rows() {
 #[test]
 fn oda_invariant_target_is_in_closeout_ci_lists() {
     let target = "observability_diagnostics_auditability_invariants";
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    assert!(quality.contains(target), "local CI must own the ODA target");
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(workflow.contains("run: scripts/tron ci test"));
 

@@ -116,45 +116,6 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .collect()
 }
 
-fn parse_quality_closeout_targets() -> Vec<String> {
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let mut targets = Vec::new();
-    let mut in_array = false;
-    for line in quality.lines() {
-        if line.contains("local closeout_test_targets=(") {
-            in_array = true;
-            continue;
-        }
-        if in_array {
-            let trimmed = line.trim();
-            if trimmed == ")" {
-                break;
-            }
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            targets.push(trimmed.to_owned());
-        }
-    }
-    assert!(
-        !targets.is_empty(),
-        "local closeout_test_targets array not found"
-    );
-    targets
-}
-
-fn assert_github_delegates_to_local_ci_test() {
-    let ci = read_repo_file(".github/workflows/ci.yml");
-    assert!(
-        ci.contains("run: scripts/tron ci test"),
-        "GitHub Rust quality must delegate to the local test owner"
-    );
-    assert!(
-        !ci.contains("Run Rust-owned closeout target set") && !ci.contains("cargo test --test "),
-        "GitHub CI must not duplicate the local closeout target list"
-    );
-}
-
 #[test]
 fn pmc_artifacts_lineage_and_readme_wiring_exist() {
     assert_current_lineage_base();
@@ -420,43 +381,6 @@ fn deleted_runtime_residue_remains_absent_and_replacements_remain_owned() {
             "stream pipeline must retain direct parse owner: {required}"
         );
     }
-}
-
-#[test]
-fn static_gate_wiring_matches_local_and_github_closeout_order() {
-    let local_targets = parse_quality_closeout_targets();
-    assert_github_delegates_to_local_ci_test();
-    assert!(
-        local_targets.contains(&TARGET_NAME.to_owned()),
-        "PMC target must be in the closeout set"
-    );
-    let unique: BTreeSet<_> = local_targets.iter().collect();
-    assert_eq!(
-        unique.len(),
-        local_targets.len(),
-        "closeout target set must not contain duplicates"
-    );
-    assert_eq!(
-        local_targets.last().map(String::as_str),
-        Some("integration"),
-        "serial integration target must remain last"
-    );
-    let ssarr_index = local_targets
-        .iter()
-        .position(|target| target == "self_sufficient_agent_runtime_readiness_invariants")
-        .expect("SSARR target should be present");
-    let pmc_index = local_targets
-        .iter()
-        .position(|target| target == TARGET_NAME)
-        .expect("PMC target should be present");
-    let primitive_trace_index = local_targets
-        .iter()
-        .position(|target| target == "primitive_trace_execution")
-        .expect("primitive trace target should be present");
-    assert!(
-        ssarr_index < pmc_index && pmc_index < primitive_trace_index,
-        "PMC must run after SSARR and before primitive trace/integration closeout targets"
-    );
 }
 
 #[test]

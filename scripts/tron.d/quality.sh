@@ -22,48 +22,49 @@ run_named_test_targets() {
     done
 }
 
+discover_cargo_integration_test_targets() {
+    local target_path target
+    local integration_found=false
+    local test_targets=()
+    local LC_ALL=C
+
+    for target_path in "$RUST_WORKSPACE"/tests/*.rs; do
+        [ -f "$target_path" ] || continue
+        target="${target_path##*/}"
+        target="${target%.rs}"
+        if [ "$target" = integration ]; then
+            integration_found=true
+        else
+            test_targets+=("$target")
+        fi
+    done
+
+    if [ "$integration_found" != true ]; then
+        echo "error: serial integration test target is missing" >&2
+        return 1
+    fi
+
+    if [ ${#test_targets[@]} -gt 0 ]; then
+        printf '%s\n' "${test_targets[@]}"
+    fi
+    printf '%s\n' integration
+}
+
 run_tests() {
     print_status "Running tests..."
-    # Keep unit/binary tests parallel for speed, then run every closeout
-    # target explicitly. The WebSocket integration target shares
-    # process-global test server plumbing and must run serially.
-    local closeout_test_targets=(
-        db_path_guard
-        primitive_engine_teardown_plan_invariants
-        determinism_replayability_invariants
-        hierarchical_rearchitecture_invariants
-        post_hra_adversarial_hardening_invariants
-        post_aha_adversarial_closeout_invariants
-        concurrency_scheduling_discipline_invariants
-        security_authority_capability_boundaries_invariants
-        observability_diagnostics_auditability_invariants
-        off_plan_saa_authorship_teardown_cleanup_invariants
-        data_integrity_storage_evolution_migration_discipline_invariants
-        public_protocol_api_contract_discipline_invariants
-        provider_model_boundary_discipline_invariants
-        performance_resource_governance_invariants
-        configuration_profile_environment_discipline_invariants
-        release_install_upgrade_rollback_discipline_invariants
-        ios_thin_client_generic_runtime_shell_invariants
-        developer_experience_repo_hygiene_automation_invariants
-        self_sufficient_agent_runtime_readiness_invariants
-        primitive_minimality_closure_invariants
-        baseline_pre_restoration_closure_invariants
-        self_updating_worker_runtime_foundation_invariants
-        ios_self_adapting_agent_cockpit_baseline_invariants
-        ios_affordance_restoration_map_invariants
-        capability_dynamic_replacement_invariants
-        failure_semantics_invariants
-        primitive_module_proposal_trace
-        state_ownership_lifecycle_invariants
-        true_modularity_boundary_invariants
-        primitive_trace_execution
-        integration
-    )
+    # Run unit/binary tests in one serial phase, then derive every present
+    # top-level integration target from Cargo's source layout. The WebSocket
+    # integration target shares process-global server plumbing and stays last.
+    local discovered_targets target
+    local test_targets=()
+    discovered_targets="$(discover_cargo_integration_test_targets)" || return 1
+    while IFS= read -r target; do
+        [ -n "$target" ] && test_targets+=("$target")
+    done <<< "$discovered_targets"
 
     if (cd "$RUST_WORKSPACE" \
         && cargo test --workspace --lib --bins -- --quiet --test-threads=1 2>&1 \
-        && run_named_test_targets "${closeout_test_targets[@]}"); then
+        && run_named_test_targets "${test_targets[@]}"); then
         print_success "Tests passed"
         return 0
     else

@@ -29,7 +29,6 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         "mac_source_guards_cover_wrapper_contracts",
         "ios_transport_and_chat_tests_mirror_production_owners",
         "rust_progressive_docs_are_current",
-        "local_and_github_ci_run_the_same_static_closeout_targets",
         "aha_provenance_privacy_and_residue_policy_are_in_repo",
     ] {
         assert!(

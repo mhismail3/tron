@@ -579,7 +579,6 @@ fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
             "neutral glass",
         ],
     );
-    assert_contains_all("scripts/tron.d/quality.sh", &[TARGET_NAME]);
     assert_contains_all(".github/workflows/ci.yml", &["run: scripts/tron ci test"]);
 }
 

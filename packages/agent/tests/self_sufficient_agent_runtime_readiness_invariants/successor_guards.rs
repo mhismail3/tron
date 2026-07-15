@@ -326,43 +326,6 @@ fn ssarr_inventory_is_structured_and_covers_required_dimensions() {
 }
 
 #[test]
-fn static_gate_wiring_matches_local_and_github_closeout_order() {
-    let local_targets = parse_quality_closeout_targets();
-    assert_github_delegates_to_local_ci_test();
-    assert!(
-        local_targets.contains(&TARGET_NAME.to_owned()),
-        "SSARR target must be in the closeout set"
-    );
-    let unique: BTreeSet<_> = local_targets.iter().collect();
-    assert_eq!(
-        unique.len(),
-        local_targets.len(),
-        "closeout target set must not contain duplicates"
-    );
-    assert_eq!(
-        local_targets.last().map(String::as_str),
-        Some("integration"),
-        "serial integration target must remain last"
-    );
-    let dxrha_index = local_targets
-        .iter()
-        .position(|target| target == "developer_experience_repo_hygiene_automation_invariants")
-        .expect("DXRHA target should be present");
-    let ssarr_index = local_targets
-        .iter()
-        .position(|target| target == TARGET_NAME)
-        .expect("SSARR target should be present");
-    let primitive_trace_index = local_targets
-        .iter()
-        .position(|target| target == "primitive_trace_execution")
-        .expect("primitive trace target should be present");
-    assert!(
-        dxrha_index < ssarr_index && ssarr_index < primitive_trace_index,
-        "SSARR must run after repository-hygiene guards and before primitive trace/integration targets"
-    );
-}
-
-#[test]
 fn evidence_manifest_records_required_commands_without_placeholders() {
     let evidence = read_repo_file(EVIDENCE_PATH);
     for row_id in 0..=10 {

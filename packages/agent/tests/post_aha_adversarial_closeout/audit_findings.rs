@@ -338,39 +338,6 @@ fn rust_progressive_docs_are_current() {
 }
 
 #[test]
-fn local_and_github_ci_run_the_same_static_closeout_targets() {
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let ci = read_repo_file(".github/workflows/ci.yml");
-    let required_targets = [
-        "primitive_engine_teardown_plan_invariants",
-        "hierarchical_rearchitecture_invariants",
-        "post_hra_adversarial_hardening_invariants",
-        "post_aha_adversarial_closeout_invariants",
-        "primitive_trace_execution",
-        "db_path_guard",
-        "integration",
-    ];
-    let mut hits = Vec::new();
-    for target in required_targets {
-        if !quality.contains(&format!("\n        {target}\n")) {
-            hits.push(format!(
-                "scripts/tron ci test target array missing `{target}`"
-            ));
-        }
-    }
-    if !ci.contains("run: scripts/tron ci test") {
-        hits.push("GitHub CI must delegate to `scripts/tron ci test`".to_string());
-    }
-    if ci.contains("Run Rust-owned closeout target set") || ci.contains("cargo test --test ") {
-        hits.push("GitHub CI must not duplicate the local closeout target list".to_string());
-    }
-    assert_no_hits(
-        "Local and GitHub CI must run the same closeout target set",
-        hits,
-    );
-}
-
-#[test]
 fn aha_provenance_privacy_and_residue_policy_are_in_repo() {
     let mut hits = Vec::new();
     for path in [

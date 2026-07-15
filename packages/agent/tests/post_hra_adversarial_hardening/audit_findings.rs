@@ -63,20 +63,8 @@ fn iarm_old_tree_census_allows_claude_rule_paths(file: &str, text: &str) -> bool
 }
 
 #[test]
-fn github_ci_runs_rust_static_gates_for_docs_templates_ios_and_mac_changes() {
+fn github_ci_runs_rust_quality_for_docs_templates_ios_and_mac_changes() {
     let ci = read_repo_file(".github/workflows/ci.yml");
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    let required_static_gates = [
-        "primitive_engine_teardown_plan_invariants",
-        "hierarchical_rearchitecture_invariants",
-        "post_hra_adversarial_hardening_invariants",
-    ];
-    for required in required_static_gates {
-        assert!(
-            quality.contains(required),
-            "scripts/tron ci test must own Rust static gate `{required}`"
-        );
-    }
     assert!(
         ci.contains("run: scripts/tron ci test"),
         "GitHub CI must delegate Rust tests to scripts/tron ci test"
@@ -92,26 +80,6 @@ fn github_ci_runs_rust_static_gates_for_docs_templates_ios_and_mac_changes() {
             .any(|line| line.trim_start().starts_with("if:")),
         "GitHub Rust CI must be unconditional so docs, templates, iOS, and Mac changes run static gates"
     );
-}
-
-#[test]
-fn github_rust_ci_matches_tron_ci_test_harness_shape() {
-    let ci = read_repo_file(".github/workflows/ci.yml");
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    assert!(
-        ci.contains("run: scripts/tron ci test"),
-        "GitHub Rust CI must delegate to scripts/tron ci test"
-    );
-    for required in [
-        "integration",
-        "primitive_trace_execution",
-        "--test-threads=1",
-    ] {
-        assert!(
-            quality.contains(required),
-            "scripts/tron ci test harness is missing `{required}`"
-        );
-    }
 }
 
 #[test]

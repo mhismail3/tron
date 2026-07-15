@@ -278,11 +278,6 @@ fn cpe_artifacts_and_static_gate_wiring_exist() {
         );
     }
 
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    assert!(
-        quality.contains(TARGET_NAME),
-        "local CI must own CPE target"
-    );
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(workflow.contains("run: scripts/tron ci test"));
 }

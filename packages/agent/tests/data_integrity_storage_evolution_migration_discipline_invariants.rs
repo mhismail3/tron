@@ -280,11 +280,6 @@ fn dsemd_readme_and_ci_wiring_are_present() {
     ] {
         assert!(readme.contains(required), "README missing {required}");
     }
-    let quality = read_repo_file("scripts/tron.d/quality.sh");
-    assert!(
-        quality.contains(TARGET_NAME),
-        "local CI must own DSEMD target"
-    );
     let workflow = read_repo_file(".github/workflows/ci.yml");
     assert!(workflow.contains("run: scripts/tron ci test"));
 }

@@ -12,9 +12,9 @@ scripts/install-hooks.sh                                           # one-time
 cd packages/agent && cargo check && cargo test -- --quiet          # baseline
 ```
 
-Open a PR against `main`. CI always runs the personal-info/version guards, runs
-the Rust closeout target set for docs/template/iOS/Mac surfaces, and runs the
-full Rust, iOS, or Mac jobs when their source paths or labels apply. Fill out
+Open a PR against `main`. CI always runs the personal-info/version guards and
+the Rust quality path, then runs the full iOS or Mac jobs when their source
+paths or labels apply. Fill out
 the PR template — the checklist exists because `README.md` and the in-tree
 progressive-disclosure docs drift fast.
 
@@ -117,12 +117,12 @@ work test-first whenever practical — write the failing test, then make it pass
 
 CI runs `scripts/tron ci fmt`, `check`, `clippy`, and `test` as its one Rust
 quality path for every repository change. Cargo's default auto-discovery of
-tracked top-level `packages/agent/tests/*.rs` files owns the integration-target
-fact set. The test command schedules that exact set explicitly, keeps
-`integration` last and serial, and runs unit/binary tests separately. The DX
-repository invariant rejects missing, stale, or duplicate scheduled targets;
-the GitHub workflow delegates to this local owner instead of duplicating the
-list. iOS and Mac jobs only run for their package paths, relevant labels, or
+top-level `packages/agent/tests/*.rs` files owns the integration-target fact
+set. The test command derives that set from the same source layout, runs each
+target once in deterministic order, and reserves `integration` for the final
+serial invocation. The DX repository invariant compares the derived schedule
+with Cargo and verifies GitHub delegates to this local owner. iOS and Mac jobs
+only run for their package paths, relevant labels, or
 full validation on `main` and manual dispatch (macOS minutes are ~10× the cost
 of Linux minutes). The Rust job checks out full history because accepted
 baseline invariants verify commit ancestry. `CI summary` is the required
