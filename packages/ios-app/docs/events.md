@@ -35,8 +35,10 @@ server reports an in-flight invocation.
 `EventStoreManager` owns the current global event subscription without owning
 the shared `AsyncEventStream` bus. The idle subscription task captures the
 manager weakly. Client replacement is predecessor-chained—including the first
-load—so rapid A→B→C replacement cannot let events or projection loads from an
-older origin overtake the latest lane. Reconnect refresh stays behind
+load—so rapid A→B→C replacement cannot let events or direct projection loads
+from an older origin overtake the latest lane. Session-list refresh completion
+is separately client-identity fenced before reconciliation, projection loads,
+retry registration, and user-visible errors. Reconnect refresh stays behind
 `SessionRefreshService`'s single coalescing owner.
 
 Acceptance is the boundary for shutdown semantics: after the lane accepts an

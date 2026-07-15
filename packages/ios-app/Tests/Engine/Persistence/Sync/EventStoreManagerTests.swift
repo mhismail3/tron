@@ -439,6 +439,100 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(streams.subscriptionCount(for: clientC), 1)
     }
 
+    func testRetiredClientRefreshDoesNotReconcileItsSnapshot() async throws {
+        let database = testState.makeDatabase(fileName: "retired-refresh-success.db")
+        try await database.initialize()
+        let clientA = makeEngineClient(port: 65513)
+        let clientB = makeEngineClient(port: 65512)
+        let transportA = makeConnectedTransport(port: 65513)
+        let transportB = makeConnectedTransport(port: 65512)
+        clientA.session = SessionClient(transport: transportA)
+        clientB.session = SessionClient(transport: transportB)
+
+        var manager: EventStoreManager!
+        var clientBReads = 0
+        transportA.readHandler = { functionId, _, _ in
+            guard functionId.rawValue == "session::list" else {
+                throw EngineConnectionError.invalidResponse
+            }
+            manager.updateEngineClient(clientB)
+            return SessionListResult(
+                sessions: [self.makeSessionInfo(sessionId: "session-from-a", title: "A", workingDirectory: "/a")],
+                totalCount: 1,
+                hasMore: false,
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-14T12:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+        transportB.readHandler = { _, _, _ in
+            clientBReads += 1
+            throw EngineConnectionError.invalidResponse
+        }
+        manager = EventStoreManager(
+            eventDB: database,
+            engineClient: clientA,
+            defaults: testState.defaults
+        )
+
+        await manager.refreshSessionList()
+
+        let retiredSession = try await database.sessions.get("session-from-a")
+        XCTAssertNil(retiredSession)
+        XCTAssertTrue(manager.sessions.isEmpty)
+        XCTAssertEqual(clientBReads, 0)
+        await manager.shutdown()
+    }
+
+    func testRetiredClientRefreshErrorDoesNotRegisterRetryOnReplacement() async throws {
+        let database = testState.makeDatabase(fileName: "retired-refresh-error.db")
+        try await database.initialize()
+        let clientA = makeEngineClient(port: 65511)
+        let clientB = makeEngineClient(port: 65510)
+        let transportA = makeConnectedTransport(port: 65511)
+        let transportB = makeConnectedTransport(port: 65510)
+        clientA.session = SessionClient(transport: transportA)
+        clientB.session = SessionClient(transport: transportB)
+        let connectionProvider = MockConnectionStateProvider()
+        connectionProvider.connectionState = .connected
+        let connectionManager = ConnectionManager(provider: connectionProvider)
+
+        var manager: EventStoreManager!
+        var clientBReads = 0
+        transportA.readHandler = { _, _, _ in
+            manager.updateEngineClient(clientB)
+            throw EngineConnectionError.notConnected
+        }
+        transportB.readHandler = { _, _, _ in
+            clientBReads += 1
+            return SessionListResult(
+                sessions: [],
+                totalCount: 0,
+                hasMore: false,
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-14T12:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+        manager = EventStoreManager(
+            eventDB: database,
+            engineClient: clientA,
+            defaults: testState.defaults
+        )
+        manager.attachConnectionManager(connectionManager)
+
+        await manager.refreshSessionList()
+        connectionProvider.connectionState = .reconnecting(attempt: 1, nextRetrySeconds: 0)
+        for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(connectionManager.state.isReconnecting)
+        connectionProvider.connectionState = .connected
+        for _ in 0..<10 { try? await Task.sleep(for: .milliseconds(20)) }
+
+        XCTAssertEqual(connectionManager.state, .connected)
+        XCTAssertEqual(clientBReads, 0)
+        await manager.shutdown()
+    }
+
     func testIncrementalSyncKeepsInitiatingClientAndCommitsCompletedPage() async throws {
         let database = testState.makeDatabase(fileName: "captured-incremental-sync.db")
         try await database.initialize()

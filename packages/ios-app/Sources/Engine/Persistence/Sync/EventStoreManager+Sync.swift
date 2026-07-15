@@ -14,11 +14,13 @@ extension EventStoreManager {
 
         do {
             let snapshot = try await sessionSynchronizer.fetchServerSessions(using: operationClient)
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             let serverSessions = snapshot.sessions
             let serverSessionIds = Set(serverSessions.map(\.sessionId))
             logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
 
             let localSessions = try await eventDB.sessions.getAll()
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             let localSessionsById = Dictionary(uniqueKeysWithValues: localSessions.map { ($0.id, $0) })
             var sessionsToUpsert: [CachedSession] = []
             sessionsToUpsert.reserveCapacity(serverSessions.count)
@@ -52,6 +54,7 @@ extension EventStoreManager {
                 authoritativeSessionIds: snapshot.isComplete ? serverSessionIds : nil,
                 snapshotAsOf: snapshot.isComplete ? snapshot.snapshotAsOf : nil
             )
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             if removedCount > 0 {
                 logger.info("Removed \(removedCount) stale local sessions", category: .session)
             }
@@ -66,6 +69,7 @@ extension EventStoreManager {
             seedProcessingStateFromSessions()
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
         } catch {
+            guard acceptsRefreshCompletion(from: operationClient) else { return }
             if ConnectionErrorClassifier.isTransientTransport(error) {
                 // Transport-level foreground churn is owned by the connection state machine.
                 // Session refresh is opportunistic, so do not show a red error toast for a
@@ -84,6 +88,11 @@ extension EventStoreManager {
             logger.error("Session list refresh failed: \(error.localizedDescription)", category: .session)
             ErrorHandler.shared.handle(error, context: "Session refresh")
         }
+    }
+
+    /// A retired or cancelled refresh cannot affect the current projection, retry lane, or UI.
+    private func acceptsRefreshCompletion(from operationClient: EngineClient) -> Bool {
+        !Task.isCancelled && engineClient === operationClient
     }
 
     /// Sync events for a specific session.

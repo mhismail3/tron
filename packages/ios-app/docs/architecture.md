@@ -572,6 +572,11 @@ missing pagination/proof fields, inconsistent boundaries, and oversized pages
 fail closed before local mutation. A complete unfiltered snapshot is applied in one SQLite
 transaction; server-missing sessions at or before its boundary are removed
 with their events while newer local rows and all retained events survive.
+Refresh completion is client-identity fenced after network and database
+boundaries: a retired client cannot begin reconciliation, schedule a current
+projection load or retry, or surface an error in the replacement client's UI.
+An origin-scoped SQLite transaction admitted while its client was current may
+finish atomically after a switch, but cannot update the replacement projection.
 Destructive boundary checks compare RFC 3339 instants at full nanosecond
 precision; Foundation floating-point dates and SQLite `julianday` are not used
 because either can collapse distinct session creation times. Full session sync
