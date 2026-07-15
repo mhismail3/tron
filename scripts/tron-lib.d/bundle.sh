@@ -63,17 +63,8 @@ create_app_bundle() {
 </plist>
 PLIST
 
-    # Copy icon if available
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    for candidate in \
-        "$script_dir/AppIcon.icns" \
-        "$CONTRIBUTOR_DIR/AppIcon.icns"; do
-        if [ -f "$candidate" ]; then
-            cp "$candidate" "$bundle_path/Contents/Resources/AppIcon.icns"
-            break
-        fi
-    done
+    cp "$CONTRIBUTOR_DIR/AppIcon.icns" \
+        "$bundle_path/Contents/Resources/AppIcon.icns"
 
     cp "$binary_src" "$bundle_path/Contents/MacOS/tron"
     chmod +x "$bundle_path/Contents/MacOS/tron"

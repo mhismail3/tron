@@ -65,8 +65,8 @@ PLIST
 install_runtime_cli_payload() {
     mkdir -p "$CONTRIBUTOR_DIR"
     cp "$SCRIPT_DIR"/{tron-cli,tron-lib.sh,tron-agent.entitlements} "$CONTRIBUTOR_DIR/"
-    [ ! -f "$SCRIPT_DIR/AppIcon.icns" ] \
-        || cp "$SCRIPT_DIR/AppIcon.icns" "$CONTRIBUTOR_DIR/AppIcon.icns"
+    cp "$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns" \
+        "$CONTRIBUTOR_DIR/AppIcon.icns"
     chmod +x "$CONTRIBUTOR_DIR/tron-cli"
     rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
     mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
@@ -384,7 +384,7 @@ cmd_install() {
     # Suppresses decorative banners and interactive prompts.
     #
     # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
-    # Phases (ordered): dirs, configs, build, bundle, plist, cli, symlink, launchd
+    # Phases (ordered): dirs, configs, build, cli, bundle, plist, symlink, launchd
     # The distributed Mac app does not call this path. Production
     # installs are `/Applications/Tron.app` + SMAppService only.
     local gui_helper=0
@@ -438,6 +438,11 @@ cmd_install() {
         _emit_event build ok "prebuilt: $RELEASE_BINARY"
     fi
 
+    _emit_event cli start ""
+    install_runtime_cli_payload
+    [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
+    _emit_event cli ok "$CONTRIBUTOR_DIR/tron-cli"
+
     _emit_event bundle start "$INSTALLED_BUNDLE"
     [ "$gui_helper" -eq 0 ] && print_status "Creating app bundle..."
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
@@ -450,11 +455,6 @@ cmd_install() {
     create_launchd_plist
     [ "$gui_helper" -eq 0 ] && print_success "Created: $PLIST_PATH"
     _emit_event plist ok "$PLIST_PATH"
-
-    _emit_event cli start ""
-    install_runtime_cli_payload
-    [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
-    _emit_event cli ok "$CONTRIBUTOR_DIR/tron-cli"
 
     _emit_event symlink start "$BIN_DIR/tron"
     [ "$gui_helper" -eq 0 ] && print_status "Installing tron CLI..."

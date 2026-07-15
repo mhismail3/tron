@@ -560,6 +560,26 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     assert_eq!(manual.matches("install_runtime_cli_payload").count(), 4);
     assert_eq!(manual.matches("tron-cli,tron-lib.sh,tron-agent").count(), 1);
     assert_eq!(manual.matches("workspace-path").count(), 1);
+    assert!(manual.contains("cp \"$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns\""));
+    assert!(manual.contains("\"$CONTRIBUTOR_DIR/AppIcon.icns\""));
+    let install = manual
+        .split_once("cmd_install() {")
+        .expect("install command missing")
+        .1;
+    assert_order(
+        install,
+        "install_runtime_cli_payload",
+        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$RELEASE_BINARY\"",
+        "clean installs must stage the required helper icon before bundle construction",
+    );
+    assert!(
+        !repo_path("scripts/AppIcon.icns").exists(),
+        "the Mac resource must remain the sole helper icon owner"
+    );
+
+    let bundle = read_repo_file("scripts/tron-lib.d/bundle.sh");
+    assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
+    assert!(!bundle.contains("$script_dir/AppIcon.icns"));
 
     let service = read_repo_file("scripts/tron-lib.d/service.sh");
     for required in [
