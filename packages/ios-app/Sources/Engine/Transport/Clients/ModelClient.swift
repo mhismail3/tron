@@ -1,25 +1,8 @@
 import Foundation
 
-/// Protocol for model client operations.
-/// Provides the transport seam used by `DefaultModelRepository`.
-@MainActor
-protocol ModelClientProtocol {
-    func list() async throws -> [ModelInfo]
-    func switchModel(
-        _ sessionId: String,
-        model: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> ModelSwitchResult
-    func setReasoningLevel(
-        _ sessionId: String,
-        level: String,
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> ReasoningLevelResult
-}
-
 /// Client for model-related engine capabilities.
 /// Thinly maps model operations onto engine capabilities.
-final class ModelClient: EngineDomainClient, ModelClientProtocol {
+final class ModelClient: EngineDomainClient {
 
     // MARK: - Model Methods
 

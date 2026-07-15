@@ -7,7 +7,7 @@ import Foundation
 @Observable
 @MainActor
 final class DefaultModelRepository: ModelRepository {
-    private let modelClient: ModelClientProtocol
+    private let modelClient: ModelClient
     private var cacheTime: Date?
     private let cacheTTL: TimeInterval = 300
 
@@ -18,7 +18,7 @@ final class DefaultModelRepository: ModelRepository {
 
     // MARK: - Initialization
 
-    init(modelClient: ModelClientProtocol) {
+    init(modelClient: ModelClient) {
         self.modelClient = modelClient
     }
 

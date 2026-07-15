@@ -470,9 +470,9 @@ snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
 `EngineClient` is the composition-owned concrete transport. Its domain clients
 are concrete adapters over the narrower `EngineTransport` contract; repository
-protocols are the sole consumer-facing injection boundary, and concrete client
-tests use `EngineTransport` directly. No second whole-client or per-domain
-client protocol mirrors those concrete surfaces.
+protocols are the sole consumer-facing injection boundary. Concrete-client and
+policy-repository tests exercise those adapters over injected `EngineTransport`.
+No second whole-client or per-domain client protocol mirrors those surfaces.
 `AgentClient` fulfills the narrow `AgentRepository` contract directly because
 that boundary adds no policy or state; policy-owning repositories such as
 `DefaultModelRepository` remain separate adapters.
