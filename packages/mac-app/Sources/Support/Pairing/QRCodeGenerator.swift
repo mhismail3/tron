@@ -7,8 +7,8 @@ import AppKit
 ///
 /// Pure-value tests live in `Tests/Support/Pairing/QRCodeGeneratorTests.swift`.
 /// They assert that the generator returns nil for empty input, returns a
-/// non-empty `NSImage` for valid pairing URLs, and round-trips the input
-/// through a CoreImage `CIDetector` to confirm encoding correctness.
+/// non-empty `NSImage` for valid pairing URLs, and decode the output with a
+/// test-owned CoreImage detector to confirm encoding correctness.
 enum QRCodeGenerator {
     /// Encodes `payload` as a QR code at the requested pixel size.
     /// Returns nil if the payload is empty or CoreImage refuses to
@@ -33,24 +33,5 @@ enum QRCodeGenerator {
         let nsImage = NSImage(size: rep.size)
         nsImage.addRepresentation(rep)
         return nsImage
-    }
-
-    /// Decodes a QR code embedded in a CIImage. Returns the first
-    /// detected message, or nil. Used by tests to round-trip the
-    /// generator's output.
-    static func decode(image: CIImage) -> String? {
-        let context = CIContext()
-        let detector = CIDetector(
-            ofType: CIDetectorTypeQRCode,
-            context: context,
-            options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]
-        )
-        guard let features = detector?.features(in: image) else { return nil }
-        for feature in features {
-            if let qr = feature as? CIQRCodeFeature, let message = qr.messageString {
-                return message
-            }
-        }
-        return nil
     }
 }

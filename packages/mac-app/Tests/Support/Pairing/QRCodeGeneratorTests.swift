@@ -4,6 +4,18 @@ import AppKit
 import Testing
 @testable import TronMac
 
+private func decodeQRCode(_ image: CIImage) -> String? {
+    let detector = CIDetector(
+        ofType: CIDetectorTypeQRCode,
+        context: CIContext(),
+        options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]
+    )
+    return detector?
+        .features(in: image)
+        .compactMap { ($0 as? CIQRCodeFeature)?.messageString }
+        .first
+}
+
 @Suite("QRCodeGenerator")
 struct QRCodeGeneratorTests {
     @Test("empty payload returns nil")
@@ -37,11 +49,8 @@ struct QRCodeGeneratorTests {
         // makeImage returns an NSImage backed by an NSCIImageRep, we
         // can recover the CIImage directly.
         let rep = try #require(image.representations.first as? NSCIImageRep)
-        let decoded = try #require(QRCodeGenerator.decode(image: rep.ciImage))
+        let decoded = try #require(decodeQRCode(rep.ciImage))
         #expect(decoded == urlString)
-
-        let parsed = try #require(PairingURLBuilder.parse(URL(string: decoded)!))
-        #expect(parsed == payload)
     }
 
     @Test("round-trip: TestFlight public invite encodes and decodes back")
@@ -49,7 +58,7 @@ struct QRCodeGeneratorTests {
         let urlString = IOSBetaStepContent.testFlightURL.absoluteString
         let image = try #require(QRCodeGenerator.makeImage(payload: urlString, size: 512))
         let rep = try #require(image.representations.first as? NSCIImageRep)
-        let decoded = try #require(QRCodeGenerator.decode(image: rep.ciImage))
+        let decoded = try #require(decodeQRCode(rep.ciImage))
         #expect(decoded == urlString)
     }
 

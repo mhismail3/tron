@@ -1,12 +1,10 @@
 import Foundation
 
-/// Builds and parses `tron://pair?host=...&port=...&token=...&label=...`
-/// URLs. Mirrors the iOS `PairingURLParser` in
-/// `packages/ios-app/Sources/Support/Pairing/PairingURLParser.swift` so the
-/// QR codes the Mac wrapper emits round-trip cleanly through iOS.
+/// Builds `tron://pair?host=...&port=...&token=...&label=...` URLs for
+/// the iOS `PairingURLParser` to consume.
 enum PairingURLBuilder {
-    static let scheme = "tron"
-    static let host = "pair"
+    private static let scheme = "tron"
+    private static let host = "pair"
 
     /// Builds a `tron://pair?host=…&port=…&token=…[&label=…]` URL.
     /// The optional `label` value is the iOS server name.
@@ -35,37 +33,11 @@ enum PairingURLBuilder {
         components.queryItems = items
         return components.url
     }
-
-    /// Parses a URL of the form `tron://pair?host=…&port=…&token=…[&label=…]`.
-    /// Returns nil on any malformed input. Used by `Tests/Support/Pairing/PairingURLBuilderTests`
-    /// to verify round-trip with iOS.
-    static func parse(_ url: URL) -> PairingPayload? {
-        guard url.scheme == scheme,
-              url.host == host,
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-
-        let items = components.queryItems ?? []
-        guard let host = items.value(for: "host"),
-              let canonicalHost = PairingHostValidator.canonicalHost(host),
-              let portString = items.value(for: "port"),
-              let port = Int(portString),
-              (1...65_535).contains(port),
-              let token = items.value(for: "token")?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !token.isEmpty
-        else {
-            return nil
-        }
-
-        let label = items.value(for: "label")?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return PairingPayload(host: canonicalHost, port: port, token: token, label: label?.isEmpty == false ? label : nil)
-    }
 }
 
 /// Mirrors the iOS host contract: a pairing host is a bare DNS hostname, IPv4
 /// address, or unbracketed IPv6 address, never a full URL/path/query/userinfo.
-enum PairingHostValidator {
+private enum PairingHostValidator {
     static func canonicalHost(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -172,11 +144,5 @@ enum PairingHostValidator {
             searchStart = range.upperBound
         }
         return count
-    }
-}
-
-private extension Array where Element == URLQueryItem {
-    func value(for name: String) -> String? {
-        first(where: { $0.name == name })?.value
     }
 }

@@ -114,6 +114,10 @@ executable, LaunchAgent plist, and signature. `InstallStep` orchestrates that
 validation and passes the active `EnvironmentSetup.launchAgentPlistPath`
 directly to `LaunchAgentManaging` for registration. The composition seam does
 not duplicate those helper paths or revalidate them through a second planner.
+`PairingURLBuilder` and `QRCodeGenerator` are likewise emitter-only production
+owners. The iOS `PairingURLParser` owns runtime consumption; QR decoding stays
+in the Mac test target so the wrapper does not ship a second inverse parser or
+detector.
 
 The menu bar observes `tron dev` takeover but does not start it. Contributors
 start dev servers from the checkout-owned `scripts/tron` CLI; the app only
