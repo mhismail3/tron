@@ -10,11 +10,11 @@
 //! Server-owned presentation metadata gives every operation a concise behavior
 //! description and a natural verb-first display name for native discovery UI;
 //! canonical operation identifiers remain the stable invocation keys. A private
-//! presentation facade routes the typed registry exhaustively into literal
-//! owners aligned with the four input-schema families. Tests require every
-//! operation to have presentation metadata and independently require exactly
-//! one schema owner, with representative provider-visible compatibility cases
-//! for each presentation family. Schema-family validation derives its cases
+//! presentation owner matches the typed registry exhaustively to its display
+//! name and description literals. Tests require every operation to have
+//! presentation metadata and independently require exactly one schema owner,
+//! with representative provider-visible compatibility cases. Schema-family
+//! validation derives its cases
 //! from the typed operation registry and owns no shadow operation-name lists.
 
 use serde_json::{Map, Value, json};
