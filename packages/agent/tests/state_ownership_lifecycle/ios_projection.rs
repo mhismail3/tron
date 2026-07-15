@@ -28,7 +28,9 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "startup fails at the composition",
         "boundary instead of silently changing the projection substrate",
         "diagnostics harnesses may create explicit isolated database paths",
-        "`EventStoreManager` and `SessionSynchronizer` rebuild local session/event",
+        "`EventStoreManager` owns the client generation for each persistence operation",
+        "one strongly captured client into every page of that operation",
+        "The two types rebuild local session/event",
         "projections from server session lists and event-sync APIs",
         "Engine stream cursors are stored per server",
         "origin/topic/filter for ACK coalescing and diagnostics only",
@@ -135,7 +137,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "await globalTask?.value",
         "await refreshCoordinator.shutdown()",
         "await loadTask?.value",
-        "sessionSynchronizer.updateEngineClient(client)",
+        "engineClient = client",
         "setupGlobalEventHandlers()",
     ] {
         assert!(
@@ -183,18 +185,18 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         &[
             "eventDB.sync.getState(sessionId)",
             "lastSyncedEventId",
-            "engineClient.eventSync.getSince",
+            "operationClient.eventSync.getSince",
             "eventDB.events.insertBatch(events)",
             "eventDB.sync.update(newSyncState)",
         ],
     );
     for required in [
-        "fullSync(sessionId: String)",
+        "fullSync(sessionId: String, using operationClient: EngineClient)",
         "eventDB.events.deleteBySession(sessionId)",
         "lastSyncedEventId: nil",
-        "engineClient.eventSync.getAll(sessionId: sessionId)",
+        "operationClient.eventSync.getAll(sessionId: sessionId)",
         "fetchMissingAncestors",
-        "engineClient.eventSync.getAncestors(parentId)",
+        "operationClient.eventSync.getAncestors(parentId)",
         "insertIgnoringDuplicates",
     ] {
         assert!(

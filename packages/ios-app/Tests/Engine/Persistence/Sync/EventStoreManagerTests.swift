@@ -439,7 +439,225 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(streams.subscriptionCount(for: clientC), 1)
     }
 
+    func testIncrementalSyncKeepsInitiatingClientAndCommitsCompletedPage() async throws {
+        let database = testState.makeDatabase(fileName: "captured-incremental-sync.db")
+        try await database.initialize()
+        try await database.sessions.insert(createTestSession(id: "session-a"))
+        let clientA = makeEngineClient(port: 65518)
+        let clientB = makeEngineClient(port: 65517)
+        let transportA = makeConnectedTransport(port: 65518)
+        let transportB = makeConnectedTransport(port: 65517)
+        clientA.eventSync = EventSyncClient(transport: transportA)
+        clientB.eventSync = EventSyncClient(transport: transportB)
+
+        var manager: EventStoreManager!
+        var clientAReads = 0
+        var clientBReads = 0
+        transportA.readHandler = { functionId, payload, _ in
+            guard functionId.rawValue == "events::get_since",
+                  let params = payload as? EventsGetSinceParams else {
+                throw EngineConnectionError.invalidResponse
+            }
+            clientAReads += 1
+            if clientAReads == 1 {
+                XCTAssertNil(params.afterEventId)
+                manager.updateEngineClient(clientB)
+                return EventsGetSinceResult(
+                    events: [self.makeRawEvent(id: "event-a-1", sessionId: "session-a", sequence: 1)],
+                    nextCursor: nil,
+                    hasMore: true
+                )
+            }
+            XCTAssertEqual(params.afterEventId, "event-a-1")
+            throw EngineConnectionError.invalidResponse
+        }
+        transportB.readHandler = { _, _, _ in
+            clientBReads += 1
+            throw EngineConnectionError.invalidResponse
+        }
+        manager = EventStoreManager(
+            eventDB: database,
+            engineClient: clientA,
+            defaults: testState.defaults
+        )
+
+        do {
+            try await manager.syncSessionEvents(sessionId: "session-a")
+            XCTFail("Expected the second page to fail")
+        } catch EngineConnectionError.invalidResponse {
+            // The first page is already durable and must have matching metadata.
+        }
+
+        let events = try await database.events.getBySession("session-a")
+        let syncState = try await database.sync.getState("session-a")
+        let cachedSession = try await database.sessions.get("session-a")
+        XCTAssertEqual(events.map(\.id), ["event-a-1"])
+        XCTAssertEqual(syncState?.lastSyncedEventId, "event-a-1")
+        XCTAssertEqual(cachedSession?.eventCount, 1)
+        XCTAssertEqual(cachedSession?.headEventId, "event-a-1")
+        XCTAssertEqual(clientAReads, 2)
+        XCTAssertEqual(clientBReads, 0)
+        await manager.shutdown()
+    }
+
+    func testFullSyncKeepsInitiatingClientForAncestorFetch() async throws {
+        let database = testState.makeDatabase(fileName: "captured-full-sync.db")
+        try await database.initialize()
+        try await database.events.insert(
+            makeSessionEvent(id: "stale-event", sessionId: "session-a", sequence: 0)
+        )
+        let clientA = makeEngineClient(port: 65516)
+        let clientB = makeEngineClient(port: 65515)
+        let transportA = makeConnectedTransport(port: 65516)
+        let transportB = makeConnectedTransport(port: 65515)
+        clientA.eventSync = EventSyncClient(transport: transportA)
+        clientB.eventSync = EventSyncClient(transport: transportB)
+
+        var manager: EventStoreManager!
+        var clientAAncestorReads = 0
+        var clientBReads = 0
+        transportA.readHandler = { functionId, _, _ in
+            switch functionId.rawValue {
+            case "events::get_history":
+                manager.updateEngineClient(clientB)
+                return EventsGetHistoryResult(
+                    events: [
+                        self.makeRawEvent(
+                            id: "fork-event-a",
+                            parentId: "ancestor-a",
+                            sessionId: "session-a",
+                            sequence: 1
+                        )
+                    ],
+                    hasMore: false,
+                    oldestEventId: nil
+                )
+            case "tree::get_ancestors":
+                clientAAncestorReads += 1
+                return TreeGetAncestorsResult(
+                    events: [
+                        self.makeRawEvent(
+                            id: "ancestor-a",
+                            sessionId: "source-session-a",
+                            sequence: 1
+                        )
+                    ]
+                )
+            default:
+                throw EngineConnectionError.invalidResponse
+            }
+        }
+        transportB.readHandler = { _, _, _ in
+            clientBReads += 1
+            throw EngineConnectionError.invalidResponse
+        }
+        manager = EventStoreManager(
+            eventDB: database,
+            engineClient: clientA,
+            defaults: testState.defaults
+        )
+
+        try await manager.fullSyncSession("session-a")
+
+        let staleEvent = try await database.events.get("stale-event")
+        let forkEvent = try await database.events.get("fork-event-a")
+        let ancestorEvent = try await database.events.get("ancestor-a")
+        XCTAssertNil(staleEvent)
+        XCTAssertNotNil(forkEvent)
+        XCTAssertNotNil(ancestorEvent)
+        XCTAssertEqual(clientAAncestorReads, 1)
+        XCTAssertEqual(clientBReads, 0)
+        await manager.shutdown()
+    }
+
+    func testFullSyncFetchFailurePreservesExistingProjection() async throws {
+        let database = testState.makeDatabase(fileName: "full-sync-fetch-failure.db")
+        try await database.initialize()
+        let existingEvent = makeSessionEvent(
+            id: "existing-event",
+            sessionId: "session-a",
+            sequence: 1
+        )
+        let existingSyncState = SyncState(
+            key: "session-a",
+            lastSyncedEventId: existingEvent.id,
+            lastSyncTimestamp: "2026-07-14T12:00:00Z",
+            pendingEventIds: []
+        )
+        try await database.events.insert(existingEvent)
+        try await database.sync.update(existingSyncState)
+        let client = makeEngineClient(port: 65514)
+        let transport = makeConnectedTransport(port: 65514)
+        transport.readHandler = { _, _, _ in
+            throw EngineConnectionError.invalidResponse
+        }
+        client.eventSync = EventSyncClient(transport: transport)
+        let synchronizer = SessionSynchronizer(eventDB: database)
+
+        do {
+            _ = try await synchronizer.fullSync(sessionId: "session-a", using: client)
+            XCTFail("Expected the server fetch to fail")
+        } catch EngineConnectionError.invalidResponse {
+            // Expected: the last usable local projection remains intact.
+        }
+
+        let retainedEvent = try await database.events.get("existing-event")
+        XCTAssertEqual(retainedEvent?.id, existingEvent.id)
+        XCTAssertEqual(retainedEvent?.sessionId, existingEvent.sessionId)
+        let retainedSyncState = try await database.sync.getState("session-a")
+        XCTAssertEqual(retainedSyncState?.lastSyncedEventId, existingEvent.id)
+        XCTAssertEqual(retainedSyncState?.lastSyncTimestamp, existingSyncState.lastSyncTimestamp)
+    }
+
     // MARK: - Helper
+
+    private func makeEngineClient(port: Int) -> EngineClient {
+        EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:\(port)/engine")!,
+            sessionAttemptDirective: { _ in .handledFailure }
+        )
+    }
+
+    private func makeConnectedTransport(port: Int) -> MockEngineTransport {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(
+            serverURL: URL(string: "ws://127.0.0.1:\(port)/engine")!
+        )
+        transport.connectionState = .connected
+        transport.serverOrigin = "127.0.0.1:\(port)"
+        return transport
+    }
+
+    private func makeRawEvent(
+        id: String,
+        parentId: String? = nil,
+        sessionId: String,
+        sequence: Int
+    ) -> RawEvent {
+        RawEvent(
+            id: id,
+            parentId: parentId,
+            sessionId: sessionId,
+            workspaceId: "/tmp/tron-fixtures/workspace",
+            type: "message.user",
+            timestamp: "2026-07-14T12:00:00Z",
+            sequence: sequence,
+            payload: [:]
+        )
+    }
+
+    private func makeSessionEvent(id: String, sessionId: String, sequence: Int) -> SessionEvent {
+        SessionEvent(
+            id: id,
+            parentId: nil,
+            sessionId: sessionId,
+            workspaceId: "/tmp/tron-fixtures/workspace",
+            type: "message.user",
+            timestamp: "2026-07-14T12:00:00Z",
+            sequence: sequence,
+            payload: [:]
+        )
+    }
 
     private func createTestSession(
         id: String,

@@ -8,11 +8,12 @@ extension EventStoreManager {
     /// Does NOT sync events — just updates the session metadata so all devices see the same list.
     /// Reconciles local state: adds new sessions, updates existing, removes stale ones.
     func refreshSessionList() async {
-        let serverOrigin = engineClient.serverOrigin
+        let operationClient = engineClient
+        let serverOrigin = operationClient.serverOrigin
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
         do {
-            let snapshot = try await sessionSynchronizer.fetchServerSessions()
+            let snapshot = try await sessionSynchronizer.fetchServerSessions(using: operationClient)
             let serverSessions = snapshot.sessions
             let serverSessionIds = Set(serverSessions.map(\.sessionId))
             logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
@@ -71,7 +72,7 @@ extension EventStoreManager {
                 // socket that is already reconnecting or about to reconnect.
                 let shouldRetryOnReconnect =
                     ConnectionErrorClassifier.requiresConnectionRecovery(error) ||
-                    !engineClient.connectionState.isConnected
+                    !operationClient.connectionState.isConnected
                 if shouldRetryOnReconnect {
                     logger.info("Session refresh deferred until reconnect: \(error.localizedDescription)", category: .session)
                     refreshService.deferUntilReconnect()
@@ -86,14 +87,20 @@ extension EventStoreManager {
     }
 
     /// Sync events for a specific session.
-    /// Delegates to SessionSynchronizer and handles pagination.
+    /// Keeps pagination on one captured client and updates metadata after every committed page.
     func syncSessionEvents(sessionId: String) async throws {
-        var result = try await sessionSynchronizer.syncEvents(sessionId: sessionId)
+        let operationClient = engineClient
+        var result = try await sessionSynchronizer.syncEvents(
+            sessionId: sessionId,
+            using: operationClient
+        )
 
-        // Continue fetching if more events available
         while result.hasMore {
             try await updateSessionMetadata(sessionId: sessionId)
-            result = try await sessionSynchronizer.syncEvents(sessionId: sessionId)
+            result = try await sessionSynchronizer.syncEvents(
+                sessionId: sessionId,
+                using: operationClient
+            )
         }
 
         if result.eventCount > 0 {
@@ -104,7 +111,11 @@ extension EventStoreManager {
     /// Full sync for a single session (fetch all events from scratch).
     /// Delegates to SessionSynchronizer.
     func fullSyncSession(_ sessionId: String) async throws {
-        _ = try await sessionSynchronizer.fullSync(sessionId: sessionId)
+        let operationClient = engineClient
+        _ = try await sessionSynchronizer.fullSync(
+            sessionId: sessionId,
+            using: operationClient
+        )
         try await updateSessionMetadata(sessionId: sessionId)
     }
 

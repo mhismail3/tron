@@ -7,7 +7,6 @@ final class SessionSynchronizer {
 
     // MARK: - Dependencies
 
-    private var engineClient: EngineClient
     private let eventDB: EventDatabase
 
     // MARK: - Types
@@ -19,45 +18,32 @@ final class SessionSynchronizer {
 
     // MARK: - Initialization
 
-    init(engineClient: EngineClient, eventDB: EventDatabase) {
-        self.engineClient = engineClient
+    init(eventDB: EventDatabase) {
         self.eventDB = eventDB
-    }
-
-    /// Update the engine client reference when server settings change.
-    func updateEngineClient(_ client: EngineClient) {
-        engineClient = client
     }
 
     // MARK: - Sync Operations
 
-    /// Sync events for a session since the last sync point.
-    /// Returns the number of events synced and whether more are available.
-    func syncEvents(sessionId: String) async throws -> SyncResult {
+    /// Sync one event page through the operation's captured client generation.
+    func syncEvents(
+        sessionId: String,
+        using operationClient: EngineClient
+    ) async throws -> SyncResult {
         logger.info("[SYNC] Syncing events for session \(sessionId)", category: .session)
 
-        // Get sync state to find cursor
         let syncState = try await eventDB.sync.getState(sessionId)
         let afterEventId = syncState?.lastSyncedEventId
-
-        // Fetch events since cursor from server
-        let result = try await engineClient.eventSync.getSince(
+        let result = try await operationClient.eventSync.getSince(
             sessionId: sessionId,
             afterEventId: afterEventId,
             limit: 500
         )
 
         if !result.events.isEmpty {
-            // Convert server events
             let events = result.events.map { rawEventToSessionEvent($0) }
-
-            // Fetch missing ancestors for fork boundaries
-            try await fetchMissingAncestors(for: events)
-
-            // Insert events
+            try await fetchMissingAncestors(for: events, using: operationClient)
             try await eventDB.events.insertBatch(events)
 
-            // Update sync state
             if let lastEvent = result.events.last {
                 let newSyncState = SyncState(
                     key: sessionId,
@@ -68,31 +54,23 @@ final class SessionSynchronizer {
                 try await eventDB.sync.update(newSyncState)
             }
 
-            logger.info("[SYNC] Synced \(result.events.count) events for session \(sessionId)", category: .session)
+            logger.info(
+                "[SYNC] Synced \(result.events.count) events for session \(sessionId)",
+                category: .session
+            )
         }
 
         return SyncResult(eventCount: result.events.count, hasMore: result.hasMore)
     }
 
     /// Full sync for a single session - fetches all events from scratch.
-    func fullSync(sessionId: String) async throws -> Int {
+    func fullSync(sessionId: String, using operationClient: EngineClient) async throws -> Int {
         logger.info("[FULL-SYNC] Starting full sync for session \(sessionId)", category: .session)
 
-        // Clear existing events
-        try await eventDB.events.deleteBySession(sessionId)
-
-        // Clear sync state
-        let emptySyncState = SyncState(
-            key: sessionId,
-            lastSyncedEventId: nil,
-            lastSyncTimestamp: nil,
-            pendingEventIds: []
-        )
-        try await eventDB.sync.update(emptySyncState)
-
-        // Fetch all events
-        let events = try await engineClient.eventSync.getAll(sessionId: sessionId)
+        // Fetch the complete replacement before clearing the last usable local projection.
+        let events = try await operationClient.eventSync.getAll(sessionId: sessionId)
         let sessionEvents = events.map { rawEventToSessionEvent($0) }
+        var ancestorSessionEvents: [SessionEvent] = []
 
         // Log the first event to verify parent_id
         if let firstEvent = sessionEvents.first {
@@ -106,15 +84,26 @@ final class SessionSynchronizer {
             logger.info("[FULL-SYNC] Session appears forked, fetching ancestor events from \(parentId.prefix(12))", category: .session)
 
             do {
-                let ancestorEvents = try await engineClient.eventSync.getAncestors(parentId)
-                let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
-                let insertedCount = try await eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
-                logger.info("[FULL-SYNC] Inserted \(insertedCount) ancestor events", category: .session)
+                let ancestorEvents = try await operationClient.eventSync.getAncestors(parentId)
+                ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
             } catch {
                 logger.warning("[FULL-SYNC] Failed to fetch ancestors: \(error.localizedDescription)", category: .session)
             }
         }
 
+        // Replace only after every required server fetch has completed.
+        try await eventDB.events.deleteBySession(sessionId)
+        let emptySyncState = SyncState(
+            key: sessionId,
+            lastSyncedEventId: nil,
+            lastSyncTimestamp: nil,
+            pendingEventIds: []
+        )
+        try await eventDB.sync.update(emptySyncState)
+        if !ancestorSessionEvents.isEmpty {
+            let insertedCount = try await eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
+            logger.info("[FULL-SYNC] Inserted \(insertedCount) ancestor events", category: .session)
+        }
         try await eventDB.events.insertBatch(sessionEvents)
         logger.info("[FULL-SYNC] Completed: \(events.count) events for session \(sessionId)", category: .session)
 
@@ -122,9 +111,9 @@ final class SessionSynchronizer {
     }
 
     /// Fetch a bounded, cursor-paginated session snapshot from the server.
-    func fetchServerSessions() async throws -> ServerSessionListSnapshot {
-        try await SessionListPageLoader().load { [engineClient] limit, cursor in
-            try await engineClient.session.list(
+    func fetchServerSessions(using operationClient: EngineClient) async throws -> ServerSessionListSnapshot {
+        try await SessionListPageLoader().load { [operationClient] limit, cursor in
+            try await operationClient.session.list(
                 limit: limit,
                 cursor: cursor,
                 includeArchived: true
@@ -135,7 +124,10 @@ final class SessionSynchronizer {
     // MARK: - Helpers
 
     /// Fetch missing ancestors for fork boundaries.
-    private func fetchMissingAncestors(for events: [SessionEvent]) async throws {
+    private func fetchMissingAncestors(
+        for events: [SessionEvent],
+        using operationClient: EngineClient
+    ) async throws {
         for event in events {
             if let parentId = event.parentId {
                 let parentExists = try await eventDB.events.exists(parentId)
@@ -143,7 +135,7 @@ final class SessionSynchronizer {
                 if !parentExists && !parentInNewEvents {
                     logger.info("[SYNC] Event references missing parent \(parentId.prefix(12)), fetching ancestors", category: .session)
                     do {
-                        let ancestorEvents = try await engineClient.eventSync.getAncestors(parentId)
+                        let ancestorEvents = try await operationClient.eventSync.getAncestors(parentId)
                         let ancestorSessionEvents = ancestorEvents.map { rawEventToSessionEvent($0) }
                         let insertedCount = try await eventDB.events.insertIgnoringDuplicates(ancestorSessionEvents)
                         logger.info("[SYNC] Inserted \(insertedCount) ancestor events", category: .session)

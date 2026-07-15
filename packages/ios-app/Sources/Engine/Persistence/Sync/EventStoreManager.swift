@@ -51,7 +51,7 @@ final class EventStoreManager {
     /// Handles synchronization of session events with the server
     @ObservationIgnored
     private(set) lazy var sessionSynchronizer: SessionSynchronizer = {
-        SessionSynchronizer(engineClient: engineClient, eventDB: eventDB)
+        SessionSynchronizer(eventDB: eventDB)
     }()
 
     /// Manages bounded live activity snapshots for session metadata persistence.
@@ -126,7 +126,6 @@ final class EventStoreManager {
     func updateEngineClient(_ client: EngineClient) {
         guard !isTerminal else { return }
         engineClient = client
-        sessionSynchronizer.updateEngineClient(client)
         setupGlobalEventHandlers()
         logger.info("engine client updated to \(client.serverOrigin)", category: .session)
     }

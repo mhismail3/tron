@@ -557,7 +557,11 @@ Documents is unavailable; startup fails at the composition boundary instead of s
 Tests and diagnostics harnesses may create explicit isolated database paths, but
 those paths are not production recovery modes.
 
-`EventStoreManager` and `SessionSynchronizer` rebuild local session/event
+`EventStoreManager` owns the client generation for each persistence operation;
+it passes one strongly captured client into every page of that operation.
+Incremental pagination, cursor advancement, and in-operation ancestor resolution therefore
+finish through one server generation even if composition selects another server
+while the operation is suspended. The two types rebuild local session/event
 projections from server session lists and event-sync APIs. Session-list refresh
 uses immutable creation-key server cursors in 200-row pages beneath one
 `snapshotAsOf` boundary, with independent page/no-progress limits and a
@@ -570,8 +574,9 @@ transaction; server-missing sessions at or before its boundary are removed
 with their events while newer local rows and all retained events survive.
 Destructive boundary checks compare RFC 3339 instants at full nanosecond
 precision; Foundation floating-point dates and SQLite `julianday` are not used
-because either can collapse distinct session creation times. Full
-session sync clears and refetches event rows, and fork ancestor rows remain source-session history
+because either can collapse distinct session creation times. Full session sync
+fetches its complete replacement and any fork ancestors before clearing the last
+usable local event rows; fork ancestor rows remain source-session history
 rather than copied client truth. Engine stream cursors are stored per server
 origin/topic/filter for ACK coalescing and diagnostics only; session history is
 reconstructed through server APIs, not replayed from cursor storage.
