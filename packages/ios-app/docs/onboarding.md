@@ -3,8 +3,11 @@
 > Last verified: 2026-07-13 (medium-first onboarding and pairing; Engine → Servers ownership; concise Settings destinations; Engine and Providers sheets start directly with their owned sections instead of duplicate summary heroes).
 
 The iOS app always opens to the normal session shell after initialization.
-`TronMobileApp` presents one medium-first onboarding sheet for first-run setup,
-Engine → Servers pairing, and pairing URLs. Preparation and pairing pages stay compact;
+`TronMobileApp` uses `AppRuntimeMode` only to prevent hosted XCTest from
+constructing the production graph. Application and UI-test launches construct
+`ProductionAppRoot`, which presents one medium-first onboarding sheet for
+first-run setup, Engine → Servers pairing, and pairing URLs. Preparation and
+pairing pages stay compact;
 after the Mac is paired, form-heavy setup pages expand to the large detent so
 provider/settings cards do not clip against the bottom of the sheet. Page
 scrolling is disabled at the medium detent, the app hides native sheet drag
@@ -53,13 +56,18 @@ active server.
 
 ```
 TronMobileApp.init()
+  └─ AppRuntimeMode.current.runsApplicationLifecycle
+       ├─ application / UI-test launch → construct ProductionAppRoot
+       └─ hosted XCTest → keep productionRoot nil and mount inert Color.clear
+
+ProductionAppRoot.init()
   ├─ TronFontLoader.registerFonts()
   └─ EventRegistry.shared.registerAll()
 
-WindowGroup.task
+ProductionAppRoot.body.task
   └─ AppInitializer.initialize { DependencyContainer.initialize() }
 
-readyContent()
+ProductionAppRoot.readyContent()
   ├─ always mounts ContentView
   └─ presentOnboarding(first-run / Engine → Servers / pairing URL)
        └─ OnboardingFlowView
@@ -88,8 +96,8 @@ readyContent()
 Pairing URLs (`tron://pair?host=…&port=…&token=…[&label=…]`) are
 handled in three places:
 
-- `TronMobileApp.onOpenURL` accepts QR/deep-link launches, fills the
-  pairing form, jumps to the connect page, and presents through the same
+- `ProductionAppRoot`'s `onOpenURL` handler accepts QR/deep-link launches,
+  fills the pairing form, jumps to the connect page, and presents through the same
   medium-detent onboarding presenter without mutating first-run completion state.
 - `QRCodeScannerSheet` scans the Mac QR code, parses the same URL shape,
   fills the connect page, and starts the same Connect validation after
@@ -376,13 +384,20 @@ unlocked at least once.
 ## File Map
 
 ```
-Sources/App/Lifecycle/TronMobileApp.swift
-  └── owns the shell + onboarding sheet presentation
+Sources/App/Lifecycle/
+  ├── TronMobileApp.swift
+  │   └── gates production graph construction for app/UI-test vs hosted XCTest
+  └── ProductionAppRoot.swift
+      └── owns the shell, onboarding presentation, completion persistence,
+          and first-run / Settings / pairing-URL launch lifecycle
 
 Sources/UI/Onboarding/
-  ├── OnboardingFlowView.swift
-  ├── OnboardingShell.swift
-  ├── QRCodeScannerSheet.swift
+  ├── Flow/
+  │   ├── OnboardingFlowPresentation.swift
+  │   ├── OnboardingFlowView.swift
+  │   └── OnboardingShell.swift
+  ├── Pairing/
+  │   └── QRCodeScannerSheet.swift
   └── Steps/
       ├── SetupStepComponents.swift
       ├── SetupSteps.swift
@@ -402,6 +417,8 @@ Sources/Session/Chat/State/OnboardingSetupSnapshot.swift
 Sources/Session/Chat/State/OnboardingState.swift
 
 Tests/UI/Onboarding/
+  ├── OnboardingFlowLayoutTests.swift
+  │   └── guards production-root presentation/persistence ownership and sheet structure
   ├── OnboardingStateTests.swift
   └── BindingPasteAwareTests.swift
 
