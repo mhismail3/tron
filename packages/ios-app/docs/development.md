@@ -667,13 +667,16 @@ extension mix Xcode-managed and manually managed profile styles.
 Manual workflow runs default to `dry_run=true`, which builds and tests but skips
 App Store Connect upload and TestFlight distribution. A manual run with
 `dry_run=false` exercises the full upload/distribution path without creating a
-new tag, but it must use a unique Apple build number or an existing build that
-is safe to redistribute. For the first external build of a new marketing version,
-the expected successful outcome is a workflow summary that says distribution is
-pending Apple Beta App Review. Rerun the same workflow after App Store Connect
-shows the build as approved; duplicate-build detection will reuse the existing
-upload and continue distribution. Later builds in the same approved marketing
-version normally skip that review wait and move straight to group assignment.
+new tag, but it must have all three required ASC secrets and use a unique Apple
+build number or an existing build that is safe to redistribute. Tag runs and
+manual `dry_run=false` runs reject a missing ASC secret before the build; only
+the explicit manual dry-run may omit them. For the first external build of a
+new marketing version, the expected successful outcome is a workflow summary
+that says distribution is pending Apple Beta App Review. Rerun the same
+workflow after App Store Connect shows the build as approved; duplicate-build
+detection will reuse the existing upload and continue distribution. Later
+builds in the same approved marketing version normally skip that review wait
+and move straight to group assignment.
 
 ## Common Tasks
 

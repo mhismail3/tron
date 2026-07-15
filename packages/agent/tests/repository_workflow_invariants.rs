@@ -177,6 +177,83 @@ fn probe_ci_summary(
         .expect("CI summary probe should start")
 }
 
+fn workflow_step_script(workflow: &str, step_name: &str) -> String {
+    let marker = format!("      - name: {step_name}\n");
+    let (_, step) = workflow
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("workflow must define step {step_name:?}"));
+    let (_, script) = step
+        .split_once("        run: |\n")
+        .unwrap_or_else(|| panic!("workflow step {step_name:?} must own a run block"));
+    script
+        .lines()
+        .take_while(|line| line.is_empty() || line.starts_with("          "))
+        .map(|line| line.strip_prefix("          ").unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn assert_release_mode(
+    script: &str,
+    required_secrets: &[&str],
+    event: &str,
+    requested_dry_run: &str,
+    configured_secrets: &[&str],
+    expected_mode: Option<&str>,
+    expected_message: &str,
+) {
+    let workspace = tempfile::tempdir().expect("release-mode probe should have a workspace");
+    let output_path = workspace.path().join("github-output");
+    let mut command = Command::new("/bin/bash");
+    command
+        .args(["-c", script])
+        .env_clear()
+        .env("GITHUB_EVENT_NAME", event)
+        .env("DRY_RUN_INPUT", requested_dry_run)
+        .env("GITHUB_OUTPUT", &output_path);
+    for secret in required_secrets {
+        command.env(
+            secret,
+            if configured_secrets.contains(secret) {
+                "configured"
+            } else {
+                ""
+            },
+        );
+    }
+    let output = command.output().expect("release-mode probe should start");
+    let messages = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let emitted = std::fs::read_to_string(output_path).unwrap_or_default();
+
+    match expected_mode {
+        Some(mode) => {
+            assert!(
+                output.status.success(),
+                "release-mode probe failed: {messages}"
+            );
+            assert_eq!(emitted.trim(), format!("dry_run={mode}"));
+        }
+        None => {
+            assert!(
+                !output.status.success(),
+                "release-mode probe unexpectedly succeeded: {messages}"
+            );
+            assert!(
+                emitted.is_empty(),
+                "failed gate must not emit a release mode"
+            );
+        }
+    }
+    assert!(
+        messages.contains(expected_message),
+        "release-mode probe omitted {expected_message:?}: {messages}"
+    );
+}
+
 #[test]
 fn root_readme_stays_a_concise_progressive_disclosure_front_door() {
     let readme = read_repo_file("README.md");
@@ -281,6 +358,112 @@ fn local_and_github_ci_share_one_fail_fast_test_schedule() {
         "missing integration must fail before Cargo"
     );
     assert!(stderr.contains("serial integration test target is missing"));
+}
+
+#[test]
+fn release_workflows_fail_closed_before_live_builds() {
+    let workflows: [(&str, &[&str]); 2] = [
+        (
+            ".github/workflows/release-mac.yml",
+            &[
+                "MACOS_CERT_P12_BASE64",
+                "MACOS_CERT_PASSWORD",
+                "NOTARIZE_APPLE_ID",
+                "NOTARIZE_TEAM_ID",
+                "NOTARIZE_APP_PASSWORD",
+            ],
+        ),
+        (
+            ".github/workflows/release-ios.yml",
+            &["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8_BASE64"],
+        ),
+    ];
+
+    for (path, required_secrets) in workflows {
+        let workflow = read_repo_file(path);
+        assert!(
+            workflow.contains("default: true") && workflow.contains("type: boolean"),
+            "{path} must expose a typed, safe dry-run default"
+        );
+        let (_, gate) = workflow
+            .split_once("      - name: Resolve dry-run flag\n")
+            .expect("workflow must own the release-mode gate");
+        let (gate_environment, _) = gate
+            .split_once("        run: |\n")
+            .expect("release-mode gate must own a run block");
+        assert!(gate_environment.contains("DRY_RUN_INPUT: ${{ inputs.dry_run }}"));
+        for secret in required_secrets {
+            let binding = format!("{secret}: ${{{{ secrets.{secret} }}}}");
+            assert!(
+                gate_environment.contains(&binding),
+                "{path} release-mode gate is missing {binding}"
+            );
+        }
+        let script = workflow_step_script(&workflow, "Resolve dry-run flag");
+        assert!(
+            !script.contains("${{ secrets.") && !script.contains("${{ inputs."),
+            "{path} must pass inputs and secrets through the step environment"
+        );
+
+        let probe = |event, input, configured, mode, message| {
+            assert_release_mode(
+                &script,
+                required_secrets,
+                event,
+                input,
+                configured,
+                mode,
+                message,
+            );
+        };
+        probe(
+            "workflow_dispatch",
+            "true",
+            &[],
+            Some("true"),
+            "Dry-run=true",
+        );
+        probe("workflow_dispatch", "", &[], Some("true"), "Dry-run=true");
+        probe(
+            "workflow_dispatch",
+            "invalid",
+            required_secrets,
+            None,
+            "dry_run must be true or false",
+        );
+        probe(
+            "push",
+            "true",
+            required_secrets,
+            Some("false"),
+            "Dry-run=false",
+        );
+        probe(
+            "workflow_dispatch",
+            "false",
+            required_secrets,
+            Some("false"),
+            "Dry-run=false",
+        );
+        probe("workflow_dispatch", "false", &[], None, "requires secrets");
+
+        for missing_secret in required_secrets {
+            let configured = required_secrets
+                .iter()
+                .copied()
+                .filter(|secret| secret != missing_secret)
+                .collect::<Vec<_>>();
+            assert_release_mode(
+                &script,
+                required_secrets,
+                "push",
+                "",
+                &configured,
+                None,
+                missing_secret,
+            );
+        }
+    }
 }
 
 #[test]

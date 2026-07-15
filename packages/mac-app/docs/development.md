@@ -208,9 +208,11 @@ tag, title, changelog, and asset names.
 
 Manual workflow dispatch defaults to structural dry-run and never publishes a
 GitHub release; with `dry_run=false` and signing credentials, it can exercise
-signed and notarized packaging. PR CI compiles the full Mac test bundle, runs
-focused stable suites, and remounts a headless unsigned DMG. Missing build
-products, helpers, links, or failed packaging are hard failures.
+signed and notarized packaging. Only the explicit manual dry-run may omit the
+five signing/notarization secrets; tag runs and manual `dry_run=false` runs
+reject any missing secret before the build. PR CI compiles the full Mac test
+bundle, runs focused stable suites, and remounts a headless unsigned DMG.
+Missing build products, helpers, links, or failed packaging are hard failures.
 
 ## Common tasks
 

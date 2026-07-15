@@ -251,8 +251,9 @@ git push && git push --tags
 
 # 5. To test the pipeline without cutting a real release, use
 #    Actions → Release (Mac DMG) and Actions → Release (iOS TestFlight)
-#    with `dry_run=true`. Missing release secrets auto-force dry-run, so
-#    forks can exercise the build without the Apple credentials.
+#    with `dry_run=true`; this explicit manual mode can run without Apple
+#    credentials. Tag runs and manual `dry_run=false` runs fail before the
+#    build when any required release secret is missing.
 ```
 
 **Required GitHub Actions secrets** for notarized releases:

@@ -33,9 +33,9 @@
 #   NOTARIZE_APPLE_ID       Apple ID email for notarytool
 #   NOTARIZE_TEAM_ID        Apple Developer team ID
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
-# All required signing and notarization secrets must be present for notarization to run. In
-# dry-run mode (the workflow_dispatch default) missing secrets are tolerated
-# and the job short-circuits before the notarization step.
+# All required signing and notarization secrets must be present for a live
+# release. Only an explicit manual dry-run may omit them; release tags fail
+# before the build when any required secret is missing.
 #
 # ─── Secret handling INVARIANT ──────────────────────────────────────────
 #
@@ -66,10 +66,10 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Skip signing/notarization; manual runs never publish (true/false)."
+        description: "Skip signing/notarization; manual runs never publish."
         required: false
-        default: "true"
-        type: string
+        default: true
+        type: boolean
 
 concurrency:
   group: release-mac-${{ github.ref }}
@@ -143,22 +143,46 @@ jobs:
       - name: Resolve dry-run flag
         id: drymode
         shell: bash
+        env:
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+          NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+          NOTARIZE_APP_PASSWORD: ${{ secrets.NOTARIZE_APP_PASSWORD }}
         run: |
-          # Tag pushes default to publish; workflow_dispatch defaults to dry-run.
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            flag="${{ inputs.dry_run }}"
-            [[ -z "$flag" ]] && flag="true"
-          else
-            flag="false"
-          fi
-          # Also treat missing notarize secrets as an automatic dry-run so
-          # forks can exercise the build without the Apple credentials.
-          if [[ -z "${{ secrets.MACOS_CERT_P12_BASE64 }}" \
-             || -z "${{ secrets.NOTARIZE_APPLE_ID }}" \
-             || -z "${{ secrets.NOTARIZE_TEAM_ID }}" \
-             || -z "${{ secrets.NOTARIZE_APP_PASSWORD }}" ]]; then
-            flag="true"
-            echo "::notice::Release signing/notarization secrets missing → forcing dry-run"
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch) flag="${DRY_RUN_INPUT:-true}" ;;
+            push) flag="false" ;;
+            *)
+              echo "::error::unsupported release event: $GITHUB_EVENT_NAME"
+              exit 1
+              ;;
+          esac
+          case "$flag" in
+            true|false) ;;
+            *)
+              echo "::error::dry_run must be true or false, got: $flag"
+              exit 1
+              ;;
+          esac
+          if [[ "$flag" == "false" ]]; then
+            required_secrets=(
+              MACOS_CERT_P12_BASE64
+              MACOS_CERT_PASSWORD
+              NOTARIZE_APPLE_ID
+              NOTARIZE_TEAM_ID
+              NOTARIZE_APP_PASSWORD
+            )
+            missing_secrets=()
+            for secret_name in "${required_secrets[@]}"; do
+              [[ -n "${!secret_name:-}" ]] || missing_secrets+=("$secret_name")
+            done
+            if (( ${#missing_secrets[@]} > 0 )); then
+              echo "::error::live Mac release requires secrets: ${missing_secrets[*]}"
+              exit 1
+            fi
           fi
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
