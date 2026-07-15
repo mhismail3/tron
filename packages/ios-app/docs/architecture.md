@@ -642,10 +642,11 @@ Server settings shown in the iOS settings UI are snapshots from
 server and roll back a failed in-flight edit to the last loaded snapshot.
 Onboarding completion is one device-local `@AppStorage` flag owned by
 `ProductionAppRoot`, alongside the sheet and startup effects it gates.
-Paired-server selection is device-local `UserDefaults` state injected at the
-production composition root so tests use isolated persistence domains and
-cannot alter the installed app's active server; bearer tokens are per-server
-Keychain secrets, drafts and input history are local workflow state, pending
+`PairedServerStore` owns paired-server metadata and active selection as
+device-local `UserDefaults` state injected at the production composition root,
+so tests use isolated persistence domains and cannot alter the installed app's
+active server. Bearer tokens are per-server Keychain secrets, drafts and input
+history are local workflow state, pending
 share content is App Group handoff state cleared after consumption, and
 MetricKit payloads are bounded Application Support diagnostics buffers.
 Recent input history is stored only on the device through
