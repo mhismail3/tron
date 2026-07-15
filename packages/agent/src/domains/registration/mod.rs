@@ -58,8 +58,10 @@ pub(crate) struct DomainLifecycleActivation {
 
 impl DomainLifecycleActivation {
     pub(crate) fn activate(self) {
+        let shutdown_coordinator = self.jobs.shutdown_coordinator.clone();
         self.jobs.activate_after_registration();
-        self.worker_lifecycle.activate_after_registration();
+        self.worker_lifecycle
+            .activate_after_registration(shutdown_coordinator);
     }
 }
 

@@ -55,6 +55,7 @@ mod tests {
             "unexpected setup error: {error}"
         );
         assert_eq!(shutdown.registered_phase_callback_count(), 0);
+        assert_eq!(shutdown.tracked_task_count(), 0);
     }
 
     #[tokio::test]
@@ -70,6 +71,7 @@ mod tests {
             "unexpected setup error: {error}"
         );
         assert_eq!(shutdown.registered_phase_callback_count(), 0);
+        assert_eq!(shutdown.tracked_task_count(), 0);
     }
 
     fn context_with_transport_trigger_owner_conflict()

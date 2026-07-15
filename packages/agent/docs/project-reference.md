@@ -1619,7 +1619,10 @@ the direct jobs worker and all `capability::execute` jobs/program adapters share
 that state rather than a process-global registry or independent cutoffs. Jobs
 dependency construction is inert; startup reconciliation and shutdown
 cancellation registration begin only when the complete engine setup consumes
-its lifecycle activation token.
+its lifecycle activation token. Production registers the one-shot
+reconciliation handle with the server shutdown coordinator instead of
+detaching it; coordinator-free embeddings reconcile on the first lifecycle
+read/cancel/cleanup operation instead.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, job-owned network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
@@ -2408,7 +2411,9 @@ returns package/installation state to `enabled` for immediate relaunch, while
 startup reconciliation runs before lifecycle requests and marks durable running
 launch attempts `unhealthy` if process ownership was lost. Dependency
 construction does not start reconciliation; the task begins only after domain
-and transport-trigger registration both succeed. A failed launch,
+and transport-trigger registration both succeed, and production shutdown owns
+the task handle until it completes. Coordinator-free embeddings defer the same
+reconciliation to their first lifecycle request. A failed launch,
 conformance mismatch, digest mismatch, or unowned stop is recorded or rejected
 fail-closed. The provider-visible model tool remains `execute`; lifecycle
 mutation operations are engine capabilities invoked through the authenticated

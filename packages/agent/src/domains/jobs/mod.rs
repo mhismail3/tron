@@ -34,9 +34,11 @@
 //! One runtime state is created by the domain composition root and shared by
 //! both the direct jobs worker and capability execution paths. Construction is
 //! side-effect free; startup reconciliation and shutdown cancellation activate
-//! only after the complete engine setup succeeds. On domain startup and before
-//! lifecycle reads/cleanup, persisted `running`
-//! job resources from before the current service instance are reconciled:
+//! only after the complete engine setup succeeds, and production reconciliation
+//! is tracked by the shutdown owner. Coordinator-free embeddings skip eager
+//! reconciliation and use the same on-demand path before lifecycle
+//! reads/cancel/cleanup. Persisted `running` job resources from before the
+//! current service instance are reconciled:
 //! owned jobs continue under their runtime handle, while non-owned stale jobs
 //! are marked with inspectable unknown/failure terminal evidence. Reconciliation
 //! uses an internal scoped scan so a newest-first public list page full of live
@@ -125,20 +127,21 @@ impl Deps {
     }
 
     pub(crate) fn activate_after_registration(self) {
-        if let Some(shutdown) = self.shutdown_coordinator {
-            let runtime_for_shutdown = self.state.runtime();
-            shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs", move || {
-                let runtime = runtime_for_shutdown.clone();
-                async move {
-                    runtime.cancel_all("server_shutdown").await;
-                }
-            });
-        }
+        let Some(shutdown) = self.shutdown_coordinator else {
+            return;
+        };
+        let runtime_for_shutdown = self.state.runtime();
+        shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs", move || {
+            let runtime = runtime_for_shutdown.clone();
+            async move {
+                runtime.cancel_all("server_shutdown").await;
+            }
+        });
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let engine_host = self.engine_host;
             let runtime_for_reconcile = self.state.runtime();
             let reconcile_for_startup = self.state.reconcile();
-            handle.spawn(async move {
+            let task = handle.spawn(async move {
                 match service::reconcile_stale_running_jobs(
                     &engine_host,
                     runtime_for_reconcile,
@@ -164,6 +167,7 @@ impl Deps {
                     }
                 }
             });
+            shutdown.register_task(task);
         }
     }
 }

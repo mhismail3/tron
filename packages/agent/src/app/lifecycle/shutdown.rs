@@ -2,9 +2,10 @@
 //!
 //! Subsystems register two ways:
 //!
-//! 1. [`ShutdownCoordinator::register_task`] — for fire-and-forget
-//!    background tasks that observe [`ShutdownCoordinator::token`] to
-//!    cooperatively stop. These are drained at the end of
+//! 1. [`ShutdownCoordinator::register_task`] — for background tasks whose
+//!    completion shutdown must own. Long-lived tasks observe
+//!    [`ShutdownCoordinator::token`] to cooperatively stop; finite tasks may
+//!    simply complete. All are drained at the end of
 //!    [`ShutdownCoordinator::graceful_shutdown`].
 //! 2. [`ShutdownCoordinator::register_phase_callback`] — for subsystems
 //!    that need a specific async "please drain now" callback. Callbacks run

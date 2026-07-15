@@ -641,6 +641,26 @@ async fn capability_started_job_is_owned_by_direct_jobs_worker_runtime() {
 }
 
 #[tokio::test]
+async fn startup_reconciliation_task_is_owned_by_shutdown_coordinator() {
+    let ctx = make_test_context();
+    let shutdown = Arc::new(ShutdownCoordinator::new());
+    let deps = activation_deps(&ctx, &shutdown);
+    let host_guard = ctx.engine_host.lock().await;
+
+    deps.activate_after_registration();
+
+    assert_eq!(shutdown.tracked_task_count(), 1);
+    drop(host_guard);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while shutdown.tracked_task_count() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("jobs startup reconciliation should leave shutdown tracking");
+}
+
+#[tokio::test]
 async fn shutdown_cancels_running_job_and_records_terminal_state() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");
@@ -649,13 +669,7 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     }
 
     let shutdown = Arc::new(ShutdownCoordinator::new());
-    let mut activation_ctx = ctx.clone();
-    activation_ctx.shutdown_coordinator = Some(shutdown.clone());
-    let registration_deps =
-        crate::domains::registration::worker::DomainRegistrationContext::from_context(
-            &activation_ctx,
-        );
-    let deps = super::Deps::from_engine(&registration_deps, super::RuntimeState::new());
+    let deps = activation_deps(&ctx, &shutdown);
     let runtime = deps.state.runtime();
     let shutdown_coordinator = deps.shutdown_coordinator.clone();
     assert_eq!(shutdown.registered_phase_callback_count(), 0);
@@ -713,6 +727,16 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
         jobs_details(&log)["stdoutPreview"],
         json!("shutdown-started")
     );
+}
+
+fn activation_deps(ctx: &ServerRuntimeContext, shutdown: &Arc<ShutdownCoordinator>) -> super::Deps {
+    let mut activation_ctx = ctx.clone();
+    activation_ctx.shutdown_coordinator = Some(shutdown.clone());
+    let registration_deps =
+        crate::domains::registration::worker::DomainRegistrationContext::from_context(
+            &activation_ctx,
+        );
+    super::Deps::from_engine(&registration_deps, super::RuntimeState::new())
 }
 
 struct ExecuteFixture<'a> {

@@ -6,10 +6,11 @@
 //! package provenance, validates manifests, derives scoped worker grants,
 //! launches local packages, and proves conformance before a launched worker is
 //! treated as running. Dependency construction is side-effect free. After the
-//! complete engine setup succeeds, startup reconciliation downgrades stale
-//! durable running launch attempts when no in-process owner can safely stop
-//! them, and lifecycle functions wait for that reconciliation before handling
-//! new requests.
+//! complete engine setup succeeds, shutdown-owned startup reconciliation
+//! downgrades stale durable running launch attempts when no in-process owner can
+//! safely stop them. Coordinator-free embeddings defer reconciliation to the
+//! first lifecycle request; every lifecycle function waits for the shared
+//! reconciliation result before handling a request.
 //!
 //! ## Submodules
 //!
@@ -100,11 +101,18 @@ impl Deps {
         }
     }
 
-    pub(crate) fn activate_after_registration(self) {
+    pub(crate) fn activate_after_registration(
+        self,
+        shutdown_coordinator: Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
+    ) {
+        let Some(shutdown) = shutdown_coordinator else {
+            return;
+        };
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
+            let task = handle.spawn(async move {
                 let _ = self.ensure_startup_reconciled().await;
             });
+            shutdown.register_task(task);
         }
     }
 
