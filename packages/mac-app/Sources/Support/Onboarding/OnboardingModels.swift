@@ -81,6 +81,13 @@ enum HeaderIcon: Equatable, Sendable {
 /// inspection and click/type control are no longer startup requirements.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
+
+    var systemSettingsURL: URL {
+        switch self {
+        case .fullDiskAccess:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+        }
+    }
 }
 
 /// Per-permission grant state. Mirrors TCC categories.

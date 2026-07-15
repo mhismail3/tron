@@ -148,7 +148,7 @@ struct PermissionsStep: View {
     private func openPermissionSettings(_ permission: Permission) {
         settingsReturnPending = true
         startSettingsGrantWatch(for: permission)
-        NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))
+        NSWorkspace.shared.open(permission.systemSettingsURL)
     }
 
     // MARK: - Polling lifecycle

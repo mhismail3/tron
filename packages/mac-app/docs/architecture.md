@@ -64,8 +64,7 @@ packages/mac-app/
 │   │   │   ├── ExistingInstallDetector.swift
 │   │   │   ├── MacPermissionProbe.swift
 │   │   │   ├── OnboardedSentinelWriter.swift
-│   │   │   ├── OnboardingModels.swift  # WizardStep, status, and install model values
-│   │   │   ├── PermissionDeepLink.swift # System Settings deep-link URLs only; probes stay wrapper-owned
+│   │   │   ├── OnboardingModels.swift  # wizard/permission models + exhaustive System Settings URL
 │   │   │   └── TailscaleProbe.swift
 │   │   ├── Pairing/
 │   │   │   ├── LocalComputerName.swift
@@ -194,8 +193,9 @@ System Settings. The Permissions step is the first place any TCC probe runs,
 and that probe runs in the wrapper process because the LaunchAgent associates
 the helper with the wrapper bundle IDs. Full Disk Access therefore points at
 `Tron.app` or `TronMac.app`, matching the app entry macOS evaluates for the
-running helper. The gear button only opens the matching System Settings pane;
-it never calls prompt APIs, so no second modal appears over the pane. The
+running helper. `Permission.systemSettingsURL` exhaustively owns the matching
+pane URL. The gear button only opens that System Settings pane and never calls
+prompt APIs, so no second modal appears over the pane. The
 wizard-opened Settings pane starts a short-lived fast-probe watcher until Full
 Disk Access turns green. App activation, Re-check, and the watcher never
 restart the server. Once Full Disk Access is green and the user presses

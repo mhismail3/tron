@@ -342,7 +342,7 @@ struct WizardVisualLayoutTests {
         let source = try String(contentsOf: step, encoding: .utf8)
 
         #expect(source.contains("openPermissionSettings"))
-        #expect(source.contains("NSWorkspace.shared.open(PermissionDeepLink.url(for: permission))"))
+        #expect(source.contains("NSWorkspace.shared.open(permission.systemSettingsURL)"))
         #expect(!source.contains("setup.requestWrapperPermission"))
         #expect(!source.contains("CGRequestScreenCaptureAccess"))
         #expect(!source.contains("AXIsProcessTrustedWithOptions"))
