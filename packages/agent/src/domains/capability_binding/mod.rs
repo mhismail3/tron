@@ -68,9 +68,13 @@
 //! install or activate modules, restore dependencies, run package managers,
 //! mutate manifests, create physical workspaces, access networks, touch
 //! repo-managed `packages/agent/skills`, expose raw commands/logs/env/code/file
-//! contents, or return raw grant/authority ids. Target operation owner/class
-//! metadata is derived from the server-owned execute registry; caller-supplied
-//! owner/class assertions must match it. `kernel_locked` and
+//! contents, or return raw grant/authority ids. Target operation metadata is
+//! derived from the server-owned execute registry; caller-supplied owner,
+//! ownership-class, and replacement-target assertions must match it. Validation
+//! passes that canonical registry value through directly, and route projections
+//! derive their target metadata from the same owner rather than maintaining
+//! copied strings.
+//! `kernel_locked` and
 //! `governance_locked` operations cannot request or activate replacement.
 //! Cockpit visibility follows a fail-closed rule: if operation-list limits or
 //! bounded resource scans make the projection partial, it reports

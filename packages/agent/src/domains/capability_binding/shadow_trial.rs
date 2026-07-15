@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
 
+use crate::domains::capability::OperationBindingMetadata;
 use crate::engine::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
     EngineResourceScope, EngineResourceVersion, Invocation,
@@ -28,10 +29,10 @@ use super::resource_store::{
 };
 use super::validation::{
     DECISION_ID_MAX_BYTES, IDEMPOTENCY_KEY_MAX_BYTES, MAX_REFS, REQUEST_ID_MAX_BYTES,
-    SUMMARY_MAX_BYTES, TITLE_MAX_BYTES, TOKEN_MAX_BYTES, TargetOperationBindingMetadata,
-    bounded_provider_visible_token, bounded_text, idempotency_key, invalid, optional_array,
-    optional_string, required_ref, required_string, resource_scope, stale_version_guard,
-    target_operation_binding_metadata, validate_ref_array,
+    SUMMARY_MAX_BYTES, TITLE_MAX_BYTES, TOKEN_MAX_BYTES, bounded_provider_visible_token,
+    bounded_text, idempotency_key, invalid, optional_array, optional_string, required_ref,
+    required_string, resource_scope, stale_version_guard, target_operation_binding_metadata,
+    validate_ref_array,
 };
 use super::{
     CAPABILITY_SHADOW_TRIAL_DECISION_KIND, CAPABILITY_SHADOW_TRIAL_DECISION_SCHEMA_ID,
@@ -191,7 +192,7 @@ pub(crate) async fn record_capability_shadow_trial_request_value_at(
         &resource,
         json!({
             "shadowTrialRequestState": state,
-            "targetOperation": target_metadata.operation_name,
+            "targetOperation": target_metadata.operation,
             "candidateAdapterId": resource_candidate_id(&candidate),
             "metadataOnly": true,
             "runAllowed": false,
@@ -780,9 +781,7 @@ fn shadow_request_state(payload: &Value) -> Result<String, CapabilityError> {
     }
 }
 
-fn shadow_target_metadata(
-    payload: &Value,
-) -> Result<TargetOperationBindingMetadata, CapabilityError> {
+fn shadow_target_metadata(payload: &Value) -> Result<OperationBindingMetadata, CapabilityError> {
     if let Some(mode) = optional_string(payload, "bindingMode")?
         && mode != "shadow"
     {
@@ -791,7 +790,7 @@ fn shadow_target_metadata(
         ));
     }
     let metadata = target_operation_binding_metadata(payload)?;
-    if metadata.operation_name != TARGET_OPERATION {
+    if metadata.operation != TARGET_OPERATION {
         return Err(invalid(format!(
             "capability shadow trial target must be exactly {TARGET_OPERATION}"
         )));
@@ -1139,9 +1138,9 @@ fn result_controls(decision_payload: &Value) -> Result<Value, CapabilityError> {
     }))
 }
 
-fn shadow_operation_record(metadata: &TargetOperationBindingMetadata) -> Value {
+fn shadow_operation_record(metadata: &OperationBindingMetadata) -> Value {
     json!({
-        "name": metadata.operation_name,
+        "name": metadata.operation,
         "family": metadata.family,
         "currentBuiltInOwner": metadata.current_owner,
         "ownershipClass": metadata.ownership_class,

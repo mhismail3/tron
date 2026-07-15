@@ -83,13 +83,6 @@ pub(crate) async fn record_capability_binding_request_value_at(
     )?;
     let target_metadata = target_operation_binding_metadata(payload)?;
     let binding_mode = binding_mode(payload)?;
-    let replacement_target = replacement_target(payload)?;
-    if replacement_target != target_metadata.replacement_target {
-        return Err(invalid(format!(
-            "replacementTarget mismatch for {}: expected {}",
-            target_metadata.operation_name, target_metadata.replacement_target
-        )));
-    }
     let target_ref = required_ref(payload, "targetRef")?;
     let actor_scope = actor_scope(payload)?;
     let rationale = bounded_text(
@@ -147,10 +140,10 @@ pub(crate) async fn record_capability_binding_request_value_at(
         state: &state,
         scope: &scope,
         title: &title,
-        operation_name: &target_metadata.operation_name,
-        current_owner: &target_metadata.current_owner,
-        ownership_class: &target_metadata.ownership_class,
-        replacement_target: &target_metadata.replacement_target,
+        operation_name: target_metadata.operation,
+        current_owner: target_metadata.current_owner,
+        ownership_class: target_metadata.ownership_class,
+        replacement_target: target_metadata.replacement_target,
         binding_mode: &binding_mode,
         target_ref,
         actor_scope: &actor_scope,
@@ -200,7 +193,7 @@ pub(crate) async fn record_capability_binding_request_value_at(
         &resource,
         json!({
             "bindingRequestState": state,
-            "targetOperation": target_metadata.operation_name,
+            "targetOperation": target_metadata.operation,
             "ownershipClass": target_metadata.ownership_class,
             "bindingMode": binding_mode,
             "metadataOnly": true,

@@ -2505,6 +2505,26 @@ async fn capability_execute_dispatch_routes_git_status_through_active_replacemen
         routed_details["dynamicReplacement"]["routeEvent"]["event"]["kind"],
         json!("routed_invocation")
     );
+    let operation_metadata = crate::domains::capability::operation_binding_metadata("git_status")
+        .expect("git status metadata");
+    let routed_operation = &routed_details["dynamicReplacement"]["routeEvent"]["operation"];
+    assert_eq!(
+        routed_operation["name"],
+        json!(operation_metadata.operation)
+    );
+    assert_eq!(routed_operation["family"], json!(operation_metadata.family));
+    assert_eq!(
+        routed_operation["currentBuiltInOwner"],
+        json!(operation_metadata.current_owner)
+    );
+    assert_eq!(
+        routed_operation["ownershipClass"],
+        json!(operation_metadata.ownership_class)
+    );
+    assert_eq!(
+        routed_operation["requestedReplacementTarget"],
+        json!(operation_metadata.replacement_target)
+    );
     assert_eq!(routed_details["status"], json!("clean"));
     assert_eq!(routed_details["git"]["worktreeState"], json!("clean"));
     assert!(

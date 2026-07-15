@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use crate::domains::capability::operation_binding_metadata;
 use crate::engine::{
     CreateResource, EngineGrant, EngineResource, EngineResourceInspection, EngineResourceLocation,
     EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
@@ -1640,7 +1641,7 @@ async fn route_has_terminal_event(
 
 fn route_target_metadata(payload: &Value) -> Result<Value, CapabilityError> {
     let target = target_operation_binding_metadata(payload)?;
-    if target.operation_name != TARGET_OPERATION {
+    if target.operation != TARGET_OPERATION {
         return Err(invalid(
             "runtime replacement routing currently targets exactly git_status",
         ));
@@ -1651,7 +1652,7 @@ fn route_target_metadata(payload: &Value) -> Result<Value, CapabilityError> {
         ));
     }
     Ok(json!({
-        "name": target.operation_name,
+        "name": target.operation,
         "family": target.family,
         "currentBuiltInOwner": target.current_owner,
         "ownershipClass": target.ownership_class,
@@ -1662,12 +1663,14 @@ fn route_target_metadata(payload: &Value) -> Result<Value, CapabilityError> {
 }
 
 fn route_operation_record(reason: &str) -> Value {
+    let metadata = operation_binding_metadata(TARGET_OPERATION)
+        .expect("runtime replacement target must remain in the operation registry");
     json!({
-        "name": TARGET_OPERATION,
-        "family": "git",
-        "currentBuiltInOwner": "domains::capability::operations::git + domains::git",
-        "ownershipClass": "adapter_replaceable",
-        "requestedReplacementTarget": "future_git_adapter_requires_exact_repo_authority_head_index_evidence_provider_safe_refs_replay_idempotency_and_rollback_disable_refs",
+        "name": metadata.operation,
+        "family": metadata.family,
+        "currentBuiltInOwner": metadata.current_owner,
+        "ownershipClass": metadata.ownership_class,
+        "requestedReplacementTarget": metadata.replacement_target,
         "currentExecutionOwner": "accepted_shadow_projection_when_active_else_builtin",
         "routeReason": reason,
         "dispatchChanged": true
