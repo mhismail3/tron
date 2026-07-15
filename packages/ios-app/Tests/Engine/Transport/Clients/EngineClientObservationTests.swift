@@ -21,12 +21,35 @@ struct EngineClientObservationTests {
         #expect(rpc.connectionState == .disconnected)
     }
 
-    @Test("EngineClient can be deallocated without crash")
-    func testDeallocationSafety() async {
-        var rpc: EngineClient? = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
-        #expect(rpc != nil)
+    @Test("Installed connection observation releases its engine client")
+    func testConnectionObservationReleasesOwner() async {
+        let recorder = HostedEngineAttemptRecorder()
+        var rpc: EngineClient? = EngineClient(
+            serverURL: URL(string: "ws://127.0.0.1:65531/engine")!,
+            sessionAttemptDirective: recorder.handle
+        )
+        weak let retainedClient = rpc
+
+        await rpc?.connect()
+        var connection = rpc?.engineConnection
+        weak let retainedConnection = connection
+        #expect(recorder.requests.count == 1)
+        #expect(connection != nil)
+
+        connection?.connectionState = .connecting
+        for _ in 0..<100 where rpc?.connectionState != .connecting {
+            await Task.yield()
+        }
+        #expect(rpc?.connectionState == .connecting)
+
+        connection = nil
         rpc = nil
-        #expect(rpc == nil)
+        for _ in 0..<100 where retainedClient != nil || retainedConnection != nil {
+            await Task.yield()
+        }
+
+        #expect(retainedClient == nil)
+        #expect(retainedConnection == nil)
     }
 
     @Test("Multiple disconnect calls are safe")

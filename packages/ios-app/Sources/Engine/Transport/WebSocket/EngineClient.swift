@@ -246,35 +246,46 @@ final class EngineClient: EngineTransport {
     /// Continuation-based observation loop that mirrors the connection state.
     private func startConnectionStateObservation() {
         observationTask?.cancel()
-        observationTask = Task { [weak self] in
+        guard let observedConnection = engineConnection else { return }
+        observationTask = Task { [weak self, observedConnection] in
             while !Task.isCancelled {
                 // Sync current state FIRST, then register for next change.
                 // This prevents missing the initial .connecting → .connected transition
                 // when ws.connect() completes before this Task starts executing.
-                guard !Task.isCancelled, let self, let ws = self.engineConnection else { return }
-                let previousState = self.connectionState
-                let nextState = ws.connectionState
-                self.connectionState = nextState
-                if EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
-                    previous: previousState,
-                    next: nextState
-                ) {
-                    self.clearActiveStreamSubscriptions(reason: "engine transport left connected state")
-                }
-                if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
-                    previous: previousState,
-                    next: nextState,
-                    hasCurrentSession: self.currentSessionId != nil
-                ), let currentSessionId = self.currentSessionId {
-                    _ = try? await self.ensureSessionEventSubscription(sessionId: currentSessionId, workspaceId: nil)
+                var sessionToResubscribe: String?
+                do {
+                    guard !Task.isCancelled, let self else { return }
+                    let previousState = connectionState
+                    let nextState = observedConnection.connectionState
+                    connectionState = nextState
+                    if EngineClientStreamSubscriptionPolicy.shouldClearSubscriptions(
+                        previous: previousState,
+                        next: nextState
+                    ) {
+                        clearActiveStreamSubscriptions(reason: "engine transport left connected state")
+                    }
+                    if EngineClientStreamSubscriptionPolicy.shouldResubscribe(
+                        previous: previousState,
+                        next: nextState,
+                        hasCurrentSession: currentSessionId != nil
+                    ) {
+                        sessionToResubscribe = currentSessionId
+                    }
                 }
 
-                await withCheckedContinuation { cont in
-                    withObservationTracking {
-                        _ = ws.connectionState
-                    } onChange: {
-                        cont.resume()
-                    }
+                if let sessionToResubscribe {
+                    guard !Task.isCancelled else { return }
+                    _ = try? await self?.ensureSessionEventSubscription(
+                        sessionId: sessionToResubscribe,
+                        workspaceId: nil
+                    )
+                    // Re-read before installing the next observation so the
+                    // final source state after subscription is reconciled.
+                    continue
+                }
+
+                await waitForObservationChange {
+                    observedConnection.connectionState
                 }
             }
         }
