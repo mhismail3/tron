@@ -101,6 +101,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Event store manager - updated when engine client changes
     private(set) var eventStoreManager: EventStoreManager
 
+    /// Cancel-and-replace startup for the currently installed server client.
+    /// Client identity, rather than selection metadata, defines the generation.
+    @ObservationIgnored
+    private var activeServerStartupTask: Task<Void, Never>?
+
     // MARK: - Repositories
 
     /// Model repository for model operations with caching
@@ -294,6 +299,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     }
 
+    deinit {
+        activeServerStartupTask?.cancel()
+    }
+
     // MARK: - Async Initialization
 
     /// Initialize async components (database, event store, etc.)
@@ -326,12 +335,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     func selectPairedServer(_ server: PairedServer, connectAfterSwitch: Bool = true) {
         guard pairedServerStore.activeServer?.id != server.id else { return }
         pairedServerStore.select(server)
-        rebuildServerBoundServices()
-        guard connectAfterSwitch else { return }
-        Task {
-            await connect()
-            await reloadServerSettings()
-        }
+        rebuildServerBoundServices(connectAfterSwitch: connectAfterSwitch)
     }
 
     @discardableResult
@@ -339,13 +343,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         try pairedServerTokenStore.remove(serverId: server.id)
         let plan = pairedServerStore.remove(server)
         if plan.removedWasActive {
-            rebuildServerBoundServices()
-            if plan.nextActiveServer != nil {
-                Task {
-                    await connect()
-                    await reloadServerSettings()
-                }
-            }
+            rebuildServerBoundServices(
+                connectAfterSwitch: plan.nextActiveServer != nil
+            )
         } else {
             activeServerSelectionVersion += 1
         }
@@ -358,7 +358,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Called after server switch to ensure server-backed app globals reflect
     /// the active server's effective settings rather than carrying values from
     /// the previously selected Mac.
-    func reloadServerSettings() async {
+    private func reloadServerSettings() async {
         guard let activeServer = pairedServerStore.activeServer else { return }
         let selectionVersion = activeServerSelectionVersion
         do {
@@ -456,7 +456,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         }
     }
 
-    private func rebuildServerBoundServices() {
+    private func rebuildServerBoundServices(connectAfterSwitch: Bool = false) {
+        activeServerStartupTask?.cancel()
+        activeServerStartupTask = nil
+
         let oldClient = engineClient
         Task {
             await oldClient.disconnect()
@@ -503,6 +506,22 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
 
         TronLogger.shared.info("Active paired server changed to \(currentServerOrigin.nilIfEmpty ?? "none")", category: .general)
+
+        guard connectAfterSwitch, pairedServerStore.activeServer != nil else { return }
+        activeServerStartupTask = Task { @MainActor [weak self, newClient] in
+            guard !Task.isCancelled, self?.engineClient === newClient else { return }
+            await newClient.connect()
+            guard !Task.isCancelled, self?.engineClient === newClient else {
+                // A connect can finish after a newer generation has already
+                // disconnected this client. Retire it again after completion.
+                await newClient.disconnect()
+                return
+            }
+            await self?.reloadServerSettings()
+            if self?.engineClient === newClient {
+                self?.activeServerStartupTask = nil
+            }
+        }
     }
 
     /// Static helper invoked by the bearer-token provider closure on every WS

@@ -479,7 +479,10 @@ protocols to engine-owned clients. `DependencyContainerStorage` owns typed
 production/test resolution of defaults, Documents, and the event database;
 `DependencyContainer+RuntimeServices` owns the consumer-facing chat repository
 bundle and connection-lifecycle forwarding, while `DependencyContainer` keeps
-application assembly and active-server selection.
+application assembly and active-server selection. Post-switch connection and
+settings startup is one cancel-and-replace task bound to the installed
+`EngineClient` identity; superseded work cannot connect or update a newer
+generation, while retirement of each replaced client remains unconditional.
 
 `DependencyContainerRuntimeIO` is the single immutable runtime-I/O seam. Its
 production value preserves live URL-session attempts, the production

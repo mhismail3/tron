@@ -42,6 +42,12 @@ final class DependencyContainerTests: XCTestCase {
         }
     }
 
+    private func drainScheduledTasks() async {
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+    }
+
     // MARK: - Container Lifecycle Tests (use shared container)
 
     func test_container_providesEngineClient() async throws {
@@ -174,6 +180,26 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertEqual(container.pairedServerStore.activeServerId, first.id)
         XCTAssertNil(container.engineClient.engineConnection?.urlSession)
         await container.disconnect()
+    }
+
+    func test_supersededAutoConnectCannotConnectNoConnectGeneration() async throws {
+        let first = PairedServer(id: "generation-a", label: "A", host: "127.0.0.1", port: 65523)
+        let second = PairedServer(id: "generation-b", label: "B", host: "127.0.0.1", port: 65522)
+        let third = PairedServer(id: "generation-c", label: "C", host: "127.0.0.1", port: 65521)
+        let data = try JSONEncoder().encode([first, second, third])
+        testState.defaults.set(data, forKey: PairedServerStore.serversKey)
+        testState.defaults.set(first.id, forKey: PairedServerStore.activeIdKey)
+        let container = testState.makeContainer()
+        let recorder = testState.attemptRecorders.last!
+        let attemptsBeforeSwitch = recorder.requests.count
+
+        container.selectPairedServer(second)
+        container.selectPairedServer(third, connectAfterSwitch: false)
+        await drainScheduledTasks()
+
+        XCTAssertEqual(container.pairedServerStore.activeServerId, third.id)
+        XCTAssertEqual(container.engineClient.serverOrigin, third.origin)
+        XCTAssertEqual(recorder.requests.count, attemptsBeforeSwitch)
     }
 
     // MARK: - Active Server Update Tests
