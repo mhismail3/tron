@@ -1021,7 +1021,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
+| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop or when candidate preparation/launch fails. Restoration succeeds only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
 | `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
@@ -3166,7 +3166,7 @@ tron manual-deploy --force  # Skip uncommitted-changes / test-failure prompts
 tron manual-deploy --ci     # Non-interactive: any failure aborts
 ```
 
-`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The command has no shorter deploy alias.
+`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. It creates a locally signed helper and validates that signature, but never submits developer builds to Apple's notary service. Production signing and notarization belong exclusively to the hosted DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The command has no shorter deploy alias.
 
 The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`) is retained for local contributor workflows:
 

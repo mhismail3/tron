@@ -46,9 +46,12 @@ Run these commands from the repo root unless a step says otherwise. The wrapper 
 The workspace CLI dispatcher is intentionally small. Command families live in
 `scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
 `scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
-`tron install` and contributor deploy refreshes. `tron setup` instead links
-the workspace entrypoint only when no installed pair owns it, so rerunning
-development setup cannot replace an installed helper/CLI pair.
+`tron install` and contributor deploy refreshes. `tron setup` instead links the
+workspace entrypoint only when no installed pair owns it, so rerunning
+development setup cannot replace an installed helper/CLI pair. Contributor
+`tron install` and `tron manual-deploy` locally sign and validate their helper
+bundles but never notarize them; `.github/workflows/release-mac.yml` is the sole
+owner of distribution signing and notarization.
 
 ## Local dev loop
 
@@ -142,7 +145,7 @@ This is intentionally the same runtime mode as a real DMG install: bundle ID `co
 
 If a real DMG build is already installed, local Release testing replaces that same `/Applications/Tron.app` slot; there is no second side-by-side Release identity. For an update-style test, copy the local Release over `/Applications/Tron.app`, then launch it or run `tron start`/`tron restart`; the wrapper should re-register/repair SMAppService, refresh stale launch constraints such as `needs LWCR update`, and restart the helper once for the new build before reporting success. For a first-run wizard test, choose **Uninstall Tron** from the existing menu bar app first (preserving database/workspace), copy the local Release into `/Applications/Tron.app`, then open it and run the wizard install.
 
-For Rust-agent iteration without rebuilding the wrapper, use `tron dev`. It stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` before declaring a background takeover successful, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then restores the installed `/Applications/Tron.app` helper through the wrapper's internal `--tron-start-server-and-quit` command when the dev process exits. That internal command reuses the wrapper's SMAppService path and exits nonzero if the helper loads but never reaches `/health`; stale installed helpers must be updated or reinstalled instead of masked by a successful launchd load. Background mode uses the transient `com.tron.server.dev-takeover` LaunchAgent so non-interactive agents do not own or accidentally reap the server process group. Machine-driven test loops should use `tron dev -bd --json --wait <seconds>` and treat `tron status --json` as the authoritative post-restart state instead of reading a transient launched child PID from human logs; the JSON status includes stale pid-file fields when a background process has exited.
+For Rust-agent iteration without rebuilding the wrapper, use `tron dev`. It stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` before declaring a background takeover successful, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then restores the installed `/Applications/Tron.app` helper through the wrapper's internal `--tron-start-server-and-quit` command when the dev process exits or candidate preparation/launch fails. That internal command reuses the wrapper's SMAppService path and exits nonzero if the helper loads but never reaches `/health`; stale installed helpers must be updated or reinstalled instead of masked by a successful launchd load. Background mode uses the transient `com.tron.server.dev-takeover` LaunchAgent so non-interactive agents do not own or accidentally reap the server process group. Machine-driven test loops should use `tron dev -bd --json --wait <seconds>` and treat `tron status --json` as the authoritative post-restart state instead of reading a transient launched child PID from human logs; the JSON status includes stale pid-file fields when a background process has exited.
 
 ### Xcode isolated install testing
 

@@ -351,6 +351,22 @@ fn port_9847_and_process_ownership_are_source_guarded() {
         !dev.contains("cmd_manual_deploy") && !dev.contains("manual-deploy"),
         "dev workflow must not invoke manual deploy"
     );
+    let failed_background_sign = Command::new("bash")
+        .args([
+            "-c",
+            "source \"$1\"; print_status() { :; }; print_error() { last_error=\"$1\"; }; launchd_stop() { :; }; launchctl() { return 1; }; service_is_running() { return 0; }; wait_for_port_free() { return 0; }; cargo() { return 0; }; create_app_bundle() { return 0; }; restart_installed_service_after_dev() { restored=true; }; DEV_PLIST_NAME=test.dev; PLIST_NAME=test.prod; PROD_PORT=9847; TRON_HOME=/nonexistent; RUST_WORKSPACE=/nonexistent; DEV_BUNDLE=/nonexistent/Tron-Dev.app; DEV_BINARY=/nonexistent/tron; DEV_PLIST_PATH=/nonexistent/dev.plist; RUN_DIR=/nonexistent; DEV_BACKGROUND_PID_FILE=/nonexistent/pid; if create_dev_launchd_plist; then exit 11; fi; run_failure() { restored=false; last_error=; case \"$1\" in sign) codesign_bundle() { return 1; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to prepare signed dev takeover bundle' ;; mkdir) codesign_bundle() { return 0; }; mkdir() { return 1; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 0; }; expected='Failed to create dev takeover runtime directory' ;; log) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/nonexistent/log; create_dev_launchd_plist() { return 0; }; expected='Failed to initialize dev takeover log' ;; plist) codesign_bundle() { return 0; }; mkdir() { return 0; }; DEV_BACKGROUND_LOG=/dev/null; create_dev_launchd_plist() { return 1; }; expected='Failed to create dev takeover LaunchAgent' ;; esac; if dev_start_background false 1; then return 10; fi; test \"$restored\" = true && test \"$last_error\" = \"$expected\"; }; run_failure sign && run_failure mkdir && run_failure log && run_failure plist",
+            "bash",
+            repo_path("scripts/tron.d/dev.sh")
+                .to_str()
+                .expect("dev helper path should be utf8"),
+        ])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("background dev signing failure smoke should run");
+    assert!(
+        failed_background_sign.success(),
+        "background dev must restore the installed helper when takeover preparation fails"
+    );
 
     let manual = read_repo_file("scripts/tron.d/manual-deploy.sh");
     for required in [
@@ -830,6 +846,43 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let bundle = read_repo_file("scripts/tron-lib.d/bundle.sh");
     assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
     assert!(!bundle.contains("$script_dir/AppIcon.icns"));
+    assert!(bundle.contains("print_error \"Code signing failed\""));
+    for path in git_ls_files("scripts") {
+        let source = read_repo_file(&path);
+        for forbidden in [
+            "sign_and_notarize",
+            "notarize_bundle",
+            "notarytool",
+            "NOTARIZE_PROFILE",
+            "stapler",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must leave notarization to the hosted release owner: {forbidden}"
+            );
+        }
+    }
+    assert_eq!(
+        manual
+            .matches("codesign_bundle \"$INSTALLED_BUNDLE\"")
+            .count(),
+        2
+    );
+    let failed_sign = Command::new("bash")
+        .args([
+            "-c",
+            "print_error() { :; }; source \"$1\"; TRON_BUNDLE_ID=com.tron.test; CONTRIBUTOR_DIR=/nonexistent; codesign_bundle /nonexistent",
+            "bash",
+            repo_path("scripts/tron-lib.d/bundle.sh")
+                .to_str()
+                .expect("bundle helper path should be utf8"),
+        ])
+        .status()
+        .expect("codesign failure smoke should run");
+    assert!(
+        !failed_sign.success(),
+        "contributor signing must fail when no valid signature can be produced"
+    );
 
     let service = read_repo_file("scripts/tron-lib.d/service.sh");
     for required in [
@@ -915,6 +968,17 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
         assert!(
             release_mac.contains(required),
             "Mac release workflow missing {required}"
+        );
+    }
+    for required in [
+        "xcrun notarytool submit \"$ZIP_PATH\"",
+        "run: xcrun stapler staple \"$APP_PATH\"",
+        "xcrun notarytool submit \"${{ steps.dmg.outputs.dmg_path }}\"",
+        "run: xcrun stapler staple \"${{ steps.dmg.outputs.dmg_path }}\"",
+    ] {
+        assert!(
+            release_mac.contains(required),
+            "hosted Mac release must retain distribution notarization step {required}"
         );
     }
 

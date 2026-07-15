@@ -46,7 +46,7 @@ create_dev_launchd_plist() {
         <string>$(xml_escape "$TRON_RELAY_SECRET")</string>"
     fi
 
-    cat > "$DEV_PLIST_PATH" << PLIST
+    cat > "$DEV_PLIST_PATH" << PLIST || return 1
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -88,7 +88,7 @@ create_dev_launchd_plist() {
 </dict>
 </plist>
 PLIST
-    chmod 600 "$DEV_PLIST_PATH"
+    chmod 600 "$DEV_PLIST_PATH" || return 1
 }
 
 cmd_dev() {
@@ -256,23 +256,46 @@ dev_start_background() {
         fi
     fi
 
-    # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
+    # Build, then wrap in an app bundle so macOS TCC permissions persist across
+    # rebuilds. Any preparation failure after takeover begins must restore the
+    # installed helper before returning.
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
-    create_app_bundle "$DEV_BUNDLE" "$dev_src"
-    codesign_bundle "$DEV_BUNDLE"
+    if ! cargo build --profile dev-server \
+            --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron \
+        || ! create_app_bundle "$DEV_BUNDLE" "$dev_src" \
+        || ! codesign_bundle "$DEV_BUNDLE"; then
+        print_error "Failed to prepare signed dev takeover bundle"
+        restart_installed_service_after_dev 12
+        return 1
+    fi
 
     local dev_log="$DEV_BACKGROUND_LOG"
     local dev_pid_file="$DEV_BACKGROUND_PID_FILE"
-    mkdir -p "$RUN_DIR"
-    {
+    if ! mkdir -p "$RUN_DIR"; then
+        print_error "Failed to create dev takeover runtime directory"
+        restart_installed_service_after_dev 12
+        return 1
+    fi
+    if {
         echo "=== tron dev background start $(date -u +"%Y-%m-%dT%H:%M:%SZ") ==="
         echo "binary=$DEV_BINARY"
         echo "port=$PROD_PORT"
-    } > "$dev_log"
+    } > "$dev_log"; then
+        :
+    else
+        print_error "Failed to initialize dev takeover log"
+        restart_installed_service_after_dev 12
+        return 1
+    fi
 
-    create_dev_launchd_plist
-    if ! launchctl bootstrap "gui/$(id -u)" "$DEV_PLIST_PATH" 2>>"$dev_log"; then
+    if ! create_dev_launchd_plist; then
+        print_error "Failed to create dev takeover LaunchAgent"
+        restart_installed_service_after_dev 12
+        return 1
+    fi
+    if launchctl bootstrap "gui/$(id -u)" "$DEV_PLIST_PATH" 2>>"$dev_log"; then
+        :
+    else
         print_error "Failed to load dev takeover LaunchAgent: $DEV_PLIST_PATH"
         if [ -s "$dev_log" ]; then
             print_status "Last dev server log lines ($dev_log):"

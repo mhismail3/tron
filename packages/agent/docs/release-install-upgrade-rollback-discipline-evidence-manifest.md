@@ -41,4 +41,4 @@ No development server, LaunchAgent, or production deploy command was started whi
 ## Residual Risk
 
 - Mac app-hosted tests depend on local Xcode/macOS state. CI builds and focused Mac tests cover the non-mutating wrapper logic; app-hosted ServiceManagement registration remains a local/manual validation path.
-- Manual contributor deploy is retained for local workflows and can notarize opportunistically when credentials exist. Production distribution remains the GitHub Release DMG path; this slice did not add production deployment automation.
+- Manual contributor deploy is retained for local workflows and requires a valid local signature. It never notarizes; production distribution and notarization remain owned by the GitHub Release DMG path.

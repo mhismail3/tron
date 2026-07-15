@@ -29,12 +29,6 @@ DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 DEV_BACKGROUND_LOG="$RUN_DIR/tron-dev-background.log"
 DEV_BACKGROUND_PID_FILE="$RUN_DIR/tron-dev-background.pid"
 
-# Keychain profile name for xcrun notarytool (see notarize_bundle).
-# One-time setup per developer machine:
-#   xcrun notarytool store-credentials "tron-notarize" \
-#     --apple-id <email> --team-id <TEAM_ID>
-NOTARIZE_PROFILE="tron-notarize"
-
 # Service configuration
 PLIST_NAME="com.tron.server"
 DEV_PLIST_NAME="com.tron.server.dev-takeover"
@@ -119,7 +113,7 @@ NC='\033[0m'
 # INVARIANT: every print_* helper writes to stderr (>&2). Stdout is
 # reserved for machine-readable output — `tron install --gui-helper`
 # emits one NDJSON event per line on stdout, and any decorative print
-# from a helper called transitively (codesign_bundle, notarize_bundle, …)
+# from a helper called transitively (for example, codesign_bundle)
 # would corrupt that stream. Routing to
 # stderr lets us keep the gating-by-flag pattern as a UX nicety while
 # making the stdout contract structurally enforced rather than

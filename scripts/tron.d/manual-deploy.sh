@@ -359,14 +359,13 @@ cmd_manual_deploy() {
     launchd_stop "$PLIST_NAME"
     sleep 1
 
-    # Create app bundle with new binary, sign with Developer ID (if available),
-    # and notarize + staple so the bundle is distribution-ready and TCC
-    # permissions persist across deploys.
+    # Create and locally sign the contributor helper. Production distribution
+    # signing and notarization belong only to the hosted Mac release workflow.
     print_status "Creating app bundle..."
     local preparation_failure=""
     if ! create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"; then
         preparation_failure="Failed to create candidate helper bundle"
-    elif ! sign_and_notarize "$INSTALLED_BUNDLE" \
+    elif ! codesign_bundle "$INSTALLED_BUNDLE" \
         || ! validate_contributor_bundle "$INSTALLED_BUNDLE"; then
         preparation_failure="Failed to sign candidate helper bundle"
     else
@@ -506,7 +505,7 @@ cmd_install() {
     _emit_event bundle start "$INSTALLED_BUNDLE"
     [ "$gui_helper" -eq 0 ] && print_status "Creating app bundle..."
     if ! create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY" \
-        || ! sign_and_notarize "$INSTALLED_BUNDLE" \
+        || ! codesign_bundle "$INSTALLED_BUNDLE" \
         || ! validate_contributor_bundle "$INSTALLED_BUNDLE"; then
         _emit_event bundle fail "bundle construction or signing failed"
         return 1
@@ -581,12 +580,6 @@ cmd_install() {
         echo "    tron login       # Authenticate with a provider"
         echo "    tron dev         # Start dev server"
         echo "    tron status      # Check service status"
-        echo ""
-        echo "  Code signing (one-time, only if you will deploy or distribute):"
-        echo "    xcrun notarytool store-credentials \"$NOTARIZE_PROFILE\" \\"
-        echo "      --apple-id <email> --team-id <TEAM_ID>"
-        echo ""
-        echo "  Get an app-specific password at: https://appleid.apple.com"
         echo ""
     fi
 }
