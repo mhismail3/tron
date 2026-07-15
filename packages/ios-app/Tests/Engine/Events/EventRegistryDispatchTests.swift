@@ -1,16 +1,15 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for EventDispatchCoordinator - routes plugin events to appropriate handlers
-/// Uses TDD: Tests written first, then implementation follows
+/// Tests that EventRegistry routes plugin events to their handlers.
 @MainActor
-final class EventDispatchCoordinatorTests: XCTestCase {
+final class EventRegistryDispatchTests: XCTestCase {
 
-    var coordinator: EventDispatchCoordinator!
+    var registry: EventRegistry!
     var mockContext: MockEventDispatchContext!
 
     override func setUp() async throws {
-        coordinator = EventDispatchCoordinator()
+        registry = EventRegistry.shared
         mockContext = MockEventDispatchContext()
         // Ensure all plugins are registered for dispatch lookup
         EventRegistry.shared.clearForTesting()
@@ -18,7 +17,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        coordinator = nil
+        registry = nil
         mockContext = nil
     }
 
@@ -29,7 +28,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = TextDeltaPlugin.Result(delta: "Hello world", messageIndex: nil)
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: TextDeltaPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -44,7 +43,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = ThinkingDeltaPlugin.Result(delta: "Let me think...", kind: .thinking)
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: ThinkingDeltaPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -58,7 +57,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
     func testDispatch_thinkingEnd_callsHandleThinkingEnd() {
         let result = ThinkingEndPlugin.Result(thinking: "Final thinking snapshot", kind: .thinking)
 
-        coordinator.dispatch(
+        registry.dispatch(
             type: ThinkingEndPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -79,7 +78,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: CapabilityInvocationStartedPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -103,7 +102,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: CapabilityInvocationCompletedPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -121,7 +120,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: TurnStartPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -144,7 +143,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: TurnEndPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -161,7 +160,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             capabilityInvocationCount: 0
         )
 
-        coordinator.dispatch(
+        registry.dispatch(
             type: AgentResponseCompletePlugin.eventType,
             transform: { result },
             context: mockContext
@@ -179,7 +178,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = CompletePlugin.Result(success: true, totalTokens: nil, totalTurns: nil)
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: CompletePlugin.eventType,
             transform: { result },
             context: mockContext
@@ -194,7 +193,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = AgentReadyPlugin.Result()
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: AgentReadyPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -224,7 +223,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: ErrorPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -255,7 +254,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: ErrorPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -285,7 +284,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: CompactionPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -301,7 +300,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = ContextClearedPlugin.Result(tokensBefore: 50000, tokensAfter: 1000)
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: ContextClearedPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -321,7 +320,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         )
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: MessageDeletedPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -338,7 +337,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let nilTransform: @Sendable () -> (any EventResult)? = { nil }
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: AgentResponseCompletePlugin.eventType,
             transform: nilTransform,
             context: mockContext
@@ -357,7 +356,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         ] {
             mockContext.resetLogs()
 
-            coordinator.dispatch(
+            registry.dispatch(
                 type: eventType,
                 transform: { nil },
                 context: mockContext
@@ -373,14 +372,16 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = TextDeltaPlugin.Result(delta: "test", messageIndex: nil)
 
         // When: Dispatching unknown type
-        coordinator.dispatch(
+        registry.dispatch(
             type: "unknown.event.type",
             transform: { result },
             context: mockContext
         )
 
-        // Then: Debug message should be logged (unhandled event)
-        XCTAssertTrue(mockContext.logDebugCalled)
+        XCTAssertEqual(
+            mockContext.logDebugCalledWith,
+            "No plugin registered for event type: unknown.event.type"
+        )
     }
 
     func testDispatch_connectedEvent_ignored() {
@@ -388,7 +389,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = ConnectedPlugin.Result(serverId: nil, version: nil, clientId: nil)
 
         // When: Dispatching
-        coordinator.dispatch(
+        registry.dispatch(
             type: ConnectedPlugin.eventType,
             transform: { result },
             context: mockContext
@@ -398,7 +399,10 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.handleCompleteCalled)
         XCTAssertNil(mockContext.handleTextDeltaCalledWith)
         // ConnectedPlugin's box returns false from dispatch → logged as unhandled
-        XCTAssertTrue(mockContext.logDebugCalled)
+        XCTAssertEqual(
+            mockContext.logDebugCalledWith,
+            "Unhandled plugin event type: \(ConnectedPlugin.eventType)"
+        )
     }
 }
 

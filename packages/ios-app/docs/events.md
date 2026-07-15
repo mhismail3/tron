@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-07-13 (response-complete finality dispatch and live/replay metadata parity; thinking vs reasoning-summary stream contracts; generating capability chip reconstruction; server stream event-surface coverage; marker no-op dispatch; FSC-8 canonical failure parity).
+> Last verified: 2026-07-15 (registry-owned dispatch; response-complete finality and live/replay metadata parity; thinking vs reasoning-summary contracts; server event-surface and canonical-failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -57,7 +57,7 @@ shutdown nor deinitialization finishes the shared event bus.
 ## Plugin Boundary
 
 Each live plugin parses one server event family into a UI-ready result and
-dispatches itself through `EventDispatchCoordinator`. Plugins may render
+dispatches itself through `EventRegistry`. Plugins may render
 transport facts, progress, errors, and generic runtime data. They must not
 restore deleted product modes or synthesize retired event names.
 
@@ -149,18 +149,20 @@ drift, not for known server markers.
 
 ## Dispatch
 
-The dispatch model stays switch-free at the central coordinator:
+The registry owns plugin lookup and keeps dispatch switch-free:
 
 ```swift
 func dispatch(type: String, transform: () -> (any EventResult)?, context: EventDispatchTarget) {
-    guard let box = EventRegistry.shared.pluginBox(for: type) else { return }
+    guard let box = pluginBox(for: type) else { return }
     guard let result = transform() else { return }
     box.dispatch(result: result, context: context)
 }
 ```
 
-`ChatViewModel` conforms to the composed dispatch target through small handler
-extensions. The root state object owns orchestration; streaming, UI queue,
+`ChatViewModel` passes itself as the per-call dispatch target and the
+process-lifetime registry never retains it. The view model conforms to the
+composed target through small handler extensions. The root state object owns
+orchestration; streaming, UI queue,
 capability-completion, and live event callback installation lives in
 `ChatViewModel+RuntimeCallbacks.swift`. The target exposes chat/session
 primitives, not fixed product session-list APIs.

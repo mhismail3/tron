@@ -169,8 +169,6 @@ final class ChatViewModel {
     let messagingCoordinator = MessagingCoordinator()
     /// Coordinates session connection, reconnection, and catch-up
     let connectionCoordinator = ConnectionCoordinator()
-    /// Coordinates event dispatch - routes plugin events to handlers
-    let eventDispatchCoordinator = EventDispatchCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
     /// Coordinates local composer mic recording and transcription.
@@ -425,9 +423,9 @@ final class ChatViewModel {
         }
     }
 
-    /// Handle a plugin-based event by dispatching to the EventDispatchCoordinator
+    /// Handle a plugin-based event through the authoritative registry.
     private func handlePluginEvent(type: String, transform: @Sendable () -> (any EventResult)?) {
-        eventDispatchCoordinator.dispatch(type: type, transform: transform, context: self)
+        EventRegistry.shared.dispatch(type: type, transform: transform, context: self)
     }
 
     // MARK: - Message Updates

@@ -35,11 +35,10 @@ final class EventRegistry: @unchecked Sendable {
     /// never stored. This shape is deliberate: the registry is a
     /// process-lifetime singleton, so any stored reference would
     /// outlive the ViewModel and create a cycle (ChatViewModel →
-    /// EventDispatchCoordinator → EventRegistry → … →
-    /// ChatViewModel).
+    /// EventRegistry → … → ChatViewModel).
     ///
     /// Guard test: `EventRegistryReferenceCycleTests` in
-    /// `Tests/Core/Events/`. If you're about to add a closure or a
+    /// `Tests/Engine/Events/`. If you're about to add a closure or a
     /// reference-typed property to an `EventPluginBox` impl, stop and
     /// re-read this block — almost every such "just add a sidecar
     /// here" change has been the root cause of a retain cycle in
@@ -76,11 +75,33 @@ final class EventRegistry: @unchecked Sendable {
         plugins[P.eventType] = DispatchablePluginBoxImpl<P>()
     }
 
-    /// Get the plugin box for a given event type (used for self-dispatch).
-    func pluginBox(for type: String) -> (any EventPluginBox)? {
+    /// Get the plugin box for a given event type.
+    private func pluginBox(for type: String) -> (any EventPluginBox)? {
         lock.lock()
         defer { lock.unlock() }
         return plugins[type]
+    }
+
+    /// Dispatch a transformed event through its registered plugin.
+    /// The per-call context is never retained by the process-lifetime registry.
+    @MainActor
+    func dispatch(
+        type: String,
+        transform: @Sendable () -> (any EventResult)?,
+        context: EventDispatchTarget
+    ) {
+        guard let box = pluginBox(for: type) else {
+            context.logDebug("No plugin registered for event type: \(type)")
+            return
+        }
+
+        guard let result = transform() else {
+            return
+        }
+
+        if !box.dispatch(result: result, context: context) {
+            context.logDebug("Unhandled plugin event type: \(type)")
+        }
     }
 
     /// Register all built-in event plugins.

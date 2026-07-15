@@ -2920,7 +2920,7 @@ packages/ios-app/Sources/
 
 - **Feature-owned state slices**: Chat state, coordinators, navigation, messaging, and timeline projection live under `Session/Chat` and `Session/Timeline` owners.
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols. Chat view-local async work is ticketed through `ChatViewTaskCoordinator`, and transcript mutations go through `MessageMutating` so message-id and capability-id indexes stay synchronized during streaming, pagination, and reconnect reconstruction.
-- **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`; registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
+- **Event plugins**: Live engine events arrive through `SessionEventRepository`; `EventRegistry` owns plugin parsing, lookup, and dispatch to the per-call `ChatViewModel` target. Registered marker plugins may transform to `nil` as an intentional no-op, while real decode failures stay logged at the parser boundary.
 - **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`; paged chat prepends reuse already-loaded capability lifecycle context across page boundaries, persisted duplicate thinking snapshots inside one assistant message are collapsed defensively, reasoning summaries stay labeled separately from raw append-only thinking, and reconnect reconstruction preserves expanded visible history, in-flight generating capability chips, and bounded event gaps before rebuilding the displayed window.
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
@@ -3051,7 +3051,7 @@ packages/ios-app/Sources/
 ### Data Flow
 
 ```
-Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
+Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  successful text agent::prompt -> InputHistoryStore -> native attachment menu -> RecentInputHistorySheet -> InputBar

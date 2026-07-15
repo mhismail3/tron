@@ -252,7 +252,7 @@ xcodebuild test -scheme Tron \
   -only-testing:TronMobileTests/AgentResponseCompletePluginTests \
   -only-testing:TronMobileTests/TurnEndPluginTests \
   -only-testing:TronMobileTests/EventPluginTests \
-  -only-testing:TronMobileTests/EventDispatchCoordinatorTests \
+  -only-testing:TronMobileTests/EventRegistryDispatchTests \
   -only-testing:TronMobileTests/ChatViewModelEventRoutingTests \
   -only-testing:TronMobileTests/TurnLifecycleCoordinatorTests \
   -only-testing:TronMobileTests/TextStreamConvergenceTests \
