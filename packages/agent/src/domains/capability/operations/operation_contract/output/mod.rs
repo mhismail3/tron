@@ -2,9 +2,10 @@
 //!
 //! Raw [`CapabilityResult`] values remain internal audit/UI state. This module
 //! owns the exact model-facing envelope, operation profile, redacted evidence
-//! projection, common failure branch, and structural byte budget. Provider
-//! adapters transport the resulting bytes; they must not rebuild or truncate
-//! the contract. Common semantic facts (`primitiveOperation` and `status`) are
+//! projection, common failure branch, and structural byte budget. The renderer
+//! returns canonical text; the turn runner owns protocol-message wrapping, and
+//! provider adapters must not rebuild or truncate the contract. Common semantic
+//! facts (`primitiveOperation` and `status`) are
 //! synthesized from this envelope's authoritative invocation/result state, not
 //! duplicated by every domain handler, and byte-budget reduction never removes
 //! facts or collections required by the operation's semantic evidence contract.
@@ -21,7 +22,6 @@
 
 use crate::engine::{FunctionId, validate_engine_schema_payload};
 use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::messages::CapabilityResultMessageContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use serde_json::{Value, json};
 
@@ -61,34 +61,16 @@ pub(super) fn schema_for_contract(operation: &str, contract: OutputContract) -> 
     provider_output_schema(operation, contract)
 }
 
-pub(crate) fn provider_result_content(
-    operation: &str,
-    result: &CapabilityResult,
-) -> CapabilityResultMessageContent {
+pub(crate) fn provider_result_text(operation: &str, result: &CapabilityResult) -> String {
     if result_contains_image(result) {
-        return CapabilityResultMessageContent::Text(render_provider_boundary_failure(
+        return render_provider_boundary_failure(
             operation,
             "PROVIDER_OUTPUT_UNCUSTODIED_MEDIA",
             "Capability results must return durable media resource refs; inline image blocks are not part of the canonical provider transport.",
-        ));
+        );
     }
-    let rendered = render_provider_output(operation, result)
-        .unwrap_or_else(|error| render_internal_contract_failure(operation, &error));
-    CapabilityResultMessageContent::Text(rendered)
-}
-
-pub(crate) fn provider_result_text(operation: &str, result: &CapabilityResult) -> String {
-    match provider_result_content(operation, result) {
-        CapabilityResultMessageContent::Text(text) => text,
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
-            .into_iter()
-            .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text),
-                CapabilityResultContent::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
+    render_provider_output(operation, result)
+        .unwrap_or_else(|error| render_internal_contract_failure(operation, &error))
 }
 
 fn render_provider_output(operation: &str, result: &CapabilityResult) -> Result<String, String> {

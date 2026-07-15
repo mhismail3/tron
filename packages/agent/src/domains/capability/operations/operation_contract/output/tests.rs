@@ -273,11 +273,7 @@ fn inline_image_blocks_fail_closed_to_text_only_transport() {
         is_error: None,
         stop_turn: None,
     };
-    let CapabilityResultMessageContent::Text(rendered) =
-        provider_result_content("observe", &result)
-    else {
-        panic!("provider transport must be text only");
-    };
+    let rendered = provider_result_text("observe", &result);
     assert!(rendered.contains("PROVIDER_OUTPUT_UNCUSTODIED_MEDIA"));
     assert!(!rendered.contains("base64-data"));
 }

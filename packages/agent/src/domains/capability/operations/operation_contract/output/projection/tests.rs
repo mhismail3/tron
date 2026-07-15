@@ -1,6 +1,5 @@
 use super::*;
 use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::messages::CapabilityResultMessageContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use serde_json::{Value, json};
 
@@ -21,9 +20,7 @@ fn make_exec_result_with_details(
 }
 
 fn provider_envelope(result: &CapabilityResult) -> Value {
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(result) else {
-        panic!("canonical provider output must be text-only");
-    };
+    let text = extract_model_context_result_text(result);
     let envelope: Value = serde_json::from_str(&text).expect("canonical provider envelope parses");
     assert_eq!(
         envelope["schemaVersion"],
@@ -280,11 +277,7 @@ fn extract_result_content_omits_redundant_supported_operation_directory() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(!text.contains("modelFacingGuidance"));
     assert!(!text.contains("supportedExecuteOperations"));
     assert!(!text.contains("filesystem_write"));
@@ -1582,9 +1575,7 @@ fn extract_result_content_projects_schema_error_code_and_path() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
     assert!(text.contains("$.baseContentHash"));
     assert!(text.contains("resource::payload"));
@@ -1618,9 +1609,7 @@ fn extract_result_content_redacts_authority_tokens_but_keeps_selector_guidance()
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("ENGINE_POLICY_VIOLATION"));
     assert!(text.contains("capability_binding_request_list"));
     assert!(text.contains("requires explicit kind:capability_binding_request selector"));
@@ -1697,9 +1686,7 @@ fn extract_result_content_projects_filesystem_resource_refs_without_diff_or_cont
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("patch_proposal:provider-call"));
     assert!(text.contains("ver_patch"));
     assert!(!text.contains("--- raw diff"));
@@ -2023,11 +2010,7 @@ fn extract_result_content_redacts_log_evidence_for_model_context() {
         })),
     );
 
-    let content = extract_result_content(&exec);
-
-    let CapabilityResultMessageContent::Text(text) = content else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("[redacted-path]"));
     assert!(text.contains("gh*_****"));
     assert!(!text.contains("/Users/example"));
@@ -2178,9 +2161,7 @@ fn extract_result_content_projects_bounded_web_source_list_contract() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("web_source_list"));
     assert!(text.contains("Provider-safe source evidence"));
     assert!(text.contains("web_source:test"));
@@ -2339,9 +2320,7 @@ fn extract_result_content_drops_failure_actual_object_values() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("ENGINE_SCHEMA_VIOLATION"));
     assert!(text.contains("$.baseContentHash"));
     assert!(text.contains("string"));
@@ -2381,9 +2360,7 @@ fn extract_result_content_denies_authority_version_and_resource_ids() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("module_runtime:ok"));
     assert!(text.contains("ver_module_runtime_ok"));
     assert!(text.contains("module_runtime_ref:ok"));
@@ -2434,9 +2411,7 @@ fn extract_result_content_drops_authority_containers_before_recursing() {
         })),
     );
 
-    let CapabilityResultMessageContent::Text(text) = extract_result_content(&exec) else {
-        panic!("expected text result");
-    };
+    let text = extract_model_context_result_text(&exec);
     assert!(text.contains("module_runtime:safe"));
     assert!(text.contains("ver_module_runtime_safe"));
     assert!(text.contains("module_runtime_ref:safe"));

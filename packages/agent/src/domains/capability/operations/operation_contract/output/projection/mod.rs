@@ -35,10 +35,6 @@ use std::sync::LazyLock;
 
 use crate::shared::foundation::redaction::redact_sensitive_content;
 #[cfg(test)]
-use crate::shared::protocol::content::CapabilityResultContent;
-#[cfg(test)]
-use crate::shared::protocol::messages::CapabilityResultMessageContent;
-#[cfg(test)]
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -47,17 +43,7 @@ use super::spec::OutputProfile;
 
 #[cfg(test)]
 fn extract_model_context_result_text(result: &CapabilityResult) -> String {
-    match extract_result_content(result) {
-        CapabilityResultMessageContent::Text(text) => text,
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text.as_str()),
-                CapabilityResultContent::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
+    super::provider_result_text(tested_operation(result), result)
 }
 
 #[cfg(test)]
@@ -78,11 +64,6 @@ const MODEL_CONTEXT_STRING_MAX_CHARS: usize = 800;
 const MODEL_CONTEXT_ARRAY_MAX_ITEMS: usize = 20;
 const MODEL_CONTEXT_OPERATION_DIRECTORY_MAX_ITEMS: usize = 12;
 const MODEL_CONTEXT_OBJECT_MAX_KEYS: usize = 80;
-
-#[cfg(test)]
-fn extract_result_content(result: &CapabilityResult) -> CapabilityResultMessageContent {
-    super::provider_result_content(tested_operation(result), result)
-}
 
 pub(super) fn project_evidence(
     operation: &str,
