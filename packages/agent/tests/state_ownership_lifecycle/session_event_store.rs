@@ -106,6 +106,9 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
             "SessionRepo::delete",
             "tx.commit()",
             "self.remove_session_write_lock(session_id)",
+            "pub(crate) fn get_session_message_previews(",
+            "pub(crate) fn get_session_activity_summaries(",
+            "pub(crate) fn get_session_activity_summaries_batch(",
         ],
     );
 

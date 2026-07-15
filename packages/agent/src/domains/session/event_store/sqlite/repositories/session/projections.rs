@@ -11,11 +11,11 @@ use crate::shared::protocol::events::ActivitySummaryLine;
 
 /// Message preview for session list display.
 #[derive(Clone, Debug, Default)]
-pub struct MessagePreview {
+pub(crate) struct MessagePreview {
     /// Last user prompt text.
-    pub last_user_prompt: Option<String>,
+    pub(crate) last_user_prompt: Option<String>,
     /// Last assistant response text.
-    pub last_assistant_response: Option<String>,
+    pub(crate) last_assistant_response: Option<String>,
 }
 
 /// Extract text from a message event payload JSON string.
@@ -259,7 +259,7 @@ impl SessionRepo {
     ///
     /// Uses a window function to find the most recent message of each type per session.
     /// Returns a map of `session_id → MessagePreview`.
-    pub fn get_message_previews(
+    pub(crate) fn get_message_previews(
         conn: &Connection,
         session_ids: &[&str],
     ) -> Result<std::collections::HashMap<String, MessagePreview>> {
@@ -324,7 +324,7 @@ impl SessionRepo {
     ///
     /// Walks persisted events to produce a compact summary of recent activity.
     /// iOS renders each line with generic primitive presentation helpers.
-    pub fn get_activity_summaries(
+    pub(crate) fn get_activity_summaries(
         conn: &Connection,
         session_id: &str,
     ) -> Result<Vec<ActivitySummaryLine>> {
@@ -349,7 +349,7 @@ impl SessionRepo {
     }
 
     /// Build activity summaries for a bounded session snapshot in one query.
-    pub fn get_activity_summaries_batch(
+    pub(crate) fn get_activity_summaries_batch(
         conn: &Connection,
         session_ids: &[&str],
     ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {

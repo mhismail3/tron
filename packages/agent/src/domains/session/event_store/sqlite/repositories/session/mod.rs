@@ -3,11 +3,11 @@
 //! Sessions are pointers into the event tree with denormalized counters
 //! (event count, token usage, cost) for efficient queries.
 //!
-//! Session-list projections live in `session/projections.rs`; this root stays
-//! on session lifecycle, listing, counters, and head/root mutation. Paginated
-//! listings traverse immutable creation keys under a server-issued snapshot
-//! boundary; activity remains mutable presentation data and cannot move rows
-//! between pages.
+//! Crate-private session-list projections live in `session/projections.rs`;
+//! this root stays on session lifecycle, listing, counters, and head/root
+//! mutation. Paginated listings traverse immutable creation keys under a
+//! server-issued snapshot boundary; activity remains mutable presentation data
+//! and cannot move rows between pages.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -19,7 +19,7 @@ mod projections;
 #[cfg(test)]
 mod tests;
 
-pub use projections::MessagePreview;
+pub(crate) use projections::MessagePreview;
 #[cfg(test)]
 use projections::extract_text_from_payload;
 

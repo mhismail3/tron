@@ -382,7 +382,7 @@ impl EventStore {
     /// Get message previews for a list of sessions.
     ///
     /// Returns the last user prompt and last assistant response per session.
-    pub fn get_session_message_previews(
+    pub(crate) fn get_session_message_previews(
         &self,
         session_ids: &[&str],
     ) -> Result<HashMap<String, MessagePreview>> {
@@ -391,7 +391,7 @@ impl EventStore {
     }
 
     /// Get activity summary lines for a single session list item.
-    pub fn get_session_activity_summaries(
+    pub(crate) fn get_session_activity_summaries(
         &self,
         session_id: &str,
     ) -> Result<Vec<ActivitySummaryLine>> {
@@ -400,7 +400,7 @@ impl EventStore {
     }
 
     /// Get activity summaries for multiple sessions (batch).
-    pub fn get_session_activity_summaries_batch(
+    pub(crate) fn get_session_activity_summaries_batch(
         &self,
         session_ids: &[&str],
     ) -> Result<HashMap<String, Vec<ActivitySummaryLine>>> {
