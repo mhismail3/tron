@@ -1,31 +1,8 @@
 #!/bin/bash
-# tron - CLI for workspace development and contributor service tooling
+# tron - workspace development and contributor service entrypoint
 #
-# Usage: tron <command> [options]
-#
-# Development:
-#   dev             Start dev server (dev-server profile, -b build, -t test, -d background)
-#   ci              Run CI checks (fmt, check, clippy, test, bench, doc)
-#   bench           Performance benchmarks (run, bless, compare)
-#   version         Print/check/sync centralized release version mirrors
-#   setup           First-time project setup
-#
-# Service:
-#   start/stop/restart  Manage launchd service
-#   status              Show service status
-#
-# Contributor service:
-#   manual-deploy   Build, test, swap contributor service binary, and restart
-#   install         Contributor launchd setup (not used by the Mac app)
-#   rollback        Restore previous binary (--yes to skip confirmation)
-#   uninstall       Remove service and reset Mac onboarding (optionally reset settings/auth)
-#
-# Auth:
-#   login           Authenticate with a provider (--label for multi-account)
-#
-# Logs:
-#   logs            Query database logs (use -h for options)
-#   errors          Show recent errors
+# Workspace-only commands dispatch here. Runtime routing and help are owned by
+# tron-lib.sh so this entrypoint stays aligned with the installed tron-cli.
 
 set -e
 
@@ -98,19 +75,8 @@ cmd_help() {
     echo "  preflight       Pre-deploy infrastructure check"
     echo "  manual-deploy   Build, test, swap contributor service binary, restart (--force, --ci)"
     echo "  install         Initial setup (launchd + CLI)"
-    echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
     echo ""
-    echo -e "${BOLD}Runtime:${NC}"
-    echo "  start           Start launchd service"
-    echo "  stop            Stop service"
-    echo "  restart         Restart service"
-    echo "  status          Show service status"
-    echo "  rollback        Restore previous binary (--yes to skip confirmation)"
-    echo "  login           Authenticate with a provider (--label <name> for multi-account)"
-    echo "  auth rotate     Rotate the WebSocket bearer token (forces iOS re-pair)"
-    echo "  logs            Query database logs (use -h for options)"
-    echo "  errors          Show recent errors"
-    echo ""
+    show_runtime_command_help
     echo -e "${BOLD}Build profiles:${NC}"
     echo "  cargo check                        # Fast correctness check (no binary)"
     echo "  cargo build --profile dev-server   # Dev server (thin LTO, fast)"

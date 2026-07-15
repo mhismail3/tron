@@ -1032,16 +1032,79 @@ fn dev_quality_environment_and_app_wrapper_do_not_hide_production_deploys() {
         "old tron deploy dispatcher alias must not return"
     );
     let installed_cli = read_repo_file("scripts/tron-cli");
-    let runtime_cli = read_repo_file("scripts/tron-lib.sh");
     assert!(installed_cli.contains("dev|manual-deploy|ci|bench|version|preflight|setup|install"));
     assert!(installed_cli.contains("*) dispatch_runtime_command \"$@\" ;;"));
-    assert!(runtime_cli.contains("status)    cmd_status \"$@\" ;;"));
-    assert!(runtime_cli.contains("auth)      cmd_auth \"$@\" ;;"));
-    assert!(installed_cli.contains("auth rotate     Rotate the WebSocket bearer token"));
     assert!(
         !installed_cli
             .lines()
             .any(|line| line.trim_start().starts_with("deploy)")),
         "installed CLI must not expose old deploy alias"
     );
+}
+
+#[test]
+fn runtime_command_help_has_one_shared_owner() {
+    let workspace_cli = read_repo_file("scripts/tron");
+    let installed_cli = read_repo_file("scripts/tron-cli");
+    let runtime_cli = read_repo_file("scripts/tron-lib.sh");
+    let shared_help = runtime_cli
+        .split_once("show_runtime_command_help() {")
+        .expect("shared runtime help owner missing")
+        .1
+        .split_once("\n}")
+        .expect("shared runtime help owner must be a shell function")
+        .0;
+    let runtime_dispatcher = runtime_cli
+        .split_once("dispatch_runtime_command() {")
+        .expect("shared runtime dispatcher missing")
+        .1;
+    let dispatcher_case = runtime_dispatcher
+        .split_once("case \"$command\" in")
+        .expect("runtime dispatcher case missing")
+        .1
+        .split_once("*)")
+        .expect("runtime dispatcher default arm missing")
+        .0;
+
+    let dispatcher_commands = dispatcher_case
+        .lines()
+        .filter_map(|line| {
+            line.trim_start()
+                .split_once(')')
+                .map(|(command, _)| command)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        dispatcher_commands, "status start stop restart uninstall logs errors rollback login auth",
+        "runtime dispatcher inventory drifted"
+    );
+    let expected_help_commands =
+        "status|start|stop|restart|uninstall|logs|errors|rollback|login|auth rotate"
+            .split('|')
+            .collect::<Vec<_>>();
+    assert_eq!(
+        shared_help
+            .lines()
+            .filter(|line| line.trim_start().starts_with("echo \"  "))
+            .count(),
+        expected_help_commands.len(),
+        "shared runtime help inventory drifted"
+    );
+
+    for entrypoint in [&workspace_cli, &installed_cli] {
+        assert_eq!(entrypoint.matches("show_runtime_command_help").count(), 1);
+    }
+    for help_command in expected_help_commands {
+        let help_row = format!("echo \"  {help_command}");
+        assert_eq!(
+            shared_help.matches(&help_row).count(),
+            1,
+            "shared runtime help must contain one {help_command} row"
+        );
+        assert!(
+            !workspace_cli.contains(&help_row) && !installed_cli.contains(&help_row),
+            "entrypoints must not duplicate shared runtime help row {help_command}"
+        );
+    }
 }

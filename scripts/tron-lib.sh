@@ -78,6 +78,23 @@ print_warning() { echo -e "${YELLOW}!${NC} $1" >&2; }
 print_info()    { echo -e "${DIM}ℹ${NC} $1" >&2; }
 print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2; }
 
+# Canonical help for commands routed by dispatch_runtime_command. Entrypoints
+# own their workspace/delegation sections but must not duplicate runtime rows.
+show_runtime_command_help() {
+    echo -e "${BOLD}Runtime:${NC}"
+    echo "  status          Show service status"
+    echo "  start           Start launchd service"
+    echo "  stop            Stop service"
+    echo "  restart         Restart service"
+    echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
+    echo "  rollback        Restore previous binary (--yes to skip confirmation)"
+    echo "  login           Authenticate with a provider (--provider <name>, --label <name>)"
+    echo "  auth rotate     Rotate the WebSocket bearer token (forces iOS re-pair)"
+    echo "  logs            Query database logs (use -h for options)"
+    echo "  errors          Show recent errors"
+    echo ""
+}
+
 #=============================================================================
 # UTILITY FUNCTIONS
 #=============================================================================
