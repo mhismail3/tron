@@ -28,9 +28,6 @@ struct ProductionAppRoot: View {
     @State private var onboardingDetent: PresentationDetent = OnboardingSheetPresentation.initialDetent
     @State private var onboardingAllowsDismiss = false
     @State private var onboardingSuppressed = false
-#if DEBUG
-    @State private var debugCameraSheetPresented = ProcessInfo.processInfo.arguments.contains("--tron-debug-camera-sheet")
-#endif
 
     /// Device-local first-run completion truth. This root owns persistence
     /// because it also owns sheet presentation, dismissibility, and push startup.
@@ -185,11 +182,6 @@ struct ProductionAppRoot: View {
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { notification in
                 launchServerOnboarding(notification: notification)
             }
-#if DEBUG
-            .sheet(isPresented: $debugCameraSheetPresented) {
-                CameraCaptureSheet(onImageCaptured: { _ in })
-            }
-#endif
     }
 
     private var sessionListContent: some View {

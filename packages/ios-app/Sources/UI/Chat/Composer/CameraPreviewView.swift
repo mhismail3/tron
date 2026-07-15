@@ -53,31 +53,3 @@ class CameraPreviewUIView: UIView {
         previewLayer?.frame = extendedBounds
     }
 }
-
-#if DEBUG
-struct CameraDebugSurface: View {
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.08, green: 0.16, blue: 0.95),
-                        Color(red: 0.92, green: 0.16, blue: 0.22),
-                        Color(red: 0.06, green: 0.78, blue: 0.42)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                VStack(spacing: 0) {
-                    ForEach(0..<12, id: \.self) { index in
-                        Rectangle()
-                            .fill(index.isMultiple(of: 2) ? Color.white.opacity(0.12) : Color.black.opacity(0.12))
-                            .frame(height: geometry.size.height / 12)
-                    }
-                }
-            }
-        }
-    }
-}
-#endif

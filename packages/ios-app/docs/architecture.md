@@ -225,7 +225,9 @@ not restore old read/write/edit/search/diff/apply-patch/import or
 agent-execution filesystem behavior without a Phase 2 module contract.
 
 `CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
-camera viewport is the sheet surface, controls layer at the bottom of that
+composer `InputBar` is its sole production presentation owner; the app process
+root has no launch-argument bypass or synthetic camera viewport. The camera
+viewport is the sheet surface, controls layer at the bottom of that
 surface, and the live/captured camera image is installed as the modal
 presentation background. The foreground layer is controls-only; it does not add
 a bottom fade or other material over the live viewport, and it expands through

@@ -2,6 +2,33 @@ import Foundation
 import Testing
 
 extension SourceGuardTests {
+    @Test("Camera presentation remains composer-owned")
+    func testCameraPresentationRemainsComposerOwned() throws {
+        let root = iosAppRoot()
+        let sources: [(path: String, contents: String)] = try swiftFiles(
+            in: root.appendingPathComponent("Sources")
+        ).map { file in
+            (
+                file.path.replacingOccurrences(of: root.path + "/", with: ""),
+                try String(contentsOf: file, encoding: .utf8)
+            )
+        }
+        let inputBar = try #require(
+            sources.first { $0.path == "Sources/UI/Chat/Composer/InputBar.swift" }?.contents
+        )
+
+        #expect(inputBar.contains(".sheet(isPresented: $showCamera)"))
+        #expect(inputBar.contains("CameraCaptureSheet(onImageCaptured: addCameraImageAttachment)"))
+        let presenters = sources
+            .filter { $0.contents.contains("CameraCaptureSheet(") }
+            .map(\.path)
+            .sorted()
+        #expect(presenters == ["Sources/UI/Chat/Composer/InputBar.swift"])
+        let productionSources = sources.map(\.contents).joined(separator: "\n")
+        #expect(!productionSources.contains("--tron-debug-camera"))
+        #expect(!productionSources.contains("CameraDebugSurface"))
+    }
+
     @Test("Camera captured-photo preview pauses session until retake")
     func testCameraCapturedPhotoPreviewPausesSessionUntilRetake() throws {
         let source = try String(
