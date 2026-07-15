@@ -18,7 +18,9 @@
 //! owns only generic type registration and version-preserving reconciliation.
 //! The complete production composition validates function ownership,
 //! canonical identity uniqueness, and stream-topic boundaries before either
-//! registration path mutates the engine catalog.
+//! registration path mutates the engine catalog. Jobs and worker-lifecycle
+//! activation is returned as a one-shot token so transport setup starts those
+//! lifecycles only after domain and trigger registration both succeed.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -48,17 +50,67 @@ use crate::domains::{
     system, tool_sources, transcription, update_diagnostics, web, web_research, worker_lifecycle,
 };
 
-/// Register server-owned domain workers, canonical functions, and trigger records.
-pub(crate) fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
-    register_domain_workers(ctx)
+#[must_use = "activate after transport-trigger registration"]
+pub(crate) struct DomainLifecycleActivation {
+    jobs: jobs::Deps,
+    worker_lifecycle: worker_lifecycle::Deps,
 }
 
-/// Register server-owned domain workers, canonical functions, and trigger
+impl DomainLifecycleActivation {
+    pub(crate) fn activate(self) {
+        self.jobs.activate_after_registration();
+        self.worker_lifecycle.activate_after_registration();
+    }
+}
+
+struct DomainComposition {
+    modules: Vec<DomainWorkerModule>,
+    activation: DomainLifecycleActivation,
+}
+
+/// Register server-owned domain workers, canonical functions, and manifest records.
+pub(crate) fn register_domain_workers_for_context(
+    ctx: &ServerRuntimeContext,
+) -> EngineResult<DomainLifecycleActivation> {
+    let DomainComposition {
+        modules,
+        activation,
+    } = domain_worker_modules(ctx)?;
+    let handle = &ctx.engine_host;
+    install_module_manifest_resources_for_setup(handle)?;
+    for module in modules {
+        handle.register_worker_for_setup(module.worker, false)?;
+        for function in module.functions {
+            handle.register_function_for_setup(
+                function.definition,
+                Some(function.handler),
+                false,
+            )?;
+        }
+    }
+    Ok(activation)
+}
+
+/// Register server-owned domain workers, canonical functions, and manifest
 /// records from async server startup.
 pub(crate) async fn register_domain_workers_for_runtime_context(
     ctx: &ServerRuntimeContext,
-) -> EngineResult<()> {
-    register_domain_workers_runtime(ctx).await
+) -> EngineResult<DomainLifecycleActivation> {
+    let DomainComposition {
+        modules,
+        activation,
+    } = domain_worker_modules(ctx)?;
+    let handle = &ctx.engine_host;
+    install_module_manifest_resources(handle).await?;
+    for module in modules {
+        handle.register_worker(module.worker, false).await?;
+        for function in module.functions {
+            handle
+                .register_function(function.definition, Some(function.handler), false)
+                .await?;
+        }
+    }
+    Ok(activation)
 }
 
 #[cfg(test)]
@@ -83,42 +135,14 @@ async fn install_module_manifest_resources(handle: &EngineHostHandle) -> EngineR
         .await
 }
 
-fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
-    let handle = &ctx.engine_host;
-    install_module_manifest_resources_for_setup(handle)?;
-    for module in domain_worker_modules(ctx)? {
-        handle.register_worker_for_setup(module.worker, false)?;
-        for function in module.functions {
-            handle.register_function_for_setup(
-                function.definition,
-                Some(function.handler),
-                false,
-            )?;
-        }
-    }
-    Ok(())
-}
-
-async fn register_domain_workers_runtime(ctx: &ServerRuntimeContext) -> EngineResult<()> {
-    let handle = &ctx.engine_host;
-    install_module_manifest_resources(handle).await?;
-    for module in domain_worker_modules(ctx)? {
-        handle.register_worker(module.worker, false).await?;
-        for function in module.functions {
-            handle
-                .register_function(function.definition, Some(function.handler), false)
-                .await?;
-        }
-    }
-    Ok(())
-}
-
-fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainWorkerModule>> {
+fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<DomainComposition> {
     let deps = DomainRegistrationContext::from_context(ctx);
     let jobs_runtime = jobs::RuntimeState::new();
+    let jobs_deps = jobs::Deps::from_engine(&deps, jobs_runtime.clone());
+    let worker_lifecycle_deps = worker_lifecycle::Deps::from_engine(&deps);
     let mut modules = vec![
         system::worker_module(&deps)?,
-        capability::worker_module(&deps, jobs_runtime.clone())?,
+        capability::worker_module(&deps, jobs_runtime)?,
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
         device::worker_module(&deps)?,
@@ -142,7 +166,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         module_activity::worker_module(&deps)?,
         web_research::worker_module(&deps)?,
         memory::worker_module(&deps)?,
-        jobs::worker_module(&deps, jobs_runtime)?,
+        jobs::worker_module(jobs_deps.clone())?,
         git::worker_module(&deps)?,
         web::worker_module(&deps)?,
         tool_sources::worker_module(&deps)?,
@@ -154,7 +178,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         settings::worker_module(&deps)?,
         transcription::worker_module(&deps)?,
         auth::worker_module(&deps)?,
-        worker_lifecycle::worker_module(&deps)?,
+        worker_lifecycle::worker_module(worker_lifecycle_deps.clone())?,
         agent::worker_module(&deps)?,
         logs::worker_module(&deps)?,
         session::worker_module(&deps)?,
@@ -164,7 +188,13 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
     for module in &modules {
         validate_domain_stream_topics(module)?;
     }
-    Ok(modules)
+    Ok(DomainComposition {
+        modules,
+        activation: DomainLifecycleActivation {
+            jobs: jobs_deps,
+            worker_lifecycle: worker_lifecycle_deps,
+        },
+    })
 }
 
 fn validate_domain_composition(modules: &[DomainWorkerModule]) -> EngineResult<()> {

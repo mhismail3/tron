@@ -6,7 +6,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
-use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
+use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
     FunctionId, Invocation, InvocationResult, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
@@ -649,14 +649,18 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     }
 
     let shutdown = Arc::new(ShutdownCoordinator::new());
-    let runtime = super::runtime::JobRuntime::default();
-    let runtime_for_shutdown = runtime.clone();
-    shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs-test", move || {
-        let runtime = runtime_for_shutdown.clone();
-        async move {
-            runtime.cancel_all("server_shutdown").await;
-        }
-    });
+    let mut activation_ctx = ctx.clone();
+    activation_ctx.shutdown_coordinator = Some(shutdown.clone());
+    let registration_deps =
+        crate::domains::registration::worker::DomainRegistrationContext::from_context(
+            &activation_ctx,
+        );
+    let deps = super::Deps::from_engine(&registration_deps, super::RuntimeState::new());
+    let runtime = deps.state.runtime();
+    let shutdown_coordinator = deps.shutdown_coordinator.clone();
+    assert_eq!(shutdown.registered_phase_callback_count(), 0);
+    deps.activate_after_registration();
+    assert_eq!(shutdown.registered_phase_callback_count(), 1);
 
     let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-shutdown").await;
     let marker = root.path().join("started");
@@ -680,7 +684,7 @@ async fn shutdown_cancels_running_job_and_records_terminal_state() {
     );
     let start = super::service::start_job_value(
         &ctx.engine_host,
-        Some(shutdown.clone()),
+        shutdown_coordinator,
         runtime,
         &invocation,
         &invocation.payload,

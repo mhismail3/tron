@@ -29,9 +29,10 @@
 //! - [`engine::socket::run_engine_ws_session`] owns one live WebSocket session,
 //!   subscriptions, request/response writes, and socket closure.
 //! - [`runtime::setup::register_server_domains_for_runtime_context`] registers
-//!   retained domain workers during async app startup.
+//!   retained domain workers and transport triggers during async app startup,
+//!   then activates domain lifecycle tasks.
 //! - [`runtime::setup::register_server_domains_for_context`] remains the
-//!   single-threaded setup/test fixture entrypoint.
+//!   single-threaded setup/test fixture entrypoint with the same ordering.
 //! - [`runtime::EngineRuntimeServices::start`] launches retained runtime pumps.
 //!
 //! ## Invariants

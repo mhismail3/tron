@@ -32,8 +32,10 @@
 //! provider-facing lifecycle projections. `job_log` is the bounded preview
 //! surface for stdout/stderr when the task explicitly needs output text.
 //! One runtime state is created by the domain composition root and shared by
-//! both the direct jobs worker and capability execution paths. On domain
-//! startup and before lifecycle reads/cleanup, persisted `running`
+//! both the direct jobs worker and capability execution paths. Construction is
+//! side-effect free; startup reconciliation and shutdown cancellation activate
+//! only after the complete engine setup succeeds. On domain startup and before
+//! lifecycle reads/cleanup, persisted `running`
 //! job resources from before the current service instance are reconciled:
 //! owned jobs continue under their runtime handle, while non-owned stale jobs
 //! are marked with inspectable unknown/failure terminal evidence. Reconciliation
@@ -115,8 +117,16 @@ pub(crate) struct Deps {
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext, state: RuntimeState) -> Self {
-        if let Some(shutdown) = &deps.shutdown_coordinator {
-            let runtime_for_shutdown = state.runtime();
+        Self {
+            engine_host: deps.engine_host.clone(),
+            shutdown_coordinator: deps.shutdown_coordinator.clone(),
+            state,
+        }
+    }
+
+    pub(crate) fn activate_after_registration(self) {
+        if let Some(shutdown) = self.shutdown_coordinator {
+            let runtime_for_shutdown = self.state.runtime();
             shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs", move || {
                 let runtime = runtime_for_shutdown.clone();
                 async move {
@@ -125,9 +135,9 @@ impl Deps {
             });
         }
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let engine_host = deps.engine_host.clone();
-            let runtime_for_reconcile = state.runtime();
-            let reconcile_for_startup = state.reconcile();
+            let engine_host = self.engine_host;
+            let runtime_for_reconcile = self.state.runtime();
+            let reconcile_for_startup = self.state.reconcile();
             handle.spawn(async move {
                 match service::reconcile_stale_running_jobs(
                     &engine_host,
@@ -155,26 +165,15 @@ impl Deps {
                 }
             });
         }
-        Self {
-            engine_host: deps.engine_host.clone(),
-            shutdown_coordinator: deps.shutdown_coordinator.clone(),
-            state,
-        }
     }
 }
 
 /// Build the domain worker registration.
-pub(crate) fn worker_module(
-    deps: &DomainRegistrationContext,
-    state: RuntimeState,
-) -> crate::engine::Result<DomainWorkerModule> {
+pub(crate) fn worker_module(deps: Deps) -> crate::engine::Result<DomainWorkerModule> {
     crate::domains::registration::worker::domain_worker_module(
         WORKER,
         &[JOBS_LIFECYCLE_TOPIC],
-        handlers::function_registrations(
-            contract::capabilities()?,
-            Deps::from_engine(deps, state),
-        )?,
+        handlers::function_registrations(contract::capabilities()?, deps)?,
     )
 }
 

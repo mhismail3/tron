@@ -660,7 +660,12 @@ The domain package is intentionally vertical. A domain root is only docs,
 exports, and crate-private worker registration. Shared worker registration
 types live in `domains::registration::worker`; transport setup enters the
 crate-private startup aggregator in `domains::registration`, which iterates
-each domain's `worker_module(...)`.
+each domain's `worker_module(...)`. That aggregator constructs and validates
+the complete domain composition before installing manifest resources or
+mutating the live catalog. It returns a one-shot jobs/worker-lifecycle
+activation token; transport setup consumes the token only after transport
+trigger registration also succeeds, so failed setup cannot leave startup tasks
+or shutdown callbacks running.
 `contract.rs` owns canonical function ids, schemas, authority, risk, and stream
 topics; each domain then keeps executable bodies under behavior owners rather
 than a shared boilerplate shape. Examples: `domains/agent/prompt`,
@@ -1611,7 +1616,10 @@ post-startup rows; targeted status/log/cancel also rechecks the addressed
 resource after scope validation without mutating unrelated scopes. Domain
 composition creates one jobs runtime and startup boundary per server instance;
 the direct jobs worker and all `capability::execute` jobs/program adapters share
-that state rather than a process-global registry or independent cutoffs.
+that state rather than a process-global registry or independent cutoffs. Jobs
+dependency construction is inert; startup reconciliation and shutdown
+cancellation registration begin only when the complete engine setup consumes
+its lifecycle activation token.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, job-owned network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
@@ -2398,7 +2406,9 @@ enable it, launch it with an allowlisted environment and scoped
 `worker_package_conformance_report` resources on `worker.lifecycle`. Stop
 returns package/installation state to `enabled` for immediate relaunch, while
 startup reconciliation runs before lifecycle requests and marks durable running
-launch attempts `unhealthy` if process ownership was lost. A failed launch,
+launch attempts `unhealthy` if process ownership was lost. Dependency
+construction does not start reconciliation; the task begins only after domain
+and transport-trigger registration both succeed. A failed launch,
 conformance mismatch, digest mismatch, or unowned stop is recorded or rejected
 fail-closed. The provider-visible model tool remains `execute`; lifecycle
 mutation operations are engine capabilities invoked through the authenticated

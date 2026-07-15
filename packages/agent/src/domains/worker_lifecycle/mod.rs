@@ -5,9 +5,11 @@
 //! protocol hosts already-running loopback workers, while this domain records
 //! package provenance, validates manifests, derives scoped worker grants,
 //! launches local packages, and proves conformance before a launched worker is
-//! treated as running. Startup reconciliation downgrades stale durable running
-//! launch attempts when no in-process owner can safely stop them, and lifecycle
-//! functions wait for that reconciliation before handling new requests.
+//! treated as running. Dependency construction is side-effect free. After the
+//! complete engine setup succeeds, startup reconciliation downgrades stale
+//! durable running launch attempts when no in-process owner can safely stop
+//! them, and lifecycle functions wait for that reconciliation before handling
+//! new requests.
 //!
 //! ## Submodules
 //!
@@ -87,7 +89,7 @@ pub(crate) struct Deps {
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        let deps = Self {
+        Self {
             engine_host: deps.engine_host.clone(),
             package_root: paths::worker_packages_dir(),
             launcher: Arc::new(SystemWorkerLauncher::default()),
@@ -95,14 +97,15 @@ impl Deps {
             startup_reconciliation: Arc::new(OnceCell::new()),
             #[cfg(test)]
             startup_reconciliation_hook: None,
-        };
+        }
+    }
+
+    pub(crate) fn activate_after_registration(self) {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let reconcile_deps = deps.clone();
             handle.spawn(async move {
-                let _ = reconcile_deps.ensure_startup_reconciled().await;
+                let _ = self.ensure_startup_reconciled().await;
             });
         }
-        deps
     }
 
     pub(super) async fn ensure_startup_reconciled(&self) -> Result<usize, CapabilityError> {
@@ -163,12 +166,10 @@ impl Deps {
 }
 
 /// Build the domain worker registration.
-pub(crate) fn worker_module(
-    deps: &DomainRegistrationContext,
-) -> crate::engine::Result<DomainWorkerModule> {
+pub(crate) fn worker_module(deps: Deps) -> crate::engine::Result<DomainWorkerModule> {
     crate::domains::registration::worker::domain_worker_module(
         WORKER,
         &[WORKER_LIFECYCLE_TOPIC],
-        handlers::function_registrations(contract::capabilities()?, Deps::from_engine(deps))?,
+        handlers::function_registrations(contract::capabilities()?, deps)?,
     )
 }

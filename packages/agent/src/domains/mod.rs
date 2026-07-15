@@ -80,7 +80,10 @@
 //! Startup enters the domain tree through
 //! `transport::runtime::setup::register_server_domains_for_runtime_context`.
 //! That facade delegates to the crate-private registration owner, which is the
-//! only non-test code allowed to wire concrete domain worker modules.
+//! only non-test code allowed to wire concrete domain worker modules. The
+//! registration owner validates the full composition before catalog mutation
+//! and returns a one-shot lifecycle token; transport setup activates it only
+//! after transport triggers also register successfully.
 //! Single-threaded test fixtures use the paired setup-only facade. Individual
 //! domains expose their public behavior through `contract.rs` definitions and
 //! handler tables, not through transport-specific functions.

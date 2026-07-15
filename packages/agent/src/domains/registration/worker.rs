@@ -3,7 +3,9 @@
 //! This module is the setup-only boundary between the broad server runtime
 //! context and domain-owned worker modules. Runtime handlers receive the narrow
 //! `Deps` type owned by their domain; this context is only used while building
-//! worker/function registrations at startup.
+//! worker/function registrations at startup. `DomainWorkerModule` is an inert
+//! catalog description; startup tasks and shutdown hooks remain under the
+//! registration lifecycle token until complete engine setup succeeds.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,7 +74,6 @@ pub(crate) struct DomainFunctionRegistration {
     pub(crate) handler: Arc<dyn InProcessFunctionHandler>,
 }
 
-#[derive(Clone)]
 pub(crate) struct DomainWorkerModule {
     pub(crate) worker: WorkerDefinition,
     pub(crate) functions: Vec<DomainFunctionRegistration>,

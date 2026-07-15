@@ -901,9 +901,17 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
         Some(pause_hook.clone()),
     );
 
-    let reconcile_deps = pending_deps.clone();
-    let reconcile_task =
-        tokio::spawn(async move { reconcile_deps.ensure_startup_reconciled().await });
+    let premature_reconciliation = tokio::time::timeout(
+        std::time::Duration::from_millis(25),
+        pause_hook.reached.notified(),
+    )
+    .await;
+    assert!(
+        premature_reconciliation.is_err(),
+        "constructing worker lifecycle dependencies must not start reconciliation"
+    );
+
+    pending_deps.clone().activate_after_registration();
     pause_hook.reached.notified().await;
 
     let launch_deps = pending_deps.clone();
@@ -930,9 +938,9 @@ async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_proce
 
     pause_hook.release.notify_waiters();
     assert_eq!(
-        reconcile_task
+        pending_deps
+            .ensure_startup_reconciled()
             .await
-            .expect("reconcile task join")
             .expect("startup reconciliation"),
         1
     );
