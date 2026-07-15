@@ -9,7 +9,9 @@
 //! construction and built-ins, handle constructors, catalog operations,
 //! invocation orchestration, delegated/meta invocation, substrate-store methods,
 //! shared invocation helpers, meta-function definitions, and the primitive
-//! runtime host.
+//! runtime host. `meta_invocation` single-owns the privileged synchronous
+//! lifecycle envelope shared by reserved synchronous engine functions and
+//! host-dispatched primitives; the router below selects only their dispatch family.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
