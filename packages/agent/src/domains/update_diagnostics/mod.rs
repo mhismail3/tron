@@ -28,7 +28,8 @@
 //! production endpoint details, installer/restart/deploy commands, filesystem
 //! paths, or secret-like caller material. Diagnostic timestamps are supplied by
 //! `capability::execute` or tests; this domain does not sample wall-clock time
-//! directly.
+//! directly. Services consume the intent-shaped `EngineHostHandle` facade
+//! directly and own no parallel dependency or state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -37,11 +38,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{UPDATE_DIAGNOSTIC_RECORD_KIND, UPDATE_DIAGNOSTIC_RECORD_SCHEMA_ID};
 
