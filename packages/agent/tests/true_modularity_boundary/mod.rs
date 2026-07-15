@@ -102,6 +102,14 @@ fn engine_facade_is_the_only_cross_module_engine_api() {
 
 #[test]
 fn domain_workers_expose_contracts_not_services() {
+    let module_dependencies =
+        read_repo_file("packages/agent/src/domains/module_dependencies/mod.rs");
+    assert!(
+        !module_dependencies.contains("pub(crate) mod contract")
+            && !module_dependencies.contains("pub(crate) use crate::engine"),
+        "module-dependency contracts and engine identifiers must stay domain-private"
+    );
+
     let allowed_prefixes = [
         "packages/agent/src/domains/",
         "packages/agent/src/app/bootstrap/",
