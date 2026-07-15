@@ -238,7 +238,7 @@ struct InstallStep: View {
         // 3. Register the bundled Login Item through SMAppService.
         stages[.registerAgent] = .running
         await paceStage()
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: setup.launchAgentManager,
             plistPath: plan.plistPath,
             label: setup.launchAgentLabel
@@ -490,22 +490,5 @@ enum InstallStepLayout {
                 .combined(with: .scale(scale: 0.98, anchor: .top)),
             removal: .opacity
         )
-    }
-}
-
-/// Applies the service registration step. An already-enabled label may
-/// still be running an older helper image after app replacement, so
-/// `.alreadyLoaded` is followed by `kickstart -k`.
-enum InstallLaunchAgentRunner {
-    static func ensureLoaded(
-        manager: LaunchAgentManaging,
-        plistPath: URL,
-        label: String
-    ) async -> LaunchAgentOutcome {
-        let loadOutcome = await manager.load(plistPath: plistPath, label: label)
-        guard case .alreadyLoaded = loadOutcome else {
-            return loadOutcome
-        }
-        return await manager.restart(label: label)
     }
 }

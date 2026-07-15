@@ -56,7 +56,7 @@ final class MenuBarActionHandler {
     private func restartServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
-        let outcome = await InstallLaunchAgentRunner.ensureLoaded(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: setup.launchAgentManager,
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel

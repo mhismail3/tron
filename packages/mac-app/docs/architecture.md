@@ -118,7 +118,7 @@ app.
 
 ### Protocol-bounded subprocess surface
 
-`LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. The shared async `Subprocess` runner lives under `Support/Foundation` so health probing, launch-agent diagnostics, and process-control callers do not make `Server/Health` a second ownership bucket. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server engine protocol.
+`LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. `LaunchAgentLoader` in the same owner applies the shared load policy: return the registration outcome directly, except an already-loaded service is restarted so an app replacement cannot leave an older helper image running. The shared async `Subprocess` runner lives under `Support/Foundation` so health probing, launch-agent diagnostics, and process-control callers do not make `Server/Health` a second ownership bucket. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server engine protocol.
 
 ### Wizard visual system
 

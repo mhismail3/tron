@@ -86,6 +86,11 @@ struct MacSourceGuardTests {
         #expect(liveManager.contains("SMAppService"))
         #expect(liveManager.contains("LaunchAgentManaging"))
 
+        let launchAgentContract = try Self.read(macRoot, "Sources/Server/LaunchAgent/LaunchAgentManaging.swift")
+        let installStep = try Self.read(macRoot, "Sources/Wizard/Steps/InstallStep.swift")
+        #expect(launchAgentContract.contains("enum LaunchAgentLoader"))
+        #expect(!installStep.contains("enum LaunchAgentLoader"))
+
         let subprocess = try Self.read(macRoot, "Sources/Support/Foundation/Subprocess.swift")
         #expect(subprocess.contains("enum Subprocess"))
         #expect(subprocess.contains("ProcessResult"))
