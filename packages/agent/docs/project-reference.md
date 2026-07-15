@@ -131,17 +131,6 @@ Current living entry points:
   source, entropy, API, hash, and proof inventory.
 - `packages/agent/docs/determinism-replayability-inventory.tsv`:
   machine-readable replay-critical source inventory used by DRC static gates.
-- `packages/agent/docs/true-modularity-boundary-scorecard.md`: completed
-  scorecard for proving Rust and iOS boundaries are black-boxed by ownership,
-  narrow APIs, and guarded dependency direction.
-- `packages/agent/docs/true-modularity-boundary-evidence-manifest.md`:
-  companion evidence manifest for the completed True Modularity Boundary campaign.
-- `packages/agent/docs/true-modularity-boundary-inventory.md`: completed TMB
-  boundary taxonomy, dependency-direction rules, and composition-root exception
-  list.
-- `packages/agent/docs/true-modularity-boundary-inventory.tsv`:
-  machine-readable Rust/Swift source ownership inventory used by TMB static
-  gates.
 - `packages/agent/docs/failure-semantics-scorecard.md`: completed Failure
   Semantics Campaign scorecard for enforcing one canonical error envelope
   across provider/model errors, runtime turn failures, capability results,
@@ -405,9 +394,9 @@ Current living entry points:
 - `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
   post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
   ownership, Rust module docs, CI parity, provenance, privacy, and residue.
-- `packages/agent/tests/true_modularity_boundary_invariants.rs`: completed TMB
-  scorecard, boundary inventory, responder, facade, domain, storage, transport,
-  iOS engine-access, boundary-error, and final closeout gates.
+- `packages/agent/tests/true_modularity_boundary_invariants.rs`: living
+  source-backed guards for provider, engine, domain-worker, storage, transport,
+  iOS repository, and boundary-error dependency direction.
 - `packages/agent/tests/failure_semantics_invariants.rs`: completed FSC scorecard,
   inventory, failure-surface, canonical-envelope, event-emission, transport,
   provider, iOS parity, replay, and closeout gates.

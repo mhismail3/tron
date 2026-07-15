@@ -1,4 +1,4 @@
-//! Static gate helpers for the True Modularity Boundary campaign.
+//! Helpers for living source-backed dependency-boundary guards.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -36,18 +36,6 @@ pub(super) fn tracked_files() -> Vec<String> {
         .expect("git ls-files output should be UTF-8")
         .lines()
         .map(str::to_owned)
-        .collect()
-}
-
-pub(super) fn tracked_boundary_sources() -> Vec<String> {
-    tracked_files()
-        .into_iter()
-        .filter(|path| {
-            (path.starts_with("packages/agent/src/") && path.ends_with(".rs"))
-                || (path.starts_with("packages/ios-app/Sources/") && path.ends_with(".swift"))
-        })
-        .filter(|path| repo_path(path).exists())
-        .filter(|path| !is_test_support_path(path))
         .collect()
 }
 

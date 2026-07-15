@@ -758,6 +758,7 @@ fn docs_do_not_store_physical_ios_device_uuid_like_identifiers() {
     let docs = git_output(&["ls-files", "README.md", "packages/agent/docs"])
         .lines()
         .filter(|path| path.ends_with(".md"))
+        .filter(|path| repo_path(path).is_file())
         .map(str::to_owned)
         .collect::<Vec<_>>();
 

@@ -649,6 +649,7 @@ fn git_ls_files() -> Vec<String> {
     String::from_utf8(output.stdout)
         .expect("utf8 git ls-files")
         .lines()
+        .filter(|path| repo_path(path).is_file())
         .map(str::to_owned)
         .collect()
 }

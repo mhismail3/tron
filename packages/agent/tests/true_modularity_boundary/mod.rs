@@ -1,245 +1,10 @@
-//! Static gates for the True Modularity Boundary campaign.
+//! Living source-backed dependency-boundary guards.
 
 mod support;
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use support::*;
-
-#[test]
-fn true_modularity_scorecard_stays_formalized() {
-    let scorecard = read_repo_file("packages/agent/docs/true-modularity-boundary-scorecard.md");
-    let manifest =
-        read_repo_file("packages/agent/docs/true-modularity-boundary-evidence-manifest.md");
-    let readme = read_repo_file("packages/agent/docs/project-reference.md");
-
-    for required in [
-        "# True Modularity Boundary Scorecard",
-        "Status: **completed**",
-        "Current score: **100/100**",
-        "Branch: `codex/primitive-engine-teardown`",
-        "This scorecard formalizes the True Modularity Boundary campaign.",
-        "## Boundary Taxonomy",
-        "`facade`",
-        "`contract`",
-        "`adapter`",
-        "`implementation`",
-        "`composition-root`",
-        "`test-support`",
-        "`generated-wire-dto`",
-        "| TMB-0 | Create the campaign harness | 5 | passed_after_fix |",
-        "| TMB-1 | Define boundary taxonomy and inventory | 8 | passed_after_fix |",
-        "| TMB-2 | Build the model response black box | 15 | passed_after_fix |",
-        "| TMB-3 | Narrow engine facade ownership | 12 | passed_after_fix |",
-        "| TMB-4 | Harden domain worker boundaries | 10 | passed_after_fix |",
-        "| TMB-5 | Encapsulate state and storage | 10 | passed_after_fix |",
-        "| TMB-6 | Make transport adapter-only | 10 | passed_after_fix |",
-        "| TMB-7 | Make iOS Engine access black-boxed | 10 | passed_after_fix |",
-        "| TMB-8 | Define boundary-local error contracts | 8 | passed_after_fix |",
-        "| TMB-9 | Update docs and README | 6 | passed_after_fix |",
-        "| TMB-10 | Final adversarial closeout | 6 | passed_after_fix |",
-        "`true_modularity_scorecard_stays_formalized`",
-        "`tmb_inventory_status_matches_completed_scorecard`",
-        "`boundary_inventory_covers_tracked_sources`",
-        "`agent_loop_uses_model_responder_boundary`",
-        "`provider_internals_do_not_escape_model_domain`",
-        "`engine_facade_is_the_only_cross_module_engine_api`",
-        "`domain_workers_expose_contracts_not_services`",
-        "`state_stores_are_owner_private`",
-        "`transport_is_adapter_only`",
-        "`ios_ui_uses_repositories_not_engine_transport`",
-        "`boundary_errors_do_not_leak_impl_errors`",
-        "`final_modularity_closeout_is_complete`",
-    ] {
-        assert!(
-            scorecard.contains(required),
-            "TMB scorecard missing required text: {required}"
-        );
-    }
-
-    for required in [
-        "# True Modularity Boundary Evidence Manifest",
-        "Status: **completed**",
-        "Current score: **100/100**",
-        "| TMB-0 | passed_after_fix |",
-        "| TMB-1 | passed_after_fix |",
-        "| TMB-2 | passed_after_fix |",
-        "| TMB-3 | passed_after_fix |",
-        "| TMB-4 | passed_after_fix |",
-        "| TMB-5 | passed_after_fix |",
-        "| TMB-6 | passed_after_fix |",
-        "| TMB-7 | passed_after_fix |",
-        "| TMB-8 | passed_after_fix |",
-        "| TMB-9 | passed_after_fix |",
-        "| TMB-10 | passed_after_fix |",
-        "## TMB-0 Red Proof",
-        "The first invariant run is intentionally red.",
-        "Rust agent loop imports `domains::model::providers` directly",
-        "Provider factory and provider health types cross into server and agent",
-        "After TMB-2, `agent_loop_uses_model_responder_boundary` passes.",
-        "After TMB-3, `engine_facade_is_the_only_cross_module_engine_api` passes.",
-        "After TMB-4, `domain_workers_expose_contracts_not_services` passes.",
-        "After TMB-5, `state_stores_are_owner_private` passes.",
-        "After TMB-6, `transport_is_adapter_only` passes.",
-        "After TMB-7, `ios_ui_uses_repositories_not_engine_transport` passes.",
-        "After TMB-8, `provider_internals_do_not_escape_model_domain` and",
-        "After TMB-9, README, affected Rust module docs, iOS architecture docs, and",
-        "After TMB-10, `final_modularity_closeout_is_complete` passes.",
-    ] {
-        assert!(
-            manifest.contains(required),
-            "TMB evidence manifest missing required text: {required}"
-        );
-    }
-
-    assert!(
-        readme.contains("packages/agent/docs/true-modularity-boundary-scorecard.md")
-            && readme.contains("packages/agent/docs/true-modularity-boundary-evidence-manifest.md")
-            && readme.contains("packages/agent/docs/true-modularity-boundary-inventory.md")
-            && readme.contains("packages/agent/docs/true-modularity-boundary-inventory.tsv")
-            && readme.contains("packages/agent/tests/true_modularity_boundary_invariants.rs"),
-        "README living-doc map must link the active TMB scorecard, evidence manifest, and invariant target"
-    );
-}
-
-#[test]
-fn tmb_inventory_status_matches_completed_scorecard() {
-    let scorecard = read_repo_file("packages/agent/docs/true-modularity-boundary-scorecard.md");
-    let inventory = read_repo_file("packages/agent/docs/true-modularity-boundary-inventory.md");
-
-    let scorecard_status = first_markdown_status(&scorecard, "TMB scorecard");
-    let inventory_status = first_markdown_status(&inventory, "TMB inventory");
-
-    assert_eq!(
-        scorecard_status, "completed",
-        "TMB scorecard must stay closed before comparing inventory status"
-    );
-    assert_eq!(
-        inventory_status, scorecard_status,
-        "TMB inventory status must not contradict the completed scorecard"
-    );
-
-    for forbidden in [
-        "Status: **active**",
-        "active boundary scope",
-        "active composition roots",
-    ] {
-        assert!(
-            !inventory.contains(forbidden),
-            "TMB inventory contains stale active-campaign wording: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn boundary_inventory_covers_tracked_sources() {
-    let inventory = read_repo_file("packages/agent/docs/true-modularity-boundary-inventory.tsv");
-    let mut rows = BTreeMap::new();
-    for line in inventory.lines().skip(1) {
-        let columns: Vec<&str> = line.split('\t').collect();
-        assert!(
-            columns.len() >= 5,
-            "inventory row must have path, language, class, owner, and dependency direction columns: {line}"
-        );
-        rows.insert(columns[0].to_owned(), columns);
-    }
-
-    let tracked_sources = tracked_boundary_sources();
-    let missing: Vec<String> = tracked_sources
-        .iter()
-        .filter(|path| !rows.contains_key(*path))
-        .cloned()
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "boundary inventory must classify every tracked Rust/Swift production source:\n{}",
-        missing.join("\n")
-    );
-
-    for (path, expected_class) in [
-        (
-            "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_module_validation_tests.rs",
-            "test-support",
-        ),
-        (
-            "packages/agent/src/domains/capability/operations/operation_contract/mod.rs",
-            "contract",
-        ),
-        (
-            "packages/agent/src/domains/capability/operations/module_validation.rs",
-            "adapter",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/authority.rs",
-            "implementation",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/contract.rs",
-            "contract",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/mod.rs",
-            "facade",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/projection.rs",
-            "implementation",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/service.rs",
-            "implementation",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/shell_ref_tests.rs",
-            "test-support",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/tests.rs",
-            "test-support",
-        ),
-        (
-            "packages/agent/src/domains/module_validation/validation.rs",
-            "implementation",
-        ),
-        (
-            "packages/agent/src/engine/durability/resources/module_validation_definitions.rs",
-            "implementation",
-        ),
-    ] {
-        let columns = rows
-            .get(path)
-            .unwrap_or_else(|| panic!("TMB inventory missing Slice 23C row: {path}"));
-        assert_eq!(
-            columns[2], expected_class,
-            "TMB inventory row for {path} must keep the Slice 23C class"
-        );
-    }
-
-    let allowed_classes: BTreeSet<&str> = [
-        "facade",
-        "contract",
-        "adapter",
-        "implementation",
-        "composition-root",
-        "test-support",
-        "generated-wire-dto",
-    ]
-    .into_iter()
-    .collect();
-
-    for (path, columns) in rows {
-        assert!(
-            allowed_classes.contains(columns[2]),
-            "inventory row for {path} has unknown class `{}`",
-            columns[2]
-        );
-        assert!(
-            !columns[3].trim().is_empty() && !columns[4].trim().is_empty(),
-            "inventory row for {path} must record owner and dependency direction"
-        );
-    }
-}
 
 #[test]
 fn agent_loop_uses_model_responder_boundary() {
@@ -273,7 +38,7 @@ fn provider_internals_do_not_escape_model_domain() {
         provider_docs.contains(
             "Depended on by: `domains::model::responder`, model routing/catalog code,\n//! and app bootstrap only as the composition/root startup path."
         ),
-        "provider root docs must name the post-TMB dependents without broadening provider-internal access"
+        "provider root docs must name the approved dependents without broadening provider-internal access"
     );
     assert!(
         !provider_docs.contains("Depended on by: the agent loop")
@@ -538,29 +303,6 @@ fn boundary_errors_do_not_leak_impl_errors() {
     );
 }
 
-#[test]
-fn final_modularity_closeout_is_complete() {
-    let scorecard = read_repo_file("packages/agent/docs/true-modularity-boundary-scorecard.md");
-    let manifest =
-        read_repo_file("packages/agent/docs/true-modularity-boundary-evidence-manifest.md");
-
-    for required in [
-        "Current score: **100/100**",
-        "Status: **completed**",
-        "| TMB-10 | Final adversarial closeout | 6 | passed_after_fix |",
-        "Full CI closeout",
-        "scripts/tron ci fmt check clippy test",
-        "scripts/personal-info-guard.sh",
-        "git diff --check",
-        "git status --short",
-    ] {
-        assert!(
-            scorecard.contains(required) || manifest.contains(required),
-            "final TMB closeout missing required evidence marker: {required}"
-        );
-    }
-}
-
 fn path_from_line(line: &str) -> &str {
     line.split_once(':').map_or("", |(path, _)| path)
 }
@@ -586,16 +328,6 @@ fn line_has_identifier(line: &str, identifier: &str) -> bool {
 
 fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
-}
-
-fn first_markdown_status<'a>(content: &'a str, document_name: &str) -> &'a str {
-    content
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("Status: **")
-                .and_then(|status| status.strip_suffix("**"))
-        })
-        .unwrap_or_else(|| panic!("{document_name} must declare a top-level markdown status"))
 }
 
 fn rust_source_lines(root: &str) -> Vec<String> {
