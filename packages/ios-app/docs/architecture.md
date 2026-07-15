@@ -319,7 +319,9 @@ Chat-scoped error routing lives in
 when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
 shell composition; message-list scrolling, pagination, composer, and sheet
 rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
-extensions. View-local async work is owned by `ChatViewTaskCoordinator`: every
+extensions. `TypewriterAnimationState` is the toolbar title's single mutable
+display/task owner, shared by the production view and its focused tests.
+View-local async work is owned by `ChatViewTaskCoordinator`: every
 delayed scroll, reconnect refresh, model prefetch, and deep-link navigation gets
 a session-generation ticket and is cancelled on disappearance so stale work
 cannot mutate a replaced chat view. Transcript mutations go through the

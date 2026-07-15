@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Testable animation state mirroring TypewriterText's logic.
+/// Single mutable owner for `TypewriterText` display and animation state.
 ///
 /// Manages character-by-character delete-then-type animation.
-/// Cancellation at any phase recovers to the target text.
+/// A newer animation or snap cancels stale work so the latest title wins.
 @Observable
 @MainActor
 final class TypewriterAnimationState {
@@ -29,10 +29,7 @@ final class TypewriterAnimationState {
             // Phase 1: Delete current text character by character
             while !displayedText.isEmpty {
                 try? await Task.sleep(for: characterDelay)
-                guard !Task.isCancelled else {
-                    displayedText = newText
-                    return
-                }
+                guard !Task.isCancelled else { return }
                 displayedText = String(displayedText.dropLast())
             }
 
@@ -43,10 +40,7 @@ final class TypewriterAnimationState {
             for (index, char) in newText.enumerated() {
                 if index > 0 {
                     try? await Task.sleep(for: characterDelay)
-                    guard !Task.isCancelled else {
-                        displayedText = newText
-                        return
-                    }
+                    guard !Task.isCancelled else { return }
                 }
                 displayedText.append(char)
             }
