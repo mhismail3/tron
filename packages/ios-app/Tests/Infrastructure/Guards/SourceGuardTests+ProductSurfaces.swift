@@ -9,7 +9,6 @@ extension SourceGuardTests {
         let checkedFiles = [
             "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
             "Sources/Engine/Transport/Clients/AgentClient.swift",
-            "Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
             "Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
