@@ -9,6 +9,7 @@ extension EventStoreManager {
     /// Reconciles local state: adds new sessions, updates existing, removes stale ones.
     func refreshSessionList() async {
         let operationClient = engineClient
+        let processingRevision = processingStateRevision
         let serverOrigin = operationClient.serverOrigin
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
@@ -24,6 +25,7 @@ extension EventStoreManager {
             let localSessionsById = Dictionary(uniqueKeysWithValues: localSessions.map { ($0.id, $0) })
             var sessionsToUpsert: [CachedSession] = []
             sessionsToUpsert.reserveCapacity(serverSessions.count)
+            var authoritativeProcessingSessionIds = Set<String>()
 
             for serverSession in serverSessions {
                 let sessionId = serverSession.sessionId
@@ -31,6 +33,9 @@ extension EventStoreManager {
                 if let existingOrigin = existing?.serverOrigin,
                    existingOrigin != serverOrigin {
                     continue
+                }
+                if serverSession.isRunning != nil {
+                    authoritativeProcessingSessionIds.insert(sessionId)
                 }
 
                 if let existing {
@@ -65,8 +70,13 @@ extension EventStoreManager {
                 )
             }
 
-            loadSessions()
-            seedProcessingStateFromSessions()
+            guard await loadSessionsAfterRefresh(
+                using: operationClient,
+                acceptingServerProcessingStateAt: processingRevision,
+                authoritativeProcessingSessionIds: authoritativeProcessingSessionIds
+            ) else {
+                return
+            }
             logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
         } catch {
             guard acceptsRefreshCompletion(from: operationClient) else { return }

@@ -577,6 +577,16 @@ boundaries: a retired client cannot begin reconciliation, schedule a current
 projection load or retry, or surface an error in the replacement client's UI.
 An origin-scoped SQLite transaction admitted while its client was current may
 finish atomically after a switch, but cannot update the replacement projection.
+An accepted refresh then awaits its exact generation-bound load before
+returning. Its server `isRunning` values replace the processing projection only
+for sessions without a newer live or optimistic override; explicit true and
+false overrides are ordered per session and retired when that refresh
+supersedes them. Partial snapshots, omitted rows, and rows without an
+`isRunning` value retain their overrides. The session array is the sole
+observable processing projection. Overrides and transient activity are
+origin-bound, and activity is captured after database suspension, so a newer
+event or another server cannot leak stale state into the published projection.
+Cancelling a refresh also cancels its exact pending load before it can publish.
 Destructive boundary checks compare RFC 3339 instants at full nanosecond
 precision; Foundation floating-point dates and SQLite `julianday` are not used
 because either can collapse distinct session creation times. Full session sync

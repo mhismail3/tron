@@ -533,6 +533,139 @@ final class CachedSessionTests: XCTestCase {
         await manager.shutdown()
     }
 
+    func testRefreshPublishesServerProcessingUnlessNewerLiveStateWins() async throws {
+        let database = testState.makeDatabase(fileName: "refresh-processing-order.db")
+        try await database.initialize()
+        let client = makeEngineClient(port: 65509)
+        let transport = makeConnectedTransport(port: 65509)
+        client.session = SessionClient(transport: transport)
+        let sessionA = "processing-order-a"
+        let sessionB = "processing-order-b"
+        var cachedA = createTestSession(id: sessionA)
+        var cachedB = createTestSession(id: sessionB)
+        cachedA.serverOrigin = client.serverOrigin
+        cachedB.serverOrigin = client.serverOrigin
+        try await database.sessions.insert(cachedA)
+        try await database.sessions.insert(cachedB)
+
+        var serverIsRunning = [sessionA: true, sessionB: true]
+        var sessionsWithoutProcessingState = Set<String>()
+        var newerIdleSessionId: String?
+        var manager: EventStoreManager!
+        transport.readHandler = { functionId, _, _ in
+            guard functionId.rawValue == "session::list" else {
+                throw EngineConnectionError.invalidResponse
+            }
+            if let newerIdleSessionId {
+                // The repeated false value is still newer than this in-flight snapshot.
+                manager.setSessionProcessing(newerIdleSessionId, isProcessing: false)
+            }
+            return SessionListResult(
+                sessions: [sessionA, sessionB].map { sessionId in
+                    self.makeSessionInfo(
+                        sessionId: sessionId,
+                        title: "Processing order",
+                        workingDirectory: "/processing-order",
+                        isRunning: sessionsWithoutProcessingState.contains(sessionId)
+                            ? nil
+                            : serverIsRunning[sessionId] == true
+                    )
+                },
+                totalCount: 2,
+                hasMore: false,
+                nextCursor: nil,
+                snapshotAsOf: "2026-07-14T12:00:00Z",
+                snapshotCanReconcile: true
+            )
+        }
+        manager = EventStoreManager(
+            eventDB: database,
+            engineClient: client,
+            defaults: testState.defaults
+        )
+
+        manager.setSessions([cachedA, cachedB])
+        manager.loadSessions()
+
+        await manager.refreshSessionList()
+        var processingById = Dictionary(uniqueKeysWithValues: manager.sessions.map { ($0.id, $0.isProcessing == true) })
+        XCTAssertEqual(processingById[sessionA], true)
+        XCTAssertEqual(processingById[sessionB], true)
+
+        serverIsRunning = [sessionA: false, sessionB: false]
+        await manager.refreshSessionList()
+        processingById = Dictionary(uniqueKeysWithValues: manager.sessions.map { ($0.id, $0.isProcessing == true) })
+        XCTAssertEqual(processingById[sessionA], false)
+        XCTAssertEqual(processingById[sessionB], false)
+
+        serverIsRunning = [sessionA: true, sessionB: true]
+        _ = manager.removeSessionLocally(sessionA)
+        newerIdleSessionId = sessionA
+        await manager.refreshSessionList()
+        processingById = Dictionary(uniqueKeysWithValues: manager.sessions.map { ($0.id, $0.isProcessing == true) })
+        XCTAssertEqual(processingById[sessionA], false)
+        XCTAssertEqual(processingById[sessionB], true)
+        let persistedServerSnapshot = try await database.sessions.get(sessionA)
+        XCTAssertEqual(persistedServerSnapshot?.isProcessing, true)
+
+        newerIdleSessionId = nil
+        sessionsWithoutProcessingState = [sessionA]
+        await manager.refreshSessionList()
+        processingById = Dictionary(uniqueKeysWithValues: manager.sessions.map { ($0.id, $0.isProcessing == true) })
+        XCTAssertEqual(processingById[sessionA], false)
+        XCTAssertEqual(processingById[sessionB], true)
+
+        sessionsWithoutProcessingState = []
+        await manager.refreshSessionList()
+        processingById = Dictionary(uniqueKeysWithValues: manager.sessions.map { ($0.id, $0.isProcessing == true) })
+        XCTAssertEqual(processingById[sessionA], true)
+        XCTAssertEqual(processingById[sessionB], true)
+        await manager.shutdown()
+    }
+
+    func testCancellingRefreshLoadPreventsPublication() async throws {
+        let database = testState.makeDatabase(fileName: "cancelled-refresh-load.db")
+        try await database.initialize()
+        let client = makeEngineClient(port: 65508)
+        let sessionId = "cancelled-refresh-load"
+        var cachedSession = createTestSession(id: sessionId)
+        cachedSession.serverOrigin = client.serverOrigin
+        try await database.sessions.insert(cachedSession)
+        let manager = EventStoreManager(
+            eventDB: database,
+            engineClient: client,
+            defaults: testState.defaults
+        )
+
+        let initialLoadPublished = await manager.loadSessionsAfterRefresh(
+            using: client,
+            acceptingServerProcessingStateAt: manager.processingStateRevision,
+            authoritativeProcessingSessionIds: [sessionId]
+        )
+        XCTAssertTrue(initialLoadPublished)
+        XCTAssertEqual(manager.sessions.first?.isProcessing, false)
+
+        cachedSession.isProcessing = true
+        try await database.sessions.insert(cachedSession)
+        let cancelledLoad = Task { @MainActor in
+            await manager.loadSessionsAfterRefresh(
+                using: client,
+                acceptingServerProcessingStateAt: manager.processingStateRevision,
+                authoritativeProcessingSessionIds: [sessionId]
+            )
+        }
+        await Task.yield()
+        cancelledLoad.cancel()
+
+        let cancelledLoadPublished = await cancelledLoad.value
+        XCTAssertFalse(cancelledLoadPublished)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(manager.sessions.first?.isProcessing, false)
+        let persistedServerState = try await database.sessions.get(sessionId)
+        XCTAssertEqual(persistedServerState?.isProcessing, true)
+        await manager.shutdown()
+    }
+
     func testIncrementalSyncKeepsInitiatingClientAndCommitsCompletedPage() async throws {
         let database = testState.makeDatabase(fileName: "captured-incremental-sync.db")
         try await database.initialize()
@@ -791,7 +924,8 @@ final class CachedSessionTests: XCTestCase {
         sessionId: String,
         title: String?,
         workingDirectory: String?,
-        lastUserPrompt: String? = nil
+        lastUserPrompt: String? = nil,
+        isRunning: Bool? = false
     ) -> SessionInfo {
         SessionInfo(
             sessionId: sessionId,
@@ -816,7 +950,7 @@ final class CachedSessionTests: XCTestCase {
             lastAssistantResponse: nil,
             source: nil,
             profile: nil,
-            isRunning: false,
+            isRunning: isRunning,
             activityLines: nil
         )
     }

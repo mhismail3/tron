@@ -139,6 +139,10 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
         "await loadTask?.value",
         "engineClient = client",
         "setupGlobalEventHandlers()",
+        "private var processingOverrides:",
+        "withTaskCancellationHandler",
+        "authoritativeProcessingSessionIds?.contains(sessionId)",
+        "override.revision > $0",
     ] {
         assert!(
             event_store_manager.contains(required),
@@ -156,13 +160,25 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
             "fetchServerSessions",
             "serverSessionIds",
             "eventDB.sessions.getAll()",
+            "authoritativeProcessingSessionIds.insert(sessionId)",
             "mergeSessionData",
             "serverSessionToCached",
             "reconcileServerSnapshot",
-            "loadSessions()",
-            "seedProcessingStateFromSessions()",
+            "loadSessionsAfterRefresh(",
+            "authoritativeProcessingSessionIds: authoritativeProcessingSessionIds",
         ],
     );
+    let event_store_activity = read_repo_file(
+        "packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+SessionActivity.swift",
+    );
+    for forbidden in ["processingSessionIds", "seedProcessingStateFromSessions"] {
+        assert!(
+            !event_store_manager.contains(forbidden)
+                && !event_store_sync.contains(forbidden)
+                && !event_store_activity.contains(forbidden),
+            "EventStoreManager must not retain duplicate processing projection `{forbidden}`"
+        );
+    }
     for required in [
         "max(existing.eventCount, serverInfo.eventCount ?? existing.eventCount)",
         "session.rootEventId = existing.rootEventId",

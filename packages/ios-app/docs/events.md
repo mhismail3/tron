@@ -38,7 +38,12 @@ manager weakly. Client replacement is predecessor-chained—including the first
 load—so rapid A→B→C replacement cannot let events or direct projection loads
 from an older origin overtake the latest lane. Session-list refresh completion
 is separately client-identity fenced before reconciliation, projection loads,
-retry registration, and user-visible errors. Reconnect refresh stays behind
+retry registration, and user-visible errors. The refresh awaits its captured
+load generation; server processing flags seed the published projection unless
+a newer accepted live or optimistic per-session override must be preserved.
+Those origin-bound overrides retain explicit true and false values and retire
+only when a later refresh supplies processing state for that session; partial
+or omitted processing truth cannot erase them. Reconnect refresh stays behind
 `SessionRefreshService`'s single coalescing owner.
 
 Acceptance is the boundary for shutdown semantics: after the lane accepts an

@@ -8,21 +8,9 @@ extension EventStoreManager {
     func setSessionProcessing(_ sessionId: String, isProcessing: Bool) {
         applySessionProcessingState(sessionId, isProcessing: isProcessing)
         if isProcessing {
-            processingSessionIds.insert(sessionId)
             Task { @MainActor [weak self] in
                 await self?.subscribeToProcessingSession(sessionId)
             }
-        }
-    }
-
-    private func applySessionProcessingState(_ sessionId: String, isProcessing: Bool) {
-        if isProcessing {
-            processingSessionIds.insert(sessionId)
-        } else {
-            processingSessionIds.remove(sessionId)
-        }
-        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
-            updateSession(at: index) { $0.isProcessing = isProcessing }
         }
     }
 
@@ -48,17 +36,6 @@ extension EventStoreManager {
                 "Session projection could not subscribe to live events for \(String(sessionId.prefix(12)))...: \(error.localizedDescription)",
                 category: .events
             )
-        }
-    }
-
-    /// Seed processingSessionIds from server-provided isRunning flags on sessions.
-    /// Called after session list refresh to sync processing state from the server.
-    func seedProcessingStateFromSessions() {
-        let runningIds = Set(sessions.filter { $0.isProcessing == true }.map(\.id))
-        processingSessionIds = runningIds
-        let count = runningIds.count
-        if count > 0 {
-            logger.info("Seeded \(count) processing session IDs from server", category: .session)
         }
     }
 

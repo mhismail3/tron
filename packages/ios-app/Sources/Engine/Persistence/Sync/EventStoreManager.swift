@@ -69,22 +69,22 @@ final class EventStoreManager {
 
     // MARK: - Processing State
 
-    var processingSessionIds: Set<String> = [] {
-        didSet {
-            if processingSessionIds != oldValue {
-                #if DEBUG || BETA
-                let added = processingSessionIds.subtracting(oldValue)
-                let removed = oldValue.subtracting(processingSessionIds)
-                if !added.isEmpty {
-                    logger.debug("Processing started for sessions: \(added.map { String($0.prefix(12)) + "..." }.joined(separator: ", "))", category: .session)
-                }
-                if !removed.isEmpty {
-                    logger.debug("Processing completed for sessions: \(removed.map { String($0.prefix(12)) + "..." }.joined(separator: ", "))", category: .session)
-                }
-                #endif
-            }
-        }
+    private struct ProcessingOverrideKey: Hashable {
+        let serverOrigin: String
+        let sessionId: String
     }
+
+    private struct ProcessingOverride {
+        let revision: UInt64
+        let isProcessing: Bool
+    }
+
+    /// Orders server snapshots against transient live or optimistic overrides.
+    /// `sessions` remains the sole observable processing projection.
+    @ObservationIgnored
+    private(set) var processingStateRevision: UInt64 = 0
+    @ObservationIgnored
+    private var processingOverrides: [ProcessingOverrideKey: ProcessingOverride] = [:]
 
     /// Task for global event handling
     @ObservationIgnored
@@ -125,7 +125,11 @@ final class EventStoreManager {
     /// Update the engine client (e.g., when server settings change)
     func updateEngineClient(_ client: EngineClient) {
         guard !isTerminal else { return }
+        let previousOrigin = engineClient.serverOrigin
         engineClient = client
+        if client.serverOrigin != previousOrigin {
+            processingOverrides.removeAll()
+        }
         setupGlobalEventHandlers()
         logger.info("engine client updated to \(client.serverOrigin)", category: .session)
     }
@@ -153,6 +157,7 @@ final class EventStoreManager {
 
     func clearSessions() {
         sessions = []
+        processingOverrides.removeAll()
     }
 
     func setSessions(_ newSessions: [CachedSession]) {
@@ -162,6 +167,33 @@ final class EventStoreManager {
     func updateSession(at index: Int, _ update: (inout CachedSession) -> Void) {
         guard sessions.indices.contains(index) else { return }
         update(&sessions[index])
+    }
+
+    func applySessionProcessingState(_ sessionId: String, isProcessing: Bool) {
+        processingStateRevision &+= 1
+        let key = ProcessingOverrideKey(
+            serverOrigin: engineClient.serverOrigin,
+            sessionId: sessionId
+        )
+        processingOverrides[key] = ProcessingOverride(
+            revision: processingStateRevision,
+            isProcessing: isProcessing
+        )
+
+        let previousValue = sessions.first(where: { $0.id == sessionId })?.isProcessing == true
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            updateSession(at: index) { $0.isProcessing = isProcessing }
+        }
+
+        #if DEBUG || BETA
+        if previousValue != isProcessing {
+            let state = isProcessing ? "started" : "completed"
+            logger.debug(
+                "Processing \(state) for session \(String(sessionId.prefix(12)))...",
+                category: .session
+            )
+        }
+        #endif
     }
 
     func setActiveSessionId(_ sessionId: String?) {
@@ -176,6 +208,12 @@ final class EventStoreManager {
         }
         let session = sessions[index]
         sessions.remove(at: index)
+        processingOverrides.removeValue(
+            forKey: ProcessingOverrideKey(
+                serverOrigin: session.serverOrigin ?? engineClient.serverOrigin,
+                sessionId: sessionId
+            )
+        )
         return (session, index)
     }
 
@@ -195,7 +233,11 @@ final class EventStoreManager {
 
     /// Latest predecessor chain for immediate and debounced database loads.
     @ObservationIgnored
-    private var loadSessionsTask: Task<Void, Never>?
+    private var loadSessionsTask: Task<Bool, Never>?
+    /// An ordinary projection reload chains behind, rather than cancels, an
+    /// accepted server-processing publication.
+    @ObservationIgnored
+    private var loadSessionsTaskAcceptsServerProcessingState = false
     /// Whether this is the first loadSessions call (skip debounce for initialize)
     @ObservationIgnored
     private var hasLoadedSessionsOnce = false
@@ -204,20 +246,71 @@ final class EventStoreManager {
     /// Debounced: rapid calls within 100ms are coalesced into a single execution.
     /// First call (during initialize) executes immediately.
     func loadSessions() {
-        guard !isTerminal else { return }
+        _ = scheduleSessionLoad(
+            using: engineClient,
+            acceptingServerProcessingStateAt: nil,
+            authoritativeProcessingSessionIds: nil
+        )
+    }
+
+    /// Publish a reconciled server snapshot through the owned load lane.
+    /// Returns only after that exact client generation either publishes or retires.
+    func loadSessionsAfterRefresh(
+        using operationClient: EngineClient,
+        acceptingServerProcessingStateAt revision: UInt64,
+        authoritativeProcessingSessionIds: Set<String>
+    ) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard let task = scheduleSessionLoad(
+            using: operationClient,
+            acceptingServerProcessingStateAt: revision,
+            authoritativeProcessingSessionIds: authoritativeProcessingSessionIds
+        ) else {
+            return false
+        }
+        return await withTaskCancellationHandler {
+            let published = await task.value
+            return !Task.isCancelled && published
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func scheduleSessionLoad(
+        using operationClient: EngineClient,
+        acceptingServerProcessingStateAt revision: UInt64?,
+        authoritativeProcessingSessionIds: Set<String>?
+    ) -> Task<Bool, Never>? {
+        guard !isTerminal else { return nil }
         let shouldDebounce = hasLoadedSessionsOnce
         hasLoadedSessionsOnce = true
+        let origin = filterByOrigin ? operationClient.serverOrigin : nil
         let predecessor = loadSessionsTask
-        predecessor?.cancel()
-        loadSessionsTask = Task { @MainActor [weak self] in
-            await predecessor?.value
+        if revision != nil || !loadSessionsTaskAcceptsServerProcessingState {
+            predecessor?.cancel()
+        }
+        let task = Task { @MainActor [weak self] in
+            _ = await predecessor?.value
+            guard !Task.isCancelled else { return false }
             if shouldDebounce {
                 try? await Task.sleep(for: .milliseconds(100))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return false }
             }
-            guard let self, !self.isTerminal else { return }
-            await self._loadSessionsImmediate()
+            guard let self,
+                  !self.isTerminal,
+                  self.engineClient === operationClient else {
+                return false
+            }
+            return await self._loadSessionsImmediate(
+                using: operationClient,
+                origin: origin,
+                acceptingServerProcessingStateAt: revision,
+                authoritativeProcessingSessionIds: authoritativeProcessingSessionIds
+            )
         }
+        loadSessionsTask = task
+        loadSessionsTaskAcceptsServerProcessingState = revision != nil
+        return task
     }
 
     /// Idempotent terminal drain. The outer owner closes the database only
@@ -239,7 +332,7 @@ final class EventStoreManager {
             await globalTask?.value
             await refreshCoordinator.shutdown()
             loadTask?.cancel()
-            await loadTask?.value
+            _ = await loadTask?.value
             activityManager.clearAll()
         }
         shutdownTask = drain
@@ -247,37 +340,77 @@ final class EventStoreManager {
     }
 
     /// Actual loadSessions implementation (called directly or after debounce).
-    private func _loadSessionsImmediate() async {
+    private func _loadSessionsImmediate(
+        using operationClient: EngineClient,
+        origin: String?,
+        acceptingServerProcessingStateAt revision: UInt64?,
+        authoritativeProcessingSessionIds: Set<String>?
+    ) async -> Bool {
         do {
-            // Preserve transient state that isn't persisted to DB
-            var preservedState: [String: (activityLines: [ActivityLine]?, isProcessing: Bool?)] = [:]
-            for session in sessions {
-                preservedState[session.id] = (session.lastActivityLines, session.isProcessing)
+            var loadedSessions = try await eventDB.sessions.getByOrigin(origin).filter { !$0.isArchived }
+            guard !Task.isCancelled,
+                  !isTerminal,
+                  engineClient === operationClient else {
+                return false
             }
 
-            // Filter by current server origin if enabled
-            let origin = filterByOrigin ? currentServerOrigin : nil
-            sessions = try await eventDB.sessions.getByOrigin(origin).filter { !$0.isArchived }
-            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"))", category: .session)
+            // Capture transient projection state after the database suspension so an
+            // accepted live update cannot be replaced by an earlier in-memory snapshot.
+            let preservedActivityLines: [String: [ActivityLine]] = Dictionary(
+                uniqueKeysWithValues: sessions.compactMap { session in
+                    guard origin == nil || session.serverOrigin == origin,
+                          let activityLines = session.lastActivityLines else {
+                        return nil
+                    }
+                    return (session.id, activityLines)
+                }
+            )
 
-            // Restore preserved transient state
-            for i in sessions.indices {
-                let sessionId = sessions[i].id
+            for i in loadedSessions.indices {
+                let sessionId = loadedSessions[i].id
+                if let activityLines = preservedActivityLines[sessionId] {
+                    loadedSessions[i].lastActivityLines = activityLines
+                }
 
-                if let preserved = preservedState[sessionId] {
-                    sessions[i].isProcessing = preserved.isProcessing
-                    if let activityLines = preserved.activityLines {
-                        sessions[i].lastActivityLines = activityLines
+                let rowOrigin = loadedSessions[i].serverOrigin ?? operationClient.serverOrigin
+                let key = ProcessingOverrideKey(serverOrigin: rowOrigin, sessionId: sessionId)
+                if let override = processingOverrides[key] {
+                    let snapshotSuppliedProcessingState =
+                        authoritativeProcessingSessionIds?.contains(sessionId) == true
+                    let overrideIsNewer = revision.map { override.revision > $0 } ?? true
+                    if !snapshotSuppliedProcessingState || overrideIsNewer {
+                        loadedSessions[i].isProcessing = override.isProcessing
                     }
                 }
+            }
 
-                if processingSessionIds.contains(sessionId) {
-                    sessions[i].isProcessing = true
+            guard !Task.isCancelled,
+                  !isTerminal,
+                  engineClient === operationClient else {
+                return false
+            }
+            sessions = loadedSessions
+            if let revision, let authoritativeProcessingSessionIds {
+                processingOverrides = processingOverrides.filter { key, override in
+                    key.serverOrigin != operationClient.serverOrigin ||
+                        !authoritativeProcessingSessionIds.contains(key.sessionId) ||
+                        override.revision > revision
                 }
             }
+            logger.info(
+                "Loaded \(sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"))",
+                category: .session
+            )
+            return true
         } catch {
+            guard !Task.isCancelled,
+                  !isTerminal,
+                  engineClient === operationClient else {
+                return false
+            }
             logger.error("Failed to load sessions: \(error.localizedDescription)", category: .session)
             sessions = []
+            return false
         }
     }
 
