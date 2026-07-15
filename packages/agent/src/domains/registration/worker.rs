@@ -5,7 +5,9 @@
 //! `Deps` type owned by their domain; this context is only used while building
 //! worker/function registrations at startup. `DomainWorkerModule` is an inert
 //! catalog description; startup tasks and shutdown hooks remain under the
-//! registration lifecycle token until complete engine setup succeeds.
+//! registration lifecycle token until complete engine setup succeeds. Domain
+//! builders may return the opaque description, but only the registration owner
+//! can inspect or mutate its worker, function, and stream-topic contents.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -75,9 +77,9 @@ pub(crate) struct DomainFunctionRegistration {
 }
 
 pub(crate) struct DomainWorkerModule {
-    pub(crate) worker: WorkerDefinition,
-    pub(crate) functions: Vec<DomainFunctionRegistration>,
-    pub(crate) stream_topics: &'static [&'static str],
+    pub(super) worker: WorkerDefinition,
+    pub(super) functions: Vec<DomainFunctionRegistration>,
+    pub(super) stream_topics: &'static [&'static str],
 }
 
 pub(crate) fn domain_worker_module(
