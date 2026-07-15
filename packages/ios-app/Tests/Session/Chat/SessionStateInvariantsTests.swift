@@ -56,7 +56,7 @@ final class SessionStateInvariantsTests: XCTestCase {
         XCTAssertFalse(vm.isCompacting)
         XCTAssertEqual(vm.agentPhase, .idle)
         XCTAssertEqual(vm.sequenceHighWaterMark, -1)
-        XCTAssertEqual(vm.eventBufferCount, 0)
+        XCTAssertEqual(vm.eventBuffer.count, 0)
     }
 
     // MARK: - cleanUpStreamingState scope

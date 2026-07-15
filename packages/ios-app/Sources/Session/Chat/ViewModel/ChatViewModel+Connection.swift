@@ -165,19 +165,6 @@ extension ChatViewModel: ConnectionContext {
     // ConnectionContext conformance uses those existing implementations.
 }
 
-// MARK: - Test Support
-
-extension ChatViewModel {
-
-    /// Route an event through the buffer/dispatch pipeline. Test-only entry point.
-    func handleEventForTesting(_ event: ParsedEventV2) {
-        handleEventV2(event)
-    }
-
-    /// Number of events currently buffered during reconstruction.
-    var eventBufferCount: Int { eventBuffer.count }
-}
-
 // MARK: - Connection & Session Management
 
 extension ChatViewModel {
