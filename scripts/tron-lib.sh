@@ -49,54 +49,6 @@ DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 # OAuth
 AUTH_FILE="$TRON_HOME/profiles/auth.json"
 
-tron_version_env_file() {
-    local roots=()
-    [ -n "${PROJECT_DIR:-}" ] && roots+=("$PROJECT_DIR")
-
-    local script_root
-    if script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"; then
-        roots+=("$script_root")
-    fi
-
-    local workspace_root
-    if workspace_root="$(cat "$CONTRIBUTOR_DIR/workspace-path" 2>/dev/null)" && [ -n "$workspace_root" ]; then
-        roots+=("$workspace_root")
-    fi
-
-    local root candidate
-    for root in "${roots[@]}"; do
-        candidate="$root/VERSION.env"
-        if [ -f "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-tron_version_env_value() {
-    local key="$1"
-    local version_file
-    version_file="$(tron_version_env_file)" || return 1
-    awk -F= -v key="$key" '
-        $1 == key {
-            sub(/\r$/, "", $2)
-            print $2
-            found = 1
-            exit
-        }
-        END { if (!found) exit 1 }
-    ' "$version_file"
-}
-
-tron_marketing_version() {
-    local canonical="$1"
-    case "$canonical" in
-        *-*) echo "${canonical%%-*}" ;;
-        *) echo "$canonical" ;;
-    esac
-}
-
 #=============================================================================
 # COLORS & PRINT HELPERS
 #=============================================================================

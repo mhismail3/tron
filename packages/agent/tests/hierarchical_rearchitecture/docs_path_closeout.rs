@@ -20,7 +20,7 @@ fn live_docs_scripts_and_workflows_do_not_claim_old_paths() {
         "scripts/tron-release-notes",
         "scripts/tron-lib.sh",
         "scripts/tron-lib.d/auth.sh",
-        "scripts/tron-lib.d/bundle.sh",
+        "scripts/tron.d/bundle.sh",
         "scripts/tron-lib.d/logs.sh",
         "scripts/tron-lib.d/service.sh",
         "scripts/tron.d/manual-deploy.sh",

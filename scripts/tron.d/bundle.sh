@@ -1,20 +1,34 @@
 #!/bin/bash
-# bundle.sh - sourced by tron-lib.sh; do not execute directly.
+# bundle.sh - workspace bundle construction/signing; sourced by scripts/tron.
+
+bundle_version_env_value() {
+    local key="$1"
+    local version_file="$PROJECT_DIR/VERSION.env"
+    [ -f "$version_file" ] || return 1
+    awk -F= -v key="$key" '
+        $1 == key {
+            sub(/\r$/, "", $2)
+            print $2
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ' "$version_file"
+}
 
 create_app_bundle() {
     local bundle_path="$1"
     local binary_src="$2"
     local canonical_version="${3:-}"
     if [ -z "$canonical_version" ]; then
-        canonical_version="$(tron_version_env_value TRON_VERSION)" || {
+        canonical_version="$(bundle_version_env_value TRON_VERSION)" || {
             print_error "Cannot create app bundle without VERSION.env"
             return 1
         }
     fi
-    local marketing_version
-    marketing_version="$(tron_marketing_version "$canonical_version")"
+    local marketing_version="${canonical_version%%-*}"
     local build_version
-    build_version="$(tron_version_env_value TRON_APPLE_BUILD)" || {
+    build_version="$(bundle_version_env_value TRON_APPLE_BUILD)" || {
         print_error "Cannot create app bundle without TRON_APPLE_BUILD in VERSION.env"
         return 1
     }

@@ -43,13 +43,14 @@ Run these commands from the repo root unless a step says otherwise. The wrapper 
 | Rust server iteration only | `./scripts/tron dev` | Stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` in background mode, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then restores `/Applications/Tron.app` through `--tron-start-server-and-quit` on exit. The internal wrapper command exits nonzero if ServiceManagement loads the helper but `/health` never becomes reachable. Background mode is LaunchAgent-backed so non-interactive agents do not own the server process group. Agent automation should prefer `./scripts/tron dev -bd --json --wait <seconds>` and verify with `./scripts/tron status --json`. |
 | Production DMG release | Push a matching `server-v*` tag and let `.github/workflows/release-mac.yml` run with signing credentials | Builds and verifies `Tron.app`, signs and notarizes the app and DMG, then creates a draft or updates an existing release without changing its publish state; manual dispatch never publishes |
 
-The workspace CLI dispatcher is intentionally small. Command families live in
-`scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
-`scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
-`tron install` and contributor deploy refreshes. `tron setup` instead links the
-workspace entrypoint only when no installed pair owns it, so rerunning
-development setup cannot replace an installed helper/CLI pair. Contributor
-`tron install` and `tron manual-deploy` locally sign and validate their helper
+The workspace CLI dispatcher is intentionally small. Command families and
+contributor bundle/signing live in `scripts/tron.d/`; runtime service/log/auth
+helpers shared by the installed `tron-cli` live in `scripts/tron-lib.d/` and
+are copied beside `tron-lib.sh` during `tron install` and contributor deploy
+refreshes. `tron setup` instead links the workspace entrypoint only when no
+installed pair owns it, so rerunning development setup cannot replace an
+installed helper/CLI pair. Contributor `tron install` and `tron manual-deploy`
+locally sign and validate their helper
 bundles but never notarize them; `.github/workflows/release-mac.yml` is the sole
 owner of distribution signing and notarization.
 

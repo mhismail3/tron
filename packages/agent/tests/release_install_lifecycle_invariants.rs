@@ -597,10 +597,23 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         "the Mac resource must remain the sole helper icon owner"
     );
 
-    let bundle = read_repo_file("scripts/tron-lib.d/bundle.sh");
+    let bundle = read_repo_file("scripts/tron.d/bundle.sh");
     assert!(bundle.contains("cp \"$CONTRIBUTOR_DIR/AppIcon.icns\""));
     assert!(!bundle.contains("$script_dir/AppIcon.icns"));
+    assert!(bundle.contains("\"$PROJECT_DIR/VERSION.env\""));
+    assert!(!bundle.contains("workspace-path"));
     assert!(bundle.contains("print_error \"Code signing failed\""));
+    assert!(!repo_path("scripts/tron-lib.d/bundle.sh").exists());
+    for retired in [
+        "tron_version_env_file",
+        "tron_version_env_value",
+        "tron_marketing_version",
+    ] {
+        assert!(
+            !tron_lib.contains(retired),
+            "installed shared CLI library must not retain workspace bundle helper {retired}"
+        );
+    }
     for path in git_ls_files("scripts") {
         let source = read_repo_file(&path);
         for forbidden in [
@@ -627,7 +640,7 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
             "-c",
             "print_error() { :; }; source \"$1\"; TRON_BUNDLE_ID=com.tron.test; CONTRIBUTOR_DIR=/nonexistent; codesign_bundle /nonexistent",
             "bash",
-            repo_path("scripts/tron-lib.d/bundle.sh")
+            repo_path("scripts/tron.d/bundle.sh")
                 .to_str()
                 .expect("bundle helper path should be utf8"),
         ])
