@@ -6,7 +6,6 @@ pub(crate) struct PromptRunPlan {
     pub(super) orchestrator: Arc<crate::domains::agent::r#loop::orchestrator::core::Orchestrator>,
     pub(super) session_manager:
         Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
-    pub(super) broadcast: Arc<crate::domains::agent::r#loop::EventEmitter>,
     pub(super) responder_factory: Arc<dyn crate::domains::model::responder::ModelResponderFactory>,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(super) shutdown_token: Option<tokio_util::sync::CancellationToken>,

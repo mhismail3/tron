@@ -77,14 +77,12 @@ impl PromptFailureHarness {
         let started_run = orchestrator
             .begin_run(&self.session_id, run_id)
             .expect("run guard");
-        let broadcast = orchestrator.broadcast().clone();
-        let events = broadcast.subscribe();
+        let events = orchestrator.subscribe();
 
         execute_prompt_run(PromptRunPlan {
             started_run,
             orchestrator: orchestrator.clone(),
             session_manager,
-            broadcast,
             responder_factory: Arc::new(CountingFactory {
                 create_calls: self.create_calls.clone(),
             }),

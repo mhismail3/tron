@@ -19,7 +19,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         started_run,
         orchestrator,
         session_manager,
-        broadcast,
         responder_factory,
         event_store,
         shutdown_token,
@@ -33,6 +32,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         request,
         ..
     } = plan;
+    let broadcast = orchestrator.broadcast().clone();
     let PromptRequest {
         session_id,
         prompt,

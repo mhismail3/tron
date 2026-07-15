@@ -14,9 +14,10 @@
 //! reconstruction and the new `message.user` append are prerequisites for
 //! provider construction and model execution;
 //! either persistence failure releases the run without opening a provider
-//! stream. Prompt-run composition owns its event persister; the session cache
-//! retains only reconstructed event-store state and no parallel runtime
-//! service. Completion does not maintain a second final-answer state.
+//! stream. Prompt-run composition derives broadcast access from its authoritative
+//! orchestrator and owns its event persister; the session cache retains only
+//! reconstructed event-store state and no parallel runtime service. Completion
+//! does not maintain a second final-answer state.
 
 use std::sync::atomic::AtomicI64;
 
