@@ -17,11 +17,6 @@ enum ServerPingResult: Sendable, Equatable {
     case unreachable
     case timeout
     case malformedResponse
-
-    var info: ServerInfo? {
-        if case .success(let info) = self { return info }
-        return nil
-    }
 }
 
 /// One-shot `system::ping` over the engine WebSocket protocol. Used by the install step's

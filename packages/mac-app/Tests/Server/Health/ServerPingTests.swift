@@ -83,22 +83,6 @@ struct ServerPingDecodeTests {
 
 @Suite("ServerPingResult")
 struct ServerPingResultTests {
-    @Test("info accessor returns nil for non-success cases")
-    func infoAccessorNilForFailures() {
-        #expect(ServerPingResult.unauthorized.info == nil)
-        #expect(ServerPingResult.unreachable.info == nil)
-        #expect(ServerPingResult.timeout.info == nil)
-        #expect(ServerPingResult.malformedResponse.info == nil)
-    }
-
-    @Test("info accessor returns the wrapped ServerInfo on success")
-    func infoAccessorSuccess() throws {
-        let info = ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: "100.64.0.1", paired: true)
-        let result = ServerPingResult.success(info)
-        #expect(result.info?.version == "0.5.0")
-        #expect(result.info?.port == 9847)
-    }
-
     @Test("equality holds for matching cases")
     func equality() {
         #expect(ServerPingResult.unauthorized == ServerPingResult.unauthorized)
