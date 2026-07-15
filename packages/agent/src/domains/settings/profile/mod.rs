@@ -34,7 +34,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`storage`] | Profile file paths, default seeding, sparse overlay loading, and deep merge |
+//! | [`storage`] | Profile file paths, sparse overlay loading, and deep merge |
 //! | [`store`] | Atomic sparse settings writes and runtime reloads |
 //! | [`types`] | Strict profile schema mirrored by iOS, including Engine-owned local transcription policy |
 //! | `operations` | Canonical settings capability operations |
@@ -52,6 +52,8 @@
 //!
 //! Depends on: core foundation paths and profile defaults.
 //! Depended on by: domain registration, profile runtime, transport handlers, and iOS settings sync.
+//! Constitution startup seeds and repairs managed profile files before the
+//! settings loader reads them.
 //! Loader-specific filesystem work stays under [`storage::loader`]; this root
 //! exposes only narrow path and snapshot-loading facades needed by bootstrap,
 //! health checks, profile runtime, and provider auth setup.

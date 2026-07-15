@@ -2,7 +2,8 @@
 //!
 //! The settings domain stores sparse user overrides under
 //! `~/.tron/profiles/user/profile.toml` and loads managed defaults from the
-//! bundled profile tree. [`loader`] owns filesystem paths, default seeding,
+//! bundled profile tree. Constitution startup seeds and repairs managed profile
+//! files before [`loader`] reads them. The loader owns filesystem paths,
 //! sparse overlay decoding, deep merge, environment overrides, and drift checks
 //! that keep bundled managed defaults aligned with compiled Rust defaults.
 //!
@@ -10,14 +11,12 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`loader`] | Resolve settings paths, seed defaults, load sparse overlays, merge defaults, apply environment overrides, and guard managed-default drift |
+//! | [`loader`] | Resolve settings paths, load sparse overlays, merge defaults, apply environment overrides, and guard managed-default drift |
 //!
 //! ## Entry Points
 //!
 //! - [`loader::load_settings_from_path`] loads an effective settings snapshot
 //!   for a specific sparse profile path.
-//! - [`loader::seed_settings_defaults_for_path`] ensures managed defaults exist
-//!   near a user profile path.
 //! - [`loader::deep_merge`] applies sparse settings overlays.
 //!
 //! ## Dependency Direction
