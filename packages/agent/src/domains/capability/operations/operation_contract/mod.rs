@@ -12,8 +12,9 @@
 //! canonical operation identifiers remain the stable invocation keys. A private
 //! presentation facade routes the typed registry exhaustively into literal
 //! owners aligned with the four input-schema families. Tests require every
-//! operation to have one presentation and one matching schema-family owner,
-//! with representative provider-visible compatibility cases for each family.
+//! operation to have presentation metadata and independently require exactly
+//! one schema owner, with representative provider-visible compatibility cases
+//! for each presentation family.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
