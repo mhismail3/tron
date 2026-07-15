@@ -942,7 +942,7 @@ Prerequisites:
 First-time setup:
 
 ```bash
-./scripts/tron setup       # Check prerequisites, build, stage contributor tooling
+./scripts/tron setup       # Check prerequisites, build, link the workspace CLI
 ./scripts/tron dev -d      # Start the server and initialize runtime state
 ./scripts/tron login       # Authenticate with Claude (OAuth browser flow)
 ```
@@ -1015,7 +1015,7 @@ See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for commit conventions, TDD expe
 
 ## CLI Reference
 
-The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. `scripts/tron.d/manual-deploy.sh::install_runtime_cli_payload` is the single installer for the contributor CLI, shared runtime helpers, signing resources, the Mac-owned helper icon, and workspace delegation path used by setup, install, and manual deploy; install stages that payload before constructing a helper bundle. Contributor-binary recovery has one owner in `scripts/tron-lib.d/service.sh`: it prefers `tron.bak`, then uses a release artifact only when the workspace entrypoint explicitly grants its repository-owned path; the shared library clears inherited recovery input. When adding or renaming a subcommand, update the dispatcher and the owning module together.
+The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. Development setup takes the pair lock and links the workspace entrypoint only when no installed pair exists; rerunning it preserves an installed CLI. `scripts/tron.d/manual-deploy.sh::install_runtime_cli_payload` is the single installer for the contributor CLI, shared runtime helpers, signing resources, the Mac-owned helper icon, and workspace delegation path used by install and manual deploy. It rejects callers that do not own the contributor-pair writer lock. Before either command mutates an installed artifact, the shared service owner atomically publishes an immutable rollback plan: a reinstall/deploy plan contains the prior complete signed helper bundle, CLI payload and resources, optional `deployed-commit`, launchd plist, and CLI entrypoint; a clean install records `no-prior-pair` plus any pre-existing plist or entrypoint. Mutable workspace build output is never accepted as recovery proof. Install, deploy, rollback, uninstall, and setup entrypoint changes are exclusive writers, while installed login and `auth rotate` hold the same OS mutex as readers for their complete Rust-helper calls. A crashed writer leaves `deploy.in-progress` and its published rollback plan, so authentication remains closed until rollback or successful completion even though the OS releases the dead process's mutex automatically. The installed CLI clears inherited Rust-workspace input and uses only its paired helper. When adding or renaming a subcommand, update the dispatcher and the owning module together.
 
 ### Development (workspace only)
 
@@ -1025,7 +1025,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
-| `tron setup` | Check prerequisites, build, and stage contributor tooling. Complete runtime/profile initialization remains owned by first server startup. |
+| `tron setup` | Check prerequisites, build, and link `~/.local/bin/tron` to the workspace entrypoint when no installed pair owns it; an installed CLI is preserved. Complete runtime/profile initialization remains owned by first server startup. |
 
 ### Manual Deployment (workspace only)
 
@@ -1033,7 +1033,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
 | `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check, and fail-closed rollback (`--force` skips confirms; `--ci` is non-interactive). `deployed-commit` and the restart sentinel advance only after `/health` passes. No automatic deploy watcher or shorter deploy alias is retained. |
-| `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
+| `tron install` | Contributor-only helper/CLI pair install for workspace testing. It always rebuilds, publishes a clean-install or prior-pair rollback plan, and holds the writer lock through bundle, payload, plist, symlink, and optional health validation; `deployed-commit` advances only when interactive startup passes `/health`, and remains absent for `--skip-service-start`. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
 
 ### Runtime
@@ -1044,7 +1044,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron stop` | Stop the service |
 | `tron restart` | Stop and start the service through the same health-gated path as `tron start`. |
 | `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
-| `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm); success requires the restored helper to pass `/health` |
+| `tron rollback` | Restore the complete prior contributor installation state (`--yes` skips confirm), or remove an interrupted clean install. A restored prior helper must pass `/health` before its rollback plan is retired. |
 | `tron login` | Authenticate with a provider after the server has initialized auth storage (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token from either the workspace or installed CLI (forces every paired iOS device to pair again) |
 | `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
@@ -2640,7 +2640,7 @@ must be corrected before the updated server can start.
 
 The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types/mod.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
-First server startup has Constitution create the exact empty JSON compatibility sentinel `{}` atomically at mode `0o600`, because active-profile validation requires its declared raw auth store to exist. Startup immediately materializes that sentinel through the secure auth writer into the full schema, including `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Rust writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file. The contributor OAuth helper requires server-initialized storage and sends credentials over stdin to a hidden Rust CLI action that acquires the canonical auth-file lock, re-reads current state, and uses that same secure writer.
+First server startup has Constitution create the exact empty JSON compatibility sentinel `{}` atomically at mode `0o600`, because active-profile validation requires its declared raw auth store to exist. Startup immediately materializes that sentinel through the secure auth writer into the full schema, including `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Rust writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file. The contributor login shell owns only prompts, browser opening, pasted-redirect parsing, and the localhost callback. Hidden Rust CLI actions share the auth domain's provider configuration, PKCE URL construction, token exchange, actual-expiry calculation, canonical auth-file lock, state re-read, and secure writer. Callback completion validates an independent CSRF state; the explicitly user-entered Anthropic code path is marked as manual and cannot synthesize returned state. Authorization codes, state, and verifiers reach completion over stdin rather than process arguments, and the verifier never enters the browser URL. Installed login holds the contributor-pair reader mutex across the entire browser flow. A hidden stdin-only `store-oauth` compatibility action accepts completion from a pre-transaction shell that was already in flight when the helper changed; new flows do not exchange or parse tokens in shell. `/engine` OAuth retains its existing authenticated `flowId`/`code` wire contract and therefore omits an authorization-state parameter rather than emitting one it cannot validate.
 
 OAuth refresh is owned by `domains/auth/credentials/`: Anthropic, OpenAI, and Google refresh paths take a process-local refresh mutex, acquire the auth-file `flock`, re-read `auth.json` after the lock, persist refreshed tokens while holding the lock, and fail the refresh if persistence fails. Model providers receive ephemeral token copies for request execution and do not write durable auth state directly.
 
@@ -3175,11 +3175,11 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 3. Builds the release binary (`cargo build --release`).
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
-6. Installs the contributor-only runtime payload under `~/.tron/internal/run/` before the service stop phase.
+6. Under the deploy lock, atomically publishes the prior signed helper bundle, CLI payload, launchd plist, entrypoint, and commit marker as one immutable rollback plan before replacing any of them.
 7. Leaves complete Tron Home, managed-profile, and secure auth initialization to Rust server startup.
 8. Starts the contributor service and waits for `/health`.
 9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.
-10. If start or health fails, attempts to restore `tron.bak`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, writes `last-deployment.json`, and exits nonzero.
+10. If start or health fails, restores `contributor-pair.bak/`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, writes `last-deployment.json`, and exits nonzero.
 
 ### Install Directory
 
@@ -3220,7 +3220,9 @@ Rust server startup completes the `profiles`, `workspace`, and `internal` roots 
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock
-    |   +-- deploy.lock            Manual deploy concurrency lock
+    |   +-- deploy.lock            Persistent BSD mutex for pair readers/writers
+    |   +-- deploy.in-progress     Writer sentinel; survives a crashed pair update
+    |   +-- contributor-pair.bak/  Immutable signed-bundle/CLI/launch rollback plan during updates
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server

@@ -159,6 +159,7 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
         &oauth_operations,
         &[
             "auth_oauth_begin",
+            "prepare_oauth_flow",
             "flows.retain",
             "OAUTH_FLOW_TTL_SECS",
             "flows.insert",
@@ -167,12 +168,27 @@ fn sol_settings_auth_secrets_lifecycle_is_source_backed() {
             "flows.remove(&flow_id)",
             "flow.created_at.elapsed() >",
             "OAUTH_FLOW_TTL_SECS",
+            "exchange_oauth_code",
+            "write_auth_and_broadcast",
             "auth::oauth_complete",
-            "acquire_auth_file_lock(&auth_path)",
             "save_account_oauth_tokens",
-            "publish_auth_updated",
         ],
     );
+    let oauth_flows = read_repo_file("packages/agent/src/domains/auth/oauth/flows.rs");
+    for required in [
+        "prepare_oauth_flow",
+        "prepare_oauth_flow_with_state",
+        "exchange_oauth_code",
+        "load_google_config",
+        "generate_state",
+        "get_authorization_url_with_state",
+        "exchange_code_for_tokens",
+    ] {
+        assert!(
+            oauth_flows.contains(required),
+            "canonical OAuth provider flow missing `{required}`"
+        );
+    }
     let oauth_mod = read_repo_file("packages/agent/src/domains/auth/oauth/mod.rs");
     assert!(
         oauth_mod.contains("pub(crate) const OAUTH_FLOW_TTL_SECS: u64 = 600"),
@@ -362,6 +378,7 @@ fn server_auth_and_settings_writes_stay_owner_private() {
         "packages/agent/src/app/health/mod.rs",
         "packages/agent/src/domains/auth/credentials/",
         "packages/agent/src/domains/settings/profile/",
+        "packages/agent/src/shared/foundation/constitution.rs",
         "packages/agent/src/shared/foundation/profile/",
     ];
     let offenders = git_ls_files()

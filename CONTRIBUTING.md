@@ -41,7 +41,7 @@ run `tron dev`, the dev binary takes over port 9847 from the prod server until
 you stop it.
 
 ```bash
-# One-time setup (installs LaunchAgent, builds initial binary, etc.).
+# One-time setup (checks prerequisites, builds, and links the workspace CLI).
 scripts/tron setup
 
 # Build and run the dev server in the foreground (takeover mode).

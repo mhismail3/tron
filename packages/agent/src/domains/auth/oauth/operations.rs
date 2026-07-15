@@ -2,11 +2,9 @@
 use super::{OAUTH_FLOW_TTL_SECS, OAUTH_PROVIDERS};
 use crate::domains::auth::Deps;
 use crate::domains::auth::credentials::{
-    ActiveCredential, acquire_auth_file_lock, build_masked_state, map_auth_error,
-    publish_auth_updated, write_auth_and_broadcast,
+    ActiveCredential, map_auth_error, write_auth_and_broadcast,
 };
 use crate::engine::Invocation;
-use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::require_string_param;
 use serde_json::Value;
@@ -18,67 +16,19 @@ pub(crate) async fn auth_oauth_begin(
 ) -> Result<Value, CapabilityError> {
     let provider = require_string_param(Some(payload), "provider")?;
 
-    let (auth_url, verifier_or_state) = match provider.as_str() {
-        "anthropic" => {
-            let pair = crate::domains::auth::credentials::pkce::generate_pkce();
-            let config = crate::domains::auth::credentials::anthropic::default_config();
-            let url =
-                crate::domains::auth::credentials::anthropic::get_authorization_url_with_state(
-                    &config,
-                    &pair.challenge,
-                    Some(&pair.verifier),
-                );
-            (url, pair.verifier)
-        }
-        "openai-codex" => {
-            let pair = crate::domains::auth::credentials::pkce::generate_pkce();
-            let config = crate::domains::auth::credentials::openai::default_config();
-            let url = crate::domains::auth::credentials::openai::get_authorization_url_with_state(
-                &config,
-                &pair.challenge,
-                Some(&pair.verifier),
-            );
-            (url, pair.verifier)
-        }
-        "google" => {
-            let gpa = crate::domains::auth::credentials::storage::get_google_provider_auth(
-                &deps.auth_path,
-            )
-            .map_err(map_auth_error)?;
-            let client_id =
-                gpa.as_ref()
-                    .and_then(|google| google.client_id.clone())
-                    .ok_or_else(|| CapabilityError::InvalidParams {
-                        message: "Google OAuth requires a client_id - configure it in Settings > Providers > Google".into(),
-                    })?;
-            let client_secret = gpa.and_then(|google| google.client_secret);
-
-            let base_cfg = crate::domains::auth::credentials::google::cloud_code_assist_config();
-            let config = crate::domains::auth::credentials::google::GoogleOAuthConfig {
-                oauth: crate::domains::auth::credentials::types::OAuthConfig {
-                    client_id,
-                    client_secret,
-                    ..base_cfg.oauth
-                },
-                ..base_cfg
-            };
-
-            let pair = crate::domains::auth::credentials::pkce::generate_pkce();
-            let url = crate::domains::auth::credentials::google::get_authorization_url(
-                &config,
-                &pair.challenge,
-            );
-            (url, pair.verifier)
-        }
-        _ => {
-            return Err(CapabilityError::InvalidParams {
-                message: format!(
+    let flow = crate::domains::auth::oauth::flows::prepare_oauth_flow(&provider, &deps.auth_path)
+        .map_err(map_auth_error)?
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message: if provider == "google" {
+                "Google OAuth requires a client_id - configure it in Settings > Providers > Google"
+                    .into()
+            } else {
+                format!(
                     "OAuth login supported for: {}. Got: {provider}",
                     OAUTH_PROVIDERS.join(", "),
-                ),
-            });
-        }
-    };
+                )
+            },
+        })?;
 
     let flow_id = uuid::Uuid::now_v7().to_string();
     let mut flows = deps.oauth_flows.lock().await;
@@ -88,7 +38,7 @@ pub(crate) async fn auth_oauth_begin(
     let _ = flows.insert(
         flow_id.clone(),
         crate::domains::auth::oauth::flows::PendingOAuthFlow {
-            verifier: verifier_or_state,
+            verifier: flow.verifier,
             provider,
             created_at: std::time::Instant::now(),
         },
@@ -96,7 +46,7 @@ pub(crate) async fn auth_oauth_begin(
 
     Ok(json!({
         "flowId": flow_id,
-        "authUrl": auth_url,
+        "authUrl": flow.auth_url,
     }))
 }
 
@@ -123,87 +73,38 @@ pub(crate) async fn auth_oauth_complete(
         });
     }
 
-    let tokens = match flow.provider.as_str() {
-        "anthropic" => {
-            let config = crate::domains::auth::credentials::anthropic::default_config();
-            crate::domains::auth::credentials::anthropic::exchange_code_for_tokens(
-                &config,
-                &code,
-                &flow.verifier,
-                Some(&flow.verifier),
-            )
-            .await
-        }
-        "openai-codex" => {
-            let config = crate::domains::auth::credentials::openai::default_config();
-            crate::domains::auth::credentials::openai::exchange_code_for_tokens(
-                &config,
-                &code,
-                &flow.verifier,
-            )
-            .await
-        }
-        "google" => {
-            let gpa = crate::domains::auth::credentials::storage::get_google_provider_auth(
-                &deps.auth_path,
-            )
-            .map_err(map_auth_error)?;
-            let client_id = gpa
-                .as_ref()
-                .and_then(|google| google.client_id.clone())
-                .ok_or_else(|| CapabilityError::Internal {
-                    message: "Google client_id is no longer configured - cannot complete OAuth"
-                        .into(),
-                })?;
-            let client_secret = gpa.and_then(|google| google.client_secret);
-
-            let base_cfg = crate::domains::auth::credentials::google::cloud_code_assist_config();
-            let config = crate::domains::auth::credentials::google::GoogleOAuthConfig {
-                oauth: crate::domains::auth::credentials::types::OAuthConfig {
-                    client_id,
-                    client_secret,
-                    ..base_cfg.oauth
-                },
-                ..base_cfg
-            };
-
-            crate::domains::auth::credentials::google::exchange_code_for_tokens(
-                &config,
-                &code,
-                &flow.verifier,
-            )
-            .await
-        }
-        _ => {
-            return Err(CapabilityError::InvalidParams {
+    let tokens = crate::domains::auth::oauth::flows::exchange_oauth_code(
+        &flow.provider,
+        &deps.auth_path,
+        &code,
+        &flow.verifier,
+        None,
+    )
+    .await
+    .map_err(map_auth_error)?
+    .ok_or_else(|| {
+        if flow.provider == "google" {
+            CapabilityError::Internal {
+                message: "Google client_id is no longer configured - cannot complete OAuth".into(),
+            }
+        } else {
+            CapabilityError::InvalidParams {
                 message: format!("Unsupported OAuth provider: {}", flow.provider),
-            });
+            }
         }
-    }
-    .map_err(map_auth_error)?;
+    })?;
 
-    let auth_path = deps.auth_path.clone();
     let provider_key = flow.provider;
-    let masked_state = run_blocking_task("auth::oauth_complete", move || {
-        let _lock =
-            acquire_auth_file_lock(&auth_path).map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to acquire auth lock: {error}"),
-            })?;
-
+    write_auth_and_broadcast(deps, invocation, "auth::oauth_complete", move |auth_path| {
         crate::domains::auth::credentials::storage::save_account_oauth_tokens(
-            &auth_path,
+            auth_path,
             &provider_key,
             &label,
             &tokens,
         )
-        .map_err(map_auth_error)?;
-
-        build_masked_state(&auth_path).map_err(map_auth_error)
+        .map_err(map_auth_error)
     })
-    .await?;
-
-    publish_auth_updated(deps, invocation, &masked_state).await;
-    Ok(masked_state)
+    .await
 }
 
 pub(crate) async fn auth_rename_account(

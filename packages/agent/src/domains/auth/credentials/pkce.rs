@@ -1,4 +1,4 @@
-//! PKCE (Proof Key for Code Exchange) generation.
+//! PKCE (Proof Key for Code Exchange) and OAuth state generation.
 //!
 //! Used by all OAuth providers for secure authorization code flows.
 
@@ -15,14 +15,22 @@ pub struct PkcePair {
     pub challenge: String,
 }
 
+fn generate_random_token() -> String {
+    URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>())
+}
+
+/// Generate an independent, cryptographically secure OAuth CSRF state.
+pub(crate) fn generate_state() -> String {
+    generate_random_token()
+}
+
 /// Generate a new PKCE verifier/challenge pair.
 ///
 /// The verifier is 32 cryptographically-secure random bytes encoded as
 /// base64url (no padding). The challenge is the SHA-256 hash of the
 /// verifier, also base64url-encoded.
 pub fn generate_pkce() -> PkcePair {
-    let random_bytes: [u8; 32] = rand::random();
-    let verifier = URL_SAFE_NO_PAD.encode(random_bytes);
+    let verifier = generate_random_token();
 
     let mut hasher = Sha256::new();
     hasher.update(verifier.as_bytes());
@@ -100,6 +108,14 @@ mod tests {
         let b = generate_pkce();
         assert_ne!(a.verifier, b.verifier);
         assert_ne!(a.challenge, b.challenge);
+    }
+
+    #[test]
+    fn state_is_independent_from_verifier() {
+        let pair = generate_pkce();
+        let state = generate_state();
+        assert_ne!(state, pair.verifier);
+        assert_eq!(state.len(), 43);
     }
 
     #[test]

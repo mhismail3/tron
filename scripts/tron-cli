@@ -19,6 +19,7 @@ done
 LIB_DIR="$(cd -P "$(dirname "$_SOURCE")" && pwd)"
 
 # Source shared library (always lives alongside this script)
+unset RUST_WORKSPACE
 source "$LIB_DIR/tron-lib.sh"
 
 # Workspace path (recorded by tron install/manual-deploy)

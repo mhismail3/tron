@@ -28,7 +28,7 @@ use crate::transport::runtime::streams::EngineStreamEventPump;
 /// Run either the requested CLI subcommand or the long-running server.
 pub async fn run(args: Cli) -> Result<()> {
     if let Some(ref cmd) = args.command {
-        return run_subcommand(cmd);
+        return run_subcommand(cmd).await;
     }
     run_server(args).await
 }

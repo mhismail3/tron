@@ -108,7 +108,7 @@ async fn refresh_tokens(
     }
 
     let data: TokenResponse = response.json().await.map_err(ProviderError::Http)?;
-    let expires_at = calculate_expires_at(data.expires_in, 0);
+    let expires_at = calculate_expires_at(data.expires_in);
 
     Ok(OAuthTokens {
         access_token: data.access_token,

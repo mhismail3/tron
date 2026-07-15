@@ -15,6 +15,434 @@ wait_for_port_free() {
     return 1
 }
 
+begin_contributor_pair_update() {
+    local operation="${1:-update}"
+    mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")" || return 1
+    if contributor_pair_update_is_owned; then
+        print_error "This process already owns the contributor helper update lock"
+        return 1
+    fi
+
+    # macOS lockf holds the BSD mutex on this shell-owned descriptor. The
+    # operation-tagged sentinel survives process death so readers fail closed
+    # and a different writer cannot reinterpret an incomplete transaction.
+    exec 9>> "$DEPLOY_LOCK_FILE" || return 1
+    local pending=""
+    if ! /usr/bin/lockf -s -t 0 9; then
+        exec 9>&-
+        pending=$(cat "$DEPLOY_UPDATE_FILE" 2>/dev/null || true)
+        if [[ "$pending" =~ ^([^:]+):([0-9]+)$ ]]; then
+            print_error "Another contributor helper update is active (${BASH_REMATCH[1]}, PID: ${BASH_REMATCH[2]})"
+        else
+            print_error "Could not acquire the contributor helper update lock"
+        fi
+        return 1
+    fi
+
+    local backup_dir="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    if ! reconcile_contributor_pair_retirement; then
+        exec 9>&-
+        return 1
+    fi
+    if [ -e "$backup_dir" ] \
+        && [ "$operation" != "rollback" ] \
+        && [ "$operation" != "uninstall" ]; then
+        exec 9>&-
+        print_error "A prior contributor update needs rollback; run: tron rollback --yes"
+        return 1
+    fi
+    if [ "$operation" = "rollback" ] \
+        && ! contributor_pair_backup_is_complete "$backup_dir"; then
+        exec 9>&-
+        print_error "No complete contributor rollback plan found"
+        return 1
+    fi
+
+    if ! printf '%s:%s\n' "$operation" "$$" > "$DEPLOY_UPDATE_FILE"; then
+        exec 9>&-
+        return 1
+    fi
+    CONTRIBUTOR_PAIR_LOCK_OWNER="$$"
+    CONTRIBUTOR_PAIR_LOCK_OPERATION="$operation"
+}
+
+contributor_pair_update_is_owned() {
+    [[ "${CONTRIBUTOR_PAIR_LOCK_OWNER:-}" = "$$" \
+        && -n "${CONTRIBUTOR_PAIR_LOCK_OPERATION:-}" \
+        && "$(cat "$DEPLOY_UPDATE_FILE" 2>/dev/null || true)" \
+            = "${CONTRIBUTOR_PAIR_LOCK_OPERATION}:$$" ]]
+}
+
+begin_contributor_pair_read() {
+    exec 8>> "$DEPLOY_LOCK_FILE" || return 1
+    if ! /usr/bin/lockf -s -t 0 8; then
+        exec 8>&-
+        print_error "Contributor authentication is blocked by a helper/CLI update"
+        return 1
+    fi
+    if [ -f "$DEPLOY_UPDATE_FILE" ] \
+        || [ -e "$CONTRIBUTOR_DIR/contributor-pair.bak" ]; then
+        exec 8>&-
+        print_error "A contributor helper/CLI update needs recovery before authentication"
+        return 1
+    fi
+    CONTRIBUTOR_PAIR_READER_OWNER="$$"
+}
+
+end_contributor_pair_read() {
+    if [ "${CONTRIBUTOR_PAIR_READER_OWNER:-}" != "$$" ]; then
+        print_error "Contributor helper/CLI reader lock is not owned by this process"
+        return 1
+    fi
+    exec 8>&-
+    unset CONTRIBUTOR_PAIR_READER_OWNER
+}
+
+end_contributor_pair_update() {
+    if ! contributor_pair_update_is_owned; then
+        print_error "Contributor helper update lock is not owned by this process"
+        return 1
+    fi
+    rm -f "$DEPLOY_UPDATE_FILE" || return 1
+    local cleanup_status=0
+    reconcile_contributor_pair_retirement || cleanup_status=$?
+    exec 9>&-
+    unset CONTRIBUTOR_PAIR_LOCK_OWNER CONTRIBUTOR_PAIR_LOCK_OPERATION \
+        CONTRIBUTOR_PAIR_RECOVERY_PENDING
+    return "$cleanup_status"
+}
+
+runtime_cli_payload_entries() {
+    printf '%s\n' \
+        tron-cli \
+        tron-lib.sh \
+        tron-lib.d \
+        tron-agent.entitlements \
+        AppIcon.icns \
+        workspace-path \
+        deployed-commit
+}
+
+validate_contributor_bundle() {
+    local bundle="$1"
+    local binary="$bundle/Contents/MacOS/tron"
+    [[ -d "$bundle" && -f "$binary" && -x "$binary" ]] \
+        && file "$binary" 2>/dev/null | grep -q "Mach-O" \
+        && /usr/bin/codesign --verify --deep --strict "$bundle" >/dev/null 2>&1
+}
+
+copy_contributor_path() {
+    /bin/cp -pP "$1" "$2"
+}
+
+contributor_pair_has_runtime_members() {
+    local entry
+    { [ -e "$INSTALLED_BUNDLE" ] || [ -L "$INSTALLED_BUNDLE" ]; } && return 0
+    while IFS= read -r entry; do
+        { [ -e "$CONTRIBUTOR_DIR/$entry" ] \
+            || [ -L "$CONTRIBUTOR_DIR/$entry" ]; } && return 0
+    done < <(runtime_cli_payload_entries)
+    return 1
+}
+
+contributor_pair_is_complete() {
+    [[ -d "$INSTALLED_BUNDLE" \
+        && ! -L "$INSTALLED_BUNDLE" \
+        && -x "$CONTRIBUTOR_DIR/tron-cli" \
+        && ! -L "$CONTRIBUTOR_DIR/tron-cli" \
+        && -f "$CONTRIBUTOR_DIR/tron-lib.sh" \
+        && ! -L "$CONTRIBUTOR_DIR/tron-lib.sh" \
+        && -d "$CONTRIBUTOR_DIR/tron-lib.d" \
+        && ! -L "$CONTRIBUTOR_DIR/tron-lib.d" \
+        && -f "$CONTRIBUTOR_DIR/tron-agent.entitlements" \
+        && ! -L "$CONTRIBUTOR_DIR/tron-agent.entitlements" \
+        && -f "$CONTRIBUTOR_DIR/AppIcon.icns" \
+        && ! -L "$CONTRIBUTOR_DIR/AppIcon.icns" \
+        && -f "$CONTRIBUTOR_DIR/workspace-path" \
+        && ! -L "$CONTRIBUTOR_DIR/workspace-path" \
+        && -f "$PLIST_PATH" \
+        && ! -L "$PLIST_PATH" \
+        && -L "$BIN_DIR/tron" \
+        && "$(readlink "$BIN_DIR/tron" 2>/dev/null || true)" \
+            = "$CONTRIBUTOR_DIR/tron-cli" ]] \
+        && validate_contributor_bundle "$INSTALLED_BUNDLE"
+}
+
+contributor_pair_backup_kind() {
+    local backup_dir="${1:-$CONTRIBUTOR_DIR/contributor-pair.bak}"
+    local kind=""
+    kind=$(cat "$backup_dir/kind" 2>/dev/null || true)
+    case "$kind" in
+        pair|no-prior-pair) printf '%s\n' "$kind" ;;
+        *) return 1 ;;
+    esac
+}
+
+contributor_pair_backup_is_complete() {
+    local backup_dir="${1:-$CONTRIBUTOR_DIR/contributor-pair.bak}"
+    local kind=""
+    kind=$(contributor_pair_backup_kind "$backup_dir") || return 1
+    if [ "$kind" = "no-prior-pair" ]; then
+        local entry
+        if [ -e "$backup_dir/Tron-Deploy.app" ] \
+            || [ -L "$backup_dir/Tron-Deploy.app" ]; then
+            return 1
+        fi
+        while IFS= read -r entry; do
+            if [ -e "$backup_dir/$entry" ] || [ -L "$backup_dir/$entry" ]; then
+                return 1
+            fi
+        done < <(runtime_cli_payload_entries)
+        return 0
+    fi
+    [[ -d "$backup_dir/Tron-Deploy.app" \
+        && ! -L "$backup_dir/Tron-Deploy.app" \
+        && -x "$backup_dir/tron-cli" \
+        && ! -L "$backup_dir/tron-cli" \
+        && -f "$backup_dir/tron-lib.sh" \
+        && ! -L "$backup_dir/tron-lib.sh" \
+        && -d "$backup_dir/tron-lib.d" \
+        && ! -L "$backup_dir/tron-lib.d" \
+        && -f "$backup_dir/tron-agent.entitlements" \
+        && ! -L "$backup_dir/tron-agent.entitlements" \
+        && -f "$backup_dir/AppIcon.icns" \
+        && ! -L "$backup_dir/AppIcon.icns" \
+        && -f "$backup_dir/workspace-path" \
+        && ! -L "$backup_dir/workspace-path" \
+        && -f "$backup_dir/launchd.plist" \
+        && ! -L "$backup_dir/launchd.plist" \
+        && -L "$backup_dir/cli-entrypoint" ]] \
+        && validate_contributor_bundle "$backup_dir/Tron-Deploy.app"
+}
+
+reconcile_contributor_pair_retirement() {
+    local committed="$CONTRIBUTOR_DIR/.contributor-pair.bak.committed"
+    local restored="$CONTRIBUTOR_DIR/.contributor-pair.bak.restored"
+    if [ -e "$committed" ] && [ -e "$restored" ]; then
+        print_error "Conflicting contributor rollback retirement state"
+        return 1
+    fi
+    if [ -e "$committed" ]; then
+        contributor_pair_backup_kind "$committed" >/dev/null \
+            && contributor_pair_is_complete || {
+                print_error "Committed contributor pair is incomplete; recovery remains blocked"
+                return 1
+            }
+        rm -rf "$committed" || return 1
+    fi
+    if [ -e "$restored" ]; then
+        local restored_kind=""
+        restored_kind=$(contributor_pair_backup_kind "$restored") || {
+            print_error "Restored contributor rollback plan is invalid"
+            return 1
+        }
+        if { [ "$restored_kind" = "pair" ] && ! contributor_pair_is_complete; } \
+            || { [ "$restored_kind" = "no-prior-pair" ] \
+                && contributor_pair_has_runtime_members; }; then
+            print_error "Restored contributor state is incomplete; recovery remains blocked"
+            return 1
+        fi
+        rm -rf "$restored" || return 1
+    fi
+}
+
+backup_contributor_pair() {
+    local backup_dir="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    local staging_dir="$CONTRIBUTOR_DIR/.contributor-pair.bak.staging"
+    local kind=""
+    if ! contributor_pair_update_is_owned; then
+        print_error "Backing up the contributor pair requires the helper update lock"
+        return 1
+    fi
+    rm -rf "$staging_dir" || return 1
+    if [ -e "$backup_dir" ]; then
+        print_error "A contributor CLI rollback payload already exists; resolve it before deploying."
+        return 1
+    fi
+    if contributor_pair_is_complete; then
+        kind="pair"
+    elif contributor_pair_has_runtime_members; then
+        print_error "Installed contributor pair is incomplete; refusing to preserve a partial state"
+        return 1
+    else
+        kind="no-prior-pair"
+    fi
+
+    mkdir -p "$staging_dir" || return 1
+    if [ "$kind" = "pair" ]; then
+        local entry
+        while IFS= read -r entry; do
+            if [ -e "$CONTRIBUTOR_DIR/$entry" ]; then
+                if ! ditto "$CONTRIBUTOR_DIR/$entry" "$staging_dir/$entry"; then
+                    rm -rf "$staging_dir"
+                    return 1
+                fi
+            fi
+        done < <(runtime_cli_payload_entries)
+        if ! ditto "$INSTALLED_BUNDLE" "$staging_dir/Tron-Deploy.app" \
+            || ! validate_contributor_bundle "$staging_dir/Tron-Deploy.app"; then
+            rm -rf "$staging_dir"
+            return 1
+        fi
+    fi
+    if [ -e "$PLIST_PATH" ] || [ -L "$PLIST_PATH" ]; then
+        copy_contributor_path "$PLIST_PATH" "$staging_dir/launchd.plist" || return 1
+    fi
+    if [ -e "$BIN_DIR/tron" ] || [ -L "$BIN_DIR/tron" ]; then
+        copy_contributor_path "$BIN_DIR/tron" "$staging_dir/cli-entrypoint" || return 1
+    fi
+    printf '%s\n' "$kind" > "$staging_dir/kind" || return 1
+    contributor_pair_backup_is_complete "$staging_dir" || return 1
+    if ! mv "$staging_dir" "$backup_dir"; then
+        rm -rf "$staging_dir"
+        return 1
+    fi
+}
+
+restore_contributor_bundle() {
+    if ! contributor_pair_update_is_owned; then
+        print_error "Contributor helper rollback requires the helper update lock"
+        return 1
+    fi
+
+    local backup_bundle="$CONTRIBUTOR_DIR/contributor-pair.bak/Tron-Deploy.app"
+    local staging_bundle="$CONTRIBUTOR_DIR/.Tron-Deploy.app.restore"
+    local discard_bundle="$CONTRIBUTOR_DIR/.Tron-Deploy.app.discard"
+    if ! validate_contributor_bundle "$backup_bundle"; then
+        print_error "No complete signed contributor helper bundle found for rollback"
+        return 1
+    fi
+
+    rm -rf "$staging_bundle" "$discard_bundle" || return 1
+    if ! ditto "$backup_bundle" "$staging_bundle" \
+        || ! validate_contributor_bundle "$staging_bundle"; then
+        rm -rf "$staging_bundle"
+        return 1
+    fi
+    if [ -e "$INSTALLED_BUNDLE" ]; then
+        mv "$INSTALLED_BUNDLE" "$discard_bundle" || return 1
+    fi
+    if ! mv "$staging_bundle" "$INSTALLED_BUNDLE"; then
+        [ ! -e "$INSTALLED_BUNDLE" ] && [ -e "$discard_bundle" ] \
+            && mv "$discard_bundle" "$INSTALLED_BUNDLE" 2>/dev/null || true
+        return 1
+    fi
+    rm -rf "$discard_bundle"
+}
+
+restore_contributor_entrypoints() {
+    if ! contributor_pair_update_is_owned; then
+        print_error "Contributor entrypoint rollback requires the helper update lock"
+        return 1
+    fi
+    local backup_dir="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    rm -f "$PLIST_PATH" || return 1
+    if [ -e "$backup_dir/launchd.plist" ] \
+        || [ -L "$backup_dir/launchd.plist" ]; then
+        mkdir -p "$(dirname "$PLIST_PATH")" || return 1
+        copy_contributor_path "$backup_dir/launchd.plist" "$PLIST_PATH" || return 1
+    fi
+    rm -rf "$BIN_DIR/tron" || return 1
+    if [ -e "$backup_dir/cli-entrypoint" ] \
+        || [ -L "$backup_dir/cli-entrypoint" ]; then
+        mkdir -p "$BIN_DIR" || return 1
+        copy_contributor_path "$backup_dir/cli-entrypoint" "$BIN_DIR/tron" || return 1
+    fi
+}
+
+restore_runtime_cli_payload() {
+    if ! contributor_pair_update_is_owned; then
+        print_error "Contributor CLI rollback requires the helper update lock"
+        return 1
+    fi
+    local backup_dir="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    if [[ ! -f "$backup_dir/tron-cli" \
+        || ! -f "$backup_dir/tron-lib.sh" \
+        || ! -d "$backup_dir/tron-lib.d" ]]; then
+        print_error "No complete contributor CLI payload backup found for rollback"
+        return 1
+    fi
+
+    local entry
+    while IFS= read -r entry; do
+        rm -rf "$CONTRIBUTOR_DIR/$entry"
+        if [ -e "$backup_dir/$entry" ]; then
+            ditto "$backup_dir/$entry" "$CONTRIBUTOR_DIR/$entry" || return 1
+        fi
+    done < <(runtime_cli_payload_entries)
+}
+
+remove_contributor_pair_runtime() {
+    if ! contributor_pair_update_is_owned; then
+        print_error "Contributor cleanup requires the helper update lock"
+        return 1
+    fi
+    rm -rf "$INSTALLED_BUNDLE" || return 1
+    local entry
+    while IFS= read -r entry; do
+        rm -rf "$CONTRIBUTOR_DIR/$entry" || return 1
+    done < <(runtime_cli_payload_entries)
+}
+
+restore_contributor_pair_plan() {
+    local kind=""
+    kind=$(contributor_pair_backup_kind) || {
+        print_error "No complete contributor rollback plan found"
+        return 1
+    }
+    case "$kind" in
+        pair)
+            restore_contributor_bundle || return 1
+            restore_runtime_cli_payload || return 1
+            ;;
+        no-prior-pair)
+            remove_contributor_pair_runtime || return 1
+            ;;
+    esac
+    restore_contributor_entrypoints
+}
+
+discard_contributor_pair_backup() {
+    local outcome="${1:-commit}"
+    if ! contributor_pair_update_is_owned; then
+        print_error "Discarding the contributor rollback pair requires the helper update lock"
+        return 1
+    fi
+    local backup_dir="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    local kind=""
+    kind=$(contributor_pair_backup_kind "$backup_dir") || {
+        print_error "No complete contributor rollback plan is ready to retire"
+        return 1
+    }
+    case "$outcome" in
+        commit)
+            contributor_pair_is_complete || {
+                print_error "Contributor pair is incomplete; refusing to commit update"
+                return 1
+            }
+            ;;
+        rollback)
+            if { [ "$kind" = "pair" ] && ! contributor_pair_is_complete; } \
+                || { [ "$kind" = "no-prior-pair" ] \
+                    && contributor_pair_has_runtime_members; }; then
+                print_error "Contributor rollback did not restore the prior state"
+                return 1
+            fi
+            ;;
+        *)
+            print_error "Unknown contributor rollback retirement outcome: $outcome"
+            return 1
+            ;;
+    esac
+    local discard_dir="$CONTRIBUTOR_DIR/.contributor-pair.bak.committed"
+    [ "$outcome" = "rollback" ] \
+        && discard_dir="$CONTRIBUTOR_DIR/.contributor-pair.bak.restored"
+    rm -rf "$discard_dir" || return 1
+    if [ -e "$backup_dir" ]; then
+        mv "$backup_dir" "$discard_dir" || return 1
+    fi
+}
+
 _launchd_target() { echo "gui/$(id -u)/$1"; }
 
 launchd_stop() {
@@ -65,39 +493,53 @@ release_wrapper_available() {
     [ -x "$RELEASE_APP_BINARY" ] && [ -f "$RELEASE_LAUNCH_AGENT_PLIST" ]
 }
 
+finish_contributor_pair_recovery() {
+    if [ "${CONTRIBUTOR_PAIR_RECOVERY_PENDING:-}" != "1" ]; then
+        return 0
+    fi
+    discard_contributor_pair_backup rollback || return 1
+    end_contributor_pair_update
+}
+
 ensure_prod_binary() {
+    if [ -e "$CONTRIBUTOR_DIR/.contributor-pair.bak.committed" ] \
+        || [ -e "$CONTRIBUTOR_DIR/.contributor-pair.bak.restored" ]; then
+        begin_contributor_pair_update recovery || return 1
+        end_contributor_pair_update || return 1
+    fi
+
+    local pair_backup="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    local backup_kind=""
+    backup_kind=$(contributor_pair_backup_kind 2>/dev/null || true)
+    if [ "$backup_kind" = "no-prior-pair" ]; then
+        print_error "A clean contributor install is incomplete. Run: tron rollback --yes"
+        return 1
+    fi
+    local backup_binary="$pair_backup/Tron-Deploy.app/Contents/MacOS/tron"
+    if [ "$backup_kind" = "pair" ] \
+        && [ -f "$backup_binary" ] \
+        && file "$backup_binary" 2>/dev/null | grep -q "Mach-O"; then
+        begin_contributor_pair_update rollback || return 1
+        if [ "$(contributor_pair_backup_kind 2>/dev/null || true)" != "pair" ] \
+            || ! contributor_pair_backup_is_complete "$pair_backup"; then
+            print_error "Contributor rollback plan changed before recovery acquired the writer lock"
+            return 1
+        fi
+        print_status "Restoring from backup..."
+        restore_contributor_pair_plan || return 1
+        CONTRIBUTOR_PAIR_RECOVERY_PENDING=1
+        print_success "Restored from backup; awaiting /health before retiring rollback"
+        return 0
+    fi
+    if [ -f "$DEPLOY_UPDATE_FILE" ]; then
+        print_error "A contributor helper update needs recovery before service start"
+        return 1
+    fi
     if validate_prod_binary; then
         return 0
     fi
 
     print_warning "Contributor service binary is missing or corrupt"
-
-    if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] \
-        && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
-        print_status "Restoring from backup..."
-        if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-            return 1
-        fi
-        codesign_bundle "$INSTALLED_BUNDLE"
-        print_success "Restored from backup"
-        return 0
-    fi
-
-    # The workspace entrypoint explicitly grants this recovery source after
-    # tron-lib.sh clears ambient input. Keep recovery ordering here so sourcing
-    # workspace modules cannot replace the service owner's behavior.
-    if [ -n "$SERVICE_RECOVERY_RELEASE_BINARY" ] \
-        && [ -f "$SERVICE_RECOVERY_RELEASE_BINARY" ] \
-        && file "$SERVICE_RECOVERY_RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O"; then
-        print_status "Restoring from release build..."
-        if ! create_app_bundle "$INSTALLED_BUNDLE" "$SERVICE_RECOVERY_RELEASE_BINARY"; then
-            return 1
-        fi
-        codesign_bundle "$INSTALLED_BUNDLE"
-        print_success "Restored from release build"
-        return 0
-    fi
-
     print_error "No valid contributor service binary found. Run: tron manual-deploy"
     return 1
 }
@@ -125,11 +567,11 @@ service_start() {
         return 1
     fi
 
-    if [ ! -f "$PLIST_PATH" ]; then
-        print_error "Service not installed. Run: tron install"
+    if ! ensure_prod_binary; then
         return 1
     fi
-    if ! ensure_prod_binary; then
+    if [ ! -f "$PLIST_PATH" ]; then
+        print_error "Service not installed. Run: tron install"
         return 1
     fi
 
@@ -137,8 +579,10 @@ service_start() {
     launchd_restart "$PLIST_NAME"
     sleep 2
 
-    if service_is_running; then
-        local pid=$(get_service_pid)
+    if service_is_running && wait_for_service_health 12; then
+        finish_contributor_pair_recovery || return 1
+        local pid
+        pid=$(get_service_pid)
         print_success "Service started (PID: ${pid:-unknown})"
         echo "  Server: http://localhost:$PROD_PORT"
         echo "  Health: http://localhost:$PROD_PORT/health"
@@ -208,6 +652,7 @@ restart_installed_service_after_dev() {
     fi
     launchd_start "$PLIST_NAME"
     if wait_for_service_health "$wait_seconds"; then
+        finish_contributor_pair_recovery || return 1
         local pid
         pid="$(listener_pid_for_port "$PROD_PORT")"
         print_success "Installed service restarted (PID: ${pid:-unknown})"
@@ -482,6 +927,8 @@ cmd_uninstall() {
 
     print_header "Uninstalling Tron"
 
+    begin_contributor_pair_update uninstall || return 1
+
     if service_is_running; then
         print_status "Stopping service..."
         launchd_stop "$PLIST_NAME"
@@ -495,9 +942,17 @@ cmd_uninstall() {
     rm -f "$BIN_DIR/tron"
 
     print_status "Removing contributor runtime artifacts..."
-    rm -rf "$INSTALLED_BUNDLE" "$DEV_BUNDLE" "$CONTRIBUTOR_DIR/tron-lib.d"
+    rm -rf \
+        "$INSTALLED_BUNDLE" \
+        "$DEV_BUNDLE" \
+        "$CONTRIBUTOR_DIR/tron-lib.d" \
+        "$CONTRIBUTOR_DIR/contributor-pair.bak" \
+        "$CONTRIBUTOR_DIR/.contributor-pair.bak.staging" \
+        "$CONTRIBUTOR_DIR/.contributor-pair.bak.committed" \
+        "$CONTRIBUTOR_DIR/.contributor-pair.bak.restored" \
+        "$CONTRIBUTOR_DIR/.Tron-Deploy.app.restore" \
+        "$CONTRIBUTOR_DIR/.Tron-Deploy.app.discard"
     rm -f \
-        "$CONTRIBUTOR_DIR/tron.bak" \
         "$CONTRIBUTOR_DIR/tron-cli" \
         "$CONTRIBUTOR_DIR/tron-lib.sh" \
         "$CONTRIBUTOR_DIR/tron-agent.entitlements" \
@@ -519,6 +974,8 @@ cmd_uninstall() {
         print_status "Removing saved credentials..."
         rm -f "$AUTH_FILE"
     fi
+
+    end_contributor_pair_update || return 1
 
     echo ""
     print_success "Tron uninstalled"
@@ -549,44 +1006,60 @@ cmd_rollback() {
         esac
     done
 
-    print_header "Rolling Back to Previous Binary"
+    print_header "Rolling Back Contributor Update"
 
-    if [ ! -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
-        print_error "No backup found. Cannot rollback."
-        echo "  A backup is only available immediately after a deploy."
+    local pair_backup="$CONTRIBUTOR_DIR/contributor-pair.bak"
+    local backup_kind=""
+    if ! contributor_pair_backup_is_complete "$pair_backup"; then
+        print_error "No complete contributor rollback plan found. Cannot rollback."
+        echo "  A rollback plan exists only while an install or deploy is incomplete."
         exit 1
     fi
+    local backup_identity=""
+    backup_identity=$(stat -f '%d:%i' "$pair_backup") || exit 1
+    backup_kind=$(contributor_pair_backup_kind)
 
     if ! $skip_confirm; then
-        if ! confirm_action "Restore previous binary from backup?"; then
+        if ! confirm_action "Restore the previous contributor installation state?"; then
             print_error "Aborted."
             exit 1
         fi
     fi
 
+    begin_contributor_pair_update rollback || exit 1
+    if [ "$(stat -f '%d:%i' "$pair_backup" 2>/dev/null || true)" \
+        != "$backup_identity" ] \
+        || ! contributor_pair_backup_is_complete "$pair_backup"; then
+        print_error "Contributor rollback plan changed before the writer lock was acquired"
+        exit 1
+    fi
+    backup_kind=$(contributor_pair_backup_kind)
+
     # Stop service
     print_status "Stopping service..."
     launchd_stop "$PLIST_NAME"
-    sleep 1
+    wait_for_port_free "$PROD_PORT" 10 || exit 1
 
     # Restore backup
     print_status "Restoring backup..."
-    if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-        exit 1
-    fi
-    codesign_bundle "$INSTALLED_BUNDLE"
+    restore_contributor_pair_plan || exit 1
 
-    # Start service
-    launchd_start "$PLIST_NAME"
-
-    if service_is_running && wait_for_service_health 12; then
+    if [ "$backup_kind" = "no-prior-pair" ]; then
+        print_success "Removed the incomplete clean installation"
+        discard_contributor_pair_backup rollback || exit 1
+        end_contributor_pair_update || exit 1
+    else
+        launchd_start "$PLIST_NAME"
+        if ! service_is_running || ! wait_for_service_health 12; then
+            print_error "Rollback restored the backup, but the service did not become healthy"
+            write_deployment_result "failed" "Manual rollback did not pass health"
+            exit 1
+        fi
         local pid
         pid="$(get_service_pid)"
         print_success "Service restarted from healthy backup (PID: ${pid:-unknown})"
-    else
-        print_error "Rollback restored the backup, but the service did not become healthy"
-        write_deployment_result "failed" "Manual rollback did not pass health"
-        exit 1
+        discard_contributor_pair_backup rollback || exit 1
+        end_contributor_pair_update || exit 1
     fi
 
     write_deployment_result "rolled_back" "Manual rollback"

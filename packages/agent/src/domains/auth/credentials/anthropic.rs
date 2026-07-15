@@ -98,7 +98,7 @@ pub async fn exchange_code_for_tokens_with_client(
     Ok(OAuthTokens {
         access_token: data.access_token,
         refresh_token: data.refresh_token.unwrap_or_default(),
-        expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
+        expires_at: calculate_expires_at(data.expires_in),
     })
 }
 
@@ -141,7 +141,7 @@ pub async fn refresh_token_with_client(
         refresh_token: data
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string()),
-        expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
+        expires_at: calculate_expires_at(data.expires_in),
     })
 }
 

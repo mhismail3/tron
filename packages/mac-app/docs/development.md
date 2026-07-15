@@ -46,7 +46,9 @@ Run these commands from the repo root unless a step says otherwise. The wrapper 
 The workspace CLI dispatcher is intentionally small. Command families live in
 `scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
 `scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
-`tron install`, `tron setup`, and contributor deploy refreshes.
+`tron install` and contributor deploy refreshes. `tron setup` instead links
+the workspace entrypoint only when no installed pair owns it, so rerunning
+development setup cannot replace an installed helper/CLI pair.
 
 ## Local dev loop
 

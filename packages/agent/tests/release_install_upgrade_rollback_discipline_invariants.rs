@@ -422,62 +422,101 @@ fn contributor_binary_recovery_has_one_service_owner() {
     );
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
     let workspace_cli = read_repo_file("scripts/tron");
-    assert!(tron_lib.contains("SERVICE_RECOVERY_RELEASE_BINARY=\"\""));
-    assert!(workspace_cli.contains("SERVICE_RECOVERY_RELEASE_BINARY=\"$RELEASE_BINARY\""));
+    for (path, source) in [
+        ("scripts/tron-lib.sh", tron_lib.as_str()),
+        ("scripts/tron", workspace_cli.as_str()),
+        ("scripts/tron-lib.d/service.sh", service.as_str()),
+    ] {
+        assert!(
+            !source.contains("SERVICE_RECOVERY_RELEASE_BINARY"),
+            "{path} must not recover an installed helper from an unverifiable workspace build"
+        );
+    }
+    let recovery = service
+        .split_once("ensure_prod_binary() {")
+        .expect("service recovery command missing")
+        .1
+        .split_once("ensure_restartable_prod_server() {")
+        .expect("service recovery owner has no boundary")
+        .0;
+    for required in [
+        "local pair_backup=\"$CONTRIBUTOR_DIR/contributor-pair.bak\"",
+        "local backup_binary=\"$pair_backup/Tron-Deploy.app/Contents/MacOS/tron\"",
+        "begin_contributor_pair_update rollback || return 1",
+        "restore_contributor_pair_plan || return 1",
+        "CONTRIBUTOR_PAIR_RECOVERY_PENDING=1",
+        "No valid contributor service binary found. Run: tron manual-deploy",
+    ] {
+        assert!(
+            recovery.contains(required),
+            "service recovery missing {required}"
+        );
+    }
+    let service_start = service
+        .split_once("service_start() {")
+        .expect("service start command missing")
+        .1
+        .split_once("service_stop() {")
+        .expect("service start owner has no boundary")
+        .0;
     assert_order(
-        &workspace_cli,
-        "source \"$SCRIPT_DIR/tron-lib.sh\"",
-        "SERVICE_RECOVERY_RELEASE_BINARY=\"$RELEASE_BINARY\"",
-        "workspace entrypoint must clear ambient recovery input before granting its artifact",
+        service_start,
+        "ensure_prod_binary",
+        "if [ ! -f \"$PLIST_PATH\" ]; then",
+        "pair recovery must be able to restore a missing launchd plist",
     );
-    assert!(service.contains("[ -n \"$SERVICE_RECOVERY_RELEASE_BINARY\" ]"));
     assert_order(
-        &service,
-        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$CONTRIBUTOR_DIR/tron.bak\"",
-        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$SERVICE_RECOVERY_RELEASE_BINARY\"",
-        "service recovery must prefer the installed backup to a workspace release artifact",
+        service_start,
+        "if service_is_running && wait_for_service_health 12; then",
+        "finish_contributor_pair_recovery || return 1",
+        "recovery must pass health before retiring its rollback plan",
     );
 }
 
 #[test]
 fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     let manual = read_repo_file("scripts/tron.d/manual-deploy.sh");
+    let deploy = manual
+        .split_once("cmd_manual_deploy() {")
+        .expect("manual deploy command missing")
+        .1;
     assert_order(
-        manual
-            .split_once("cmd_manual_deploy() {")
-            .expect("manual deploy command missing")
-            .1,
+        deploy,
+        "backup_contributor_pair",
         "install_runtime_cli_payload",
-        "launchd_stop \"$PLIST_NAME\"",
-        "manual deploy must validate its runtime payload before stopping the service",
+        "manual deploy must publish the prior pair before replacing its CLI",
     );
     assert_order(
-        &manual,
+        deploy,
         "if service_is_running && wait_for_service_health 12; then",
-        "echo \"$new_commit\" > \"$DEPLOYED_COMMIT_FILE\"",
+        "printf '%s\\n' \"$new_commit\" > \"$DEPLOYED_COMMIT_FILE\"",
         "manual deploy must health-check before advancing deployed commit",
     );
     assert_order(
         &manual,
         "if service_is_running && wait_for_service_health 12; then",
-        "write_restart_sentinel \"deploy\" \"$new_commit\" \"$previous_commit\" \"completed\"",
+        "\"deploy\" \"$new_commit\" \"$previous_commit\" \"completed\"",
         "manual deploy must complete sentinel only after health passes",
     );
-    let failure_tail = manual
+    let failure_tail = deploy
         .split_once("Service started but did not pass /health; failing deploy closed.")
         .map(|(_, tail)| tail)
         .expect("manual deploy missing unhealthy-helper failure marker");
-    assert_order(
-        failure_tail,
-        "write_deployment_result \"failed\" \"$failure_reason\"",
-        "return 1",
-        "manual deploy unhealthy helper must return failure after recording failure evidence",
+    assert!(
+        failure_tail.contains("record_failed_contributor_deploy"),
+        "manual deploy unhealthy helper must enter paired rollback handling"
     );
     for required in [
-        "write_restart_sentinel \"deploy\" \"$new_commit\" \"$previous_commit\" \"rolled_back\"",
-        "write_restart_sentinel \"deploy\" \"$new_commit\" \"$previous_commit\" \"failed\"",
+        "record_failed_contributor_deploy()",
+        "\"deploy\" \"$new_commit\" \"$previous_commit\" \"rolled_back\"",
+        "\"deploy\" \"$new_commit\" \"$previous_commit\" \"failed\"",
         "TRON_DEPLOYMENT_COMMIT=\"$new_commit\"",
         "TRON_DEPLOYMENT_PREVIOUS_COMMIT=\"$previous_commit\"",
+        "restore_contributor_pair_plan || return 1",
+        "discard_contributor_pair_backup rollback",
+        "begin_contributor_pair_update manual-deploy || return 1",
+        "end_contributor_pair_update || return 1",
+        "contributor-pair.bak",
     ] {
         assert!(
             manual.contains(required),
@@ -487,16 +526,18 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     assert_order(
         &manual,
         "launchd_stop \"$PLIST_NAME\"",
-        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$CONTRIBUTOR_DIR/tron.bak\"",
+        "restore_contributor_pair_plan || return 1",
         "rollback helper must stop an unhealthy candidate before restoring backup bundle",
     );
     assert_order(
         &manual,
         "wait_for_port_free \"$PROD_PORT\" 10 || return 1",
-        "create_app_bundle \"$INSTALLED_BUNDLE\" \"$CONTRIBUTOR_DIR/tron.bak\"",
+        "restore_contributor_pair_plan || return 1",
         "rollback helper must wait for port 9847 to clear before restoring backup bundle",
     );
     for forbidden in [
+        "tron.bak",
+        "runtime-cli.bak",
         "Health check failed — server may still be starting",
         "Monitor with: tron status",
     ] {
@@ -507,9 +548,49 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     }
 
     let service = read_repo_file("scripts/tron-lib.d/service.sh");
+    for required in [
+        "begin_contributor_pair_update()",
+        "backup_contributor_pair()",
+        "contributor_pair_backup_kind()",
+        "validate_contributor_bundle()",
+        "restore_contributor_bundle()",
+        "restore_contributor_entrypoints()",
+        "restore_runtime_cli_payload()",
+        "restore_contributor_pair_plan()",
+        "end_contributor_pair_update()",
+        "begin_contributor_pair_read()",
+        "end_contributor_pair_read()",
+        "contributor-pair.bak",
+        ".contributor-pair.bak.staging",
+        ".contributor-pair.bak.committed",
+        ".contributor-pair.bak.restored",
+        "no-prior-pair",
+        "mv \"$staging_dir\" \"$backup_dir\"",
+        "mv \"$backup_dir\" \"$discard_dir\"",
+        "/usr/bin/lockf -s -t 0 9",
+        "/usr/bin/lockf -s -t 0 8",
+        "deployed-commit",
+    ] {
+        assert!(
+            service.contains(required),
+            "paired runtime rollback missing {required}"
+        );
+    }
     assert_order(
         &service,
-        "if service_is_running && wait_for_service_health 12; then",
+        "ditto \"$INSTALLED_BUNDLE\" \"$staging_dir/Tron-Deploy.app\"",
+        "mv \"$staging_dir\" \"$backup_dir\"",
+        "the complete signed bundle must be validated before atomic plan publication",
+    );
+    assert_order(
+        &service,
+        "restore_contributor_bundle || return 1",
+        "restore_runtime_cli_payload || return 1",
+        "rollback must restore the signed bundle before exposing its matching CLI",
+    );
+    assert_order(
+        &service,
+        "if ! service_is_running || ! wait_for_service_health 12; then",
         "write_deployment_result \"rolled_back\" \"Manual rollback\"",
         "manual rollback success must be health-gated",
     );
@@ -521,6 +602,14 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
         rollback_failure_tail.contains("exit 1"),
         "manual rollback health failure must exit nonzero after recording evidence"
     );
+    let rollback_success = service
+        .split_once("Service restarted from healthy backup")
+        .map(|(_, tail)| tail)
+        .expect("manual rollback missing healthy-backup success path");
+    assert!(
+        rollback_success.contains("discard_contributor_pair_backup rollback || exit 1"),
+        "manual rollback must atomically retire its pair backup after health passes"
+    );
 }
 
 #[test]
@@ -531,6 +620,7 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         "Rust foundation owners define the complete runtime home/profile layout",
         "RUN_DIR=\"$TRON_HOME/internal/run\"",
         "AUTH_FILE=\"$TRON_HOME/profiles/auth.json\"",
+        "DEPLOY_UPDATE_FILE=\"$RUN_DIR/deploy.in-progress\"",
     ] {
         assert!(tron_lib.contains(required), "tron-lib missing {required}");
     }
@@ -588,12 +678,28 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     );
 
     let auth = read_repo_file("scripts/tron-lib.d/auth.sh");
+    assert!(
+        installed_cli.contains("unset RUST_WORKSPACE"),
+        "installed OAuth must ignore mutable workspace input and use its paired helper"
+    );
+    assert!(
+        !installed_cli.contains("RUST_WORKSPACE=\"${_WORKSPACE_PATH}/packages/agent\""),
+        "installed OAuth must not execute mutable checkout source"
+    );
     for required in [
         "_auth_storage_is_initialized",
         "Start the Tron server once, then retry login",
         "_run_tron_auth_owner",
+        "_run_with_contributor_pair_read",
         "printf '%s\\0'",
-        "| _run_tron_auth_owner store-oauth",
+        "_run_tron_auth_owner begin-oauth anthropic",
+        "_run_tron_auth_owner begin-oauth openai-codex",
+        "| _run_tron_auth_owner complete-oauth",
+        "expected_state",
+        "completion_kind",
+        "begin_contributor_pair_read",
+        "end_contributor_pair_read",
+        "\" 8>&- 9>&- &",
     ] {
         assert!(auth.contains(required), "auth helper missing {required}");
     }
@@ -602,13 +708,31 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         "mv -f \"$tmp_file\" \"$AUTH_FILE\"",
         "--arg accessToken",
         "--arg refreshToken",
+        "openssl rand",
+        "curl -s -w",
+        "ANTHROPIC_OAUTH_",
+        "OPENAI_OAUTH_",
+        "store-oauth",
     ] {
         assert!(
-            !auth.contains(forbidden),
-            "shell auth helper must not mutate auth storage directly: {forbidden}"
+            !auth.contains(forbidden) && !tron_lib.contains(forbidden),
+            "shell auth surface must defer provider protocol and storage: {forbidden}"
         );
     }
-    assert_eq!(manual.matches("install_runtime_cli_payload").count(), 4);
+    assert!(
+        !auth.contains("elif [[ -x \"$DEV_BINARY\" ]]")
+            && auth.contains("installed Tron CLI has no paired helper binary"),
+        "installed auth must use only its paired helper binary"
+    );
+    let rotate = auth
+        .split_once("cmd_auth_rotate() {")
+        .expect("auth rotate command missing")
+        .1;
+    assert!(
+        rotate.contains("_run_with_contributor_pair_read _run_tron_auth_owner rotate"),
+        "installed auth rotation must hold the pair reader mutex while invoking Rust"
+    );
+    assert_eq!(manual.matches("install_runtime_cli_payload").count(), 3);
     assert_eq!(manual.matches("tron-cli,tron-lib.sh,tron-agent").count(), 1);
     assert_eq!(manual.matches("workspace-path").count(), 1);
     assert!(manual.contains("cp \"$PROJECT_DIR/packages/mac-app/Sources/Resources/AppIcon.icns\""));
@@ -617,11 +741,86 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
         .split_once("cmd_install() {")
         .expect("install command missing")
         .1;
+    assert!(
+        !install.contains("prebuilt: $RELEASE_BINARY"),
+        "install must not pair current shell sources with an unverified prebuilt helper"
+    );
+    assert_order(
+        install,
+        "build_rust",
+        "begin_contributor_pair_update",
+        "install must build the helper from current source before acquiring its pair lock",
+    );
+    assert_order(
+        install,
+        "begin_contributor_pair_update",
+        "backup_contributor_pair",
+        "install must acquire the pair lock before publishing its rollback plan",
+    );
+    assert_order(
+        install,
+        "backup_contributor_pair",
+        "install_runtime_cli_payload",
+        "install must publish a rollback plan before replacing its runtime payload",
+    );
     assert_order(
         install,
         "install_runtime_cli_payload",
         "create_app_bundle \"$INSTALLED_BUNDLE\" \"$RELEASE_BINARY\"",
         "clean installs must stage the required helper icon before bundle construction",
+    );
+    assert_order(
+        install,
+        "wait_for_service_health 12",
+        "printf '%s\\n' \"$current_commit\" > \"$DEPLOYED_COMMIT_FILE\"",
+        "install must health-gate its deployed commit marker",
+    );
+    let committed_install = install
+        .split_once("printf '%s\\n' \"$current_commit\" > \"$DEPLOYED_COMMIT_FILE\"")
+        .map(|(_, tail)| tail)
+        .expect("install must record its durable commit marker");
+    assert!(
+        committed_install.contains("end_contributor_pair_update || return 1"),
+        "install must release the pair lock only after its durable commit marker"
+    );
+    assert_order(
+        install,
+        "discard_contributor_pair_backup || return 1",
+        "end_contributor_pair_update || return 1",
+        "install must retire its validated rollback plan before releasing readers",
+    );
+    let setup = manual
+        .split_once("cmd_setup() {")
+        .expect("setup command missing")
+        .1;
+    for required in [
+        "begin_contributor_pair_update setup",
+        "if contributor_pair_is_complete; then",
+        "Preserved installed CLI",
+        "ln -sf \"$SCRIPT_DIR/tron\" \"$BIN_DIR/tron\"",
+        "end_contributor_pair_update",
+    ] {
+        assert!(setup.contains(required), "setup path missing {required}");
+    }
+    assert_order(
+        setup,
+        "begin_contributor_pair_update setup",
+        "ln -sf \"$SCRIPT_DIR/tron\" \"$BIN_DIR/tron\"",
+        "setup must lock the shared entrypoint before linking workspace source",
+    );
+    assert!(
+        !setup.contains("install_runtime_cli_payload"),
+        "workspace setup must not replace the installed helper/CLI pair"
+    );
+    let installer = manual
+        .split_once("install_runtime_cli_payload() {")
+        .expect("runtime CLI installer missing")
+        .1;
+    assert_order(
+        installer,
+        "contributor_pair_update_is_owned",
+        "cp \"$SCRIPT_DIR\"/{tron-cli,tron-lib.sh,tron-agent.entitlements}",
+        "the runtime CLI installer must reject unlocked callers",
     );
     assert!(
         !repo_path("scripts/AppIcon.icns").exists(),

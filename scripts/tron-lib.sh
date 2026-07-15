@@ -21,6 +21,7 @@ RUN_DIR="$TRON_HOME/internal/run"
 USER_PROFILE_FILE="$TRON_HOME/profiles/user/profile.toml"
 CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
+DEPLOY_UPDATE_FILE="$RUN_DIR/deploy.in-progress"
 INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
 DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"
@@ -53,21 +54,6 @@ DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 
 # OAuth
 AUTH_FILE="$TRON_HOME/profiles/auth.json"
-
-# Anthropic OAuth
-ANTHROPIC_OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-ANTHROPIC_OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
-ANTHROPIC_OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
-ANTHROPIC_OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
-ANTHROPIC_OAUTH_SCOPES="org:create_api_key user:profile user:inference"
-
-# OpenAI OAuth
-OPENAI_OAUTH_CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann"
-OPENAI_OAUTH_AUTH_ENDPOINT="https://auth.openai.com/oauth/authorize"
-OPENAI_OAUTH_TOKEN_ENDPOINT="https://auth.openai.com/oauth/token"
-OPENAI_OAUTH_REDIRECT_URI="http://localhost:1455/auth/callback"
-OPENAI_OAUTH_SCOPES="openid profile email offline_access"
-OPENAI_OAUTH_PORT=1455
 
 tron_version_env_file() {
     local roots=()
@@ -192,10 +178,6 @@ clear_user_profile_settings() {
 #=============================================================================
 # COMMAND MODULES
 #=============================================================================
-
-# Clear ambient input before service modules are loaded. The workspace
-# entrypoint explicitly grants its release artifact as a recovery source.
-SERVICE_RECOVERY_RELEASE_BINARY=""
 
 TRON_LIB_MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tron-lib.d"
 for tron_lib_module in "$TRON_LIB_MODULE_DIR"/*.sh; do
