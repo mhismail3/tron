@@ -92,7 +92,7 @@ scripts/tron dev --background   # start in the background
 scripts/tron dev --stop         # stop development takeover
 scripts/tron status --json      # inspect the active server
 scripts/tron logs               # query bounded local logs
-scripts/tron ci                 # run the complete repository validation
+scripts/tron ci                 # run full local Rust validation
 ```
 
 Build the iOS app:
@@ -128,16 +128,6 @@ scripts/personal-info-guard.sh
 GitHub Actions runs the same warning-denied Rust path plus iOS and Mac validation
 on `main`. The required branch check is `CI summary`.
 
-## Repository
-
-```text
-packages/
-  agent/      Rust server and engine
-  ios-app/    SwiftUI iPhone and iPad client
-  mac-app/    SwiftUI Mac wrapper and server installer
-scripts/      Development, validation, version, and release tooling
-```
-
 ## Documentation
 
 Start with the document closest to the work:
@@ -152,11 +142,11 @@ Start with the document closest to the work:
   [development guide](packages/ios-app/docs/development.md).
 - [Mac architecture](packages/mac-app/docs/architecture.md) and
   [development guide](packages/mac-app/docs/development.md).
-- [Capability ownership metadata](packages/agent/src/domains/capability/operations/operation_contract/metadata.rs)
-  and the [dynamic replacement contract](packages/agent/docs/capability-dynamic-replacement-scorecard.md).
+- [Capability operation contracts](packages/agent/src/domains/capability/operations/operation_contract/mod.rs)
+  and their [ownership metadata](packages/agent/src/domains/capability/operations/operation_contract/metadata.rs).
 
-The root README intentionally stays short. Detailed catalogs and audit evidence
-belong with their owning source or scorecard rather than on the project front
+The root README intentionally stays short. Detailed contracts belong with
+their owning source or technical reference rather than on the project front
 page.
 
 ## Project Rules

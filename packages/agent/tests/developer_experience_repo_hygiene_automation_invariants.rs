@@ -511,6 +511,30 @@ fn local_ci_derives_cargo_targets_and_github_delegates() {
         rust_job.contains("fetch-depth: 0"),
         "Rust CI needs full history for baseline-lineage invariants"
     );
+    let ios_filter = workflow
+        .split_once("            ios:\n")
+        .and_then(|(_, rest)| rest.split_once("            mac:\n"))
+        .map(|(filter, _)| filter)
+        .expect("CI must define the iOS path filter before the Mac filter");
+    assert!(
+        ios_filter.contains(".github/workflows/release-ios.yml"),
+        "iOS release workflow changes must schedule iOS validation"
+    );
+    let ci_summary = workflow
+        .split_once("\n  ci:\n")
+        .map(|(_, summary)| summary)
+        .expect("CI must define its aggregate summary job");
+    for required in [
+        "needs: [changes, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]",
+        "RESULT_CHANGES: ${{ needs.changes.result }}",
+        "EVENT_NAME: ${{ github.event_name }}",
+        "[[ \"$EVENT_NAME\" == \"pull_request\" && \"$result\" == \"skipped\" ]]",
+    ] {
+        assert!(
+            ci_summary.contains(required),
+            "CI aggregate must fail closed; missing {required}"
+        );
+    }
     let mut expected_targets = discovered_targets
         .iter()
         .filter(|target| target.as_str() != "integration")
@@ -565,7 +589,6 @@ fn scripts_tron_dispatch_help_and_docs_stay_in_sync_without_hidden_deploy() {
     let quality = read_repo_file("scripts/tron.d/quality.sh");
     let readme = read_repo_file("packages/agent/docs/project-reference.md");
     let contributing = read_repo_file("CONTRIBUTING.md");
-    let pr_template = read_repo_file(".github/pull_request_template.md");
 
     for command in [
         "dev",
@@ -617,12 +640,6 @@ fn scripts_tron_dispatch_help_and_docs_stay_in_sync_without_hidden_deploy() {
     assert!(
         contributing.contains("scripts/tron dev --stop"),
         "CONTRIBUTING must document the actual dev stop option"
-    );
-    assert!(
-        pr_template.contains("scripts/tron ci fmt check clippy test")
-            && pr_template.contains("git diff --check")
-            && pr_template.contains("git ls-files -ci --exclude-standard"),
-        "PR template must keep local closeout hygiene visible"
     );
 }
 

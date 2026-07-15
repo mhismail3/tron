@@ -9,7 +9,7 @@ exactly what you need to make a green PR.
 git clone <repository-url>
 cd tron
 scripts/install-hooks.sh                                           # one-time
-cd packages/agent && cargo check && cargo test -- --quiet          # baseline
+scripts/tron ci test                                               # Rust baseline
 ```
 
 Open a PR against `main`. CI always runs the personal-info/version guards and
@@ -24,7 +24,7 @@ progressive-disclosure docs drift fast.
 packages/
   agent/      Rust server (cargo workspace member)
   ios-app/    SwiftUI iOS app (XcodeGen)
-  mac-app/    SwiftUI macOS wrapper (lands in Phase 5)
+  mac-app/    SwiftUI macOS wrapper and server installer
 scripts/      Bash entrypoints — `tron`, `install-hooks.sh`, `personal-info-guard.sh`
 ```
 
@@ -105,48 +105,42 @@ failed packaging, empty images, or images without the wrapper, helper, and
 
 ## Testing
 
-Project rule: **code, tests, and docs ship together**. Every PR that adds or
-changes behavior must include the corresponding tests in the same commit. We
-work test-first whenever practical — write the failing test, then make it pass.
+Project rule: **code, tests, and docs ship together**. Reuse existing tests for
+the changed owner; add or update tests when behavior changes or a genuine
+coverage gap exists.
 
 | Surface | Command |
 |---------|---------|
-| Rust agent | `cd packages/agent && cargo check && cargo test -- --quiet` |
+| Rust agent | `scripts/tron ci test` |
 | iOS app | `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` |
 | Personal-info guard | `scripts/personal-info-guard.sh` |
-| All-in-one (workspace only) | `scripts/tron ci` |
+| Rust commit milestone | `scripts/tron ci fmt check clippy test` |
 
 CI runs `scripts/tron ci fmt`, `check`, `clippy`, and `test` as its one Rust
 quality path for every repository change. Cargo's default auto-discovery of
 top-level `packages/agent/tests/*.rs` files owns the integration-target fact
 set. The test command derives that set from the same source layout, runs each
 target once in deterministic order, and reserves `integration` for the final
-serial invocation. The DX repository invariant compares the derived schedule
-with Cargo and verifies GitHub delegates to this local owner. iOS and Mac jobs
-only run for their package paths, relevant labels, or
-full validation on `main` and manual dispatch (macOS minutes are ~10× the cost
-of Linux minutes). The Rust job checks out full history because accepted
-baseline invariants verify commit ancestry. `CI summary` is the required
-mainline check.
-
-Repository invariants must not depend on developer-local branch refs. Historical
-or quarantined branches belong in tracked evidence with immutable commit hashes;
-only commits reachable from the checked-out repository may be queried at test
-time.
+serial invocation. The repository CI test compares that schedule with Cargo
+and verifies GitHub delegates to this local owner. On pull requests, iOS and
+Mac jobs run for their package paths, their release workflows, or relevant
+labels. Both run on `main` and manual dispatch. `CI summary` requires successful
+change detection and all unconditional jobs; it accepts a skipped client job
+only on a successfully path-filtered pull request.
 
 ## Commits
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/) loosely:
 
 ```
-feat(rpc): add system.checkForUpdates handler
-fix(ios-connection): resume backoff after foreground transition
-docs(readme): refresh RPC API table
-chore(ci): bump actions/checkout to v4
+feat(capability): add bounded workspace search
+fix(events): preserve session ownership during reconstruction
+docs(storage): clarify resource cleanup ownership
+ci: fail closed when path detection fails
 ```
 
 Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `style`.
-Common scopes mirror the touched module (`rpc`, `events`, `ios-onboarding`,
+Common scopes mirror the touched module (`capability`, `events`, `ios-session`,
 `mac-wizard`, `scripts`, `cargo`).
 
 The pre-commit hook (`scripts/install-hooks.sh`) runs Rust formatting check
@@ -185,9 +179,8 @@ into every session) or `~/.tron/memory/rules/`. Skill-owned secrets go through
 the `vault` skill at `~/.tron/workspace/vault/`; Tron-owned provider auth lives
 in `~/.tron/profiles/auth.json`. Never paste secrets anywhere in the tree.
 
-If you legitimately need to write your username (e.g. as a test fixture), add
-your file path to the allowlist in `scripts/personal-info-guard.sh` AND
-explain why in the same commit.
+Tests that need identity-shaped data must use synthetic, nonpersonal fixtures;
+personal literals are not allowlisted into the repository.
 
 ## Documentation
 

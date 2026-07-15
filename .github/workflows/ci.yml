@@ -1,13 +1,14 @@
 # Continuous Integration
 #
-# Six workloads, two cost tiers:
+# Six validation workloads, plus change detection and one aggregate gate:
 #   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
 #   - version-drift:       ubuntu, ~10s, validates VERSION.env mirrors.
 #   - workflow-lint:       ubuntu, validates every Actions workflow.
 #   - rust:                ubuntu (1x), runs the canonical `scripts/tron ci`
 #                          checks for every repository change.
-#   - ios:                 macos (10x), runs when packages/ios-app/** changes,
-#                          or for every non-PR full validation.
+#   - ios:                 macos (10x), runs when packages/ios-app/** or its
+#                          release workflow changes, or for every non-PR full
+#                          validation.
 #   - mac:                 macos (10x), runs when packages/mac-app/** or
 #                          packages/agent/** changes (the Rust binary is
 #                          embedded in the Mac app bundle), or for every
@@ -62,6 +63,7 @@ jobs:
             ios:
               - 'packages/ios-app/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release-ios.yml'
             mac:
               - 'packages/agent/**'
               - 'packages/mac-app/**'
@@ -73,9 +75,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Need full history so `git grep` sees everything, not just the PR diff.
-          fetch-depth: 0
       - name: Run personal-info-guard
         run: ./scripts/personal-info-guard.sh
 
@@ -175,9 +174,8 @@ jobs:
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60
 
-      # NOTE: destination uses `OS=latest` and a generic `iPhone` family so
-      # the test job survives Xcode/Simulator upgrades. The user's local
-      # machine targets `iPhone 17 Pro` specifically; CI is more permissive.
+      # Keep the runtime current with `OS=latest`; the runner must provide the
+      # same pinned iPhone 17 Pro device named in contributor commands.
       - name: xcodebuild test
         run: |
           set -o pipefail
@@ -342,16 +340,17 @@ jobs:
           hdiutil detach "$MOUNT_POINT"
           trap - EXIT
 
-  # Aggregate gate — the main ruleset points at this single check.
-  # Adding a new required job? List it under `needs:` here too AND add a
-  # corresponding line in the script body (skipped jobs from path-gating
-  # count as success).
+  # Aggregate gate — the main ruleset points at this single check. Client jobs
+  # may be skipped only when a successful PR path filter proves they are
+  # untouched; pushes and manual runs require both client jobs to succeed.
   ci:
     name: CI summary
     runs-on: ubuntu-latest
-    needs: [personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
+    needs: [changes, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
     if: always()
     env:
+      EVENT_NAME: ${{ github.event_name }}
+      RESULT_CHANGES: ${{ needs.changes.result }}
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
       RESULT_VERSION: ${{ needs.version-drift.result }}
       RESULT_WORKFLOW_LINT: ${{ needs.workflow-lint.result }}
@@ -362,26 +361,19 @@ jobs:
       - name: Verify all required jobs passed
         run: |
           fail=0
-          # personal-info-guard never path-gates — must be success.
-          if [[ "$RESULT_GUARD" != "success" ]]; then
-            echo "::error::personal-info-guard: $RESULT_GUARD"; fail=1
-          fi
-          if [[ "$RESULT_VERSION" != "success" ]]; then
-            echo "::error::version-drift: $RESULT_VERSION"; fail=1
-          fi
-          if [[ "$RESULT_WORKFLOW_LINT" != "success" ]]; then
-            echo "::error::workflow-lint: $RESULT_WORKFLOW_LINT"; fail=1
-          fi
-          if [[ "$RESULT_RUST" != "success" ]]; then
-            echo "::error::rust: $RESULT_RUST"; fail=1
-          fi
-          # iOS and Mac may be `skipped` by the PR path filter.
-          for name in IOS MAC; do
+          for name in CHANGES GUARD VERSION WORKFLOW_LINT RUST; do
             var="RESULT_$name"
             result="${!var}"
-            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+            if [[ "$result" != "success" ]]; then
               echo "::error::$name job: $result"; fail=1
             fi
           done
+          for name in IOS MAC; do
+            var="RESULT_$name"
+            result="${!var}"
+            [[ "$result" == "success" ]] && continue
+            [[ "$EVENT_NAME" == "pull_request" && "$result" == "skipped" ]] && continue
+            echo "::error::$name job: $result"; fail=1
+          done
           if [[ $fail -ne 0 ]]; then exit 1; fi
-          echo "All required jobs passed (or skipped via path filter)."
+          echo "All required jobs passed."

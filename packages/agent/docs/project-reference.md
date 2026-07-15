@@ -3356,13 +3356,13 @@ Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_I
 ### Rust Tests
 
 ```bash
+scripts/tron ci test                                    # Owned full Rust schedule
 cd packages/agent
-cargo test                   # Full suite (single `tron` crate)
-cargo test paths::           # Filter by module path
-cargo test --quiet           # Quiet output
+cargo test --lib paths::                                # Focused unit-test filter
+cargo test --test db_path_guard -- --nocapture          # Focused integration target
 ```
 
-The agent is a single `tron` crate, so `cargo test` runs everything: library unit tests, app/bootstrap tests, integration tests, doc tests, and static gates. Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
+The agent is a single `tron` crate. The repository-owned schedule runs its library and binary tests serially, then executes every top-level integration target discovered from `packages/agent/tests/*.rs`, with the process-global `integration` target last. Test counts are intentionally not hardcoded here because they drift quickly.
 
 For repository CI, Cargo's default auto-discovery of top-level
 `packages/agent/tests/*.rs` files owns the integration-target fact set.
@@ -3384,24 +3384,19 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 ### CI
 
 ```bash
-tron ci                      # Run every check (fmt, check, clippy, test, bench, doc)
-tron ci fmt check            # Subset: formatting + compilation
-tron ci clippy test          # Subset: linting + tests
+scripts/tron ci                      # Run every Rust check (fmt, check, clippy, test, bench, doc)
+scripts/tron ci fmt check            # Subset: formatting + compilation
+scripts/tron ci clippy test          # Subset: linting + tests
 ```
 
-`tron ci test` runs Rust lib/bin tests serially first, then derives and executes
+`scripts/tron ci test` runs Rust lib/bin tests serially first, then derives and executes
 each top-level Cargo integration target sequentially and fail-fast. The
 `integration` target runs last with one test thread. GitHub delegates to this
 command instead of maintaining a second target list, and runs the Rust quality
 path for every repository change because integration targets may inspect code,
-docs, scripts, workflows, and client source.
-
-Before restoring any feature from the primitive baseline feature index, the
-feature slice must satisfy the BPRC pre-restoration entry contract: worker or
-module owner, function/trigger contracts, resource/event schemas, authority
-policy, iOS parity decision, tests, docs, migration and retention policy,
-rollback strategy, and proof that the change is not a hardcoded harness
-expansion.
+docs, scripts, workflows, and client source. The aggregate check requires
+successful path detection and accepts skipped client jobs only for
+path-filtered pull requests; pushes and manual runs require both clients.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info
