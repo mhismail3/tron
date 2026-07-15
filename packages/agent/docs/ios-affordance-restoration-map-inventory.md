@@ -8,20 +8,25 @@ Machine-readable inventory:
 This inventory is the exhaustive source-backed historical map for the original
 iOS restoration planning phase. It compares the old modular capability iOS tree at
 `ad5e484722c6f7abbe764126409494026216ad92` to the current IOSAC baseline and
-classifies every deleted or renamed old iOS path through grouped rows. The
-grouping is intentional: future restoration decisions happen by user-facing
-affordance, not by blindly copying legacy files.
+classifies every deleted or renamed old iOS affordance path through grouped
+rows. The grouping is intentional: future restoration decisions happen by
+user-facing affordance, not by blindly copying legacy files.
 
-The old reference contributes 848 old paths that were deleted or renamed before
-the current baseline:
+At the map baseline, the old reference contributed 848 paths that had been
+deleted or renamed:
 
 - 567 `Sources/` paths;
 - 266 `Tests/` paths;
 - 2 `docs/` paths;
 - 13 `.claude/rules/` paths.
 
-The static gate verifies that each old path is covered by at least one
-inventory row pattern.
+The live static gate recomputes deleted and renamed affordance paths from the
+old reference to `HEAD` and verifies that each path is covered by at least one
+inventory row pattern. Generated `.xcodeproj` and `.xcworkspace` bundles are
+excluded because `project.yml` and XcodeGen generation/build guards own project
+structure, not the affordance map. The gate deliberately does not freeze the
+path count: later source consolidation can increase that count without
+weakening exhaustive coverage.
 
 ## Controlled Vocabulary
 
