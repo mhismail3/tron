@@ -371,14 +371,6 @@ impl EventStore {
         Ok(deleted)
     }
 
-    /// Batch-fetch sessions by IDs.
-    ///
-    /// Returns a map of `session_id → SessionRow`. IDs not found are omitted.
-    pub fn get_sessions_by_ids(&self, session_ids: &[&str]) -> Result<HashMap<String, SessionRow>> {
-        let conn = self.conn()?;
-        SessionRepo::get_by_ids(&conn, session_ids)
-    }
-
     /// Get message previews for a list of sessions.
     ///
     /// Returns the last user prompt and last assistant response per session.

@@ -1,47 +1,5 @@
 use super::*;
 
-// ── Batch session queries ─────────────────────────────────────────
-
-#[test]
-fn get_sessions_by_ids_basic() {
-    let store = setup();
-    let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/a", Some("A"), None)
-        .unwrap();
-    let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/b", Some("B"), None)
-        .unwrap();
-    store
-        .create_session("claude-opus-4-6", "/tmp/c", Some("C"), None)
-        .unwrap();
-
-    let ids = [cr1.session.id.as_str(), cr2.session.id.as_str()];
-    let result = store.get_sessions_by_ids(&ids).unwrap();
-    assert_eq!(result.len(), 2);
-    assert!(result.contains_key(&cr1.session.id));
-    assert!(result.contains_key(&cr2.session.id));
-}
-
-#[test]
-fn get_sessions_by_ids_empty() {
-    let store = setup();
-    let result = store.get_sessions_by_ids(&[]).unwrap();
-    assert!(result.is_empty());
-}
-
-#[test]
-fn get_sessions_by_ids_missing_omitted() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None)
-        .unwrap();
-
-    let ids = [cr.session.id.as_str(), "sess_nonexistent"];
-    let result = store.get_sessions_by_ids(&ids).unwrap();
-    assert_eq!(result.len(), 1);
-    assert!(result.contains_key(&cr.session.id));
-}
-
 #[test]
 fn get_session_message_previews_basic() {
     let store = setup();

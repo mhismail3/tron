@@ -543,36 +543,3 @@ fn delete_session() {
     assert!(SessionRepo::delete(&conn, &sess.id).unwrap());
     assert!(!SessionRepo::exists(&conn, &sess.id).unwrap());
 }
-
-// ── Batch operations ─────────────────────────────────────────────
-
-#[test]
-fn get_by_ids_basic() {
-    let (conn, ws_id) = setup();
-    let s1 = create_default_session(&conn, &ws_id);
-    let s2 = create_default_session(&conn, &ws_id);
-
-    let ids = [s1.id.as_str(), s2.id.as_str()];
-    let map = SessionRepo::get_by_ids(&conn, &ids).unwrap();
-    assert_eq!(map.len(), 2);
-    assert!(map.contains_key(&s1.id));
-    assert!(map.contains_key(&s2.id));
-}
-
-#[test]
-fn get_by_ids_empty() {
-    let (conn, _) = setup();
-    let map = SessionRepo::get_by_ids(&conn, &[]).unwrap();
-    assert!(map.is_empty());
-}
-
-#[test]
-fn get_by_ids_missing_ids_omitted() {
-    let (conn, ws_id) = setup();
-    let s1 = create_default_session(&conn, &ws_id);
-
-    let ids = [s1.id.as_str(), "sess_nonexistent"];
-    let map = SessionRepo::get_by_ids(&conn, &ids).unwrap();
-    assert_eq!(map.len(), 1);
-    assert!(map.contains_key(&s1.id));
-}
