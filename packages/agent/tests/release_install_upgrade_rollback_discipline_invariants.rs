@@ -527,12 +527,10 @@ fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
 fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let tron_lib = read_repo_file("scripts/tron-lib.sh");
     for required in [
-        "ensure_tron_home()",
-        "$TRON_HOME\"/internal/{database,run}",
-        "$DEFAULT_PROFILE_DIR\" \"$NORMAL_PROFILE_DIR\" \"$CHAT_PROFILE_DIR\" \"$LOCAL_PROFILE_DIR\" \"$USER_PROFILE_DIR",
-        "$WORKSPACE_DIR\"/{projects,plans,reports,renders,screenshots,scratch,labs,archive}",
-        "Standalone settings JSON is intentionally not created here",
-        "chmod 600 \"$AUTH_FILE\"",
+        "Shared contributor-shell paths and functions",
+        "Rust foundation owners define the complete runtime home/profile layout",
+        "RUN_DIR=\"$TRON_HOME/internal/run\"",
+        "AUTH_FILE=\"$TRON_HOME/profiles/auth.json\"",
     ] {
         assert!(tron_lib.contains(required), "tron-lib missing {required}");
     }
@@ -540,16 +538,74 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
     let manual = read_repo_file("scripts/tron.d/manual-deploy.sh");
     for required in [
         "cmd_setup()",
-        "ensure_tron_home",
-        "ensure_default_configs",
         "cmd_install()",
         "--gui-helper",
         "--skip-service-start",
         "Machine-readable contributor runs skip launchctl",
+        "Phases (ordered): dirs, build, cli, bundle, plist, symlink, launchd",
+        "completed on first server start",
     ] {
         assert!(
             manual.contains(required),
             "setup/install path missing {required}"
+        );
+    }
+    let tron = read_repo_file("scripts/tron");
+    let installed_cli = read_repo_file("scripts/tron-cli");
+    for (path, source) in [
+        ("scripts/tron-lib.sh", tron_lib.as_str()),
+        ("scripts/tron", tron.as_str()),
+        ("scripts/tron-cli", installed_cli.as_str()),
+        ("scripts/tron.d/manual-deploy.sh", manual.as_str()),
+    ] {
+        for forbidden in ["ensure_tron_home", "ensure_default_configs"] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must not duplicate Rust startup ownership with {forbidden}"
+            );
+        }
+    }
+    for retired in [
+        "memory/{rules,sessions}",
+        "projects,plans,reports",
+        "prompts,providers,context,tools",
+    ] {
+        assert!(
+            !tron_lib.contains(retired),
+            "shell layout must not restore retired path set {retired}"
+        );
+    }
+
+    let constitution = read_repo_file("packages/agent/src/shared/foundation/constitution.rs");
+    assert!(constitution.contains("fn profile_first_dirs"));
+    assert!(constitution.contains("Constitution seeds"));
+    assert!(constitution.contains("managed_default!(\"profiles/auth.json\", false)"));
+    assert!(constitution.contains("write_private_default_if_absent"));
+    assert!(constitution.contains("persist_noclobber"));
+    assert!(
+        repo_path("packages/agent/defaults/profiles/auth.json").exists(),
+        "profile validation requires the private empty auth compatibility sentinel"
+    );
+
+    let auth = read_repo_file("scripts/tron-lib.d/auth.sh");
+    for required in [
+        "_auth_storage_is_initialized",
+        "Start the Tron server once, then retry login",
+        "_run_tron_auth_owner",
+        "printf '%s\\0'",
+        "| _run_tron_auth_owner store-oauth",
+    ] {
+        assert!(auth.contains(required), "auth helper missing {required}");
+    }
+    for forbidden in [
+        "mktemp \"${AUTH_FILE}",
+        "mv -f \"$tmp_file\" \"$AUTH_FILE\"",
+        "--arg accessToken",
+        "--arg refreshToken",
+    ] {
+        assert!(
+            !auth.contains(forbidden),
+            "shell auth helper must not mutate auth storage directly: {forbidden}"
         );
     }
     assert_eq!(manual.matches("install_runtime_cli_payload").count(), 4);

@@ -5,6 +5,49 @@ base64url_encode() {
     openssl base64 -A | tr '+/' '-_' | tr -d '='
 }
 
+_auth_storage_is_initialized() {
+    [[ -f "$AUTH_FILE" ]] && jq -e '
+        type == "object" and
+        .version == 1 and
+        (.providers | type == "object") and
+        (.lastUpdated | type == "string") and
+        (.bearerToken | type == "string" and length > 0)
+    ' "$AUTH_FILE" >/dev/null 2>&1
+}
+
+_run_tron_auth_owner() {
+    local action="$1"
+    shift
+    if [[ "$action" == "store-oauth" \
+        && -f "${RUST_WORKSPACE:-}/Cargo.toml" ]] \
+        && command -v cargo >/dev/null 2>&1; then
+        ( cd "$RUST_WORKSPACE" && cargo run --quiet --bin tron -- auth "$action" "$@" )
+        return
+    fi
+
+    local binary=""
+    if [[ -x "$INSTALLED_BINARY" ]]; then
+        binary="$INSTALLED_BINARY"
+    elif [[ -x "$DEV_BINARY" ]]; then
+        binary="$DEV_BINARY"
+    elif [[ -x "$RELEASE_BINARY" ]]; then
+        binary="$RELEASE_BINARY"
+    elif [[ -x "$DEV_SERVER_BINARY" ]]; then
+        binary="$DEV_SERVER_BINARY"
+    fi
+
+    if [[ -n "$binary" ]]; then
+        "$binary" auth "$action" "$@"
+        return
+    fi
+    if ! command -v cargo >/dev/null 2>&1 \
+        || [[ ! -f "${RUST_WORKSPACE:-}/Cargo.toml" ]]; then
+        print_error "No compatible tron binary or Rust workspace is available. Build with 'cargo build' first."
+        return 1
+    fi
+    ( cd "$RUST_WORKSPACE" && cargo run --quiet --bin tron -- auth "$action" "$@" )
+}
+
 cmd_login() {
     local label=""
     local host_override=""
@@ -33,12 +76,15 @@ cmd_login() {
         esac
     done
 
-    # Show existing accounts for all providers
-    if [[ -f "$AUTH_FILE" ]]; then
-        local now_ms=$(( $(date +%s) * 1000 ))
-        _show_provider_accounts "anthropic" "Anthropic" "$now_ms"
-        _show_provider_accounts "openai-codex" "OpenAI" "$now_ms"
+    if ! _auth_storage_is_initialized; then
+        print_error "Auth storage is not initialized. Start the Tron server once, then retry login."
+        return 1
     fi
+
+    # Show existing accounts for all providers
+    local now_ms=$(( $(date +%s) * 1000 ))
+    _show_provider_accounts "anthropic" "Anthropic" "$now_ms"
+    _show_provider_accounts "openai-codex" "OpenAI" "$now_ms"
 
     # Provider selection
     if [[ -z "$provider" ]]; then
@@ -115,29 +161,21 @@ _save_oauth_tokens() {
     local refresh_token="$4"
     local expires_at="$5"
 
-    if [[ ! -f "$AUTH_FILE" ]]; then
-        echo '{"version":1,"providers":{}}' > "$AUTH_FILE"
-        chmod 600 "$AUTH_FILE"
+    if ! _auth_storage_is_initialized; then
+        print_error "Auth storage changed before tokens could be saved; start Tron and retry login."
+        return 1
     fi
 
-    local tmp_file="${AUTH_FILE}.tmp"
-
-    jq --arg pk "$provider_key" \
-       --arg label "$label" \
-       --arg at "$access_token" \
-       --arg rt "$refresh_token" \
-       --argjson ea "$expires_at" \
-       '
-       .providers[$pk].accounts //= [] |
-       (.providers[$pk].accounts | map(.label) | index($label)) as $idx |
-       if $idx != null then
-           .providers[$pk].accounts[$idx].oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea}
-       else
-           .providers[$pk].accounts += [{label: $label, oauth: {accessToken: $at, refreshToken: $rt, expiresAt: $ea}}]
-       end |
-       .lastUpdated = (now | todate)
-       ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
-    chmod 600 "$AUTH_FILE"
+    if ! printf '%s\0' \
+        "$provider_key" \
+        "$label" \
+        "$access_token" \
+        "$refresh_token" \
+        "$expires_at" \
+        | _run_tron_auth_owner store-oauth; then
+        print_error "Could not persist OAuth credentials through the Rust auth owner."
+        return 1
+    fi
 }
 
 cmd_login_anthropic() {
@@ -232,7 +270,7 @@ print(q.get('state',[''])[0])
     expires_in=$(echo "$body" | jq -r '.expires_in')
     expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
 
-    _save_oauth_tokens "anthropic" "$label" "$access_token" "$refresh_token" "$expires_at"
+    _save_oauth_tokens "anthropic" "$label" "$access_token" "$refresh_token" "$expires_at" || return 1
 
     print_success "Saved Anthropic tokens for account \"${label}\""
 
@@ -405,7 +443,7 @@ except SystemExit:
     expires_in=$(echo "$body" | jq -r '.expires_in')
     expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
 
-    _save_oauth_tokens "openai-codex" "$label" "$access_token" "$refresh_token" "$expires_at"
+    _save_oauth_tokens "openai-codex" "$label" "$access_token" "$refresh_token" "$expires_at" || return 1
 
     print_success "Saved OpenAI tokens for account \"${label}\""
 
@@ -512,30 +550,6 @@ cmd_auth() {
 }
 
 cmd_auth_rotate() {
-    # Pick the freshest contributor binary in priority order: installed
-    # service bundle > dev-server build > workspace `cargo run`. This mirrors how
-    # cmd_status / cmd_rollback select binaries — keeping a single
-    # source of truth means the rotated token always lands at the path
-    # the running daemon will actually consult.
-    local binary=""
-    if [[ -x "$INSTALLED_BINARY" ]]; then
-        binary="$INSTALLED_BINARY"
-    elif [[ -x "$DEV_BINARY" ]]; then
-        binary="$DEV_BINARY"
-    elif [[ -x "$RELEASE_BINARY" ]]; then
-        binary="$RELEASE_BINARY"
-    elif [[ -x "$DEV_SERVER_BINARY" ]]; then
-        binary="$DEV_SERVER_BINARY"
-    fi
-
-    if [[ -n "$binary" ]]; then
-        "$binary" auth rotate "$@"
-    else
-        # Workspace source path — dev tree, no built binary on disk yet.
-        if ! command -v cargo >/dev/null 2>&1; then
-            print_error "No tron binary found and cargo is unavailable. Build with 'cargo build' first."
-            return 1
-        fi
-        ( cd "$RUST_WORKSPACE" && cargo run --quiet --bin tron -- auth rotate "$@" )
-    fi
+    # The Rust owner serializes rotation with every other auth writer.
+    _run_tron_auth_owner rotate "$@"
 }

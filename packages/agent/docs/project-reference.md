@@ -942,7 +942,8 @@ Prerequisites:
 First-time setup:
 
 ```bash
-./scripts/tron setup       # Check prerequisites, build, create ~/.tron/
+./scripts/tron setup       # Check prerequisites, build, stage contributor tooling
+./scripts/tron dev -d      # Start the server and initialize runtime state
 ./scripts/tron login       # Authenticate with Claude (OAuth browser flow)
 ```
 
@@ -1024,7 +1025,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
-| `tron setup` | First-time project setup |
+| `tron setup` | Check prerequisites, build, and stage contributor tooling. Complete runtime/profile initialization remains owned by first server startup. |
 
 ### Manual Deployment (workspace only)
 
@@ -1044,7 +1045,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron restart` | Stop and start the service through the same health-gated path as `tron start`. |
 | `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm); success requires the restored helper to pass `/health` |
-| `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
+| `tron login` | Authenticate with a provider after the server has initialized auth storage (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token from either the workspace or installed CLI (forces every paired iOS device to pair again) |
 | `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
 | `tron errors` | Show recent errors |
@@ -2639,7 +2640,7 @@ must be corrected before the updated server can start.
 
 The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types/mod.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
-Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file.
+First server startup has Constitution create the exact empty JSON compatibility sentinel `{}` atomically at mode `0o600`, because active-profile validation requires its declared raw auth store to exist. Startup immediately materializes that sentinel through the secure auth writer into the full schema, including `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Rust writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file. The contributor OAuth helper requires server-initialized storage and sends credentials over stdin to a hidden Rust CLI action that acquires the canonical auth-file lock, re-reads current state, and uses that same secure writer.
 
 OAuth refresh is owned by `domains/auth/credentials/`: Anthropic, OpenAI, and Google refresh paths take a process-local refresh mutex, acquire the auth-file `flock`, re-read `auth.json` after the lock, persist refreshed tokens while holding the lock, and fail the refresh if persistence fails. Model providers receive ephemeral token copies for request execution and do not write durable auth state directly.
 
@@ -2711,7 +2712,7 @@ envelope.
 
 Stored beside provider auth in the same secure file. This single 32-byte URL-safe-base64 token gates every WebSocket upgrade request. The same token is shared across all paired iOS devices for a given server (per-device tokens are deferred to a future version).
 
-The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. If the installer seeded `{}`, startup rewrites that sentinel into the full auth schema at the same time. The Mac onboarding wizard and iOS pairing flow both display it for the user to copy into the iOS pairing step.
+The token is generated during first server startup and written as `bearerToken` inside `~/.tron/profiles/auth.json`. Constitution's private exact `{}` sentinel is upgraded through the secure auth writer during that same startup; the reader retains the sentinel interpretation for interrupted or older installs. The Mac onboarding wizard and iOS pairing flow both display the token for the user to copy into the iOS pairing step.
 
 ```bash
 # Rotate the token (forces every paired iOS device to pair again)
@@ -2720,7 +2721,7 @@ tron auth rotate
 # Then use the iOS re-pair action for each affected server to scan or paste the fresh token.
 ```
 
-Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
+Rotation is serialized through a process-wide mutex plus the canonical auth-file `flock`, then persisted atomically (`tempfile + sync_all + rename`). It therefore cannot lose a concurrent provider refresh or contributor OAuth update from another process. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
 
 Both `scripts/tron` and the installed `tron-cli` route this runtime command
 directly to the shared `scripts/tron-lib.d/auth.sh` owner; the installed CLI
@@ -3175,14 +3176,14 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
 6. Installs the contributor-only runtime payload under `~/.tron/internal/run/` before the service stop phase.
-7. Seeds managed defaults and runtime support.
+7. Leaves complete Tron Home, managed-profile, and secure auth initialization to Rust server startup.
 8. Starts the contributor service and waits for `/health`.
 9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.
 10. If start or health fails, attempts to restore `tron.bak`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, writes `last-deployment.json`, and exits nonzero.
 
 ### Install Directory
 
-Base directories for `profiles`, `workspace`, and `internal` in the tree below are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename one of those directories, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
+Rust server startup completes the `profiles`, `workspace`, and `internal` roots in the tree below through Constitution and auth-storage owners. Contributor shell tooling creates only the `internal/run` payload it directly owns before startup. Base-directory paths are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename one of those directories, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
 
 ```
 ~/.tron/
@@ -3202,7 +3203,6 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |       +-- profile.toml           Sparse `[settings]` overrides
 +-- workspace/                    Active work and generated artifacts
 |   +-- projects/                  Project-local active work
-|   +-- plans/                     Plan files and task lists
 |   +-- reports/                   Analysis and investigation reports
 |   +-- renders/                   Rendered pages displayed in chat
 |   +-- screenshots/               Saved screenshots from runtime execution
@@ -3212,9 +3212,6 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
 |   +-- workers/                   Approved local package root for `tron.worker_package.v1` manifests
-+-- memory/                       User-authored memory/rule notes reserved for explicit future import
-|   +-- rules/                     Reserved detail files; not auto-injected by the current memory contract
-|   +-- sessions/                  Reserved session-scoped material; not a hidden prompt plane
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
     |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
@@ -3240,7 +3237,7 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 ```
 
 Notes:
-- The seeded top-level homes are `profiles`, `workspace`, `memory`, and `internal`; for a clean reset, move `~/.tron` aside rather than deleting individual subtrees.
+- The server-owned top-level homes are exactly `profiles`, `workspace`, and `internal`; for a clean reset, move `~/.tron` aside rather than deleting individual subtrees.
 - Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
 - Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
 

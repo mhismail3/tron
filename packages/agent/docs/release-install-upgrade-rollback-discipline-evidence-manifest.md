@@ -16,7 +16,7 @@ Stale branch policy: `codex/release-install-upgrade-rollback-discipline` is quar
 | Rollback audit | RIURD-5 | `scripts/tron-lib.d/service.sh::cmd_rollback` now requires `service_is_running && wait_for_service_health 12` before recording `rolled_back` success. |
 | Mac wrapper audit | RIURD-4,RIURD-6 | `TronPaths`, `MacRuntimeVariant`, `LiveLaunchAgentManager`, `MacAppStartupMaintenance`, `MacCommandModeServerStarter`, `DevServerStopper`, and `TronUninstaller` prove installed Release ownership, Debug companion non-ownership, isolated port 9848, stale registration repair, health-gated version finalization, and data-preserving uninstall. |
 | Generated project audit | RIURD-7 | iOS uses tracked `TronMobile.xcodeproj` with CI/release diff checks; Mac uses ignored `TronMac.xcodeproj` generated from `project.yml` with CI/release existence and ignore checks before build/archive. |
-| Clean-machine setup audit | RIURD-4 | Shell setup/install creates only the intended `~/.tron` runtime/profile/workspace support paths, seeds `auth.json`, and does not create standalone settings JSON; Mac install validates `/Applications/Tron.app` and bundled helper/plist before SMAppService registration. |
+| Clean-machine setup audit | RIURD-4 | Shell setup/install stages only contributor-owned runtime payloads; Rust startup creates the complete three-root layout and managed profiles, then atomically seeds and materializes the mode-`600` auth document. Mac install validates `/Applications/Tron.app` and bundled helper/plist before SMAppService registration. |
 
 ## Verification Matrix
 

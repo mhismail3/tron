@@ -7,7 +7,7 @@ This inventory maps the retained release, install, development takeover, update 
 - `cli`: workspace and installed CLI dispatch/help surfaces.
 - `dev_server`: `tron dev` foreground/background takeover and stop behavior.
 - `manual_deploy`: contributor-only deployment, preflight, lock, sentinel, backup, and deploy-result paths.
-- `setup_install`: first-time setup, contributor install, clean-machine seeding, and uninstall behavior.
+- `setup_install`: first-time contributor tooling, server-owned clean-machine bootstrap, install, and uninstall behavior.
 - `service_manager`: shared launchd, health, status, start, stop, restart, and rollback helpers.
 - `mac_wrapper`: SwiftUI wrapper, SMAppService, helper validation, command mode, update finalization, process probing, and uninstall.
 - `update_rollback`: app-version finalization, stale registration repair, rollback, and failed-upgrade handling.
@@ -25,7 +25,7 @@ This inventory maps the retained release, install, development takeover, update 
 3. `tron dev` is a development takeover. It stops production ownership before binding 9847, uses `Tron-Dev.app`, and restores the installed helper only through the health-gated wrapper path.
 4. `tron manual-deploy` is a contributor-only, explicit workspace command. No dev, quality, Codex action, or Mac wrapper path may call it implicitly.
 5. Manual deploy and rollback success require `/health`, not just launchd loaded state.
-6. Clean setup may create intended profile/workspace/internal support paths and managed auth/config seeds. Uninstall preserves database and workspace by default.
+6. Shell setup/install creates only contributor-owned runtime payloads. Rust server startup owns the complete profile/workspace/internal layout, managed profiles, and secure auth creation. Uninstall preserves database and workspace by default.
 7. Mac app update finalization records `mac-app-version.json` only after the current bundled helper is loaded and healthy; active `tron dev` defers production restart/finalization.
 8. iOS `TronMobile.xcodeproj` and Mac `TronMac.xcodeproj` are ignored build outputs. Their `project.yml` definitions are authoritative and workflows regenerate each project before build/release.
 9. Production releases are manual tag/workflow-driven DMG and TestFlight pipelines. This slice does not add automatic production deployment.

@@ -284,6 +284,66 @@ fn root_readme_stays_a_concise_progressive_disclosure_front_door() {
 }
 
 #[test]
+fn shell_entrypoints_leave_runtime_initialization_to_source_owners() {
+    let probe = tempfile::tempdir().expect("shell ownership probe should have a home");
+    for (name, script, args) in [
+        (
+            "workspace-version",
+            "scripts/tron",
+            &["version", "print"][..],
+        ),
+        (
+            "installed-auth-help",
+            "scripts/tron-cli",
+            &["auth", "--help"][..],
+        ),
+    ] {
+        let data_dir = probe.path().join(name);
+        let output = Command::new("/bin/bash")
+            .arg(repo_path(script))
+            .args(args)
+            .env("HOME", probe.path())
+            .env("TRON_DATA_DIR", &data_dir)
+            .current_dir(repo_root())
+            .output()
+            .expect("read-only shell probe should start");
+        assert!(
+            output.status.success(),
+            "{script} {args:?} failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !data_dir.exists(),
+            "read-only shell command must not create {}",
+            data_dir.display()
+        );
+    }
+
+    let cold_home = probe.path().join("cold-login");
+    let output = Command::new("/bin/bash")
+        .arg(repo_path("scripts/tron"))
+        .args(["login", "--provider", "anthropic", "--label", "probe"])
+        .env("HOME", probe.path())
+        .env("TRON_DATA_DIR", &cold_home)
+        .current_dir(repo_root())
+        .output()
+        .expect("cold login probe should start");
+    assert!(
+        !output.status.success(),
+        "cold login must fail before OAuth"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Start the Tron server once"),
+        "cold login must explain its initialization owner"
+    );
+    assert!(
+        !cold_home.exists(),
+        "failed cold login must not create partial auth state"
+    );
+}
+
+#[test]
 fn local_and_github_ci_share_one_fail_fast_test_schedule() {
     let local_targets = quality_discovered_integration_targets();
     let discovered_targets = cargo_discovered_integration_targets();

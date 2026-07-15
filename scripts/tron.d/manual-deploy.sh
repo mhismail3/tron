@@ -384,7 +384,7 @@ cmd_install() {
     # Suppresses decorative banners and interactive prompts.
     #
     # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
-    # Phases (ordered): dirs, configs, build, cli, bundle, plist, symlink, launchd
+    # Phases (ordered): dirs, build, cli, bundle, plist, symlink, launchd
     # The distributed Mac app does not call this path. Production
     # installs are `/Applications/Tron.app` + SMAppService only.
     local gui_helper=0
@@ -422,10 +422,6 @@ cmd_install() {
     mkdir -p "$CONTRIBUTOR_DIR"
     mkdir -p "$HOME/Library/LaunchAgents"
     _emit_event dirs ok "$BIN_DIR,$CONTRIBUTOR_DIR,$HOME/Library/LaunchAgents"
-
-    _emit_event configs start ""
-    ensure_default_configs
-    _emit_event configs ok ""
 
     if [ ! -f "$RELEASE_BINARY" ]; then
         _emit_event build start "cargo build --release"
@@ -553,15 +549,6 @@ cmd_setup() {
 
     command -v git &> /dev/null && print_success "git $(git --version | cut -d' ' -f3) found"
 
-    # Create directory structure
-    print_status "Creating directory structure..."
-    ensure_tron_home
-    print_success "Created $TRON_HOME directory structure"
-
-    # Create default config files
-    print_status "Creating configuration files..."
-    ensure_default_configs
-
     # Build
     build_rust
 
@@ -589,12 +576,12 @@ cmd_setup() {
     echo -e "${GREEN}                      Tron Setup Complete!${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "  Data directory: $TRON_HOME"
+    echo "  Data directory: $TRON_HOME (completed on first server start)"
     echo "  Project path:   $PROJECT_DIR"
     echo ""
     echo "  Next steps:"
+    echo "    tron dev -d      # Start server and initialize runtime state"
     echo "    tron login       # Authenticate with a provider"
-    echo "    tron dev         # Start server in foreground"
     echo "    tron install     # Install as launchd service"
     echo ""
 }

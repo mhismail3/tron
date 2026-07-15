@@ -127,8 +127,6 @@ case "${1:-help}" in
     help|--help|-h) cmd_help; exit 0 ;;
 esac
 
-ensure_tron_home
-
 case "$1" in
     dev)       shift; cmd_dev "$@" ;;
     ci)        shift; cmd_ci "$@" ;;

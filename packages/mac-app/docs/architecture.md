@@ -378,7 +378,7 @@ Production workflows operate against the same `~/.tron/internal/` data tree and 
 
 - **Port `9847`** — the production WS bind. Always exclusive — see "Mutual exclusion" below. Workflow 4 uses `9848`.
 - **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed production server. Workflows 1 and 2 register it through `SMAppService`; workflow 3 observes it; workflow 5 stops it before binding the port itself. Workflow 4 registers only `com.tron.server.dev` and points `BundleProgram` at `Tron Server Dev.app`.
-- **`~/.tron/` Constitution home** — production profiles/auth, memory, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
+- **`~/.tron/` Constitution home** — production profiles/auth, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
 - **`auth.json.bearerToken`** — workflows 1, 2, 3, and 5 share the production token. The isolated workflow has a separate token under `~/.tron-dev`.
 - **Release identity** — `VERSION.env` is the only hand-edited release source.
   `scripts/tron version sync` mirrors the canonical Cargo/GitHub version into

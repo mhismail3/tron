@@ -81,8 +81,8 @@ Clone this repository, then set up and start a development server:
 ```bash
 cd tron
 scripts/tron setup
+scripts/tron dev --background
 scripts/tron login
-scripts/tron dev
 ```
 
 Useful commands:

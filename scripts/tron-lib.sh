@@ -1,8 +1,8 @@
 #!/bin/bash
 # tron-lib.sh - Shared library for Tron CLI scripts
 #
-# SINGLE SOURCE OF TRUTH for all paths, config, and shared functions.
-# Sourced by: scripts/tron and scripts/tron-cli
+# Shared contributor-shell paths and functions for scripts/tron and tron-cli.
+# Rust foundation owners define the complete runtime home/profile layout.
 #
 # Do NOT execute this file directly.
 
@@ -18,16 +18,7 @@ BIN_DIR="$HOME/.local/bin"
 # these bundles are only for shell-script development flows.
 TRON_BUNDLE_ID="com.tron.agent"
 RUN_DIR="$TRON_HOME/internal/run"
-PROFILES_DIR="$TRON_HOME/profiles"
-USER_PROFILE_DIR="$PROFILES_DIR/user"
-DEFAULT_PROFILE_DIR="$PROFILES_DIR/default"
-NORMAL_PROFILE_DIR="$PROFILES_DIR/normal"
-CHAT_PROFILE_DIR="$PROFILES_DIR/chat"
-LOCAL_PROFILE_DIR="$PROFILES_DIR/local"
-USER_PROFILE_FILE="$USER_PROFILE_DIR/profile.toml"
-WORKSPACE_DIR="$TRON_HOME/workspace"
-WORKSPACE_VAULT_DIR="$WORKSPACE_DIR/vault"
-WORKSPACE_KNOWLEDGE_DIR="$WORKSPACE_DIR/knowledge"
+USER_PROFILE_FILE="$TRON_HOME/profiles/user/profile.toml"
 CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
 INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
@@ -61,7 +52,7 @@ ONBOARDED_MARKER_PATH="$RUN_DIR/.onboarded"
 DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 
 # OAuth
-AUTH_FILE="$PROFILES_DIR/auth.json"
+AUTH_FILE="$TRON_HOME/profiles/auth.json"
 
 # Anthropic OAuth
 ANTHROPIC_OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -142,8 +133,8 @@ NC='\033[0m'
 # INVARIANT: every print_* helper writes to stderr (>&2). Stdout is
 # reserved for machine-readable output — `tron install --gui-helper`
 # emits one NDJSON event per line on stdout, and any decorative print
-# from a helper called transitively (codesign_bundle, notarize_bundle,
-# ensure_default_configs, …) would corrupt that stream. Routing to
+# from a helper called transitively (codesign_bundle, notarize_bundle, …)
+# would corrupt that stream. Routing to
 # stderr lets us keep the gating-by-flag pattern as a UX nicety while
 # making the stdout contract structurally enforced rather than
 # discipline-enforced.
@@ -195,37 +186,6 @@ clear_user_profile_settings() {
         mv "$tmp_file" "$USER_PROFILE_FILE"
     else
         rm -f "$tmp_file" "$USER_PROFILE_FILE"
-    fi
-}
-
-ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/internal/{database,run}
-    mkdir -p "$DEFAULT_PROFILE_DIR" "$NORMAL_PROFILE_DIR" "$CHAT_PROFILE_DIR" "$LOCAL_PROFILE_DIR" "$USER_PROFILE_DIR"
-    mkdir -p "$USER_PROFILE_DIR/prompts"
-    mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,providers,context,tools}
-    mkdir -p "$DEFAULT_PROFILE_DIR/prompts/processes"
-    mkdir -p "$TRON_HOME"/memory/{rules,sessions}
-    mkdir -p "$WORKSPACE_DIR"/{projects,plans,reports,renders,screenshots,scratch,labs,archive}
-    mkdir -p "$WORKSPACE_KNOWLEDGE_DIR" "$WORKSPACE_VAULT_DIR"
-}
-
-ensure_default_configs() {
-    # Standalone settings JSON is intentionally not created here. The Rust
-    # profile seeder owns managed defaults in profiles/default/profile.toml,
-    # while settings.update writes sparse [settings] overrides to
-    # profiles/user/profile.toml.
-
-    if [ ! -f "$AUTH_FILE" ]; then
-        mkdir -p "$(dirname "$AUTH_FILE")"
-        cat > "$AUTH_FILE" << 'EOF'
-{
-  "version": 1,
-  "providers": {},
-  "lastUpdated": ""
-}
-EOF
-        chmod 600 "$AUTH_FILE"
-        print_success "Created auth.json"
     fi
 }
 
