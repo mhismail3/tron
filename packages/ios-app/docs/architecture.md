@@ -514,9 +514,9 @@ events. iOS decodes the metadata-only `model.provider_request` audit event for
 stored-event parity, but replay manifests stay outside the iOS event plugin and
 database event-case surface.
 
-Transport and UI scheduling follows the CSD inventory in
-`packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`.
-Long-lived `Task` handles are stored and cancelled by their owner, SwiftUI
+Transport and UI scheduling is guarded directly by
+`concurrency_scheduling_discipline_invariants`. Long-lived `Task` handles are
+stored and cancelled by their owner, SwiftUI
 `.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
 callback bridges use bounded stream buffering or owner queues. An observation
 task must not retain its lifecycle owner through a suspended wait, and stored

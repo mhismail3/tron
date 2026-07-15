@@ -805,7 +805,6 @@ fn predecessor_inventories_classify_dxrha_artifacts() {
         "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
-        "packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv",
         "packages/agent/docs/state-ownership-lifecycle-inventory.tsv",
         "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
     ] {

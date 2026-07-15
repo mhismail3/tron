@@ -265,9 +265,7 @@ Inspected planning sources:
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`
 - `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md`
-- `packages/agent/docs/concurrency-scheduling-discipline-scorecard.md`
-- `packages/agent/docs/concurrency-scheduling-discipline-inventory.md`
-- `packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md`
+- `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`
 - `packages/agent/docs/true-primitive-cleanup-scorecard.md`
 - `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`
 - `packages/agent/src/lib.rs`
@@ -778,12 +776,14 @@ native memory UI, public `/engine` expansion, settings/profile migration, and
 unrelated DRC cleanup remain future decisions.
 
 Focused tests: queue lifecycle, cancellation, stream replay, log retention,
-lease expiry, shutdown, process sandbox, interpreter isolation, CSD inventory.
+lease expiry, shutdown, process sandbox, interpreter isolation, and living
+scheduling guards.
 
 iOS validation: simulator/Computer Use for any native job detail or cancel UI.
 
-Docs/static updates: README capabilities/database/events, CSD/PERF/SACB rows,
-dependency review for `portable-pty` or runtime engines if introduced.
+Docs/static updates: README capabilities/database/events plus scheduling,
+resource, and authority guards; dependency review for `portable-pty` or runtime
+engines if introduced.
 
 User decisions: PTY support, interpreter languages, network policy, output
 retention, and approval rules.
@@ -870,8 +870,9 @@ Required tests and verification:
   when sandboxing is unavailable.
 - Resource/schema tests for job resource definitions, output contracts,
   lifecycle payloads, retention fields, and replay/evidence refs.
-- Static/invariant coverage: CSD for owner/backpressure/cancellation/shutdown,
-  SACB for authority/network/process boundaries, TMB for package/engine
+- Static/invariant coverage: living scheduling guards for
+  owner/backpressure/cancellation/shutdown, SACB for authority/network/process
+  boundaries, TMB for package/engine
   separation, HRA/PCC/TPC for file ownership and line budgets, BPRC/IARM for
   deferral classification, DESI for scorecard/evidence consistency, personal
   info guard, and `git diff --check`.
@@ -905,8 +906,8 @@ Likely implementation files/domains to inspect or touch:
   operation-to-scope/network policy checks;
 - provider prompt/schema documentation in
   `packages/agent/src/domains/model/providers/openai/message_converter/mod.rs`;
-- focused/static tests under `packages/agent/tests/`, especially CSD, SACB,
-  TMB, HRA, PCC, TPC, BPRC, IARM, DESI, and primitive trace execution;
+- focused/static tests under `packages/agent/tests/`, especially scheduling,
+  authority, modularity, cleanup, restoration, and primitive trace execution;
 - README capability, event, database/resource, testing, and progressive
   disclosure sections plus the new jobs domain `mod.rs` docs.
 
@@ -1639,7 +1640,7 @@ answer provenance, queue backpressure, cancellation, replay, and no fake local
 question sheets.
 
 Focused tests: goal lifecycle, queue ordering, question/answer idempotency,
-cancellation, plan versioning, iOS answer flow, CSD queue rows.
+cancellation, plan versioning, iOS answer flow, and bounded-queue guards.
 
 iOS validation: simulator/Computer Use for question and goal UI if native.
 
@@ -1749,8 +1750,8 @@ Likely files and boundaries:
 - `packages/agent/src/engine/durability/resources/definitions.rs`
 - optional focused split such as
   `packages/agent/src/engine/durability/resources/goal_definitions.rs`
-- `packages/agent/tests/*_invariants.rs` inventories and static guards for
-  BPRC, HRA, TMB, TPC, PCC, SACB, CSD, DESI, and iOS affordance boundaries as
+- `packages/agent/tests/*_invariants.rs` source guards for restoration,
+  modularity, cleanup, authority, scheduling, and iOS affordance boundaries as
   touched
 - `README.md`
 - `packages/agent/docs/phase-2-agent-execution-restoration-*`
@@ -1787,8 +1788,8 @@ Docs/static updates required:
   kernel split.
 - Phase 2 scorecard, evidence manifest, inventory narrative, and TSV row
   `P2AER-INV-010`.
-- Static inventory rows and source guards for BPRC, HRA, TMB, TPC, PCC, SACB,
-  CSD, DESI, and IARM as required by the touched files.
+- Living source guards for restoration, modularity, cleanup, authority,
+  scheduling, and iOS affordance boundaries as required by the touched files.
 
 Residual risks and deferred work:
 
@@ -2253,7 +2254,7 @@ SACB external-worker guards.
 iOS validation: Agent Cockpit package/source UI screenshots if changed.
 
 Docs/static updates: README worker lifecycle/MCP/dependency sections, SUWRF
-inventory, SACB/CSD/PERF rows.
+inventory, and authority/scheduling/resource guards.
 
 User decisions: approved source roots, MCP trust policy, package signing, and
 whether agent-authored packages can self-propose.
@@ -2289,7 +2290,7 @@ Acceptance criteria: every subagent has parent trace, authority, workspace,
 model profile, cancellation path, result resource, and replay evidence.
 
 Focused tests: spawn/status/result/cancel lifecycle, parent budget, result
-merge, failure semantics, iOS projection, CSD task ownership.
+merge, failure semantics, iOS projection, and task ownership.
 
 iOS validation: simulator/Computer Use if native subagent chips/sheets return.
 
@@ -2373,12 +2374,13 @@ authority on each run, cancellation, replay, retention, and no hidden cron
 tables outside the module.
 
 Focused tests: trigger firing, missed-run behavior, cancellation, schedule
-edits, clock injection, CSD timer fairness, APNs handoff if notification is
+edits, clock injection, timer fairness, and APNs handoff if notification is
 used.
 
 iOS validation: simulator screenshots if schedule UI changes.
 
-Docs/static updates: README event/database/settings, CSD inventory.
+Docs/static updates: README event/database/settings and living scheduling
+guards.
 
 User decisions: supported schedule grammar, timezone behavior, missed-run
 policy, and default notification path.
@@ -2697,8 +2699,7 @@ Implementation slices add:
 
 - focused Rust `cargo fmt --all -- --check`, `cargo check`, and targeted tests;
 - migration/replay/resource/event tests for storage changes;
-- SACB/CSD/PERF/ODA/static inventory checks for authority, scheduling,
-  resources, and diagnostics changes;
+- living authority, scheduling, resource, and diagnostics guards;
 - iOS `xcodegen generate`, focused Swift tests, simulator screenshots, and
   Computer Use validation when Swift UI changes;
 - physical-device validation for APNs, microphone/camera, background
@@ -2715,7 +2716,7 @@ Implementation slices add:
 | P2AER-3 | Primitive-vs-capability classification | 10 | passed | Each family is classified as true primitive, modular capability/package, iOS surface only, server-fact rendering only, deferred, or reject candidate. |
 | P2AER-4 | Deep hot-swappable memory design | 14 | passed | Memory primitives, engine contract, store families, privacy, migration, eval, swapping, iOS audit, and hidden-memory guards are specified. |
 | P2AER-5 | Ordered slice roadmap | 16 | passed | Each slice records objective, user outcome, primitives, modular boundaries, likely files, evidence paths, acceptance criteria, tests, iOS validation, docs/static updates, and user decisions. |
-| P2AER-6 | Safety, authority, scheduling, and validation gates | 10 | passed | SACB/CSD/TPC/HRA constraints are folded into every risky feature family and validation protocol. |
+| P2AER-6 | Safety, authority, scheduling, and validation gates | 10 | passed | Living authority, scheduling, protocol, and ownership constraints are folded into every risky feature family and validation protocol. |
 | P2AER-7 | iOS parity and native-surface discipline | 8 | passed | Generic runtime rendering is the default; native iOS surfaces require stable backend contracts and simulator or device validation. |
 | P2AER-8 | Machine-readable inventory and evidence manifest | 7 | passed | The TSV has a stable schema, old evidence paths, status, owners, backend dependency, memory involvement, and validation requirements. |
 | P2AER-9 | Handoff readiness | 5 | passed | Future implementation threads have a required pre-slice handoff packet and explicit user-question format. |

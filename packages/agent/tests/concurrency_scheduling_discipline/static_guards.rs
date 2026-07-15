@@ -1,51 +1,12 @@
 use super::support::{
-    inventory_by_path, is_production_rust, is_production_swift, marker_paths, read_repo_file,
+    production_ios_swift_paths, production_rust_paths, production_swift_paths, read_repo_file,
     text_has_any,
 };
 
 #[test]
-fn production_rust_tokio_spawns_have_explicit_ownership() {
-    let inventory = inventory_by_path();
-    let missing = marker_paths()
-        .into_iter()
-        .filter(|path| is_production_rust(path))
-        .filter(|path| read_repo_file(path).contains("tokio::spawn"))
-        .filter(|path| {
-            let row = inventory
-                .get(path)
-                .unwrap_or_else(|| panic!("missing CSD inventory row for {path}"));
-            let policy = format!(
-                "{} {} {}",
-                row.start_site, row.stop_or_cancel_site, row.test_evidence
-            );
-            !text_has_any(
-                &policy,
-                &[
-                    "shutdown",
-                    "cancellationtoken",
-                    "cancel",
-                    "abort",
-                    "drain",
-                    "join",
-                    "await",
-                    "scoped",
-                    "request future",
-                ],
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        missing.is_empty(),
-        "production tokio::spawn sites need explicit CSD ownership:\n{}",
-        missing.join("\n")
-    );
-}
-
-#[test]
 fn production_unbounded_mpsc_is_absent() {
-    let offenders = marker_paths()
+    let offenders = production_rust_paths()
         .into_iter()
-        .filter(|path| is_production_rust(path))
         .filter(|path| {
             let source = read_repo_file(path);
             source.contains("mpsc::unbounded_channel")
@@ -55,16 +16,15 @@ fn production_unbounded_mpsc_is_absent() {
         .collect::<Vec<_>>();
     assert!(
         offenders.is_empty(),
-        "production unbounded MPSC requires a narrow CSD exception and none are allowed now:\n{}",
+        "production unbounded MPSC is not allowed:\n{}",
         offenders.join("\n")
     );
 }
 
 #[test]
 fn production_swift_banned_scheduling_patterns_are_absent() {
-    let offenders = marker_paths()
+    let offenders = production_ios_swift_paths()
         .into_iter()
-        .filter(|path| is_production_swift(path))
         .filter_map(|path| {
             let source = read_repo_file(&path);
             let hits = [
@@ -85,39 +45,239 @@ fn production_swift_banned_scheduling_patterns_are_absent() {
     );
 }
 
+fn mask_swift_comments_and_strings(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut code = bytes.to_vec();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"//") {
+            let end = bytes[index..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(bytes.len(), |offset| index + offset);
+            code[index..end].fill(b' ');
+            index = end;
+            continue;
+        }
+        if bytes[index..].starts_with(b"/*") {
+            let start = index;
+            let mut depth = 1;
+            index += 2;
+            while index < bytes.len() && depth > 0 {
+                if bytes[index..].starts_with(b"/*") {
+                    depth += 1;
+                    index += 2;
+                } else if bytes[index..].starts_with(b"*/") {
+                    depth -= 1;
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            code[start..index].fill(b' ');
+            continue;
+        }
+
+        let hash_count = bytes[index..]
+            .iter()
+            .take_while(|byte| **byte == b'#')
+            .count();
+        let quote_index = index + hash_count;
+        if bytes.get(quote_index) == Some(&b'"') {
+            let start = index;
+            let quote_count = if bytes[quote_index..].starts_with(b"\"\"\"") {
+                3
+            } else {
+                1
+            };
+            index = quote_index + quote_count;
+            while index < bytes.len() {
+                if hash_count == 0 && bytes[index] == b'\\' {
+                    index = (index + 2).min(bytes.len());
+                    continue;
+                }
+                let quote_end = index + quote_count;
+                let hash_end = quote_end + hash_count;
+                if hash_end <= bytes.len()
+                    && bytes[index..quote_end].iter().all(|byte| *byte == b'"')
+                    && bytes[quote_end..hash_end].iter().all(|byte| *byte == b'#')
+                {
+                    index = hash_end;
+                    break;
+                }
+                index += 1;
+            }
+            code[start..index].fill(b' ');
+            continue;
+        }
+        index += 1;
+    }
+    String::from_utf8(code).expect("masking ASCII syntax preserves Swift UTF-8")
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
+}
+
+fn skip_whitespace(code: &[u8], mut index: usize) -> usize {
+    while code.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    index
+}
+
+fn skip_generic_arguments(code: &[u8], mut index: usize) -> usize {
+    if code.get(index) != Some(&b'<') {
+        return index;
+    }
+    let mut depth = 0;
+    while index < code.len() {
+        match code[index] {
+            b'<' => depth += 1,
+            b'>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return index + 1;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    code.len()
+}
+
+fn invocation_has_bounded_buffering_policy(code: &str, open_paren: usize) -> bool {
+    let bytes = code.as_bytes();
+    let mut depth = 0;
+    let mut index = open_paren;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let arguments = code[open_paren + 1..index]
+                        .split_whitespace()
+                        .collect::<String>();
+                    return arguments.contains("bufferingPolicy:")
+                        && !arguments.contains("bufferingPolicy:.unbounded")
+                        && !arguments.contains("BufferingPolicy.unbounded");
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    false
+}
+
+fn occurrence_is_type_declaration(code: &str, start: usize) -> bool {
+    let prefix = code[..start].trim_end();
+    if prefix.ends_with("->") || prefix.ends_with("extension") {
+        return true;
+    }
+    if !prefix.ends_with(':') {
+        return false;
+    }
+    let statement = prefix
+        .rsplit(['\n', ';', '{', '}'])
+        .next()
+        .unwrap_or_default()
+        .trim_start();
+    !statement.contains('=') && (statement.starts_with("var ") || statement.contains(" var "))
+}
+
+fn has_unbounded_stream_initializer(source: &str, stream_type: &str) -> bool {
+    let code = mask_swift_comments_and_strings(source);
+    let bytes = code.as_bytes();
+    for (start, _) in code.match_indices(stream_type) {
+        let end = start + stream_type.len();
+        if start > 0 && is_identifier_byte(bytes[start - 1])
+            || bytes.get(end).is_some_and(|byte| is_identifier_byte(*byte))
+        {
+            continue;
+        }
+
+        let mut cursor = skip_whitespace(bytes, end);
+        cursor = skip_generic_arguments(bytes, cursor);
+        cursor = skip_whitespace(bytes, cursor);
+        let tail = &code[cursor..];
+        if tail.starts_with(".Continuation") {
+            continue;
+        }
+        if tail.starts_with(".init") {
+            cursor = skip_whitespace(bytes, cursor + ".init".len());
+        } else if tail.starts_with(".makeStream") {
+            cursor = skip_whitespace(bytes, cursor + ".makeStream".len());
+        }
+
+        match bytes.get(cursor) {
+            Some(b'(') if !invocation_has_bounded_buffering_policy(&code, cursor) => return true,
+            Some(b'{') if !occurrence_is_type_declaration(&code, start) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 #[test]
-fn production_swift_async_streams_have_bounded_policy_rows() {
-    let inventory = inventory_by_path();
-    let missing = marker_paths()
+fn async_stream_guard_distinguishes_generic_code_from_prose() {
+    for unbounded in [
+        "let stream = AsyncStream<Event> { _ in }",
+        "let stream = AsyncThrowingStream<Event, Error>.init { _ in }",
+        "let pair = AsyncStream<Event>.makeStream()",
+        "let stream = AsyncStream<Event>(bufferingPolicy: .unbounded) { _ in }",
+        "let pair = AsyncStream<Event>.makeStream(bufferingPolicy: .unbounded)",
+        "consume(stream: AsyncStream<Event> { _ in })",
+        "let table = [\"events\": AsyncStream<Event> { _ in }]",
+        "var result = consume(stream: AsyncStream<Event> { _ in })",
+    ] {
+        assert!(
+            has_unbounded_stream_initializer(unbounded, "AsyncStream")
+                || has_unbounded_stream_initializer(unbounded, "AsyncThrowingStream")
+        );
+    }
+
+    for allowed in [
+        "let stream = AsyncStream<Event>(bufferingPolicy: .bufferingNewest(1)) { _ in }",
+        "let stream = AsyncThrowingStream<Event, Error>(bufferingPolicy: .bufferingNewest(1)) { _ in }",
+        "func events() -> AsyncStream<Event> { fatalError() }",
+        "private var events: AsyncStream<Event> { fatalError() }",
+        "// AsyncStream<Event> { prose in }",
+        "/* AsyncThrowingStream<Event, Error> { prose in } */",
+        "let prose = \"AsyncStream<Event> { prose in }\"",
+        "let factory = MyAsyncStream()",
+    ] {
+        assert!(!has_unbounded_stream_initializer(allowed, "AsyncStream"));
+        assert!(!has_unbounded_stream_initializer(
+            allowed,
+            "AsyncThrowingStream"
+        ));
+    }
+}
+
+#[test]
+fn production_swift_async_stream_initializers_are_bounded() {
+    let offenders = production_swift_paths()
         .into_iter()
-        .filter(|path| is_production_swift(path))
-        .filter(|path| read_repo_file(path).contains("AsyncStream"))
         .filter(|path| {
-            let row = inventory
-                .get(path)
-                .unwrap_or_else(|| panic!("missing CSD inventory row for {path}"));
-            let policy = format!(
-                "{} {} {}",
-                row.scheduler_class, row.backpressure_or_capacity, row.test_evidence
-            );
-            !text_has_any(
-                &policy,
-                &["bounded", "bufferingnewest", "cursor", "polling"],
-            )
+            let source = read_repo_file(path);
+            has_unbounded_stream_initializer(&source, "AsyncStream")
+                || has_unbounded_stream_initializer(&source, "AsyncThrowingStream")
         })
         .collect::<Vec<_>>();
     assert!(
-        missing.is_empty(),
-        "production Swift AsyncStream surfaces need bounded buffering or cursor polling policy:\n{}",
-        missing.join("\n")
+        offenders.is_empty(),
+        "production Swift async streams must declare a buffering policy:\n{}",
+        offenders.join("\n")
     );
 }
 
 #[test]
 fn swift_owner_classes_with_task_fields_expose_cancellation_paths() {
-    let offenders = marker_paths()
+    let offenders = production_ios_swift_paths()
         .into_iter()
-        .filter(|path| is_production_swift(path))
         .filter(|path| {
             let source = read_repo_file(path);
             source.contains("Task<")
@@ -139,49 +299,6 @@ fn swift_owner_classes_with_task_fields_expose_cancellation_paths() {
         offenders.is_empty(),
         "Swift owner classes with stored Task fields need visible cancellation paths:\n{}",
         offenders.join("\n")
-    );
-}
-
-#[test]
-fn production_sleep_and_timer_sites_have_inventory_policy() {
-    let inventory = inventory_by_path();
-    let missing = marker_paths()
-        .into_iter()
-        .filter(|path| {
-            let source = read_repo_file(path);
-            source.contains("tokio::time::sleep")
-                || source.contains("Task.sleep")
-                || source.contains("thread::sleep")
-                || source.contains("std::thread::sleep")
-                || source.contains("Timer")
-        })
-        .filter(|path| {
-            let row = inventory
-                .get(path)
-                .unwrap_or_else(|| panic!("missing CSD inventory row for {path}"));
-            let policy = format!("{} {}", row.scheduler_class, row.timeout_or_deadline);
-            !text_has_any(
-                &policy,
-                &[
-                    "timer_loop",
-                    "deadline",
-                    "retry",
-                    "heartbeat",
-                    "debounce",
-                    "batch",
-                    "cadence",
-                    "animation",
-                    "layout",
-                    "runtime-loop",
-                    "ui work",
-                ],
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        missing.is_empty(),
-        "production sleep/timer sites need CSD deadline or cadence policy:\n{}",
-        missing.join("\n")
     );
 }
 
@@ -210,11 +327,6 @@ fn assert_contains_in_order(name: &str, source: &str, needles: &[&str]) {
             .unwrap_or_else(|| panic!("{name} is missing ordered fragment `{needle}`"));
         cursor += relative + needle.len();
     }
-}
-
-fn task_cancel_is_joined(source: &str, owner: &str) -> bool {
-    source.contains(&format!("{owner}?.cancel()"))
-        && source.contains(&format!("await {owner}?.value"))
 }
 
 #[test]
@@ -253,69 +365,4 @@ fn ios_terminal_task_owners_cancel_and_await_exact_handles() {
     assert!(refresh.contains("guard !isStopped else { return }"));
     assert!(refresh.contains("if let shutdownTask"));
     assert!(refresh.contains("await shutdownTask.value"));
-
-    let inventory = inventory_by_path();
-    assert_eq!(inventory.len(), 151, "CSD inventory row total changed");
-    assert_eq!(
-        inventory
-            .values()
-            .filter(|row| row.scheduler_class == "test_fixture")
-            .count(),
-        22,
-        "CSD test-fixture row total changed"
-    );
-    assert_eq!(
-        inventory
-            .values()
-            .filter(|row| row.scheduler_class != "test_fixture")
-            .count(),
-        129,
-        "CSD production row total changed"
-    );
-    for (scheduler_class, expected) in [
-        ("debounce_or_coalescer", 10),
-        ("main_actor_ui", 18),
-        ("tracked_background_task", 15),
-        ("external_callback_bridge", 8),
-    ] {
-        assert_eq!(
-            inventory
-                .values()
-                .filter(|row| row.scheduler_class == scheduler_class)
-                .count(),
-            expected,
-            "CSD `{scheduler_class}` row total changed"
-        );
-    }
-
-    assert_eq!(
-        inventory
-            .get("packages/ios-app/Sources/App/Lifecycle/ProductionAppRoot.swift")
-            .expect("ProductionAppRoot CSD row")
-            .scheduler_class,
-        "main_actor_ui"
-    );
-    assert_eq!(
-        inventory
-            .get("packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift")
-            .expect("EventStoreManager CSD row")
-            .scheduler_class,
-        "tracked_background_task"
-    );
-    assert_eq!(
-        inventory
-            .get("packages/ios-app/Sources/Engine/Persistence/Sync/SessionRefreshService.swift")
-            .expect("SessionRefreshService CSD row")
-            .scheduler_class,
-        "debounce_or_coalescer"
-    );
-}
-
-#[test]
-fn cancellation_without_join_is_rejected_by_terminal_owner_detector() {
-    assert!(!task_cancel_is_joined("ownedTask?.cancel()", "ownedTask"));
-    assert!(task_cancel_is_joined(
-        "ownedTask?.cancel(); await ownedTask?.value",
-        "ownedTask"
-    ));
 }

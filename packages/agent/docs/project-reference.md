@@ -166,18 +166,6 @@ Current living entry points:
   state-surface lifecycle taxonomy and inventory notes.
 - `packages/agent/docs/state-ownership-lifecycle-inventory.tsv`:
   machine-readable SOL state ownership inventory used by static gates.
-- `packages/agent/docs/concurrency-scheduling-discipline-scorecard.md`: completed
-  Concurrency Scheduling Discipline scorecard proving task ownership, bounded
-  queues/streams, timer fairness, blocking isolation, agent/session concurrency,
-  engine worker scheduling, iOS transport/update scheduling, and deterministic
-  scheduling tests.
-- `packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md`:
-  companion evidence manifest for CSD row checkpoints, verification logs, and
-  closed scheduling findings.
-- `packages/agent/docs/concurrency-scheduling-discipline-inventory.md`: completed
-  CSD taxonomy and scheduling-surface proof notes.
-- `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`:
-  machine-readable CSD scheduling inventory used by static gates.
 - `packages/agent/docs/observability-diagnostics-auditability-scorecard.md`:
   completed Observability Diagnostics Auditability scorecard for proving
   session events, provider audits, primitive trace records, engine ledger rows,
@@ -446,10 +434,11 @@ Current living entry points:
   closeout gates, with focused modules under
   `packages/agent/tests/observability_diagnostics_auditability/`.
 - `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
-  completed CSD scorecard, inventory, scheduling-marker coverage, spawn/task
-  ownership, bounded channel/stream, Swift banned-pattern, stored-task
-  cancellation, timer/deadline, blocking-isolation, and closeout gates, with
-  focused modules under `packages/agent/tests/concurrency_scheduling_discipline/`.
+  living guards that scan the production Rust and Swift trees for unbounded
+  channels or streams, banned iOS scheduling patterns, missing stored-task
+  cancellation paths, external-worker backpressure, and exact terminal iOS task
+  drains, with focused modules under
+  `packages/agent/tests/concurrency_scheduling_discipline/`.
 - `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`:
   nine living cross-cutting guards for public bearer and loopback boundaries,
   public-context injection denial, grants and delegated budgets, capability
@@ -532,7 +521,7 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/SSARR
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/SSARR
 scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
 scorecard, the IOSAC cockpit baseline scorecard, the IARM restoration map
 scorecard, the OPSAA cleanup scorecard, and the living SACB boundary gate.

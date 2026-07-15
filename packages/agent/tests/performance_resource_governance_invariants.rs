@@ -423,10 +423,6 @@ fn predecessor_inventory_rows_record_perf_as_next_original_slice() {
             "Performance / Resource Governance extends DSEMD storage/WAL/retention proof",
         ),
         (
-            "packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv",
-            "Performance / Resource Governance extends CSD bounded task and queue proof",
-        ),
-        (
             "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
             "Performance / Resource Governance extends ODA bounded diagnostics proof",
         ),
