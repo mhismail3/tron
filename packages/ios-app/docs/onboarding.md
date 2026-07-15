@@ -82,7 +82,7 @@ readyContent()
             ├─ RemainingProvidersOnboardingPage
             ├─ ServicesSetupOnboardingPage
             └─ ModelSetupOnboardingPage
-                 └─ state.complete() → dismiss sheet
+                 └─ onComplete → ProductionAppRoot persists completion and dismisses sheet
 ```
 
 Pairing URLs (`tron://pair?host=…&port=…&token=…[&label=…]`) are
@@ -340,23 +340,23 @@ metadata, but offline snapshots are never editable server settings.
 
 ## Persistence Keys
 
-All keys live exactly once on `OnboardingState`, `SettingsState`, or
-`PairedServerStore`.
-Never duplicate these literals inline.
+Each key has one owner: `ProductionAppRoot` owns first-run completion, while
+`PairedServerStore` owns the paired-server list and active selection. Never
+duplicate these literals inline.
 
-| Key | Purpose | Type |
-|-----|---------|------|
-| `onboardingComplete` | Presents/dismisses the first-run onboarding sheet | Bool |
-| `pairedServers` | Local paired Mac list | Data (JSON) |
-| `activePairedServerId` | Active paired server id | String |
+| Key | Owner | Purpose | Type |
+|-----|-------|---------|------|
+| `onboardingComplete` | `ProductionAppRoot` | Presents/dismisses the first-run onboarding sheet | Bool |
+| `pairedServers` | `PairedServerStore` | Local paired Mac list | Data (JSON) |
+| `activePairedServerId` | `PairedServerStore` | Active paired server id | String |
 
 Tron does not persist an analytics opt-in key. Local diagnostics are collected
 bounded on-device and leave the phone only when the user explicitly sends or
 shares a diagnostics bundle from Settings.
 
-`@AppStorage` uses `UserDefaults.standard`, not
-`NSUbiquitousKeyValueStore`. Onboarding completion is per-device:
-pairing an iPad must not silently mark an iPhone as paired.
+`ProductionAppRoot` reads and writes completion through `@AppStorage`, which
+uses `UserDefaults.standard`, not `NSUbiquitousKeyValueStore`. Completion is
+per-device: pairing an iPad must not silently mark an iPhone as paired.
 
 ---
 

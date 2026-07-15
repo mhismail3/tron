@@ -3,8 +3,8 @@ import Testing
 @testable import TronMobile
 
 /// `OnboardingState` is the observable model behind the first-run
-/// pairing sheet. It owns only the pairing form, the completion flag,
-/// inline pairing errors, and the in-flight Connect lock.
+/// pairing sheet. It owns only transient flow, pairing, setup, error,
+/// and in-flight Connect state.
 @Suite("OnboardingState")
 @MainActor
 struct OnboardingStateTests {
@@ -13,9 +13,7 @@ struct OnboardingStateTests {
 
     @Test("Fresh state defaults to empty pairing inputs")
     func defaultsAreSensible() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         #expect(state.currentStep == .welcome)
         #expect(state.pairingHost.isEmpty)
         #expect(state.pairingPort == AppConstants.prodPort)
@@ -100,23 +98,11 @@ struct OnboardingStateTests {
         #expect(OnboardingPageDotsMetrics.verticalPadding == 6)
     }
 
-    @Test("complete() flips the AppStorage flag")
-    func completeFlipsFlag() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let defaults = defaultsScope.defaults
-        let state = OnboardingState(defaults: defaults)
-        state.complete()
-        #expect(defaults.bool(forKey: OnboardingState.completionStorageKey) == true)
-    }
-
     // MARK: - Pairing payload application
 
     @Test("acceptPairingPayload(_:) populates host/port/token from a parsed URL")
     func acceptPairingPayload() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let payload = PairingURLParser.PairingPayload(
             host: "100.64.0.7",
             port: 9847,
@@ -134,9 +120,7 @@ struct OnboardingStateTests {
 
     @Test("acceptPairingPayload preserves user's label if already typed")
     func acceptPairingPayloadPreservesLabel() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         state.pairingLabel = "Custom Name"
         let payload = PairingURLParser.PairingPayload(
             host: "h", port: 1, token: "t", label: "From QR"
@@ -148,9 +132,7 @@ struct OnboardingStateTests {
 
     @Test("acceptPairingPayload clears any inline pairing error")
     func acceptPayloadClearsError() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         state.pairingError = .unauthorized
         state.acceptPairingPayload(.init(host: "h", port: 1, token: "t", label: nil))
         #expect(state.pairingError == nil)
@@ -158,9 +140,7 @@ struct OnboardingStateTests {
 
     @Test("acceptPairingPayload starts a fresh setup hydration scope")
     func acceptPairingPayloadStartsFreshSetupScope() throws {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
         state.hasPairedMac = true
         state.hydrateSetup(serverId: "old-server", settings: ServerSettingsSnapshot(settings), authState: nil)
@@ -174,9 +154,7 @@ struct OnboardingStateTests {
 
     @Test("prepareFirstRunOnboarding returns to the intro without changing form values")
     func prepareFirstRunOnboardingReturnsToIntro() throws {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
         state.prepareServerOnboarding(prefill: .init(id: "studio", label: "Studio", host: "100.64.0.7", port: 9847))
         state.pairingToken = "stored-token"
@@ -203,9 +181,7 @@ struct OnboardingStateTests {
 
     @Test("prepareServerOnboarding starts Settings-launched onboarding at connect")
     func prepareServerOnboardingStartsAtConnect() throws {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
         state.currentStep = .model
         state.hasPairedMac = true
@@ -231,9 +207,7 @@ struct OnboardingStateTests {
 
     @Test("prepareServerOnboarding can prefill a paired server and reuse its stored token")
     func prepareServerOnboardingPrefillsExistingServer() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let server = PairedServer(
             id: "studio",
             label: "Studio",
@@ -257,9 +231,7 @@ struct OnboardingStateTests {
 
     @Test("fresh server onboarding stays blocked until a token is scanned or entered")
     func freshServerOnboardingRequiresToken() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
 
         state.prepareServerOnboarding(prefill: nil)
         state.pairingHost = "100.64.0.7"
@@ -279,9 +251,7 @@ struct OnboardingStateTests {
 
     @Test("editing a prefilled server origin requires a fresh token")
     func editingPrefilledOriginRequiresFreshToken() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let server = PairedServer(
             id: "studio",
             label: "Studio",
@@ -309,9 +279,7 @@ struct OnboardingStateTests {
 
     @Test("pairing attempt preserves Settings repair mode for retry")
     func pairingAttemptPreservesSettingsRepairModeForRetry() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let server = PairedServer(
             id: "studio",
             label: "Studio",
@@ -330,9 +298,7 @@ struct OnboardingStateTests {
 
     @Test("scanned token for same prefilled server completes repair after pairing")
     func scannedTokenForSamePrefilledServerCompletesRepairAfterPairing() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let server = PairedServer(
             id: "studio",
             label: "Studio",
@@ -354,9 +320,7 @@ struct OnboardingStateTests {
 
     @Test("scanned token for different server keeps setup flow")
     func scannedTokenForDifferentServerKeepsSetupFlow() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let server = PairedServer(
             id: "studio",
             label: "Studio",
@@ -377,9 +341,7 @@ struct OnboardingStateTests {
 
     @Test("setup steps cannot be selected before a fresh pairing succeeds")
     func setupStepsStayLockedUntilPairingSucceeds() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         state.currentStep = .connect
 
         state.selectStep(.workspace)
@@ -394,9 +356,7 @@ struct OnboardingStateTests {
 
     @Test("explicit navigation advances through unlocked pages and stops at locked setup")
     func explicitNavigationHonorsSetupLock() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
 
         #expect(state.canNavigateBackward == false)
         #expect(state.canNavigateForward == true)
@@ -425,9 +385,7 @@ struct OnboardingStateTests {
 
     @Test("explicit navigation reaches model only after pairing and never runs past the final step")
     func explicitNavigationStopsAtModel() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         state.hasPairedMac = true
 
         while state.canNavigateForward {
@@ -443,9 +401,7 @@ struct OnboardingStateTests {
 
     @Test("pairing connect eligibility follows the current form values")
     func pairingConnectEligibilityFollowsFormValues() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
 
         #expect(state.validatedPairingPayload == nil)
         #expect(state.canAttemptPairing == false)
@@ -460,36 +416,6 @@ struct OnboardingStateTests {
 
         state.isConnecting = true
         #expect(state.canAttemptPairing == false)
-    }
-
-    // MARK: - reset()
-
-    @Test("reset() clears completion flag and pairing inputs")
-    func resetReturnsToPairing() {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let defaults = defaultsScope.defaults
-        let state = OnboardingState(defaults: defaults)
-        state.currentStep = .connect
-        state.pairingHost = "h"
-        state.pairingPort = "1"
-        state.pairingToken = "t"
-        state.pairingLabel = "L"
-        state.prepareServerOnboarding(prefill: .init(id: "server-1", label: "Studio", host: "h", port: 1))
-        state.hasPairedMac = true
-        defaults.set(true, forKey: OnboardingState.completionStorageKey)
-
-        state.reset()
-
-        #expect(state.currentStep == .welcome)
-        #expect(state.hasPairedMac == false)
-        #expect(state.pairingHost.isEmpty)
-        #expect(state.pairingPort == AppConstants.prodPort)
-        #expect(state.pairingToken.isEmpty)
-        #expect(state.pairingLabel == "My Mac")
-        #expect(state.pairingPrefilledServerId == nil)
-        #expect(state.completesAfterPairing == false)
-        #expect(defaults.bool(forKey: OnboardingState.completionStorageKey) == false)
     }
 
     // MARK: - setup hydration
@@ -551,26 +477,9 @@ struct OnboardingStateTests {
         #expect(snapshot.preferredApiKeyLabel(for: "minimax") == "Default")
     }
 
-    @Test("reset clears hydrated setup snapshot")
-    func resetClearsSetupSnapshot() throws {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/tmp"}}"#))
-        state.hydrateSetup(serverId: "server-1", settings: ServerSettingsSnapshot(settings), authState: nil)
-
-        state.reset()
-
-        #expect(state.setupSnapshot.serverId == nil)
-        #expect(state.setupSnapshot.defaultWorkspace == AppConstants.defaultWorkspace)
-        #expect(state.setupSnapshot.defaultModel == "")
-    }
-
     @Test("credential refresh updates setup snapshot without losing server preferences")
     func credentialRefreshUpdatesSetupSnapshot() throws {
-        let defaultsScope = isolatedDefaultsScope()
-        defer { defaultsScope.cleanupDefaultsSynchronously() }
-        let state = OnboardingState(defaults: defaultsScope.defaults)
+        let state = OnboardingState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
           "server": {
@@ -616,11 +525,4 @@ struct OnboardingStateTests {
         #expect(state.setupSnapshot.authLoadError == nil)
     }
 
-    // MARK: - Helpers
-
-    /// Each stateful test owns one registered suite and synchronously tears it
-    /// down after all persistence assertions complete.
-    private func isolatedDefaultsScope() -> IsolatedTestState {
-        IsolatedTestState(label: "onboarding-state")
-    }
 }

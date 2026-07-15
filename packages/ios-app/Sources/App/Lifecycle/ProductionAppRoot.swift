@@ -1,5 +1,9 @@
 import SwiftUI
 
+private enum ProductionAppStorageKeys {
+    static let onboardingComplete = "onboardingComplete"
+}
+
 /// The real application graph. `TronMobileApp` constructs this view only for
 /// application and UI-test processes; hosted unit-test processes never
 /// evaluate its state, dependencies, persistence, or lifecycle modifiers.
@@ -28,11 +32,9 @@ struct ProductionAppRoot: View {
     @State private var debugCameraSheetPresented = ProcessInfo.processInfo.arguments.contains("--tron-debug-camera-sheet")
 #endif
 
-    /// First-run pairing flag. Driven by `OnboardingState.completionStorageKey`
-    /// (the literal key `"onboardingComplete"`). When false, the app still
-    /// mounts the session list and presents `OnboardingFlowView` through the
-    /// central onboarding sheet presenter.
-    @AppStorage("onboardingComplete") private var onboardingComplete: Bool = false
+    /// Device-local first-run completion truth. This root owns persistence
+    /// because it also owns sheet presentation, dismissibility, and push startup.
+    @AppStorage(ProductionAppStorageKeys.onboardingComplete) private var onboardingComplete: Bool = false
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -44,9 +46,9 @@ struct ProductionAppRoot: View {
         _container = State(initialValue: container)
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--tron-ui-test-onboarding-complete") {
-            UserDefaults.standard.set(true, forKey: OnboardingState.completionStorageKey)
+            UserDefaults.standard.set(true, forKey: ProductionAppStorageKeys.onboardingComplete)
         } else if ProcessInfo.processInfo.arguments.contains("--tron-ui-test-onboarding-incomplete") {
-            UserDefaults.standard.set(false, forKey: OnboardingState.completionStorageKey)
+            UserDefaults.standard.set(false, forKey: ProductionAppStorageKeys.onboardingComplete)
         }
 #endif
         TronFontLoader.registerFonts()

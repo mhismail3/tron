@@ -49,7 +49,6 @@ struct OnboardingFlowView: View {
                         onPaired: {
                             withAnimation(.snappy(duration: 0.28)) {
                                 if state.completesAfterPairing {
-                                    state.complete()
                                     onComplete()
                                 } else {
                                     state.hasPairedMac = true
@@ -99,7 +98,6 @@ struct OnboardingFlowView: View {
                             state: state,
                             dependencies: dependencies,
                             onComplete: {
-                                state.complete()
                                 onComplete()
                             }
                         )

@@ -165,6 +165,51 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         )
     }
 
+    func testOnboardingCompletionPersistenceIsOwnedByProductionRoot() throws {
+        let app = try source(pathComponents: [
+            "Sources", "App", "Lifecycle", "ProductionAppRoot.swift",
+        ])
+        let state = try source(pathComponents: [
+            "Sources", "Session", "Chat", "State", "OnboardingState.swift",
+        ])
+        let flow = try source(pathComponents: [
+            "Sources", "UI", "Onboarding", "Flow", "OnboardingFlowView.swift",
+        ])
+
+        XCTAssertEqual(
+            app.components(separatedBy: #""onboardingComplete""#).count - 1,
+            1,
+            "The completion key literal should have one production owner"
+        )
+        XCTAssertFalse(
+            state.contains(#""onboardingComplete""#) || flow.contains(#""onboardingComplete""#),
+            "Transient onboarding owners should not duplicate the root persistence key"
+        )
+        XCTAssertTrue(
+            app.contains("@AppStorage(ProductionAppStorageKeys.onboardingComplete)"),
+            "The production root should persist the completion truth it uses for lifecycle gating"
+        )
+        XCTAssertTrue(
+            app.contains("onboardingComplete = true"),
+            "The root completion callback should make the single persistence write"
+        )
+        for forbidden in ["completionStorageKey", "private let defaults", "func complete()", "func reset()"] {
+            XCTAssertFalse(
+                state.contains(forbidden),
+                "Transient onboarding state should not own persistence marker \(forbidden)"
+            )
+        }
+        XCTAssertFalse(
+            flow.contains("state.complete()"),
+            "The child flow should emit completion without duplicating persistence"
+        )
+        XCTAssertEqual(
+            flow.components(separatedBy: "onComplete()").count - 1,
+            2,
+            "Both repair and first-run terminal paths should emit completion to the root"
+        )
+    }
+
     private func source(pathComponents: [String]) throws -> String {
         var url = try projectRoot()
         for component in pathComponents {
