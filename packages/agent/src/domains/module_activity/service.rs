@@ -3,12 +3,11 @@ use serde_json::Value;
 use crate::domains::module_registry::MODULE_MANIFEST_KIND;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, ListResources,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, ListResources,
 };
 use crate::shared::server::errors::CapabilityError;
 
-use super::Deps;
 use super::projection::{ModuleActivityItem, ModuleActivityProjection};
 
 const DEFAULT_LIMIT: usize = 40;
@@ -27,7 +26,7 @@ const MODULE_RESOURCE_KINDS: &[&str] = &[
 ];
 
 operation_bindings! {
-    deps = Deps;
+    deps = EngineHostHandle;
     hidden = [];
     bindings = [
         "overview" => |invocation, deps| {
@@ -37,7 +36,7 @@ operation_bindings! {
 }
 
 pub(crate) async fn overview_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
 ) -> Result<Value, CapabilityError> {
     let scopes = readable_scopes(invocation);
@@ -56,8 +55,7 @@ pub(crate) async fn overview_value(
     let mut items = Vec::new();
     for kind in MODULE_RESOURCE_KINDS {
         for scope in &scopes {
-            let resources = deps
-                .engine_host
+            let resources = engine_host
                 .list_resources(ListResources {
                     kind: Some((*kind).to_owned()),
                     scope: Some(scope.clone()),
@@ -68,7 +66,7 @@ pub(crate) async fn overview_value(
                 .map_err(engine_error)?;
             for resource in resources {
                 if let Some((inspection, version, payload)) =
-                    inspect_current_payload(deps, invocation, &resource).await?
+                    inspect_current_payload(engine_host, invocation, &resource).await?
                 {
                     items.push(ModuleActivityItem::from_resource(
                         &inspection.resource,
@@ -83,12 +81,11 @@ pub(crate) async fn overview_value(
 }
 
 async fn inspect_current_payload(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     resource: &EngineResource,
 ) -> Result<Option<(EngineResourceInspection, EngineResourceVersion, Value)>, CapabilityError> {
-    let Some(inspection) = deps
-        .engine_host
+    let Some(inspection) = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?

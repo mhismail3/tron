@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::domains::module_activity::projection::{ModuleActivityItem, test_item, test_projection};
-use crate::domains::module_activity::{Deps, contract, service};
+use crate::domains::module_activity::{contract, service};
 use crate::engine::durability::resources::EngineResourceVersionState;
 use crate::engine::{
     ActorId, EngineResource, EngineResourceScope, EngineResourceVersion, FunctionId, Invocation,
@@ -304,9 +304,6 @@ fn projection_redacts_sensitive_shapes_and_declares_policy() {
 #[tokio::test]
 async fn overview_lists_current_session_and_workspace_module_resources_only() {
     let engine_host = crate::engine::EngineHostHandle::new_in_memory().expect("host");
-    let deps = Deps {
-        engine_host: engine_host.clone(),
-    };
     let invocation = Invocation::new_sync(
         FunctionId::new("module_activity::overview").expect("function id"),
         json!({"limit": 10}),
@@ -360,7 +357,7 @@ async fn overview_lists_current_session_and_workspace_module_resources_only() {
     )
     .await;
 
-    let value = service::overview_value(&deps, &invocation)
+    let value = service::overview_value(&engine_host, &invocation)
         .await
         .expect("overview");
     assert_eq!(value["operation"], "module_activity_overview");
@@ -391,9 +388,6 @@ async fn overview_lists_current_session_and_workspace_module_resources_only() {
 #[tokio::test]
 async fn overview_fails_closed_without_trusted_scope() {
     let engine_host = crate::engine::EngineHostHandle::new_in_memory().expect("host");
-    let deps = Deps {
-        engine_host: engine_host.clone(),
-    };
     let invocation = Invocation::new_sync(
         FunctionId::new("module_activity::overview").expect("function id"),
         json!({
@@ -410,7 +404,7 @@ async fn overview_fails_closed_without_trusted_scope() {
         .with_scope(contract::READ_SCOPE),
     );
 
-    let error = service::overview_value(&deps, &invocation)
+    let error = service::overview_value(&engine_host, &invocation)
         .await
         .expect_err("overview must fail without trusted scope");
     match error {
