@@ -168,6 +168,10 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
             "iOS pairing parser missing host lifecycle guard: {required}"
         );
     }
+    assert!(
+        !ios_parser.contains("static func makeURL("),
+        "iOS pairing support must consume the Mac-owned wire format without a second emitter"
+    );
 
     let ios_validator = read_repo_file(
         "packages/ios-app/Sources/Support/Pairing/Onboarding/PairingStepValidator.swift",
@@ -260,7 +264,8 @@ fn sacb_pairing_lifecycle_boundaries_are_hardened() {
         "rejectsURLShapedHostValue",
         "rejectsHostFragments",
         "rejectsInvalidIPAndDNSHosts",
-        "makeURLRejectsMalformedRequiredFields",
+        "parsesMacEmitterRequiredFields",
+        "whitespaceOnlyTokenIsMissing",
     ] {
         assert!(
             ios_parser_tests.contains(required),

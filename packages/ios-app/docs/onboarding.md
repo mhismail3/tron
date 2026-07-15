@@ -94,7 +94,9 @@ ProductionAppRoot.readyContent()
 ```
 
 Pairing URLs (`tron://pair?host=…&port=…&token=…[&label=…]`) are
-handled in three places:
+emitted only by the Mac `PairingURLBuilder` and consumed by the iOS
+`PairingURLParser`; iOS does not maintain a second production URL builder.
+They are handled in three iOS entry paths:
 
 - `ProductionAppRoot`'s `onOpenURL` handler accepts QR/deep-link launches,
   fills the pairing form, jumps to the connect page, and presents through the same

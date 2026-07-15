@@ -465,6 +465,7 @@ extension SourceGuardTests {
         ] {
             #expect(parser.contains(required), "PairingURLParser missing lifecycle marker: \(required)")
         }
+        #expect(!parser.contains("static func makeURL("))
         #expect(validator.contains("case invalidHost(String)"))
         #expect(validator.contains("PairingHostValidator.canonicalHost(trimmedHost)"))
         #expect(persistor.contains("enum RollbackTokenAction"))
@@ -481,7 +482,8 @@ extension SourceGuardTests {
         for required in [
             "rejectsURLShapedHostValue",
             "rejectsHostFragments",
-            "makeURLRejectsMalformedRequiredFields",
+            "parsesMacEmitterRequiredFields",
+            "whitespaceOnlyTokenIsMissing",
         ] {
             #expect(parserTests.contains(required), "Pairing URL parser tests missing \(required)")
         }
