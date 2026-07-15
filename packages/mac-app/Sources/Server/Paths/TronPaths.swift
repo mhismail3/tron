@@ -1,8 +1,8 @@
 import Foundation
 
-/// Single source of truth for filesystem paths the wrapper interacts
-/// with. Mirrors `packages/agent/src/core/foundation/paths.rs` exports
-/// for user data and the macOS bundle layout for app-owned artifacts.
+/// Canonical Tron-home and bundle paths owned by the wrapper. Mirrors
+/// `packages/agent/src/shared/foundation/paths/mod.rs` for shared user-data
+/// locations and adds the macOS bundle layout for app-owned artifacts.
 enum TronPaths {
     private enum HomeComponent {
         static let internalDir = "internal"

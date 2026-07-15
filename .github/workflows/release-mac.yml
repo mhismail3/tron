@@ -3,15 +3,15 @@
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
 #   - Tag push matching `server-v*` (e.g. `server-v0.1.0-beta.1`)
-#   - Manual `workflow_dispatch` dry-run. The version always comes from
-#     VERSION.env so manual runs cannot produce mismatched artifacts.
+#   - Manual `workflow_dispatch`, which defaults to structural dry-run and
+#     never publishes. The version always comes from VERSION.env.
 #
 # ─── Pipeline overview ──────────────────────────────────────────────────
 #
 #   1. Resolve the target version from VERSION.env and verify any tag
 #      matches the centralized release tag.
 #   2. Build the Rust agent helper in release mode (cached).
-#   3. Stage both helpers into the embedded `Tron Server.app` Login Item via
+#   3. Stage the agent into both embedded helper apps via
 #      `packages/mac-app/scripts/bundle-agent.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
 #      `TronMac` scheme with explicit Developer ID signing for a release;
@@ -19,8 +19,7 @@
 #   5. Locate the archived `.app`; publishing uses Developer ID Application.
 #   6. Notarize the `.app` via `xcrun notarytool submit --wait`; staple with
 #      `stapler`.
-#   7. Build and sign the DMG via `create-dmg` into
-#      `dist/tron-v0.1.0-beta1.dmg`.
+#   7. Build and sign the version-owned DMG via `create-dmg`.
 #   8. Notarize the signed DMG separately, then staple it. Notary tickets are
 #      artifact-specific; the stapled `.app` ticket does not apply to the DMG.
 #   9. Generate a SHA256 manifest and deterministic changelog.
@@ -35,8 +34,8 @@
 #   NOTARIZE_TEAM_ID        Apple Developer team ID
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
 # All required signing and notarization secrets must be present for notarization to run. In
-# dry-run mode (workflow_dispatch with `dry_run=true`) missing secrets
-# are tolerated and the job short-circuits before the notarization step.
+# dry-run mode (the workflow_dispatch default) missing secrets are tolerated
+# and the job short-circuits before the notarization step.
 #
 # ─── Secret handling INVARIANT ──────────────────────────────────────────
 #
@@ -55,9 +54,8 @@
 #
 # ─── Rollback ───────────────────────────────────────────────────────────
 #
-# Bad release? `gh release delete server-v0.1.0-beta.1` pulls the DMG. Existing
-# installs are unaffected (they don't auto-pull deletions). Cut a fixed
-# release at the next beta or patch version.
+# Remove or unpublish the affected GitHub release assets, then cut a fixed
+# release at the next beta or patch version. Existing installs are unaffected.
 
 name: Release (Mac DMG)
 
@@ -68,7 +66,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Skip notarization + release publish (true/false)."
+        description: "Skip signing/notarization; manual runs never publish (true/false)."
         required: false
         default: "true"
         type: string
@@ -539,7 +537,7 @@ jobs:
       # upload + clobber — but we DO NOT change its publish state, so
       # operators can recover an over-eager publish without deleting
       # the release first.
-      - name: Create or update GitHub Release (draft)
+      - name: Create or update GitHub Release
         if: |
           steps.drymode.outputs.dry_run != 'true' &&
           github.event_name == 'push'

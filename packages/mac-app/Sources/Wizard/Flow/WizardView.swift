@@ -424,7 +424,7 @@ struct WizardShell<Content: View>: View {
     }
 
     /// Gate for the Permissions step's Continue button. Full Disk Access
-    /// must be granted before pairing so primitive file-backed execution
+    /// must be granted before pairing so agent file-backed execution
     /// does not start from a half-working install.
     private var permissionsCanContinue: Bool {
         Permission.allCases.allSatisfy { permission in

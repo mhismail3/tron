@@ -113,6 +113,7 @@ coverage gap exists.
 |---------|---------|
 | Rust agent | `scripts/tron ci test` |
 | iOS app | `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'` |
+| Mac wrapper | `cd packages/mac-app && xcodegen generate && xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug` |
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | Rust commit milestone | `scripts/tron ci fmt check clippy test` |
 
@@ -211,12 +212,12 @@ Two release lanes:
 | What | How | Cadence |
 |---|---|---|
 | iOS Beta to TestFlight | Tag `server-v0.1.0-beta.1`-style versions on a green main commit. CI workflow `release-ios.yml` archives the `Tron` / `Prod` iOS app, exports an App Store Connect IPA with automatic cloud signing or configured local signing secrets, uploads to App ID `6761511764`, waits for processing, resolves export compliance, submits TestFlight beta review when external testing requires it, exits successfully as pending review for first-build/new-version review waits, or assigns externally-ready builds to the public TestFlight group. | Same tag as server release. |
-| Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds + notarizes + attaches the macOS DMG as a draft `Tron Server ...` pre-release with generated changelog notes. | Same tag as iOS release. |
+| Server DMG to GitHub Releases | The same tag triggers `release-mac.yml`, which builds and notarizes the macOS DMG, creates a draft release when absent, or refreshes assets on an existing release without changing its publish state. | Same tag as iOS release. |
 
 Versioning sources:
 - **Source of truth** — root `VERSION.env`. `TRON_VERSION` is canonical
-  SemVer (`0.1.0-beta.1`), and `TRON_APPLE_BUILD` is the numeric Apple
-  build. Human-facing surfaces format that first beta as `v0.1 (Beta 1)`.
+  SemVer, `TRON_APPLE_BUILD` is the numeric Apple build, and
+  `TRON_DISPLAY_VERSION` is the human-facing label.
 - **Generated mirrors** — `packages/agent/Cargo.toml`, `packages/agent/Cargo.lock`,
   Mac/iOS `project.yml`, and custom `TRONCanonicalVersion` bundle keys.
   Run `scripts/tron version sync` after editing `VERSION.env`; CI runs
@@ -229,18 +230,18 @@ Versioning sources:
 git checkout main && git pull && git log -1 --oneline
 
 # 2. Set VERSION.env, then sync generated mirrors.
-# For the first beta this is already 0.1.0-beta.1; subsequent betas can use
-# `scripts/tron version bump beta`.
+# Use `scripts/tron version bump beta` first when advancing to the next beta.
 scripts/tron version sync
 
 # 3. Commit the bump and tag.
-git commit -am "chore(release): Tron v0.1 (Beta 1)"
+git commit -am "chore(release): bump Tron version"
 git tag "$(scripts/tron version print | awk -F= '$1 == "TRON_RELEASE_TAG" { print $2 }')"
 git push && git push --tags
 
 # 4. Tag push starts both release workflows:
 #    - release-mac.yml: build → codesign → app notarize/staple → DMG
-#      build/sign/notarize/staple → GitHub Release draft.
+#      build/sign/notarize/staple → create a draft or refresh existing assets
+#      without changing the release's publish state.
 #    - release-ios.yml: archive Prod iOS app → export/sign App Store IPA →
 #      upload to App Store Connect → wait for processing → resolve export
 #      compliance / beta review → either stop as pending Apple review or assign
@@ -271,12 +272,12 @@ git push && git push --tags
 | `IOS_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile` |
 | `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` | App Store Connect distribution profile for `com.tron.mobile.ShareExtension` |
 
-**Required GitHub Actions variables** for iOS TestFlight distribution:
+**Optional GitHub Actions variables** for iOS TestFlight group assignment:
 
 | Variable | What |
 |---|---|
-| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id |
-| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link |
+| `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` | Existing internal TestFlight group id; omitted when CI should skip that explicit assignment |
+| `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` | Existing public TestFlight group id behind the onboarding QR link; CI can auto-discover a single public-link group |
 
 Rotate by regenerating the relevant `.p12` or profile, re-encoding
 (`base64 -i Tron.p12 | pbcopy`), or by creating a new App Store Connect API key
@@ -288,9 +289,9 @@ matching manually managed profiles or matching Xcode-managed App Store profiles.
 The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`;
 revisit that release assertion before adding non-exempt cryptography.
 
-**Rollback a bad server release**: `gh release delete server-v0.1.0-beta.1` pulls the DMG.
-Existing installs are unaffected (they don't auto-pull deletions). Cut a fixed
-release at the next beta or patch version.
+**Rollback a bad server release**: `gh release delete <release-tag>` removes
+the release assets. Existing installs are unaffected because they do not
+auto-pull deletions. Cut a fixed release at the next beta or patch version.
 
 Hotfix path: cherry-pick the fix to `main`, tag a new patch release.
 

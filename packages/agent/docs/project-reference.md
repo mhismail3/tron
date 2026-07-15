@@ -3120,89 +3120,22 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, and profile defaults under `Contents/Resources/Constitution/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, confirms permissions, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
-
-```
-packages/mac-app/Sources/
-+-- App/
-|   +-- Lifecycle/             App entry, runtime variant, and startup maintenance
-|   +-- CommandMode/           Internal start/uninstall command modes
-|   +-- Composition/           Sendable environment setup and live/test DI
-+-- Server/
-|   +-- LaunchAgent/           SMAppService-backed LaunchAgent boundary
-|   +-- Health/                Server ping, health wait, and status polling
-|   +-- Paths/                 TronPaths and profile settings TOML cache
-|   +-- PairingToken/          Bearer-token reader
-|   +-- ProcessControl/        Dev stopper, process probe, lock, uninstall
-+-- MenuBar/
-|   +-- Controller/            NSStatusItem lifecycle
-|   +-- Actions/               Menu command handlers and feedback action
-|   +-- Presentation/          Menu descriptors, log reader, logs window
-+-- Wizard/
-|   +-- Flow/                  Wizard state machine and shell view
-|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, iOS Beta, Pairing, Done
-|   +-- Components/            Window and visual layout primitives
-+-- Support/
-|   +-- Diagnostics/           Redaction for diagnostics and logs
-|   +-- Feedback/              GitHub issue composer
-|   +-- Foundation/            Shared foundation helpers, subprocess, and display formatting
-|   +-- Onboarding/            Wizard models, probes, install planning
-|   +-- Pairing/               Pairing URL, QR, local computer-name helpers
-|   +-- Theme/                 Colors, font loading, typography
-+-- Resources/
-+-- Assets.xcassets/
-+-- Info.plist
-```
-
-### Wizard Steps
-
-1. **Welcome** — introduces Tron.
-2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `/engine` `invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles macOS Login Items authorization by opening Settings when needed, and polls `system::ping` after the initial `hello.ok` frame.
-4. **Permissions** — Full Disk Access only. Deep-links to System Settings, labels the exact wrapper app entry to enable, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after the wizard-opened Settings pane, and keeps Re-check as a non-restarting probe.
-5. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
-6. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it in `profiles/user/profile.toml`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`. The QR builder uses the same bare-host and `1...65535` port contract as iOS, so it does not emit URL/path/userinfo/bracketed-host payloads.
-7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
-
-### Menu-bar Actions
-
-| Item | Action |
-|------|--------|
-| Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, normalized live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
-| Show pairing info | Opens a pairing-only window that shows one emerald resolving spinner directly on the window background until the QR + manual copy buttons for host, port, token, and server name crossfade in; copy actions quickly show a checkmark for two seconds on success |
-| Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; start-like actions post success only after `/health` passes |
-| Update finalization | On the first menu-bar launch or command-mode start for a new app build, refreshes stale SMAppService metadata and restarts the bundled server once; the app-version marker is recorded only after `/health` passes, and `tron dev` takeover defers this until the production server is active again |
-| Stop dev server | Appears with the server controls whenever `Tron-Dev.app` owns port 9847; stops the dev process and resumes the installed Login Item through the same health-gated path. Pause, restart, and uninstall are disabled while dev takeover is active. |
-| Show logs | Opens the native logs window backed by the read-only `logs::recent` capability |
-| Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
-| Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. The database and workspace are always preserved. |
-| Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
-
-### Variants & Workflows
-
-The wrapper coexists with local Release testing, Xcode Debug UI dogfood, an isolated Xcode install sandbox, and the `tron dev` agent-only workflow. Production workflows share `port 9847` and the `~/.tron/internal/` data tree; the isolated install scheme deliberately uses `port 9848`, `~/.tron-dev`, `com.tron.server.dev`, and the separate `Tron Server Dev.app` helper whose bundle identifier matches that LaunchAgent label.
-
-| Workflow | Build product | Bundle ID | Lives at | What it is |
-|---|---|---|---|---|
-| **Production (DMG)** | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Notarized SwiftUI wrapper + bundled headless agent — what end users install |
-| **Local Release test** (Xcode Release copied into place) | `Tron.app` | `com.tron.mac` | `/Applications/Tron.app` | Same installed-release path as the DMG; useful for validating local changes before packaging |
-| **Debug companion** (default Xcode Run) | `TronMac.app` | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/TronMac.app` | SwiftUI wrapper dogfood that coexists with `/Applications/Tron.app`; it observes the production server but does not register, pause, restart, or uninstall it |
-| **Isolated install test** (`TronMac Isolated Install` scheme) | `TronMac.app` | `com.tron.mac.dev` | DerivedData | First-run/reinstall sandbox with separate LaunchAgent label, port, and data root |
-| **Agent dev** (`tron dev`) | `Tron-Dev.app` (no SwiftUI — just a `.app` wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/internal/run/Tron-Dev.app` | Headless agent only — used by contributors iterating on the Rust server without rebuilding the wrapper |
-
-Mutual exclusion:
-- Duplicate wrappers of the same bundle ID — guarded by `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`). Release and Debug companion wrappers intentionally use different lock files so their menu icons can coexist.
-- Production agents — guarded by `~/.tron/internal/database/tron.sqlite.lock` (cross-process exclusive `flock`).
-- LaunchAgent ownership — installed Release is authoritative for `com.tron.server` and repairs stale Debug/DerivedData registrations before restart; default Xcode Debug is companion-only. The `TronMac Isolated Install` scheme owns `com.tron.server.dev` on port `9848` with `TRON_HOME_NAME=.tron-dev` and a Debug-first `AssociatedBundleIdentifiers` list so ServiceManagement attributes the job to `TronMac.app`.
-- Port `9847` — `tron dev` calls `launchctl bootout com.tron.server` before binding, so the installed helper is paused while dev-mode runs.
-- Direct server guard — if no LaunchAgent owns the service but port `9847` is already bound or `internal/database/tron.sqlite.lock` is held, the app reports another Tron server instead of registering a second helper or choosing a different port.
-
-A contributor can have the DMG installed AND run the default Xcode Debug wrapper for menu/wizard UI work; both menu icons can coexist and both observe the production server. Running `tron dev` is still the explicit server-takeover path for Rust-agent iteration: the wrapper's menu bar keeps pinging port 9847, reports the `Tron-Dev.app` PID/uptime, and shows `Dev Server active` while dev owns the port. Quitting `tron dev` restarts the installed helper by invoking `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which re-enters the same `SMAppService` registration path used by the app; the CLI reports the installed service as restarted only after `/health` passes, records the finalized app-version marker on success, and stale installed helpers that cannot parse current profile defaults must be updated rather than papered over. The menu-bar Stop Dev action follows the same rule, showing `Resume failed` when ServiceManagement loads an unhealthy installed helper instead of posting a false recovery. Pre-onboarding production cleanup uses the installed app's paired internal command `--tron-uninstall-and-quit` so stale Login Item registrations are removed by `SMAppService.unregister` instead of only being booted out of launchd; Debug companion command mode refuses to uninstall production. See [`packages/mac-app/docs/architecture.md` → Workflows & Variants](../../mac-app/docs/architecture.md#workflows--variants) for the full breakdown including the on-disk artifacts each workflow shares.
+`Tron.app` is the SwiftUI wrapper around the headless Rust agent. Production
+runs only from `/Applications/Tron.app`; it owns `com.tron.server` registration
+through `SMAppService`, waits for server health, and switches from a regular
+wizard window to accessory/menu-bar presentation after onboarding. The bundle
+contains signed production and isolated-test helper apps plus Constitution
+defaults. Default Xcode Debug is a companion observer; the isolated scheme uses
+`~/.tron-dev`, port `9848`, and `com.tron.server.dev`.
 
 ### Documentation
 
-- `packages/mac-app/docs/architecture.md` — wizard + menu bar + helper-binary lifecycle
-- `packages/mac-app/docs/development.md` — workflow quick reference for Xcode Debug, local Release install testing, `tron dev`, and DMG release, plus XcodeGen/signing setup
+- [`packages/mac-app/docs/architecture.md`](../../mac-app/docs/architecture.md)
+  owns wrapper composition, wizard/menu behavior, lifecycle, and workflow
+  identities.
+- [`packages/mac-app/docs/development.md`](../../mac-app/docs/development.md)
+  owns XcodeGen, local build/test commands, helper staging, and DMG contributor
+  workflow.
 
 ---
 
@@ -3309,31 +3242,39 @@ Notes:
 
 ### Service (SMAppService)
 
-The production Mac app registers `com.tron.server` with `SMAppService.agent(plistName: "com.tron.server.plist")`. The notarized app must live at `/Applications/Tron.app`; the bundled LaunchAgent lives inside the app at `Contents/Library/LaunchAgents/com.tron.server.plist`, and its `BundleProgram` points at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` with `ProgramArguments` of `tron --port 9847 --quiet`. Installed and contributor LaunchAgents do not set `RUST_LOG`; quiet-mode database diagnostics use the fixed engine policy. `AssociatedBundleIdentifiers` lists the wrapper bundle IDs (`com.tron.mac`, then `com.tron.mac.dev`) so Login Items/TCC attribution follows the responsible wrapper app. No production code writes `~/Library/LaunchAgents` or copies an app bundle into `~/.tron/internal/`. An enabled Login Item registration without a loaded launchd job is not treated as installed/running; the current app replaces that registration through SMAppService and still waits for the server heartbeat. If `launchctl print` reveals a stale event trigger pointing at a missing/mismatched helper executable, a stale parent bundle build number for the same installed app, stale launch constraints such as `needs LWCR update`, or a Debug/DerivedData parent owns the production label, the installed app boots it out, unregisters the stale registration, and re-registers `/Applications/Tron.app` before restarting.
+The installed `/Applications/Tron.app` is the only production owner of
+`com.tron.server`. Its tracked LaunchAgent points at the bundled
+`Tron Server.app` executable with `tron --port 9847 --quiet`; registration and
+repair go through `SMAppService`, never a writable `~/Library/LaunchAgents`
+copy. Loaded state is not health: install, restart, resume, command-mode start,
+and version finalization wait for the server before reporting success.
 
-Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; reopen `/Applications/Tron.app` or run `tron start`/`tron restart` so the wrapper repairs SMAppService before launchd executes the bundled server. Start-like menu actions, command-mode starts, contributor CLI start/restart, and update finalization wait for `/health` after ServiceManagement reports loaded; the app-version marker is recorded only after that health gate succeeds. Loaded-but-unhealthy helpers remain visible failures until `/Applications/Tron.app` is updated or reinstalled. Default Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData, and are companion-only: they can show the menu bar and observe the production server, but server pause/restart/uninstall/install actions are disabled. Use the `TronMac Isolated Install` scheme when testing the first-run/reinstall wizard from Xcode; it registers `com.tron.server.dev`, points `BundleProgram` at `Tron Server Dev.app`, runs on port `9848`, and stores data under `~/.tron-dev`. For agent-only iteration, `tron dev` stops the production LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only production registration path.
+Default Debug is companion-only. Isolated Debug owns `com.tron.server.dev`,
+port `9848`, and `~/.tron-dev`. `tron dev` temporarily takes over production
+port `9847` and restores the installed helper through the wrapper command-mode
+entry point. The Mac
+[architecture owner](../../mac-app/docs/architecture.md#workflows--variants)
+documents registration repair, variants, and mutual exclusion.
 
 ### DMG Release Pipeline
 
-End-users install `Tron.app` via a notarized DMG published to GitHub Releases. Release identity is centralized in `VERSION.env`: the first beta is canonical `0.1.0-beta.1`, Apple bundles receive numeric `MARKETING_VERSION = 0.1.0` / `CURRENT_PROJECT_VERSION = 1`, and human-facing UI renders `v0.1 (Beta 1)`. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on a matching `server-v*` tag push:
+Release identity is centralized in `VERSION.env`. On a matching `server-v*` tag,
+[`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml)
+checks every version mirror, builds the locked Rust agent, verifies the tracked
+helper metadata, stages the executable into both helper bundles, generates the
+Xcode project, and archives `Tron.app`. Publication signs inside-out, notarizes
+the app, builds the DMG from a dedicated source directory, remounts it to
+require the production helper and `Applications` link, then signs/notarizes the
+DMG separately. `scripts/tron-release-notes` owns dynamic release copy and
+asset names. The workflow creates a draft when no release exists, or updates
+existing assets without changing an already-published release's state, title,
+or notes.
 
-1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
-2. `scripts/tron version check` verifies `VERSION.env`, Cargo, Cargo.lock, Mac/iOS `project.yml`, custom bundle canonical version keys, and release docs agree before any artifact is built. A tag push must equal `server-v$(TRON_VERSION)`.
-3. `cargo build --release --bin tron --locked` in `packages/agent/`.
-4. Install XcodeGen + `create-dmg`.
-5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into both bundled helpers (`Tron Server.app` and `Tron Server Dev.app`) and writes both LaunchAgent plists.
-6. `xcodegen generate` inside `packages/mac-app/`.
-7. Create an isolated release keychain from the signing/notarization secrets for publication. Structural-only dry-runs disable code signing and do not notarize.
-8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-9. Verify the bundled helper app, both helper executables, LaunchAgent plist, and profile defaults are present in the archive.
-10. Sign the helper apps first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
-11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
-12. Copy `Tron.app` into a dedicated DMG source directory, build the intended `create-dmg` layout without a fallback, then remount the image and verify the exact app, embedded helper, and `Applications -> /Applications` install link. Sign the verified DMG, submit that signed image to `notarytool`, and staple it; the app and DMG require separate notary tickets.
-13. Keep dSYMs in the Xcode archive/release artifacts for Apple crash diagnostics.
-14. `scripts/tron-release-notes` writes a bounded draft changelog body from first-parent git history since the previous release tag, including the DMG filename, SHA256, and a full compare link. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta1-to-beta2 pump recognizes the historical Mac-scoped beta1 tag so the first `server-v*` release does not include the entire repo history.
-15. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates a draft GitHub pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog; maintainers publish after installing and verifying the DMG.
-
-A parallel dry-run job runs on every PR that touches `packages/mac-app/**`, `packages/agent/**`, or the workflow itself. It stops before notarization (no cert needed), but still fails unless `create-dmg` produces a nonempty image containing `TronMac.app`, its embedded helper, and the `Applications` link.
+Manual dispatch defaults to structural dry-run and never publishes; with
+`dry_run=false` and signing credentials it may exercise signed/notarized
+packaging. PR coverage is an unsigned structural proof. Both remain
+fail-closed. Exact contributor commands live in the Mac
+[development guide](../../mac-app/docs/development.md#ci-pipeline).
 
 The iOS TestFlight pipeline lives at `.github/workflows/release-ios.yml` and triggers on the same `server-v*` tag push. It regenerates `packages/ios-app/TronMobile.xcodeproj` from XcodeGen, verifies `VERSION.env` mirrors, runs the iOS simulator tests, archives the `Tron` scheme with the `Prod` configuration (`com.tron.mobile` / App ID `6761511764`), exports an App Store Connect IPA with Xcode's `app-store-connect` export method, uploads with `asc builds upload`, waits for the Apple build to become valid, resolves TestFlight export compliance, updates What to Test notes, submits TestFlight beta review when Apple requires it for external testing, and branches on the ASC review state. First external builds for a new marketing version normally enter `WAITING_FOR_BETA_REVIEW`; CI treats that as a successful pending-review checkpoint instead of timing out. Once Apple approves the version, rerunning the workflow or uploading later builds in the same version continues to group validation and assigns the build to the public external TestFlight group when one is configured or can be auto-discovered. The public group is the same TestFlight link shown by the Mac onboarding QR code. TestFlight group checks are warning-only after the build is uploaded and processed because successful public distribution must not be blocked by stale or renamed group variables that CI does not need to create the beta build. Reruns are idempotent: if the Apple build number already exists in App Store Connect, CI skips the binary upload and reuses that build for processing/distribution. Manual workflow runs default to `dry_run=true` and stop before ASC upload.
 

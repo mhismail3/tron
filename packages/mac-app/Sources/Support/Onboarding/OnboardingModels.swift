@@ -77,7 +77,7 @@ enum HeaderIcon: Equatable, Sendable {
 }
 
 /// Permission category the wizard probes during the Permissions step.
-/// The primitive wrapper only preflights broad local file access; visual
+/// The Mac wrapper only preflights broad local file access; visual
 /// inspection and click/type control are no longer startup requirements.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess

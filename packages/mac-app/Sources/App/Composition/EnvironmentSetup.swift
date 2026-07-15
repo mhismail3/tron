@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Dependency injection point for the Mac wrapper.
 ///
-/// All filesystem paths, subprocess invocations, and time sources go
-/// through this struct so tests can substitute pure-value fakes
-/// without touching the host system.
+/// This is the composition seam for wizard/menu dependencies that need host
+/// substitution. Leaf services retain their own bounded filesystem, process,
+/// and timing behavior.
 struct EnvironmentSetup: Sendable {
     var tronHome: URL
     var applicationBundle: URL

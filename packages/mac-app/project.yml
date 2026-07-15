@@ -32,11 +32,9 @@ targets:
         createIntermediateGroups: true
         excludes:
           - "Resources/**"
-      # Resources get added as individual file references (not a folder
-      # reference), so each file lands at the top level of
-      # `Tron.app/Contents/Resources/` — required by the wizard's
-      # `Bundle.main.url(forResource: "tron-agent")` lookup in
-      # Sources/Wizard/Steps/InstallStep.swift:137.
+      # Ordinary resources are copied through Xcode's resource phase. The
+      # tracked Library tree is excluded because the post-build script owns
+      # its `Contents/Library` placement and nested signing order.
       - path: Sources/Resources
         createIntermediateGroups: true
         buildPhase: resources

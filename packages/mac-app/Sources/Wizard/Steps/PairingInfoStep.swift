@@ -225,9 +225,9 @@ struct PairingInfoStep: View {
             if Task.isCancelled { return }
         }
 
-        // Fresh installs do not have a user profile yet. Resolve the
-        // current Tailscale address live, then cache it into the profile
-        // only after we know the value is real.
+        // Fresh installs may not have a user profile yet. Prefer live and
+        // current-session state, then fall back to server/settings state;
+        // cache the selected host for later wrapper and server reads.
         let token = setup.readBearerToken()
         guard let token, !token.isEmpty else {
             fail(.noToken)
