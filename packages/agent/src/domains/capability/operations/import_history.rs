@@ -13,11 +13,8 @@ pub(super) async fn import_history_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let import_history_deps = crate::domains::import_history::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::import_history::service::record_import_history_value_at(
-        &import_history_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn import_history_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let import_history_deps = crate::domains::import_history::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::import_history::service::list_import_history_value(
-        &import_history_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn import_history_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let import_history_deps = crate::domains::import_history::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::import_history::service::inspect_import_history_value(
-        &import_history_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )

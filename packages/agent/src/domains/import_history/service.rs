@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    WorkerId,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -16,19 +16,19 @@ use super::contract::{
 };
 use super::projection::{import_history_summary, inspected_import_history};
 use super::validation::*;
-use super::{Deps, IMPORT_HISTORY_RECORD_KIND, IMPORT_HISTORY_RECORD_SCHEMA_ID};
+use super::{IMPORT_HISTORY_RECORD_KIND, IMPORT_HISTORY_RECORD_SCHEMA_ID};
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.import_history.idempotency.v1";
 const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.import_history.idempotency.v1\0";
 
 pub(crate) async fn record_import_history_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_raw_import_fields(payload)?;
-    ensure_write_authority(deps, invocation, "import_history_record").await?;
+    ensure_write_authority(engine_host, invocation, "import_history_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let record_id = optional_string(payload, "recordId")?
@@ -63,8 +63,7 @@ pub(crate) async fn record_import_history_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = import_history_resource_id(&scope, &record_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -105,8 +104,7 @@ pub(crate) async fn record_import_history_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: IMPORT_HISTORY_RECORD_KIND.to_owned(),
@@ -133,7 +131,7 @@ pub(crate) async fn record_import_history_value_at(
         .clone()
         .ok_or_else(|| invalid("import history resource was created without a current version"))?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "import_history.recorded",
         &resource,
@@ -154,17 +152,17 @@ pub(crate) async fn record_import_history_value_at(
         "idempotentReplay": false,
         "importHistoryResourceId": resource.resource_id,
         "importHistoryVersionId": version_id,
-        "record": import_history_summary_for_resource(deps, &resource).await?,
+        "record": import_history_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "import_history")]
     }))
 }
 
 pub(crate) async fn list_import_history_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "import_history_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "import_history_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -174,8 +172,7 @@ pub(crate) async fn list_import_history_value(
     let graph_kind = optional_string(payload, "graphKind")?;
     let subject_kind = optional_string(payload, "subjectKind")?;
     let subject_id = optional_string(payload, "subjectId")?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(IMPORT_HISTORY_RECORD_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -191,8 +188,7 @@ pub(crate) async fn list_import_history_value(
     let truncated = resources.len() > limit;
     let mut records = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -254,16 +250,15 @@ pub(crate) async fn list_import_history_value(
 }
 
 pub(crate) async fn inspect_import_history_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "import_history_inspect").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "import_history_inspect").await?;
     let resource_id = required_string(payload, "importHistoryResourceId")?;
     validate_import_history_resource_id(&resource_id)?;
     let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -348,11 +343,10 @@ fn import_history_record(input: ImportHistoryRecordInput<'_>) -> Value {
 }
 
 async fn import_history_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?
@@ -422,13 +416,13 @@ fn validate_import_history_resource_id(value: &str) -> Result<(), CapabilityErro
 }
 
 async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: IMPORT_HISTORY_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({
