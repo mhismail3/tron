@@ -454,6 +454,9 @@ for mounted chat sessions, `AppConnectionRepository` for connection state,
 `SessionEventRepository` for live events, `SettingsRepository` for settings
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
+`EngineClient` is the composition-owned concrete transport; domain clients use
+the narrower `EngineTransport` contract, so no second whole-client protocol
+mirrors the concrete client surface.
 `ModelClient` is transport-only; `DefaultModelRepository` owns the active
 server's five-minute model catalog, refresh, and invalidation policy, while
 `ModelPickerState` owns only optimistic switch presentation.

@@ -40,7 +40,7 @@ through `packages/agent/src/transport/runtime/setup.rs`. Individual
 
 | Class | Files |
 |---|---:|
-| `adapter` | 163 |
+| `adapter` | 162 |
 | `composition-root` | 15 |
 | `contract` | 130 |
 | `facade` | 123 |
@@ -48,7 +48,7 @@ through `packages/agent/src/transport/runtime/setup.rs`. Individual
 | `implementation` | 824 |
 | `test-support` | 173 |
 
-Total tracked source rows: **1455**.
+Total tracked source rows: **1454**.
 
 ## Verification
 

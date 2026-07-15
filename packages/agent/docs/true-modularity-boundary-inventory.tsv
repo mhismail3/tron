@@ -694,7 +694,6 @@ packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.sw
 packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionProtocolFrames.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionTypes.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
-packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/EngineClientProtocol.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/EngineTransport.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/LoggingContext.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
 packages/ios-app/Sources/Session/Attachments/Attachment.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
