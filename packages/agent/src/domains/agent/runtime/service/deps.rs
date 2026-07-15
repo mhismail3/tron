@@ -2,7 +2,6 @@ use super::{CausalContext, FunctionId, InvocationId};
 use crate::engine::Invocation;
 use std::sync::Arc;
 
-#[derive(Clone)]
 pub struct PromptRuntimeDeps {
     pub orchestrator: Arc<crate::domains::agent::r#loop::orchestrator::core::Orchestrator>,
     pub session_manager:
@@ -13,7 +12,6 @@ pub struct PromptRuntimeDeps {
     pub origin: String,
 }
 
-#[derive(Clone)]
 pub struct PromptEngineCausality {
     pub(super) context: CausalContext,
     pub(super) parent_invocation_id: Option<InvocationId>,

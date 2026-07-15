@@ -25,7 +25,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         shutdown_token,
         shutdown_coordinator,
         engine_host,
-        engine_causality,
         sequence_counter,
         server_origin,
         run_id,
@@ -39,7 +38,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         prompt,
         reasoning_level,
         attachments,
-        engine_causality: _,
+        engine_causality,
     } = request;
     let inherited_trace_id = engine_causality
         .as_ref()

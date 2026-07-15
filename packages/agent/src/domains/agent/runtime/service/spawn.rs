@@ -10,7 +10,6 @@ pub fn spawn_prompt_run(
     run_id: String,
     request: PromptRequest,
 ) {
-    let engine_causality = request.engine_causality.clone();
     let plan = PromptRunPlan {
         started_run,
         orchestrator: runtime_deps.orchestrator.clone(),
@@ -24,7 +23,6 @@ pub fn spawn_prompt_run(
             .map(|coord| coord.token()),
         shutdown_coordinator: runtime_deps.shutdown_coordinator.clone(),
         engine_host: runtime_deps.engine_host.clone(),
-        engine_causality,
         sequence_counter: {
             let sid = &request.session_id;
             let max_seq = runtime_deps.event_store.get_max_sequence(sid).unwrap_or(0);

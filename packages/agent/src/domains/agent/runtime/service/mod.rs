@@ -5,8 +5,10 @@
 //! lightweight session title generation, and the major run-turn phases. The
 //! service also owns the outer structured logging lifecycle for accepted prompt
 //! runs so logs, session events, trace records, and agent-result resources share
-//! common run/session/trace identifiers. Completion derives `agent_result` text
-//! and its event reference after the turn's synchronous persistence calls have
+//! common run/session/trace identifiers. `PromptRequest` is the single
+//! plan-level owner of accepted invocation causality; execution moves that value
+//! into its turn and completion path. Completion derives `agent_result` text and
+//! its event reference after the turn's synchronous persistence calls have
 //! committed, then reads the durable session update directly from `EventStore`;
 //! it does not retain session-cache ownership. Durable prior-history
 //! reconstruction and the new `message.user` append are prerequisites for
