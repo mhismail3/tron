@@ -184,6 +184,18 @@ struct MacSourceGuardTests {
                 "<string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>"
             )
         )
+
+        let bundleScript = try Self.read(macRoot, "scripts/bundle-agent.sh")
+        #expect(bundleScript.contains("tracked_plists=("))
+        #expect(bundleScript.contains("tracked helper metadata is missing"))
+        for plistVariable in [
+            "HELPER_INFO_PLIST",
+            "DEV_HELPER_INFO_PLIST",
+            "LAUNCH_AGENT_PLIST",
+            "DEV_LAUNCH_AGENT_PLIST",
+        ] {
+            #expect(!bundleScript.contains("cat > \"$\(plistVariable)\""))
+        }
     }
 
     @Test("staged-binary policy keeps helper executables ignored")

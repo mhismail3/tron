@@ -78,6 +78,12 @@ packages/mac-app/scripts/bundle-agent.sh --clean
 both helper `Info.plist` files, and helper icons stay in the repository. It only
 removes ignored payload binaries under each helper's `Contents/MacOS/`.
 
+The two helper `Info.plist` files and two LaunchAgent plists under
+`Sources/Resources/Library` are the authoritative packaged metadata.
+`bundle-agent.sh` verifies that those tracked files exist; it does not generate
+or repair them while staging a binary. Edit and review the tracked plist owner
+directly when bundle identity, arguments, ports, or associations change.
+
 The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. The primitive branch does not bundle managed skills, transcription sidecars, or product capability assets.
 
 After staging, regenerate the Xcode project so it picks up the file reference:
@@ -234,7 +240,7 @@ swiftformat packages/mac-app/Sources packages/mac-app/Tests
 | Symptom | Likely cause |
 |---|---|
 | Install reports missing helper executable | The active helper binary (`Tron Server.app` for production/Release or `Tron Server Dev.app` for isolated Debug) was not staged before archive/build. Run `bash packages/mac-app/scripts/bundle-agent.sh`, then `xcodegen generate`. |
-| Install reports invalid LaunchAgent plist | The bundled `Contents/Library/LaunchAgents/<active-label>.plist` is missing `BundleProgram`, the exact active `tron --port <port> --quiet` argv, or the wrapper `AssociatedBundleIdentifiers`. Re-run the bundle script and regenerate. |
+| Install reports invalid LaunchAgent plist | The tracked `Sources/Resources/Library/LaunchAgents/<active-label>.plist` is missing `BundleProgram`, the exact active `tron --port <port> --quiet` argv, or the wrapper `AssociatedBundleIdentifiers`. Fix that authoritative plist, validate it with `plutil -lint`, then regenerate the project. |
 | Install fails with `Codesigning failure loading plist ... code: -67054` | The copied `Contents/Library/LaunchAgents/*.plist` resources are not sealed by the outer app signature. Rebuild with the current XcodeGen project so the post-build script re-signs the helper apps and then the outer wrapper. |
 | `SingleInstanceLock.acquire()` returns false on first launch | Another instance of the same wrapper bundle id is already running, or that specific lock file has broken permissions. Release uses `.mac-wrapper.com.tron.mac.lock`; Debug uses `.mac-wrapper.com.tron.mac.dev.lock`. |
 | Tailscale step says not signed in even though `tailscale status` is healthy | Rebuild the wrapper with the latest `TailscaleProbe`; it tries every executable candidate and the "I have Tailscale" button re-probes instead of skipping the gate. |
