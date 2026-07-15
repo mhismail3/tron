@@ -1024,6 +1024,7 @@ fn dev_quality_environment_and_app_wrapper_do_not_hide_production_deploys() {
 
     let workspace_cli = read_repo_file("scripts/tron");
     assert!(workspace_cli.contains("manual-deploy) shift; cmd_manual_deploy"));
+    assert!(workspace_cli.contains("*) dispatch_runtime_command \"$@\" ;;"));
     assert!(
         !workspace_cli
             .lines()
@@ -1031,8 +1032,11 @@ fn dev_quality_environment_and_app_wrapper_do_not_hide_production_deploys() {
         "old tron deploy dispatcher alias must not return"
     );
     let installed_cli = read_repo_file("scripts/tron-cli");
+    let runtime_cli = read_repo_file("scripts/tron-lib.sh");
     assert!(installed_cli.contains("dev|manual-deploy|ci|bench|version|preflight|setup|install"));
-    assert!(installed_cli.contains("auth)            shift; cmd_auth \"$@\""));
+    assert!(installed_cli.contains("*) dispatch_runtime_command \"$@\" ;;"));
+    assert!(runtime_cli.contains("status)    cmd_status \"$@\" ;;"));
+    assert!(runtime_cli.contains("auth)      cmd_auth \"$@\" ;;"));
     assert!(installed_cli.contains("auth rotate     Rotate the WebSocket bearer token"));
     assert!(
         !installed_cli

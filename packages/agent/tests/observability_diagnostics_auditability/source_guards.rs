@@ -83,15 +83,11 @@ fn oda_cli_logs_are_bounded_filterable_and_quoted() {
     );
 
     let service_script = read_repo_file("scripts/tron-lib.d/service.sh");
-    for path in ["scripts/tron", "scripts/tron-cli"] {
-        let cli = read_repo_file(path);
-        assert!(
-            cli.lines().any(|line| {
-                line.contains("errors)") && line.contains("query_logs --level error --limit 20")
-            }),
-            "{path} must route errors through the canonical log query"
-        );
-    }
+    let runtime_cli = read_repo_file("scripts/tron-lib.sh");
+    assert!(
+        runtime_cli.contains("errors)    query_logs --level error --limit 20"),
+        "the shared runtime dispatcher must route errors through the canonical log query"
+    );
     assert!(
         !service_script.contains("cmd_errors()") && !service_script.contains("FROM logs"),
         "service lifecycle code must not own a second logs query"

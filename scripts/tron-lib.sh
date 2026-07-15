@@ -130,3 +130,28 @@ for tron_lib_module in "$TRON_LIB_MODULE_DIR"/*.sh; do
     [ -e "$tron_lib_module" ] && source "$tron_lib_module"
 done
 unset tron_lib_module TRON_LIB_MODULE_DIR
+
+# Shared runtime command ownership. Each entrypoint defines its own cmd_help
+# before calling this dispatcher, so unknown commands retain the local help UX.
+dispatch_runtime_command() {
+    local command="$1"
+    shift
+
+    case "$command" in
+        status)    cmd_status "$@" ;;
+        start)     cmd_start ;;
+        stop)      cmd_stop ;;
+        restart)   cmd_restart ;;
+        uninstall) cmd_uninstall "$@" ;;
+        logs)      query_logs "$@" ;;
+        errors)    query_logs --level error --limit 20 ;;
+        rollback)  cmd_rollback "$@" ;;
+        login)     cmd_login "$@" ;;
+        auth)      cmd_auth "$@" ;;
+        *)
+            print_error "Unknown command: $command"
+            cmd_help
+            return 1
+            ;;
+    esac
+}

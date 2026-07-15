@@ -80,23 +80,8 @@ case "${1:-help}" in
 esac
 
 case "$1" in
-    # Runtime (handled directly)
-    status)          cmd_status ;;
-    start)           cmd_start ;;
-    stop)            cmd_stop ;;
-    restart)         cmd_restart ;;
-    uninstall)       shift; cmd_uninstall "$@" ;;
-    logs)            shift; query_logs "$@" ;;
-    errors)          query_logs --level error --limit 20 ;;
-    rollback)        shift; cmd_rollback "$@" ;;
-    login)           shift; cmd_login "$@" ;;
-    auth)            shift; cmd_auth "$@" ;;
-    # Dev (delegate to workspace)
+    # Development commands delegate to the workspace.
     dev|manual-deploy|ci|bench|version|preflight|setup|install)
         delegate_to_workspace "$@" ;;
-    *)
-        print_error "Unknown command: $1"
-        cmd_help
-        exit 1
-        ;;
+    *) dispatch_runtime_command "$@" ;;
 esac

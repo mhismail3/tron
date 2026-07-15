@@ -134,16 +134,6 @@ case "$1" in
     preflight) cmd_preflight ;;
     manual-deploy) shift; cmd_manual_deploy "$@" ;;
     install)   shift; cmd_install "$@" ;;
-    rollback)  shift; cmd_rollback "$@" ;;
     setup)     shift; cmd_setup "$@" ;;
-    status)    shift; cmd_status "$@" ;;
-    start)     cmd_start ;;
-    stop)      cmd_stop ;;
-    restart)   cmd_restart ;;
-    logs)      shift; query_logs "$@" ;;
-    errors)    query_logs --level error --limit 20 ;;
-    login)     shift; cmd_login "$@" ;;
-    auth)      shift; cmd_auth "$@" ;;
-    uninstall) shift; cmd_uninstall "$@" ;;
-    *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
+    *) dispatch_runtime_command "$@" ;;
 esac
