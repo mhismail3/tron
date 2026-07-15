@@ -13,11 +13,8 @@ pub(super) async fn import_preview_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let import_preview_deps = crate::domains::import_preview::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::import_preview::service::record_import_preview_record_value_at(
-        &import_preview_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn import_preview_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let import_preview_deps = crate::domains::import_preview::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::import_preview::service::list_import_preview_value(
-        &import_preview_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn import_preview_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let import_preview_deps = crate::domains::import_preview::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::import_preview::service::inspect_import_preview_value(
-        &import_preview_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
