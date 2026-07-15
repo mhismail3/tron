@@ -179,32 +179,6 @@ mod tests {
         for operation in crate::domains::capability::supported_operation_names() {
             assert!(operations.contains(operation), "missing {operation}");
         }
-        for operation in concat!(
-            "filesystem_read filesystem_write git_status git_diff git_branch_inventory git_stage ",
-            "git_unstage git_commit git_branch_start goal_create goal_list goal_inspect goal_cancel ",
-            "question_create question_list question_inspect question_answer schedule_create schedule_list ",
-            "schedule_inspect schedule_cancel schedule_fire_due web_fetch web_robots_check web_source_list ",
-            "web_source_inspect web_source_archive web_research_request_record web_research_request_list web_research_request_inspect web_research_review_record web_research_review_list web_research_review_inspect web_research_source_record web_research_source_list web_research_source_inspect media_create media_list media_inspect media_archive ",
-            "import_history_record import_history_list import_history_inspect ",
-            "repository_tree_snapshot repository_tree_list repository_tree_inspect ",
-            "import_preview_record import_preview_list import_preview_inspect ",
-            "program_execution_record program_execution_list program_execution_inspect ",
-            "prompt_artifact_record prompt_artifact_list prompt_artifact_inspect ",
-            "context_control_snapshot context_control_compact context_control_clear context_control_action_list context_control_action_inspect context_survivor_record context_survivor_list context_survivor_disable context_exclusion_record context_exclusion_list context_exclusion_disable context_policy_snapshot ",
-            "module_proposal_record module_proposal_list module_proposal_inspect module_validation_record module_validation_list module_validation_inspect ",
-            "module_dependency_request_record module_dependency_request_list module_dependency_request_inspect module_dependency_decision_record module_dependency_decision_list module_dependency_decision_inspect module_dependency_policy_activate module_dependency_policy_list module_dependency_policy_inspect ",
-            "capability_binding_request_record capability_binding_request_list capability_binding_request_inspect capability_binding_decision_record capability_binding_decision_list capability_binding_decision_inspect capability_binding_policy_activate capability_binding_policy_list capability_binding_policy_inspect capability_binding_cockpit_overview ",
-            "capability_shadow_trial_request_record capability_shadow_trial_decision_record capability_shadow_trial_run_record capability_shadow_trial_evidence_inspect ",
-            "module_program_execution_start module_program_execution_status module_program_execution_cancel module_program_execution_cleanup ",
-            "device_list device_inspect notification_send notification_list ",
-            "notification_inspect notification_mark_read notification_mark_all_read tool_source_list ",
-            "tool_source_inspect subagent_launch subagent_status subagent_result subagent_cancel ",
-            "subagent_task_list subagent_task_inspect worker_package_list worker_package_inspect",
-        )
-        .split_whitespace()
-        {
-            assert!(operations.contains(operation), "missing {operation}");
-        }
         assert!(
             !operations.contains("file_read") && !operations.contains("file_write"),
             "retired file operations must not be model-reachable"

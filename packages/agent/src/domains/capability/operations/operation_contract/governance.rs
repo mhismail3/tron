@@ -15,69 +15,6 @@ const MAX_REFS: u64 = 25;
 const MAX_TIMEOUT_MS: u64 = 120_000;
 const MAX_OUTPUT_BYTES: u64 = 200_000;
 
-#[cfg(test)]
-const GOVERNANCE_OPERATIONS: &[&str] = &[
-    "procedural_definition_record",
-    "procedural_state_list",
-    "procedural_state_inspect",
-    "procedural_activation_request_record",
-    "procedural_activation_request_list",
-    "procedural_activation_request_inspect",
-    "procedural_activation_decision_record",
-    "procedural_activation_decision_list",
-    "procedural_activation_decision_inspect",
-    "schedule_create",
-    "schedule_list",
-    "schedule_inspect",
-    "schedule_cancel",
-    "schedule_fire_due",
-    "tool_source_list",
-    "tool_source_inspect",
-    "subagent_launch",
-    "subagent_status",
-    "subagent_result",
-    "subagent_cancel",
-    "subagent_task_list",
-    "subagent_task_inspect",
-    "worker_package_list",
-    "worker_package_inspect",
-    "module_list",
-    "module_inspect",
-    "module_proposal_record",
-    "module_proposal_list",
-    "module_proposal_inspect",
-    "module_validation_record",
-    "module_validation_list",
-    "module_validation_inspect",
-    "module_install_request_record",
-    "module_install_request_list",
-    "module_install_request_inspect",
-    "module_install_decision_record",
-    "module_install_decision_list",
-    "module_install_decision_inspect",
-    "module_dependency_request_record",
-    "module_dependency_request_list",
-    "module_dependency_request_inspect",
-    "module_dependency_decision_record",
-    "module_dependency_decision_list",
-    "module_dependency_decision_inspect",
-    "module_dependency_policy_activate",
-    "module_dependency_policy_list",
-    "module_dependency_policy_inspect",
-    "module_lifecycle_request",
-    "module_lifecycle_decision",
-    "module_lifecycle_list",
-    "module_lifecycle_inspect",
-    "module_program_execution_start",
-    "module_program_execution_status",
-    "module_program_execution_cancel",
-    "module_program_execution_cleanup",
-    "module_runtime_request",
-    "module_runtime_list",
-    "module_runtime_inspect",
-    "module_runtime_cancel",
-];
-
 pub(super) fn input_schema(operation: &str) -> Option<Value> {
     let (required, fields) = match operation {
         "procedural_definition_record" => (
@@ -1372,25 +1309,21 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn governance_operation_set_is_exact_and_unique() {
-        let operations = GOVERNANCE_OPERATIONS
+    fn governance_operations() -> impl Iterator<Item = &'static str> {
+        super::super::supported_operation_names()
             .iter()
             .copied()
-            .collect::<BTreeSet<_>>();
-        assert_eq!(GOVERNANCE_OPERATIONS.len(), 59);
-        assert_eq!(operations.len(), GOVERNANCE_OPERATIONS.len());
-        assert!(
-            GOVERNANCE_OPERATIONS
-                .iter()
-                .all(|operation| input_schema(operation).is_some())
-        );
+            .filter(|operation| input_schema(operation).is_some())
+    }
+
+    #[test]
+    fn governance_family_rejects_unknown_operations() {
         assert!(input_schema("not_a_governance_operation").is_none());
     }
 
     #[test]
     fn every_governance_schema_is_closed_and_operation_constant_is_exact() {
-        for operation in GOVERNANCE_OPERATIONS {
+        for operation in governance_operations() {
             let schema = input_schema(operation).expect("governance schema");
             assert_eq!(schema["type"], json!("object"), "{operation}");
             assert_eq!(schema["additionalProperties"], json!(false), "{operation}");

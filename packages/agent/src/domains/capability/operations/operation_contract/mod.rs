@@ -14,7 +14,8 @@
 //! owners aligned with the four input-schema families. Tests require every
 //! operation to have presentation metadata and independently require exactly
 //! one schema owner, with representative provider-visible compatibility cases
-//! for each presentation family.
+//! for each presentation family. Schema-family validation derives its cases
+//! from the typed operation registry and owns no shadow operation-name lists.
 
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;

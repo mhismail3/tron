@@ -11,73 +11,6 @@ use crate::domains::notifications::contract::EVENT_FAMILIES;
 
 use super::closed_schema;
 
-#[cfg(test)]
-const OPERATIONS: &[&str] = &[
-    "goal_create",
-    "goal_list",
-    "goal_inspect",
-    "goal_cancel",
-    "question_create",
-    "question_list",
-    "question_inspect",
-    "question_answer",
-    "memory_status",
-    "memory_list",
-    "memory_inspect",
-    "memory_query_list",
-    "memory_query_inspect",
-    "memory_decision_list",
-    "memory_decision_inspect",
-    "context_control_status",
-    "context_control_snapshot",
-    "context_control_compact",
-    "context_control_clear",
-    "context_control_action_list",
-    "context_control_action_inspect",
-    "context_survivor_record",
-    "context_survivor_list",
-    "context_survivor_disable",
-    "context_exclusion_record",
-    "context_exclusion_list",
-    "context_exclusion_disable",
-    "context_policy_snapshot",
-    "media_create",
-    "media_list",
-    "media_inspect",
-    "media_archive",
-    "import_history_record",
-    "import_history_list",
-    "import_history_inspect",
-    "import_preview_record",
-    "import_preview_list",
-    "import_preview_inspect",
-    "program_execution_record",
-    "program_execution_list",
-    "program_execution_inspect",
-    "prompt_artifact_record",
-    "prompt_artifact_list",
-    "prompt_artifact_inspect",
-    "update_diagnostic_record",
-    "update_diagnostic_list",
-    "update_diagnostic_inspect",
-    "device_list",
-    "device_inspect",
-    "notification_send",
-    "notification_list",
-    "notification_inspect",
-    "notification_mark_read",
-    "notification_mark_all_read",
-    "web_research_request_record",
-    "web_research_request_list",
-    "web_research_request_inspect",
-    "web_research_review_record",
-    "web_research_review_list",
-    "web_research_review_inspect",
-    "web_research_source_record",
-    "web_research_source_list",
-    "web_research_source_inspect",
-];
-
 pub(super) fn input_schema(operation: &str) -> Option<Value> {
     let (required, fields) = match operation {
         "goal_create" => (
@@ -1090,28 +1023,22 @@ mod tests {
 
     use super::*;
 
+    fn record_operations() -> impl Iterator<Item = &'static str> {
+        super::super::supported_operation_names()
+            .iter()
+            .copied()
+            .filter(|operation| input_schema(operation).is_some())
+    }
+
     #[test]
-    fn operation_set_is_exact_unique_and_complete() {
-        let actual = OPERATIONS.iter().copied().collect::<BTreeSet<_>>();
-        assert_eq!(OPERATIONS.len(), 63);
-        assert_eq!(
-            actual.len(),
-            OPERATIONS.len(),
-            "duplicate operation contract"
-        );
-        for operation in OPERATIONS {
-            assert!(
-                input_schema(operation).is_some(),
-                "missing schema for {operation}"
-            );
-        }
+    fn record_family_rejects_unknown_operations() {
         assert!(input_schema("records_unknown").is_none());
     }
 
     #[test]
     fn every_contract_is_a_closed_exact_top_level_schema() {
         let function_id = FunctionId::new("capability::execute").expect("function id");
-        for operation in OPERATIONS {
+        for operation in record_operations() {
             let contract = input_schema(operation).expect("operation contract");
             let properties = contract["properties"]
                 .as_object()
@@ -1127,7 +1054,7 @@ mod tests {
                 "{operation}"
             );
             assert_eq!(
-                contract["properties"]["operation"]["const"], *operation,
+                contract["properties"]["operation"]["const"], operation,
                 "{operation}"
             );
             assert!(
