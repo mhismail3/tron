@@ -172,9 +172,13 @@ primitives, not fixed product session-list APIs.
 `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` reconstructs
 messages from `SessionEvent` rows. Engine reconstruction helpers own persisted
 event decoding support; the transformer is Session-owned because it projects
-durable events into chat timeline state. The retained reconstruction state
-tracks message content, capability invocation lifecycles, streaming state, turn
-grouping, generated runtime data, and compact session metadata needed for chat.
+durable events into chat timeline state. Its transient reconstruction result
+contains only messages, the latest reasoning level, accumulated token usage,
+and the last context size. Capability lifecycle rows are joined into their
+rendered assistant content; compact boundaries retain their rendered message
+and update the context size. Session lifecycle, turn, file, metadata, and tag
+rows remain available as durable diagnostics without creating parallel mounted
+client state.
 Capability identity fields stay primitive: model primitive, operation,
 trace/root invocation ids, theme color, and presentation hints. Reconstruction
 must not recover retired contract, implementation, worker, risk, or binding

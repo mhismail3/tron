@@ -91,13 +91,9 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
     func testEveryPersistedEventTypeHasExplicitReconstructionDisposition() {
         let rendered = Set(renderableEventFixtures().keys)
         let stateHandled: Set<PersistedEventType> = [
-            .sessionStart, .sessionBranch,
             .messageDeleted,
-            .streamTurnEnd,
-            .configModelSwitch, .configReasoningLevel,
-            .fileRead, .fileWrite, .fileEdit,
-            .compactBoundary,
-            .metadataUpdate, .metadataTag
+            .configReasoningLevel,
+            .compactBoundary
         ]
         let consumedThroughAssistantMessage: Set<PersistedEventType> = [
             .capabilityInvocationStarted,
@@ -110,14 +106,25 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
             .streamTurnStart
         ]
         let intentionallyNoStateImpact: Set<PersistedEventType> = [
-            // Session tree / completion metadata lives outside ReconstructedState.
+            // Session lifecycle/tree facts stay in server reconstruction metadata,
+            // CachedSession, or raw durable diagnostics rather than mounted state.
+            .sessionStart,
             .sessionEnd,
             .sessionFork,
+            .sessionBranch,
+            // These durable rows remain available for diagnostics, but they do
+            // not rebuild a second client-owned turn/file/metadata projection.
+            .streamTurnEnd,
+            .fileRead,
+            .fileWrite,
+            .fileEdit,
+            .metadataUpdate,
+            .metadataTag,
             // Provider request audit rows are diagnostics for the server-side
             // model call and do not rebuild chat or session state.
             .modelProviderRequest,
             // Prompt/process events do not currently restore
-            // user-visible chat or persisted ReconstructedState fields.
+            // user-visible chat or mounted reconstruction fields.
             .capabilityRunStatus,
             .configPromptUpdate
         ]

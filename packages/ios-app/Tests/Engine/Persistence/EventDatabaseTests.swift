@@ -471,7 +471,6 @@ final class EventDatabaseTests: XCTestCase {
         let state = UnifiedEventTransformer.reconstructSessionState(from: ancestors)
 
         XCTAssertEqual(state.messages.count, 2)
-        XCTAssertEqual(state.currentTurn, 1)
     }
 
     // MARK: - Sync State

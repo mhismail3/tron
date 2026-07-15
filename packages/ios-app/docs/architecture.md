@@ -576,9 +576,12 @@ those paths are not production recovery modes.
 `TokenRecord` is the server-projected per-turn token DTO, not an independent
 state owner. `ContextTrackingState` is the sole mounted owner of live token and
 context-window presentation state. On resume, `UnifiedEventTransformer`
-reconstructs accumulated usage and the last context size into
-`ReconstructedState`, which the chat view model applies to that same owner;
-there is no parallel client-side token history.
+reconstructs a Session-owned transient projection containing only messages,
+reasoning level, accumulated usage, and the last context size. The chat view
+model applies its token fields to `ContextTrackingState`; there is no parallel
+client-side token history. Current model, turn count, workspace, session tree,
+file activity, and metadata remain owned by server reconstruction metadata,
+`CachedSession`, or raw durable events rather than duplicated projection fields.
 
 `EventStoreManager` owns the client generation for each persistence operation;
 it passes one strongly captured client into every page of that operation.

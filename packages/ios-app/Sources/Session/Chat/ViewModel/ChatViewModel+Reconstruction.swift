@@ -22,7 +22,7 @@ extension ChatViewModel {
         )
         let mergedEvents = mergeReconstructionEvents(previousEvents, eventWindow.events)
 
-        // 1. Reconstruct full session state (messages + config)
+        // 1. Reconstruct the transient chat projection (messages + config + tokens)
         //    Uses reconstructSessionState() as single source of truth.
         let state = UnifiedEventTransformer.reconstructSessionState(from: mergedEvents, presorted: true)
         applyReconstructedConfig(state)

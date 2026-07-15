@@ -29,11 +29,8 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
         XCTAssertEqual(state.messages.count, 2)
-        XCTAssertEqual(state.currentModel, "claude-sonnet-4")
-        XCTAssertEqual(state.workingDirectory, "/home/user/project")
         XCTAssertEqual(state.totalTokenUsage.inputTokens, 100)
         XCTAssertEqual(state.totalTokenUsage.outputTokens, 50)
-        XCTAssertEqual(state.currentTurn, 1)
     }
 
     func testReconstructSessionStateWithModelSwitch() {
@@ -49,8 +46,13 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
 
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
-        XCTAssertEqual(state.currentModel, "claude-opus-4")
         XCTAssertEqual(state.messages.count, 3) // user + model_switch + assistant
+        guard case .systemEvent(.modelChange(let from, let to)) = state.messages[1].content else {
+            XCTFail("Expected reconstructed model-change event")
+            return
+        }
+        XCTAssertEqual(from, "Sonnet 4")
+        XCTAssertEqual(to, "Opus 4")
     }
 
     // MARK: - Reasoning Level Reconstruction Tests
@@ -202,7 +204,6 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
         // Tokens should accumulate
         XCTAssertEqual(state.totalTokenUsage.inputTokens, 300)
         XCTAssertEqual(state.totalTokenUsage.outputTokens, 150)
-        XCTAssertEqual(state.currentTurn, 2)
     }
 
     func testReconstructSessionStateWithErrors() {
@@ -247,8 +248,6 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
         XCTAssertEqual(state.messages.count, 2)
-        XCTAssertEqual(state.currentModel, "claude-sonnet-4")
-        XCTAssertEqual(state.workingDirectory, "/test")
     }
 
     // MARK: - Edge Cases
@@ -282,7 +281,9 @@ final class UnifiedEventTransformerStateTests: UnifiedEventTransformerTestCase {
 
         let state = UnifiedEventTransformer.reconstructSessionState(from: [RawEvent]())
         XCTAssertEqual(state.messages.count, 0)
-        XCTAssertNil(state.currentModel)
+        XCTAssertNil(state.reasoningLevel)
+        XCTAssertEqual(state.totalTokenUsage.inputTokens, 0)
+        XCTAssertEqual(state.lastTurnInputTokens, 0)
     }
 
     // MARK: - Ordering Tests
