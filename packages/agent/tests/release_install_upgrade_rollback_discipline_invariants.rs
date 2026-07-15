@@ -776,7 +776,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
         "data-integrity-storage-evolution-migration-discipline-inventory.tsv",
         "observability-diagnostics-auditability-inventory.tsv",
-        "state-ownership-lifecycle-inventory.tsv",
         "failure-semantics-inventory.tsv",
         "determinism-replayability-inventory.tsv",
     ] {
@@ -794,7 +793,6 @@ fn predecessor_inventory_wiring_is_recorded() {
         "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
-        "packages/agent/docs/state-ownership-lifecycle-inventory.tsv",
         "packages/agent/docs/failure-semantics-inventory.tsv",
         "packages/agent/docs/determinism-replayability-inventory.tsv",
     ] {

@@ -139,23 +139,6 @@ fn sol_server_bootstrap_lifecycle_is_source_backed() {
             "database process-lock owner missing `{required}`"
         );
     }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/app/bootstrap/mod.rs",
-        "packages/agent/src/app/bootstrap/server.rs",
-        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
-        "packages/agent/src/shared/storage/archive.rs",
-        "packages/agent/src/shared/storage/schema.rs",
-        "packages/agent/src/shared/foundation/paths/mod.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-3"))),
-            "SOL inventory must tag {required} as part of SOL-3"
-        );
-    }
 }
 
 #[test]
@@ -339,28 +322,6 @@ fn sol_runtime_task_memory_lifecycle_is_source_backed() {
         assert!(
             bootstrap.contains(required),
             "app bootstrap background task ownership missing `{required}`"
-        );
-    }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/app/bootstrap/mod.rs",
-        "packages/agent/src/app/bootstrap/server.rs",
-        "packages/agent/src/app/lifecycle/shutdown.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/capability_invocation_tracker.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs",
-        "packages/agent/src/shared/server/context.rs",
-        "packages/agent/src/transport/runtime/mod.rs",
-        "packages/agent/src/transport/runtime/queue_drainer.rs",
-        "packages/agent/src/transport/runtime/worker_heartbeat.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-4"))),
-            "SOL inventory must tag {required} as part of SOL-4"
         );
     }
 }

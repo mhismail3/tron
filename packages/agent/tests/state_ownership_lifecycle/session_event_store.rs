@@ -286,32 +286,4 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
             "session query lifecycle missing `{required}`"
         );
     }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs",
-        "packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs",
-        "packages/agent/src/domains/session/lifecycle/archive.rs",
-        "packages/agent/src/domains/session/lifecycle/mod.rs",
-        "packages/agent/src/domains/session/mod.rs",
-        "packages/agent/src/domains/session/query/mod.rs",
-        "packages/agent/src/domains/session/reconstruction/mod.rs",
-        "packages/agent/src/domains/session/event_store/mod.rs",
-        "packages/agent/src/domains/session/event_store/store/event_store/event_log.rs",
-        "packages/agent/src/domains/session/event_store/store/event_store/locking.rs",
-        "packages/agent/src/domains/session/event_store/store/event_store/session_lifecycle.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/crud.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/session_queries.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tree_queries.rs",
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-6"))),
-            "SOL inventory must tag {required} as part of SOL-6"
-        );
-    }
 }

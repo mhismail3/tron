@@ -154,18 +154,6 @@ Current living entry points:
   surfaces.
 - `packages/agent/docs/failure-semantics-inventory.tsv`: machine-readable FSC
   failure-surface inventory used by static gates.
-- `packages/agent/docs/state-ownership-lifecycle-scorecard.md`: completed State
-  Ownership And Lifecycle campaign scorecard proving every stateful server,
-  engine, iOS, script/CI, and docs-owned state claim has one owner, lifecycle
-  class, mutation boundary, hydration path, retirement path, and concurrency or
-  task guard.
-- `packages/agent/docs/state-ownership-lifecycle-evidence-manifest.md`:
-  companion evidence manifest for SOL row checkpoints, verification logs, and
-  residual lifecycle risks.
-- `packages/agent/docs/state-ownership-lifecycle-inventory.md`: completed SOL
-  state-surface lifecycle taxonomy and inventory notes.
-- `packages/agent/docs/state-ownership-lifecycle-inventory.tsv`:
-  machine-readable SOL state ownership inventory used by static gates.
 - `packages/agent/docs/observability-diagnostics-auditability-scorecard.md`:
   completed Observability Diagnostics Auditability scorecard for proving
   session events, provider audits, primitive trace records, engine ledger rows,
@@ -423,10 +411,11 @@ Current living entry points:
 - `packages/agent/tests/failure_semantics_invariants.rs`: completed FSC scorecard,
   inventory, failure-surface, canonical-envelope, event-emission, transport,
   provider, iOS parity, replay, and closeout gates.
-- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: completed SOL
-  scorecard, inventory, stateful-marker coverage, runtime task lifecycle,
-  iOS local-state classification, owner-private settings/auth writes, and final
-  closeout gates, with focused modules under
+- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: living
+  source-backed guards for server bootstrap, runtime task ownership, durable
+  engine state, session/event storage, settings and secret custody, iOS local
+  projections, recovery/observability, and owner-private settings/auth writes,
+  with focused modules under
   `packages/agent/tests/state_ownership_lifecycle/`.
 - `packages/agent/tests/observability_diagnostics_auditability_invariants.rs`:
   completed ODA scorecard, evidence, inventory, source guard, logs filter,
@@ -519,12 +508,9 @@ Current living entry points:
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
-Historical scorecard artifacts are retained as evidence only; live architecture
-guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/SSARR
-scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
-scorecard, the IOSAC cockpit baseline scorecard, the IARM restoration map
-scorecard, the OPSAA cleanup scorecard, and the living SACB boundary gate.
+Remaining historical scorecard artifacts are retained as evidence only; live
+architecture guidance is owned by the current README, package docs, source
+module docs, and living boundary guards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or

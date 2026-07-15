@@ -266,32 +266,4 @@ fn sol_engine_durable_substrate_lifecycle_is_source_backed() {
             "storage stats missing `{required}`"
         );
     }
-
-    let inventory = inventory_by_path();
-    for required in [
-        "packages/agent/src/engine/authority/compensation.rs",
-        "packages/agent/src/engine/authority/grants/mod.rs",
-        "packages/agent/src/engine/authority/leases.rs",
-        "packages/agent/src/engine/catalog/registry/idempotency.rs",
-        "packages/agent/src/engine/catalog/registry/invocation.rs",
-        "packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs",
-        "packages/agent/src/engine/durability/queue/sqlite_store.rs",
-        "packages/agent/src/engine/durability/resources/store/mod.rs",
-        "packages/agent/src/engine/durability/state.rs",
-        "packages/agent/src/engine/durability/streams/sqlite_store.rs",
-        "packages/agent/src/engine/invocation/host/meta_invocation.rs",
-        "packages/agent/src/engine/primitives/stores.rs",
-        "packages/agent/src/shared/storage/maintenance.rs",
-        "packages/agent/src/shared/storage/mod.rs",
-        "packages/agent/src/shared/storage/payloads.rs",
-        "packages/agent/src/shared/storage/schema.rs",
-        "packages/agent/src/shared/storage/stats.rs",
-    ] {
-        assert!(
-            inventory
-                .get(required)
-                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-5"))),
-            "SOL inventory must tag {required} as part of SOL-5"
-        );
-    }
 }
