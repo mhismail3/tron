@@ -27,8 +27,6 @@ pub(super) struct PromptRunCompletion<'a> {
     pub(super) persister:
         Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
     pub(super) run_cleanup: &'a mut PromptRunCleanup,
-    pub(super) session_manager:
-        Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(super) broadcast: Arc<crate::domains::agent::r#loop::EventEmitter>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
@@ -44,7 +42,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         result,
         persister,
         run_cleanup,
-        session_manager,
         event_store,
         broadcast,
         engine_host,
@@ -89,7 +86,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
     let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
 
     run_cleanup.release();
-    emit_session_update(&session_manager, &event_store, &broadcast, &session_id).await;
+    emit_session_update(&event_store, &broadcast, &session_id).await;
 
     info!(
         component = "agent.runtime",
@@ -323,20 +320,11 @@ fn emit_run_error_if_needed(
 }
 
 async fn emit_session_update(
-    session_manager: &Arc<
-        crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager,
-    >,
     event_store: &Arc<crate::domains::session::event_store::EventStore>,
     broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     session_id: &str,
 ) {
-    match load_session_update_data(
-        session_manager.clone(),
-        event_store.clone(),
-        session_id.to_owned(),
-    )
-    .await
-    {
+    match load_session_update_data(event_store.clone(), session_id.to_owned()).await {
         Ok(Some(update)) => {
             let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::SessionUpdated {
                 base: crate::shared::protocol::events::BaseEvent::now(session_id),

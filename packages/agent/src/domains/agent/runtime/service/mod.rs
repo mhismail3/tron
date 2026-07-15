@@ -7,8 +7,10 @@
 //! runs so logs, session events, trace records, and agent-result resources share
 //! common run/session/trace identifiers. Completion derives `agent_result` text
 //! and its event reference after the turn's synchronous persistence calls have
-//! committed. Durable prior-history reconstruction and the new `message.user`
-//! append are prerequisites for provider construction and model execution;
+//! committed, then reads the durable session update directly from `EventStore`;
+//! it does not retain session-cache ownership. Durable prior-history
+//! reconstruction and the new `message.user` append are prerequisites for
+//! provider construction and model execution;
 //! either persistence failure releases the run without opening a provider
 //! stream. Prompt-run composition owns its event persister; the session cache
 //! retains only reconstructed event-store state and no parallel runtime

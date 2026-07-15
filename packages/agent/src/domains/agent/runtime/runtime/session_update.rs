@@ -9,10 +9,11 @@ use crate::shared::server::failure::{
 };
 use std::sync::Arc;
 
-pub struct SessionUpdateData {
-    pub session: crate::domains::session::event_store::SessionRow,
-    pub preview: Option<MessagePreview>,
-    pub activity_lines: Vec<ActivitySummaryLine>,
+pub(in crate::domains::agent::runtime) struct SessionUpdateData {
+    pub(in crate::domains::agent::runtime) session:
+        crate::domains::session::event_store::SessionRow,
+    pub(in crate::domains::agent::runtime) preview: Option<MessagePreview>,
+    pub(in crate::domains::agent::runtime) activity_lines: Vec<ActivitySummaryLine>,
 }
 
 const SESSION_UPDATE_LOAD_ATTEMPTS: usize = 40;
@@ -52,8 +53,7 @@ fn map_prompt_resume_error(error: RuntimeError, session_id: &str) -> CapabilityE
     CapabilityError::from_failure(failure)
 }
 
-pub async fn load_session_update_data(
-    _session_manager: Arc<SessionManager>,
+pub(in crate::domains::agent::runtime) async fn load_session_update_data(
     event_store: Arc<EventStore>,
     session_id: String,
 ) -> Result<Option<SessionUpdateData>, CapabilityError> {

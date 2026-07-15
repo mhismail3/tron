@@ -286,7 +286,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         result,
         persister,
         run_cleanup: &mut run_cleanup,
-        session_manager,
         event_store,
         broadcast,
         engine_host,

@@ -288,4 +288,26 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
             "session query lifecycle missing `{required}`"
         );
     }
+
+    let session_update =
+        read_repo_file("packages/agent/src/domains/agent/runtime/runtime/session_update.rs");
+    let update_loader_signature = session_update
+        .split_once("pub(in crate::domains::agent::runtime) async fn load_session_update_data(")
+        .expect("session-update loader must remain runtime-owned")
+        .1
+        .split_once(") ->")
+        .expect("session-update loader signature missing")
+        .0;
+    assert!(update_loader_signature.contains("event_store: Arc<EventStore>"));
+    assert!(
+        !update_loader_signature.contains("session_manager"),
+        "durable session-update reads must not advertise session-cache ownership"
+    );
+
+    let completion =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/completion.rs");
+    assert!(
+        !completion.contains("session_manager"),
+        "prompt completion must depend on EventStore, not SessionManager"
+    );
 }
