@@ -243,6 +243,10 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("if state.permissionStatuses.isEmpty"))
         #expect(source.contains("PermissionsStepContent.initialProbeDelayNanoseconds"))
         #expect(source.contains("if Task.isCancelled { return }"))
+        #expect(source.contains(".task { await startPolling() }"))
+        #expect(!source.contains("@State private var pollTask"))
+        #expect(!source.contains("pollTask = Task"))
+        #expect(source.contains("guard !Task.isCancelled else { return }"))
         #expect(source.contains("Button {"))
         #expect(source.contains("Task { await refreshAll(showActivity: true) }"))
         #expect(source.contains("startSettingsGrantWatch(for: permission)"))
@@ -272,6 +276,22 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("Restarting Tron Server"))
         #expect(source.contains(".padding(.leading, PermissionsStepLayout.recheckLeadingPadding)"))
         #expect(source.contains(".fixedSize(horizontal: false, vertical: true)"))
+    }
+
+    @Test("wizard poll loops are owned by view-scoped SwiftUI tasks")
+    func wizardPollLoopsAreViewScoped() throws {
+        let packageRoot = macAppRoot()
+        let tailscale = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/TailscaleStep.swift"),
+            encoding: .utf8
+        )
+
+        #expect(tailscale.contains(".task { await probeUntilReady() }"))
+        #expect(tailscale.contains("private func probeUntilReady() async"))
+        #expect(tailscale.contains("guard !Task.isCancelled else { return }"))
+        #expect(!tailscale.contains("@State private var pollTask"))
+        #expect(!tailscale.contains("pollTask = Task"))
+        #expect(!tailscale.contains(".onDisappear"))
     }
 
     @Test("pairing page resolves Tailscale live and treats profile settings as cache")

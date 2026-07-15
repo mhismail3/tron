@@ -26,7 +26,6 @@ struct PermissionsStep: View {
     @Environment(\.environmentSetup) private var setup
 
     @State private var appActivationObserver: NSObjectProtocol?
-    @State private var pollTask: Task<Void, Never>?
     @State private var settingsGrantWatchTask: Task<Void, Never>?
     @State private var checkingPermissions = false
     @State private var settingsReturnPending = false
@@ -153,10 +152,8 @@ struct PermissionsStep: View {
 
     // MARK: - Polling lifecycle
 
-    /// Starts the 2 s agent-probe poll loop. Runs until the view
-    /// disappears or Full Disk Access is observed, whichever comes
-    /// first. The loop is re-entrant, so calling this twice is idempotent
-    /// thanks to the `pollTask` guard.
+    /// Runs the view-scoped 2 s agent-probe loop until SwiftUI cancels
+    /// the `.task` or Full Disk Access is observed.
     @MainActor
     private func startPolling() async {
         // Seed the state before the recurring 2 s loop. On revisits,
@@ -174,26 +171,20 @@ struct PermissionsStep: View {
         }
 
         await refreshAll(showActivity: false)
+        guard !Task.isCancelled else { return }
+        if Permission.allCases.allSatisfy({ state.permissionStatuses[$0] == .granted }) {
+            return
+        }
 
-        guard pollTask == nil else { return }
-        pollTask = Task { [weak state = self.state] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
-                if Task.isCancelled { break }
-                let snapshot = await setup.probePermissions()
-                await MainActor.run {
-                    guard let state else { return }
-                    Self.applyPermissionSnapshot(snapshot, to: state)
-                }
-                // Stop polling once the grant is observed — no point
-                // hammering the engine protocol when the user is still on this
-                // step admiring the green badge.
-                let allGranted = await MainActor.run { [weak state] in
-                    Permission.allCases.allSatisfy { p in
-                        (state?.permissionStatuses[p]) == .granted
-                    }
-                }
-                if allGranted { break }
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await refreshAll(showActivity: false)
+            guard !Task.isCancelled else { return }
+            // Stop polling once the grant is observed — no point
+            // probing while the user admires the green badge.
+            if Permission.allCases.allSatisfy({ state.permissionStatuses[$0] == .granted }) {
+                return
             }
         }
     }
@@ -222,8 +213,6 @@ struct PermissionsStep: View {
     }
 
     private func teardown() {
-        pollTask?.cancel()
-        pollTask = nil
         settingsGrantWatchTask?.cancel()
         settingsGrantWatchTask = nil
         if let token = appActivationObserver {
@@ -271,6 +260,7 @@ struct PermissionsStep: View {
             }
         }
         let snapshot = await setup.probePermissions()
+        guard !Task.isCancelled else { return }
         Self.applyPermissionSnapshot(snapshot, to: state)
     }
 

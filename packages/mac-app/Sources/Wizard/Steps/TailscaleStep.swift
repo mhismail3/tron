@@ -11,7 +11,6 @@ struct TailscaleStep: View {
     @Environment(\.environmentSetup) private var setup
 
     @State private var probing = false
-    @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,8 +41,7 @@ struct TailscaleStep: View {
 
             Spacer(minLength: 0)
         }
-        .onAppear { startProbe() }
-        .onDisappear { pollTask?.cancel() }
+        .task { await probeUntilReady() }
     }
 
     @ViewBuilder
@@ -104,20 +102,18 @@ struct TailscaleStep: View {
         }
     }
 
-    private func startProbe() {
-        pollTask?.cancel()
-        pollTask = Task { @MainActor in
-            // Probe once immediately, then every 1 s while the wizard
-            // is on this step. We stop on `.signedIn` to avoid burning
-            // CPU when the user has already finished setup.
-            while !Task.isCancelled {
-                probing = true
-                let status = await setup.probeTailscale()
-                probing = false
-                state.tailscaleStatus = status
-                if status.isReady { return }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
+    /// Probes once immediately, then every second until the view-scoped
+    /// SwiftUI task is cancelled or Tailscale is ready.
+    @MainActor
+    private func probeUntilReady() async {
+        while !Task.isCancelled {
+            probing = true
+            let status = await setup.probeTailscale()
+            guard !Task.isCancelled else { return }
+            probing = false
+            state.tailscaleStatus = status
+            if status.isReady { return }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }
 }
