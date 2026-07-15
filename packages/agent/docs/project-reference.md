@@ -2942,10 +2942,9 @@ packages/ios-app/Sources/
                          pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
                          surfaces, capabilities, components, system sheets
-+-- Resources/            Fonts and generated app-icon source layers
++-- Resources/            Bundled fonts
 +-- Assets.xcassets/      Icons and images
 +-- Resources/Fonts/      Bundled typography assets
-+-- Resources/IconLayers/ Source layers for the app icon
 +-- Info.plist            App metadata
 +-- PrivacyInfo.xcprivacy Apple privacy manifest
 ```

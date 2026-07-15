@@ -19,6 +19,21 @@ open TronMobile.xcodeproj
 `project.yml` is the authoritative project definition. The generated
 `TronMobile.xcodeproj` is local build output and remains ignored by Git.
 
+### Icon Assets
+
+`Sources/Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the
+authoritative logo source. The Bun/Sharp generator writes only the two app-icon
+PNGs and three in-app raster logo sizes that the asset catalogs reference:
+
+```bash
+cd packages/ios-app
+bun install --frozen-lockfile
+bun scripts/generate-icons.mjs
+```
+
+Generated image outputs stay inside `Assets.xcassets`; loose icon-layer PNGs
+under `Sources/Resources` are not part of the app resource contract.
+
 ### Server Connection
 
 The app connects to the Tron engine over `/engine`. Physical device testing

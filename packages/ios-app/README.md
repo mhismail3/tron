@@ -102,7 +102,8 @@ packages/ios-app/
 │   ├── UI/                         # Chat, settings, onboarding, runtime surfaces
 │   ├── Support/                    # Composition, diagnostics, pairing, storage
 │   ├── Assets.xcassets/            # App icons and image assets
-│   └── Resources/                  # Fonts and generated app-icon source layers
+│   └── Resources/                  # Bundled fonts
+├── scripts/generate-icons.mjs      # SVG-to-asset-catalog icon generator
 ├── Tests/
 │   ├── Engine/
 │   ├── Session/

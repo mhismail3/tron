@@ -146,8 +146,13 @@ Sources/
 |                         surfaces, Dashboard, capabilities, components,
 |                         system sheets
 +-- Assets.xcassets/      App icons and image assets
-+-- Resources/            Fonts and generated app-icon source layers
++-- Resources/            Bundled fonts
 ```
+
+`Assets.xcassets/TronLogoVector.imageset/tron-logo.svg` is the authoritative
+logo input. `scripts/generate-icons.mjs` derives only the two app icons and the
+three raster logo sizes referenced by the asset catalogs; the app has no loose
+icon-layer resource directory.
 
 The retained `UI/Capabilities` components render capability lifecycle
 data as generic chat evidence. They are not a capability catalog, admin
