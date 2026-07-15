@@ -15,8 +15,6 @@ struct MenuBarItemBuilderTests {
         EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app"),
-            serverHelperBundle: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app"),
-            serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: tmp.appendingPathComponent("auth.json"),
             onboardedMarkerPath: tmp.appendingPathComponent("run/.onboarded"),
             settingsPath: tmp.appendingPathComponent("profile.toml"),

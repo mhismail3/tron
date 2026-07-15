@@ -203,29 +203,6 @@ struct InstallStep: View {
         }
         stages[.validateHelper] = .succeeded
 
-        let plan: InstallPlan
-        let plannerResult = InstallPlanner.plan(
-            paths: InstallPlanner.TargetPaths(
-                helperBundle: setup.serverHelperBundle,
-                helperBinary: setup.serverHelperBinary,
-                plistPath: setup.launchAgentPlistPath
-            )
-        )
-        switch plannerResult {
-        case .failure(.helperMissing(let url)):
-            let message = "Missing helper executable at \(url.path). Reinstall Tron.app."
-            state.installOutcome = .helperValidationFailed(message)
-            stages[.validateHelper] = .failed(message)
-            return
-        case .failure(.plistMissing(let url)):
-            let message = "Missing LaunchAgent plist at \(url.path). Reinstall Tron.app."
-            state.installOutcome = .helperValidationFailed(message)
-            stages[.validateHelper] = .failed(message)
-            return
-        case .success(let value):
-            plan = value
-        }
-
         guard setup.canManageLaunchAgent else {
             let message = "This Xcode Debug wrapper is in companion mode. Use /Applications/Tron.app for the production install, or run the isolated install-testing scheme."
             stages[.registerAgent] = .failed(message)
@@ -238,7 +215,7 @@ struct InstallStep: View {
         await paceStage()
         let outcome = await LaunchAgentLoader.ensureLoaded(
             manager: setup.launchAgentManager,
-            plistPath: plan.plistPath,
+            plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
         )
         switch outcome {

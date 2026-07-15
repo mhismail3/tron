@@ -62,7 +62,6 @@ packages/mac-app/
 │   │   │   └── VersionDisplay.swift
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
-│   │   │   ├── InstallPlanner.swift    # validates packaged helper/plist paths
 │   │   │   ├── MacPermissionProbe.swift
 │   │   │   ├── OnboardedSentinelWriter.swift
 │   │   │   ├── OnboardingModels.swift  # WizardStep, status, and install model values
@@ -109,13 +108,13 @@ struct EnvironmentSetup: Sendable {
 
 SwiftUI plumbing: injected via `.environment(\.environmentSetup, …)` on the root scene. Test views override the single key.
 
-### Planning and side-effect boundaries
+### Validation and side-effect boundaries
 
-Long-running operations keep planning, side effects, and presentation separate
-where that creates a useful boundary. For example, `InstallPlanner` validates
-the active helper and plist paths and returns an `InstallPlan`; `InstallStep`
-then asks `LaunchAgentManaging` to register or refresh the service. Leaf
-planners may perform the narrow filesystem checks they own.
+`ExistingInstallDetector` owns bundled-helper validation: helper app,
+executable, LaunchAgent plist, and signature. `InstallStep` orchestrates that
+validation and passes the active `EnvironmentSetup.launchAgentPlistPath`
+directly to `LaunchAgentManaging` for registration. The composition seam does
+not duplicate those helper paths or revalidate them through a second planner.
 
 The menu bar observes `tron dev` takeover but does not start it. Contributors
 start dev servers from the checkout-owned `scripts/tron` CLI; the app only
@@ -304,12 +303,11 @@ GitHub issue opens with a short note.
    - WizardState.handledInstallRequestID suppresses replay when the install page remounts after back/forward navigation
 1. Validate location: Release builds must run from `/Applications/Tron.app`; Debug builds may run from DerivedData.
 2. Validate helper: Ensure the active bundled helper app (`Tron Server.app` or `Tron Server Dev.app`), its executable, LaunchAgent plist, `BundleProgram`, wrapper `AssociatedBundleIdentifiers`, and signature are present.
-3. Plan:          InstallPlanner.plan(…) → Result<InstallPlan, Failure>
-4. Register:      SMAppService.agent(plistName: "<active-label>.plist").register()
+3. Register:      SMAppService.agent(plistName: "<active-label>.plist").register()
    - Installed Release manages `com.tron.server` on port `9847`; the isolated install scheme manages `com.tron.server.dev` on port `9848`.
    - Default Xcode Debug is companion-only. If it reaches the Install step it fails before mutating Login Items and tells the contributor to use `/Applications/Tron.app` or the isolated install-testing scheme.
    - Before registration, `LiveLaunchAgentManager` reads `launchctl print` to identify the loaded job's parent bundle, event-trigger executable, and launch-constraint state. An enabled SMAppService registration without a loaded launchd job, one pointing at a missing/mismatched helper path, one owned by a stale parent bundle build, or one reporting launch-constraint drift such as `needs LWCR update` is treated as registered-but-not-ready. A manager build replaces that registration through SMAppService, then the pipeline waits for ping.
-5. Await ping:    poll setup.pingServer(token) for 30s on 1s cadence, ignoring connection events; menu-bar and command-mode update finalization write `internal/run/mac-app-version.json` only after this health gate passes
+4. Await ping:    poll setup.pingServer(token) for 30s on 1s cadence, ignoring connection events; menu-bar and command-mode update finalization write `internal/run/mac-app-version.json` only after this health gate passes
 → state.installOutcome set; Pairing step unblocks only when .success
 
 The UI intentionally paces quick stages for a few hundred milliseconds

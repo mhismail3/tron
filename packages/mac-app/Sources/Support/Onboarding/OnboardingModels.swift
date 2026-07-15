@@ -149,11 +149,3 @@ enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     case registerAgent
     case awaitPing
 }
-
-/// Pure-value description of what the install step plans to do. The
-/// View applies the plan via `SMAppService` through `LaunchAgentManaging`.
-struct InstallPlan: Equatable, Sendable {
-    var plistPath: URL
-    var helperBundle: URL
-    var helperBinary: URL
-}

@@ -80,6 +80,40 @@ struct ExistingInstallDetectorTests {
         }
     }
 
+    @Test("bundled helper validation owns file and signature failures")
+    func bundledHelperValidationOwnsFailures() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let helper = tmp.appendingPathComponent("Tron Server.app", isDirectory: true)
+        let binary = helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
+        let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
+
+        func validate(signatureProblem: String? = nil) -> String? {
+            ExistingInstallDetector.validateBundledHelper(
+                helperBundle: helper,
+                helperBinary: binary,
+                plistPath: plist,
+                signatureProblemResolver: { _ in signatureProblem }
+            )
+        }
+
+        #expect(validate() == "Tron Server.app is missing from the application bundle.")
+
+        try FileManager.default.createDirectory(at: helper, withIntermediateDirectories: true)
+        #expect(validate() == "Tron Server.app is missing its tron executable.")
+
+        try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: binary)
+        #expect(validate() == "The bundled LaunchAgent plist is missing.")
+
+        try Data("<plist/>".utf8).write(to: plist)
+        #expect(validate() == nil)
+        #expect(
+            validate(signatureProblem: "Tron Server.app signature is invalid")
+                == "Tron Server.app signature is invalid"
+        )
+    }
+
     @Test("invalid helper signature is partial")
     func invalidSignatureIsPartial() throws {
         let tmp = TestTempDir.make()

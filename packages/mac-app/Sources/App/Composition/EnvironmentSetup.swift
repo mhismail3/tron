@@ -9,8 +9,6 @@ import SwiftUI
 struct EnvironmentSetup: Sendable {
     var tronHome: URL
     var applicationBundle: URL
-    var serverHelperBundle: URL
-    var serverHelperBinary: URL
     var bearerTokenPath: URL
     var onboardedMarkerPath: URL
     var settingsPath: URL
@@ -108,8 +106,6 @@ struct EnvironmentSetup: Sendable {
     static let live = EnvironmentSetup(
         tronHome: TronPaths.tronHome,
         applicationBundle: TronPaths.applicationBundle,
-        serverHelperBundle: TronPaths.serverHelperBundle,
-        serverHelperBinary: TronPaths.serverHelperBinary,
         bearerTokenPath: TronPaths.bearerTokenPath,
         onboardedMarkerPath: TronPaths.onboardedMarkerPath,
         settingsPath: TronPaths.settingsPath,

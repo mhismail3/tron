@@ -18,8 +18,6 @@ struct ServerStatusPollerTests {
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp,
-            serverHelperBundle: tmp.appendingPathComponent("Tron Server.app"),
-            serverHelperBinary: tmp.appendingPathComponent("Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: tmp,
             onboardedMarkerPath: tmp,
             settingsPath: tmp,

@@ -112,8 +112,6 @@ struct TronUninstallerTests {
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
-            serverHelperBundle: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app", isDirectory: true),
-            serverHelperBinary: tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"),
             bearerTokenPath: profiles.appendingPathComponent("auth.json", isDirectory: false),
             onboardedMarkerPath: run.appendingPathComponent(".onboarded", isDirectory: false),
             settingsPath: userProfile.appendingPathComponent("profile.toml", isDirectory: false),
