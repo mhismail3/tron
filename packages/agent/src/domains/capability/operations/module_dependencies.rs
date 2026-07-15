@@ -13,12 +13,9 @@ pub(super) async fn module_dependency_request_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::record_module_dependency_request_value_at(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
             operation_at,
@@ -35,12 +32,9 @@ pub(super) async fn module_dependency_request_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::list_module_dependency_request_value(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )
@@ -60,12 +54,9 @@ pub(super) async fn module_dependency_request_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::inspect_module_dependency_request_value(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )
@@ -82,12 +73,9 @@ pub(super) async fn module_dependency_decision_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::record_module_dependency_decision_value_at(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
             operation_at,
@@ -104,12 +92,9 @@ pub(super) async fn module_dependency_decision_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::list_module_dependency_decision_value(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )
@@ -129,12 +114,9 @@ pub(super) async fn module_dependency_decision_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::inspect_module_dependency_decision_value(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )
@@ -151,12 +133,9 @@ pub(super) async fn module_dependency_policy_activate(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::activate_module_dependency_policy_value_at(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
             operation_at,
@@ -173,12 +152,9 @@ pub(super) async fn module_dependency_policy_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::list_module_dependency_policy_value(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )
@@ -198,12 +174,9 @@ pub(super) async fn module_dependency_policy_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let module_deps = crate::domains::module_dependencies::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details =
         crate::domains::module_dependencies::service::inspect_module_dependency_policy_value(
-            &module_deps,
+            &deps.engine_host,
             invocation,
             &invocation.payload,
         )

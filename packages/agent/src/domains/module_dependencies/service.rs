@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use crate::engine::{CreateResource, EngineResourceLocation, Invocation, ListResources};
+use crate::engine::{
+    CreateResource, EngineHostHandle, EngineResourceLocation, Invocation, ListResources,
+};
 use crate::shared::server::errors::CapabilityError;
 
 use super::authority::{
@@ -33,19 +35,19 @@ use super::resource_store::{
 };
 use super::validation::*;
 use super::{
-    Deps, MODULE_DEPENDENCY_DECISION_KIND, MODULE_DEPENDENCY_DECISION_SCHEMA_ID,
+    MODULE_DEPENDENCY_DECISION_KIND, MODULE_DEPENDENCY_DECISION_SCHEMA_ID,
     MODULE_DEPENDENCY_POLICY_KIND, MODULE_DEPENDENCY_POLICY_SCHEMA_ID,
     MODULE_DEPENDENCY_REQUEST_KIND, MODULE_DEPENDENCY_REQUEST_SCHEMA_ID,
 };
 
 pub(crate) async fn record_module_dependency_request_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    ensure_write_authority(deps, invocation, "module_dependency_request_record").await?;
+    ensure_write_authority(engine_host, invocation, "module_dependency_request_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let request_id_input = optional_string(payload, "dependencyRequestId")?
@@ -116,8 +118,7 @@ pub(crate) async fn record_module_dependency_request_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = module_dependency_request_resource_id(&scope, &request_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -167,8 +168,7 @@ pub(crate) async fn record_module_dependency_request_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_DEPENDENCY_REQUEST_KIND.to_owned(),
@@ -194,7 +194,7 @@ pub(crate) async fn record_module_dependency_request_value_at(
         invalid("module dependency request resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_dependency.request_recorded",
         &resource,
@@ -217,18 +217,18 @@ pub(crate) async fn record_module_dependency_request_value_at(
         "idempotentReplay": false,
         "moduleDependencyRequestResourceId": resource.resource_id,
         "moduleDependencyRequestVersionId": version_id,
-        "dependencyRequest": module_dependency_request_summary_for_resource(deps, &resource).await?,
+        "dependencyRequest": module_dependency_request_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_dependency_request")]
     }))
 }
 
 pub(crate) async fn list_module_dependency_request_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        engine_host,
         invocation,
         payload,
         "module_dependency_request_list",
@@ -241,18 +241,19 @@ pub(crate) async fn list_module_dependency_request_value(
 }
 
 pub(crate) async fn inspect_module_dependency_request_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_dependency_request_inspect").await?;
+    let grant =
+        inspect_read_grant(engine_host, invocation, "module_dependency_request_inspect").await?;
     let resource_id = required_string(payload, "moduleDependencyRequestResourceId")?;
     validate_module_dependency_request_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_dependency_request_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module dependency request").await?;
+        inspect_resource_required(engine_host, &resource_id, "module dependency request").await?;
     ensure_module_dependency_request(&inspection, "module_dependency_request_inspect")?;
     ensure_scope(&inspection, &scope, "module_dependency_request_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_dependency_request_inspect")?;
@@ -266,14 +267,15 @@ pub(crate) async fn inspect_module_dependency_request_value(
 }
 
 pub(crate) async fn record_module_dependency_decision_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_write_authority(deps, invocation, "module_dependency_decision_record").await?;
+        ensure_write_authority(engine_host, invocation, "module_dependency_decision_record")
+            .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let decision_id_input = optional_string(payload, "dependencyDecisionId")?
@@ -290,8 +292,12 @@ pub(crate) async fn record_module_dependency_decision_value_at(
         &request_resource_id,
         "module_dependency_decision_record",
     )?;
-    let request_inspection =
-        inspect_resource_required(deps, &request_resource_id, "module dependency request").await?;
+    let request_inspection = inspect_resource_required(
+        engine_host,
+        &request_resource_id,
+        "module dependency request",
+    )
+    .await?;
     ensure_module_dependency_request(&request_inspection, "module_dependency_decision_record")?;
     ensure_scope(
         &request_inspection,
@@ -339,8 +345,7 @@ pub(crate) async fn record_module_dependency_decision_value_at(
     let resource_id =
         module_dependency_decision_resource_id(&scope, &decision_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -382,8 +387,7 @@ pub(crate) async fn record_module_dependency_decision_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_DEPENDENCY_DECISION_KIND.to_owned(),
@@ -409,7 +413,7 @@ pub(crate) async fn record_module_dependency_decision_value_at(
         invalid("module dependency decision resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         if state == "approved_policy" {
             "module_dependency.policy_candidate_recorded"
@@ -435,18 +439,18 @@ pub(crate) async fn record_module_dependency_decision_value_at(
         "idempotentReplay": false,
         "moduleDependencyDecisionResourceId": resource.resource_id,
         "moduleDependencyDecisionVersionId": version_id,
-        "dependencyDecision": module_dependency_decision_summary_for_resource(deps, &resource).await?,
+        "dependencyDecision": module_dependency_decision_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_dependency_decision")]
     }))
 }
 
 pub(crate) async fn list_module_dependency_decision_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        engine_host,
         invocation,
         payload,
         "module_dependency_decision_list",
@@ -459,18 +463,23 @@ pub(crate) async fn list_module_dependency_decision_value(
 }
 
 pub(crate) async fn inspect_module_dependency_decision_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_dependency_decision_inspect").await?;
+    let grant = inspect_read_grant(
+        engine_host,
+        invocation,
+        "module_dependency_decision_inspect",
+    )
+    .await?;
     let resource_id = required_string(payload, "moduleDependencyDecisionResourceId")?;
     validate_module_dependency_decision_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_dependency_decision_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module dependency decision").await?;
+        inspect_resource_required(engine_host, &resource_id, "module dependency decision").await?;
     ensure_module_dependency_decision(&inspection, "module_dependency_decision_inspect")?;
     ensure_scope(&inspection, &scope, "module_dependency_decision_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_dependency_decision_inspect")?;
@@ -484,14 +493,15 @@ pub(crate) async fn inspect_module_dependency_decision_value(
 }
 
 pub(crate) async fn activate_module_dependency_policy_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
     let grant =
-        ensure_write_authority(deps, invocation, "module_dependency_policy_activate").await?;
+        ensure_write_authority(engine_host, invocation, "module_dependency_policy_activate")
+            .await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let policy_id_input = optional_string(payload, "dependencyPolicyId")?
@@ -508,9 +518,12 @@ pub(crate) async fn activate_module_dependency_policy_value_at(
         &decision_resource_id,
         "module_dependency_policy_activate",
     )?;
-    let decision_inspection =
-        inspect_resource_required(deps, &decision_resource_id, "module dependency decision")
-            .await?;
+    let decision_inspection = inspect_resource_required(
+        engine_host,
+        &decision_resource_id,
+        "module dependency decision",
+    )
+    .await?;
     ensure_module_dependency_decision(&decision_inspection, "module_dependency_policy_activate")?;
     ensure_scope(
         &decision_inspection,
@@ -537,8 +550,7 @@ pub(crate) async fn activate_module_dependency_policy_value_at(
         &idempotency_key,
     );
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -577,8 +589,7 @@ pub(crate) async fn activate_module_dependency_policy_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: MODULE_DEPENDENCY_POLICY_KIND.to_owned(),
@@ -604,7 +615,7 @@ pub(crate) async fn activate_module_dependency_policy_value_at(
         invalid("module dependency policy resource was created without a current version")
     })?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "module_dependency.policy_activated",
         &resource,
@@ -627,18 +638,18 @@ pub(crate) async fn activate_module_dependency_policy_value_at(
         "idempotentReplay": false,
         "moduleDependencyPolicyResourceId": resource.resource_id,
         "moduleDependencyPolicyVersionId": version_id,
-        "dependencyPolicy": module_dependency_policy_summary_for_resource(deps, &resource).await?,
+        "dependencyPolicy": module_dependency_policy_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "module_dependency_policy")]
     }))
 }
 
 pub(crate) async fn list_module_dependency_policy_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     list_values(
-        deps,
+        engine_host,
         invocation,
         payload,
         "module_dependency_policy_list",
@@ -651,18 +662,19 @@ pub(crate) async fn list_module_dependency_policy_value(
 }
 
 pub(crate) async fn inspect_module_dependency_policy_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let grant = inspect_read_grant(deps, invocation, "module_dependency_policy_inspect").await?;
+    let grant =
+        inspect_read_grant(engine_host, invocation, "module_dependency_policy_inspect").await?;
     let resource_id = required_string(payload, "moduleDependencyPolicyResourceId")?;
     validate_module_dependency_policy_resource_id(&resource_id)?;
     require_exact_resource_selector(&grant, &resource_id, "module_dependency_policy_inspect")?;
     let scope = resource_scope(invocation)?;
     let inspection =
-        inspect_resource_required(deps, &resource_id, "module dependency policy").await?;
+        inspect_resource_required(engine_host, &resource_id, "module dependency policy").await?;
     ensure_module_dependency_policy(&inspection, "module_dependency_policy_inspect")?;
     ensure_scope(&inspection, &scope, "module_dependency_policy_inspect")?;
     let (version, payload) = current_payload(&inspection, "module_dependency_policy_inspect")?;
@@ -676,7 +688,7 @@ pub(crate) async fn inspect_module_dependency_policy_value(
 }
 
 async fn list_values(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation: &str,
@@ -690,7 +702,7 @@ async fn list_values(
     output_key: &str,
 ) -> Result<Value, CapabilityError> {
     reject_unsafe_payload(payload)?;
-    let _grant = inspect_read_grant(deps, invocation, operation).await?;
+    let _grant = inspect_read_grant(engine_host, invocation, operation).await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -700,8 +712,7 @@ async fn list_values(
     let lifecycle = optional_string(payload, "lifecycle")?
         .map(|value| bounded_token("lifecycle", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(kind.to_owned()),
             scope: Some(scope.clone()),
@@ -719,8 +730,7 @@ async fn list_values(
     let truncated = resources.len() > limit;
     let mut items = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?

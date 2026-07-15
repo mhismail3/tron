@@ -1,14 +1,13 @@
-use crate::engine::{EngineGrant, Invocation, is_bootstrap_authority_grant_id};
+use crate::engine::{EngineGrant, EngineHostHandle, Invocation, is_bootstrap_authority_grant_id};
 use crate::shared::server::errors::CapabilityError;
 
-use super::Deps;
 use super::{
     MODULE_DEPENDENCY_DECISION_KIND, MODULE_DEPENDENCY_POLICY_KIND, MODULE_DEPENDENCY_REQUEST_KIND,
     contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRITE_SCOPE},
 };
 
 pub(super) async fn ensure_write_authority(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
@@ -27,7 +26,7 @@ pub(super) async fn ensure_write_authority(
             "{operation} requires a derived non-bootstrap grant"
         )));
     }
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(engine_host, invocation, operation).await?;
     for scope in [
         READ_SCOPE,
         WRITE_SCOPE,
@@ -44,11 +43,11 @@ pub(super) async fn ensure_write_authority(
 }
 
 pub(super) async fn inspect_read_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    let grant = inspect_grant(deps, invocation, operation).await?;
+    let grant = inspect_grant(engine_host, invocation, operation).await?;
     require_explicit_grant_item(&grant.allowed_authority_scopes, READ_SCOPE, operation)?;
     require_explicit_grant_item(
         &grant.allowed_authority_scopes,
@@ -115,11 +114,11 @@ fn require_kind_selectors(grant: &EngineGrant, operation: &str) -> Result<(), Ca
 }
 
 async fn inspect_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     operation: &str,
 ) -> Result<EngineGrant, CapabilityError> {
-    deps.engine_host
+    engine_host
         .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
         .await
         .map_err(engine_error)?

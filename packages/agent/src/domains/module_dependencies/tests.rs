@@ -9,21 +9,21 @@ use super::service::{
     record_module_dependency_decision_value_at, record_module_dependency_request_value_at,
 };
 use super::{
-    Deps, MODULE_DEPENDENCY_DECISION_KIND, MODULE_DEPENDENCY_DECISION_SCHEMA_ID,
+    MODULE_DEPENDENCY_DECISION_KIND, MODULE_DEPENDENCY_DECISION_SCHEMA_ID,
     MODULE_DEPENDENCY_POLICY_KIND, MODULE_DEPENDENCY_POLICY_SCHEMA_ID,
     MODULE_DEPENDENCY_REQUEST_KIND, MODULE_DEPENDENCY_REQUEST_SCHEMA_ID,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant,
-    EngineResourceVersioningMode, FunctionId, Invocation, InvocationId, RiskLevel, TraceId,
-    builtin_resource_type_definitions,
+    EngineHostHandle, EngineResourceVersioningMode, FunctionId, Invocation, InvocationId,
+    RiskLevel, TraceId, builtin_resource_type_definitions,
 };
 use crate::shared::server::test_support::make_test_context;
 
 const DEFAULT_OPERATION_AT: &str = "2026-06-27T12:00:00Z";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -32,12 +32,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -59,7 +57,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[
@@ -76,7 +74,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -86,7 +84,7 @@ impl Fixture {
     async fn dependency_request(&self, key: &str) -> Value {
         let invocation = self.write_invocation(key, request_payload(key));
         record_module_dependency_request_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -118,7 +116,7 @@ impl Fixture {
             &self.session_id,
         );
         record_module_dependency_decision_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -148,7 +146,7 @@ impl Fixture {
             &self.session_id,
         );
         activate_module_dependency_policy_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -160,7 +158,7 @@ impl Fixture {
     async fn exact_read_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[
@@ -182,7 +180,7 @@ impl Fixture {
     async fn exact_write_grant(&self, suffix: &str, resource_id: &str) -> AuthorityGrantId {
         let exact_selector = format!("resource:{resource_id}");
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             &[
                 READ_SCOPE,
@@ -320,7 +318,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 
     assert_eq!(
         list_module_dependency_request_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("list-requests", json!({})),
             &json!({})
         )
@@ -333,7 +331,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
     );
     assert_eq!(
         list_module_dependency_decision_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("list-decisions", json!({})),
             &json!({})
         )
@@ -346,7 +344,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
     );
     assert_eq!(
         list_module_dependency_policy_value(
-            &fixture.deps,
+            &fixture.engine_host,
             &fixture.read_invocation("list-policies", json!({})),
             &json!({})
         )
@@ -360,7 +358,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 
     let request_grant = fixture.exact_read_grant("request-exact", request_id).await;
     let inspected_request = inspect_module_dependency_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "inspect-request",
             json!({"moduleDependencyRequestResourceId": request_id}),
@@ -379,7 +377,7 @@ async fn request_decision_policy_record_list_inspect_and_replay_are_metadata_onl
 
     let policy_grant = fixture.exact_read_grant("policy-exact", policy_id).await;
     let inspected_policy = inspect_module_dependency_policy_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "inspect-policy",
             json!({"moduleDependencyPolicyResourceId": policy_id}),
@@ -419,7 +417,7 @@ async fn unsafe_payloads_and_package_manager_parity_are_rejected() {
     ] {
         let invocation = fixture.write_invocation("unsafe", payload);
         let error = record_module_dependency_request_value_at(
-            &fixture.deps,
+            &fixture.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -445,7 +443,7 @@ async fn rejected_decisions_require_denial_evidence_and_exact_selectors() {
         .unwrap();
 
     let missing_evidence = record_module_dependency_decision_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &invocation(
             "denial-missing",
             json!({
@@ -479,7 +477,7 @@ async fn rejected_decisions_require_denial_evidence_and_exact_selectors() {
     assert!(missing_evidence.contains("denialEvidence"));
 
     let selector_denied = inspect_module_dependency_request_value(
-        &fixture.deps,
+        &fixture.engine_host,
         &fixture.read_invocation(
             "selector-denied",
             json!({"moduleDependencyRequestResourceId": request_id}),
@@ -493,14 +491,14 @@ async fn rejected_decisions_require_denial_evidence_and_exact_selectors() {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     label: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     resource_selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    deps.engine_host
+    engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("module-dependencies-{label}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").expect("parent grant"),
