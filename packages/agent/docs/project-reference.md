@@ -495,7 +495,7 @@ tron/
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
-|   +-- dependabot.yml      Weekly Cargo + GitHub Actions updates, monthly Swift
+|   +-- dependabot.yml      Weekly Cargo + GitHub Actions dependency updates
 |   +-- pull_request_template.md
 ```
 

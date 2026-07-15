@@ -284,6 +284,16 @@ fn root_readme_stays_a_concise_progressive_disclosure_front_door() {
 }
 
 #[test]
+fn dependabot_tracks_only_repository_owned_ecosystems() {
+    let config = read_repo_file(".github/dependabot.yml");
+    let ecosystems = config
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- package-ecosystem: "))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(ecosystems, BTreeSet::from(["cargo", "github-actions"]));
+}
+
+#[test]
 fn shell_entrypoints_leave_runtime_initialization_to_source_owners() {
     let probe = tempfile::tempdir().expect("shell ownership probe should have a home");
     for (name, script, args) in [
