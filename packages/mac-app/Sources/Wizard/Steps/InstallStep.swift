@@ -208,9 +208,7 @@ struct InstallStep: View {
             paths: InstallPlanner.TargetPaths(
                 helperBundle: setup.serverHelperBundle,
                 helperBinary: setup.serverHelperBinary,
-                plistPath: setup.launchAgentPlistPath,
-                label: setup.launchAgentLabel,
-                port: setup.serverPort
+                plistPath: setup.launchAgentPlistPath
             )
         )
         switch plannerResult {

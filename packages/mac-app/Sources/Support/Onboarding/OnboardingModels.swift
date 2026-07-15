@@ -138,8 +138,8 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var label: String?
 }
 
-/// Discrete steps in the install pipeline. Each is
-/// tested separately in `InstallPlannerTests`.
+/// Discrete steps in the install pipeline. Ordering is covered by
+/// `InstallPipelineStageOrderingTests`.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     /// Confirms this is the release app in `/Applications`.
     case validateApplication

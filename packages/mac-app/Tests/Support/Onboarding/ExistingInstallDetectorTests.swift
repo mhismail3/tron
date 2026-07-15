@@ -128,11 +128,8 @@ struct ExistingInstallDetectorTests {
     }
 
     @Test("LaunchAgent plist requires current BundleProgram and associated wrapper IDs")
-    func launchAgentPlistIsCurrent() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let plist = tmp.appendingPathComponent("com.tron.server.plist")
-        try InstallPlanner.renderPlist(paths: makeTargetPaths(in: tmp)).write(to: plist, atomically: true, encoding: .utf8)
+    func launchAgentPlistIsCurrent() {
+        let plist = trackedLaunchAgentPlist(named: "com.tron.server.plist")
 
         #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(
             plistPath: plist,
@@ -149,31 +146,28 @@ struct ExistingInstallDetectorTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let plist = tmp.appendingPathComponent("com.tron.server.plist")
-        try InstallPlanner.renderPlist(
-            paths: makeTargetPaths(in: tmp, environmentVariables: ["RUST_LOG": "debug"])
-        ).write(to: plist, atomically: true, encoding: .utf8)
+        let trackedPlist = trackedLaunchAgentPlist(named: "com.tron.server.plist")
+        let data = try Data(contentsOf: trackedPlist)
+        var decoded = try #require(
+            PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        )
+        decoded["EnvironmentVariables"] = ["RUST_LOG": "debug"]
+        let modifiedData = try PropertyListSerialization.data(
+            fromPropertyList: decoded,
+            format: .xml,
+            options: 0
+        )
+        try modifiedData.write(to: plist)
 
         #expect(!ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
     }
 
     @Test("isolated LaunchAgent plist uses the dev helper and Tron home")
-    func isolatedLaunchAgentPlistIsCurrent() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let plist = tmp.appendingPathComponent("com.tron.server.dev.plist")
+    func isolatedLaunchAgentPlistIsCurrent() {
+        let plist = trackedLaunchAgentPlist(named: "com.tron.server.dev.plist")
         let environment = [
             TronPaths.tronHomeNameEnv: ".tron-dev",
         ]
-        try InstallPlanner.renderPlist(
-            paths: makeTargetPaths(
-                in: tmp,
-                helperName: "Tron Server Dev.app",
-                label: "com.tron.server.dev",
-                port: 9848,
-                environmentVariables: environment,
-                associatedBundleIDs: ["com.tron.mac.dev", "com.tron.mac"]
-            )
-        ).write(to: plist, atomically: true, encoding: .utf8)
 
         #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(
             plistPath: plist,
@@ -223,24 +217,8 @@ struct ExistingInstallDetectorTests {
         return (helper, binary, plist)
     }
 
-    private func makeTargetPaths(
-        in tmp: URL,
-        helperName: String = "Tron Server.app",
-        label: String = "com.tron.server",
-        port: Int = 9847,
-        environmentVariables: [String: String] = [:],
-        associatedBundleIDs: [String] = ["com.tron.mac", "com.tron.mac.dev"]
-    ) -> InstallPlanner.TargetPaths {
-        let app = tmp.appendingPathComponent("Tron.app", isDirectory: true)
-        let helper = app.appendingPathComponent("Contents/Library/LoginItems/\(helperName)", isDirectory: true)
-        return InstallPlanner.TargetPaths(
-            helperBundle: helper,
-            helperBinary: helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false),
-            plistPath: app.appendingPathComponent("Contents/Library/LaunchAgents/\(label).plist", isDirectory: false),
-            label: label,
-            port: port,
-            environmentVariables: environmentVariables,
-            associatedBundleIDs: associatedBundleIDs
-        )
+    private func trackedLaunchAgentPlist(named fileName: String) -> URL {
+        macAppRoot()
+            .appendingPathComponent("Sources/Resources/Library/LaunchAgents/\(fileName)")
     }
 }

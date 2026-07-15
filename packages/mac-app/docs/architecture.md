@@ -54,7 +54,7 @@ packages/mac-app/
 │   │   │   └── VersionDisplay.swift
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
-│   │   │   ├── InstallPlanner.swift    # pure-value plan + plist renderer
+│   │   │   ├── InstallPlanner.swift    # validates packaged helper/plist paths
 │   │   │   ├── OnboardedSentinelWriter.swift
 │   │   │   ├── OnboardingModels.swift  # WizardStep, status, and install model values
 │   │   │   ├── PermissionDeepLink.swift # System Settings deep-link URLs only; probes stay wrapper-owned
