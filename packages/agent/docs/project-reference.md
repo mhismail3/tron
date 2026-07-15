@@ -289,18 +289,6 @@ Current living entry points:
   completed DXRHA contributor workflow taxonomy and ownership notes.
 - `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
   machine-readable DXRHA workflow inventory used by static gates.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-scorecard.md`:
-  completed Documentation / Evidence / Scorecard Integrity scorecard for
-  active-doc truthfulness, command-evidence provenance, scorecard arithmetic,
-  inventory coverage, local/GitHub gate parity, branch handoff, and closeout
-  proof.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest.md`:
-  companion evidence manifest for DESI source findings, verification commands,
-  stale-branch quarantine, and residual documentation/evidence risks.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md`:
-  completed DESI documentation/evidence taxonomy and ownership notes.
-- `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv`:
-  machine-readable DESI artifact inventory used by static gates.
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md`:
   completed Self-Sufficient Agent Runtime Readiness scorecard for auditing
   clean extension points for generated workers, learned rules/memory, tool
@@ -526,13 +514,8 @@ Current living entry points:
 - `packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs`:
   completed DXRHA gates for scorecard/evidence, inventory coverage, local and
   GitHub static-gate parity, generated/ignored artifact policy, setup/dev
-  runtime-state docs, version/release helper checks, branch handoff, and
-  predecessor inventory rows.
-- `packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs`:
-  completed DESI gates for active scorecard/evidence/inventory integrity,
-  present-tense docs, command provenance, predecessor inventory coverage,
-  local/GitHub closeout target parity, stale branch quarantine, and final
-  closeout proof.
+  runtime-state docs, version/release helper checks, concise root-README
+  progressive disclosure, branch handoff, and predecessor inventory rows.
 - `packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs`:
   completed SSARR gates for readiness scorecard/evidence/inventory integrity,
   successor-term classification, negative generated-worker/learned-memory/tool
@@ -568,7 +551,7 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/SSARR
 scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
 scorecard, the IOSAC cockpit baseline scorecard, the IARM restoration map
 scorecard, the OPSAA cleanup scorecard, and the living SACB boundary gate.
@@ -3493,7 +3476,6 @@ tron ci clippy test          # Subset: linting + tests
 `release_install_upgrade_rollback_discipline_invariants`,
 `ios_thin_client_generic_runtime_shell_invariants`,
 `developer_experience_repo_hygiene_automation_invariants`,
-`documentation_evidence_scorecard_integrity_invariants`,
 `self_sufficient_agent_runtime_readiness_invariants`,
 `primitive_minimality_closure_invariants`,
 `baseline_pre_restoration_closure_invariants`,

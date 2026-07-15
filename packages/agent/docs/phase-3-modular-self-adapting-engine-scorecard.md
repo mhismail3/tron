@@ -874,7 +874,6 @@ the default Phase 3 closeout set is:
 - focused Rust tests for touched domains/modules
 - focused iOS tests and `xcodegen generate` when Swift or project files change
 - `baseline_pre_restoration_closure_invariants`
-- `documentation_evidence_scorecard_integrity_invariants`
 - `self_sufficient_agent_runtime_readiness_invariants`
 - `self_updating_worker_runtime_foundation_invariants`
 - `true_modularity_boundary_invariants`

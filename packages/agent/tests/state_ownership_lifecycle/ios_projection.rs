@@ -493,7 +493,7 @@ fn sol_ios_projection_local_state_lifecycle_is_source_backed() {
     );
 
     let all_rows: Vec<&InventoryRow> = inventory.values().flatten().collect();
-    assert_eq!(all_rows.len(), 822, "SOL inventory row total drifted");
+    assert_eq!(all_rows.len(), 817, "SOL inventory row total drifted");
     assert_eq!(
         all_rows
             .iter()

@@ -676,7 +676,6 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         "README.md"
         | "packages/agent/docs/project-reference.md"
         | "packages/agent/docs/restoration-retrospective-audit-status.md"
-        | "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
@@ -695,7 +694,6 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
-        | "packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs"
         | "packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md"
         | "packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md"

@@ -52,7 +52,7 @@ fn csd_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Concurrency Scheduling Discipline Inventory",
-        "Status: CSD-10 `passed_after_fix`; 129 production scheduling-surface rows and 27 static-gate/predecessor rows inventoried and classified.",
+        "Status: CSD-10 `passed_after_fix`; 129 production scheduling-surface rows and 22 static-gate/predecessor rows inventoried and classified.",
         "## Allowed Scheduler Classes",
         "`tracked_background_task`",
         "`bounded_queue`",
@@ -126,7 +126,7 @@ fn csd_invariant_target_is_in_closeout_ci_lists() {
 #[test]
 fn csd_inventory_rows_are_structured_and_cover_marker_files() {
     let rows = parse_inventory();
-    assert_eq!(rows.len(), 156, "CSD inventory row count changed");
+    assert_eq!(rows.len(), 151, "CSD inventory row count changed");
 
     let mut paths = BTreeSet::new();
     let allowed: BTreeSet<_> = ALLOWED_SCHEDULER_CLASSES.iter().copied().collect();

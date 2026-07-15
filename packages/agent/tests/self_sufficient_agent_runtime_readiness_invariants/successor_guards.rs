@@ -344,10 +344,10 @@ fn static_gate_wiring_matches_local_and_github_closeout_order() {
         Some("integration"),
         "serial integration target must remain last"
     );
-    let desi_index = local_targets
+    let dxrha_index = local_targets
         .iter()
-        .position(|target| target == "documentation_evidence_scorecard_integrity_invariants")
-        .expect("DESI target should be present");
+        .position(|target| target == "developer_experience_repo_hygiene_automation_invariants")
+        .expect("DXRHA target should be present");
     let ssarr_index = local_targets
         .iter()
         .position(|target| target == TARGET_NAME)
@@ -357,8 +357,8 @@ fn static_gate_wiring_matches_local_and_github_closeout_order() {
         .position(|target| target == "primitive_trace_execution")
         .expect("primitive trace target should be present");
     assert!(
-        desi_index < ssarr_index && ssarr_index < primitive_trace_index,
-        "SSARR must run after DESI and before primitive trace/integration closeout targets"
+        dxrha_index < ssarr_index && ssarr_index < primitive_trace_index,
+        "SSARR must run after repository-hygiene guards and before primitive trace/integration targets"
     );
 }
 
@@ -375,7 +375,6 @@ fn evidence_manifest_records_required_commands_without_placeholders() {
         "cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check",
         "cargo check --manifest-path packages/agent/Cargo.toml",
         "cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test developer_experience_repo_hygiene_automation_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture",

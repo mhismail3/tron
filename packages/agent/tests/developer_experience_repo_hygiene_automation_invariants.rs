@@ -216,6 +216,52 @@ fn assert_order(source: &str, before: &str, after: &str, context: &str) {
 }
 
 #[test]
+fn root_readme_stays_a_concise_progressive_disclosure_front_door() {
+    let readme = read_repo_file("README.md");
+    assert!(
+        readme.lines().count() <= 250,
+        "root README must stay under 250 lines; move detailed reference material to its owner"
+    );
+    for required in [
+        "# Tron",
+        "## Why Tron",
+        "## System Shape",
+        "## Install",
+        "## Develop",
+        "## Validate",
+        "## Documentation",
+        "packages/agent/docs/project-reference.md",
+        "CONTRIBUTING.md",
+        "packages/agent/src/lib.rs",
+        "packages/ios-app/docs/architecture.md",
+        "packages/mac-app/docs/architecture.md",
+    ] {
+        assert!(
+            readme.contains(required),
+            "root README front door is missing {required}"
+        );
+    }
+    for displaced_catalog in [
+        "## Rust Modules",
+        "## CLI Reference",
+        "## Engine Protocol API",
+        "### Key Configuration",
+        "### Tables",
+        "### Wizard Steps",
+        "## Core Invariants",
+    ] {
+        assert!(
+            !readme.contains(displaced_catalog),
+            "root README must link to, not embed, detailed catalog {displaced_catalog}"
+        );
+    }
+    assert!(
+        repo_path("packages/agent/docs/project-reference.md").exists(),
+        "the linked technical project reference must exist"
+    );
+}
+
+#[test]
 fn dxrha_artifacts_and_static_gate_wiring_exist() {
     for path in [
         SCORECARD_PATH,

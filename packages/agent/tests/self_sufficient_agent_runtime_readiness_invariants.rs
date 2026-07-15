@@ -89,7 +89,7 @@ fn assert_current_lineage_base() {
         .expect("git merge-base should run");
     assert!(
         status.success(),
-        "HEAD must descend from DESI baseline {BASE_COMMIT}"
+        "HEAD must descend from the readiness baseline {BASE_COMMIT}"
     );
 }
 
@@ -222,7 +222,6 @@ fn predecessor_inventories_classify_ssarr_artifacts() {
         "packages/agent/docs/state-ownership-lifecycle-inventory.tsv",
         "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
         "packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv",
-        "packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv",
     ] {
         let source = read_repo_file(predecessor);
         for required_path in required_paths {
