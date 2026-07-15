@@ -350,18 +350,6 @@ final class ChatViewModel {
     @ObservationIgnored
     var selectedImageTask: Task<Void, Never>?
 
-    /// Tracked fire-and-forget work keyed for removal on completion.
-    @ObservationIgnored
-    private var backgroundTasks: [UUID: Task<Void, Never>] = [:]
-
-    func launchBackground(_ operation: @escaping @Sendable @MainActor () async -> Void) {
-        let id = UUID()
-        backgroundTasks[id] = Task { @MainActor [weak self] in
-            await operation()
-            self?.backgroundTasks[id] = nil
-        }
-    }
-
     deinit {
         // MainActor classes always deinit on the main actor.
         // assumeIsolated lets the compiler see we can safely access isolated state.
@@ -369,7 +357,6 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             selectedImageTask?.cancel()
-            for task in backgroundTasks.values { task.cancel() }
             transcriptionTask?.cancel()
             micRecorder.cancelRecording()
         }
@@ -578,15 +565,11 @@ final class ChatViewModel {
         services.events.hasActiveSession
     }
 
-    /// Updates the context window based on available model info
-    /// Called by ChatView when models are loaded or model is switched
+    /// Updates the context window from the model catalog loaded by ChatView.
     func updateContextWindow(from models: [ModelInfo]) {
         if let model = models.first(where: { $0.id == currentModel }) {
             contextState.currentContextWindow = model.contextWindow
         }
-    }
-
-    func refreshContextFromServer() async {
     }
 
     // Note: Deep link methods moved to ChatViewModel+DeepLinks.swift

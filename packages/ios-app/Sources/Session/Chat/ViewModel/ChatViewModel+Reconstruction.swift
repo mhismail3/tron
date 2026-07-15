@@ -81,9 +81,6 @@ extension ChatViewModel {
             contextState.accumulatedCost = cost
         }
 
-        // 6. Ensure context window limit is set (prefetchModels runs in parallel and may not have completed)
-        await refreshContextFromServer()
-
         if !result.isRunning {
             reconcileCompletedReconstructionState()
         }

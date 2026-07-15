@@ -51,15 +51,13 @@ final class ModelPickerState {
     ///   - onOptimisticSet: Called when optimistic name is set (for context window update)
     ///   - onSuccess: Called on successful switch with previous and new model names
     ///   - onError: Called on failure with error message and model to revert to
-    ///   - onContextRefresh: Called after success to refresh context from server
     func switchModel(
         to model: ModelInfo,
         sessionId: String,
         currentModel: String,
         onOptimisticSet: @escaping (String) -> Void,
         onSuccess: @escaping (String, String) -> Void,
-        onError: @escaping (String, ModelInfo?) -> Void,
-        onContextRefresh: @escaping () async -> Void
+        onError: @escaping (String, ModelInfo?) -> Void
     ) async {
         let previousModel = currentModel
 
@@ -76,7 +74,6 @@ final class ModelPickerState {
             // Clear optimistic update - real value now reflected
             optimisticModelName = nil
             onSuccess(previousModel, result.newModel)
-            await onContextRefresh()
         } catch {
             // Revert optimistic update on failure
             optimisticModelName = nil

@@ -309,10 +309,5 @@ final class TurnLifecycleCoordinator {
         context.resetUIUpdateQueue()
         context.resetAnimationCoordinatorCapabilityState()
         context.resetStreamingManager()
-
-        // Refresh context from server to ensure accuracy after all operations
-        Task {
-            await context.refreshContextFromServer()
-        }
     }
 }

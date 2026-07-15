@@ -446,17 +446,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.currentTurnCapabilityInvocations.isEmpty)
     }
 
-    func testCompleteTriggersContextRefresh() async throws {
-        // When
-        coordinator.handleComplete(streamingText: "", context: mockContext)
-
-        // Wait briefly for the async Task to execute
-        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
-
-        // Then
-        XCTAssertTrue(mockContext.refreshContextFromServerCalled)
-    }
-
     // MARK: - Helpers
 
     private func makeTurnEndPluginResult(
@@ -563,7 +552,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var uiUpdateQueueFlushCalled = false
     var uiUpdateQueueResetCalled = false
     var streamingManagerResetCalled = false
-    var refreshContextFromServerCalled = false
     var thinkingStateEndTurnCalled = false
 
     // MARK: - Protocol Methods
@@ -603,10 +591,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
 
     func resetStreamingManager() {
         streamingManagerResetCalled = true
-    }
-
-    func refreshContextFromServer() async {
-        refreshContextFromServerCalled = true
     }
 
     func updateContextStateFromTokenRecord(_ record: TokenRecord) {

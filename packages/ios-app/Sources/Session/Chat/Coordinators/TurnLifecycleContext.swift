@@ -67,9 +67,6 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
     /// Accumulate token usage for billing
     func accumulateTokens(input: Int, output: Int, cacheRead: Int, cacheCreation: Int, cost: Double)
 
-    /// Refresh context from server
-    func refreshContextFromServer() async
-
     // MARK: - Session Persistence
 
     /// Update session tokens in database

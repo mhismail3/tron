@@ -4,13 +4,7 @@ import SwiftUI
 
 // MARK: - Context Protocol Conformances
 
-extension ChatViewModel: CompactionContext {
-    func refreshContextInBackground() {
-        launchBackground { [weak self] in
-            await self?.refreshContextFromServer()
-        }
-    }
-}
+extension ChatViewModel: CompactionContext {}
 
 // MARK: - Event Handlers
 
@@ -300,11 +294,6 @@ extension ChatViewModel {
             contextControlActionResourceId: pluginResult.contextControlActionResourceId
         )
         appendToMessages(clearedMessage)
-
-        // Refresh context from server to ensure context limit is also current
-        launchBackground { [weak self] in
-            await self?.refreshContextFromServer()
-        }
     }
 
     func handleMessageDeleted(_ pluginResult: MessageDeletedPlugin.Result) {

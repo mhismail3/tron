@@ -7,7 +7,6 @@ protocol CompactionContext: LoggingContext, StreamingManaging, MessageMutating {
     var isCompacting: Bool { get set }
     var compactionInProgressMessageId: UUID? { get set }
     var contextState: ContextTrackingState { get }
-    func refreshContextInBackground()
 }
 
 /// Coordinates context compaction event handling for ChatViewModel.
@@ -66,7 +65,6 @@ final class CompactionCoordinator {
                 )
                 replaceInProgressMessage(failedMessage, context)
             }
-            context.refreshContextInBackground()
             return
         }
 
@@ -86,8 +84,6 @@ final class CompactionCoordinator {
             contextControlActionResourceId: pluginResult.contextControlActionResourceId
         )
         replaceInProgressMessage(compactionMessage, context)
-
-        context.refreshContextInBackground()
     }
 
     private func replaceInProgressMessage(

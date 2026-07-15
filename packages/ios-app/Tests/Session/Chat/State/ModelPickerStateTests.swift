@@ -182,8 +182,7 @@ struct ModelPickerStateTests {
             currentModel: opusModel.id,
             onOptimisticSet: { _ in },
             onSuccess: { _, _ in },
-            onError: { _, _ in },
-            onContextRefresh: { }
+            onError: { _, _ in }
         )
 
         #expect(displayedName == sonnetModel.id)
@@ -260,8 +259,7 @@ struct ModelPickerStateTests {
                 optimisticDuringSwitch = optimistic
             },
             onSuccess: { _, _ in },
-            onError: { _, _ in },
-            onContextRefresh: { }
+            onError: { _, _ in }
         )
 
         #expect(optimisticDuringSwitch == "claude-sonnet-4-20250514")
@@ -283,8 +281,7 @@ struct ModelPickerStateTests {
             currentModel: "claude-opus-4-20250514",
             onOptimisticSet: { _ in },
             onSuccess: { _, _ in },
-            onError: { _, _ in },
-            onContextRefresh: { }
+            onError: { _, _ in }
         )
 
         #expect(repository.switchCallCount == 1)
@@ -308,8 +305,7 @@ struct ModelPickerStateTests {
             currentModel: "claude-opus-4-20250514",
             onOptimisticSet: { _ in },
             onSuccess: { _, _ in },
-            onError: { _, _ in },
-            onContextRefresh: { }
+            onError: { _, _ in }
         )
 
         #expect(state.optimisticModelName == nil)
@@ -336,36 +332,11 @@ struct ModelPickerStateTests {
                 receivedPrevious = prev
                 receivedNew = new
             },
-            onError: { _, _ in },
-            onContextRefresh: { }
+            onError: { _, _ in }
         )
 
         #expect(receivedPrevious == "claude-opus-4-20250514")
         #expect(receivedNew == "claude-sonnet-4-20250514")
-    }
-
-    @Test("Switch model calls onContextRefresh on success")
-    func testSwitchModel_callsOnContextRefresh() async {
-        let repository = MockModelRepository()
-        repository.switchResult = ModelSwitchResult(
-            previousModel: "claude-opus-4-20250514",
-            newModel: "claude-sonnet-4-20250514"
-        )
-        let state = ModelPickerState(modelRepository: repository)
-        let targetModel = Self.makeModelInfo(id: "claude-sonnet-4-20250514")
-        var refreshCalled = false
-
-        await state.switchModel(
-            to: targetModel,
-            sessionId: "test-session",
-            currentModel: "claude-opus-4-20250514",
-            onOptimisticSet: { _ in },
-            onSuccess: { _, _ in },
-            onError: { _, _ in },
-            onContextRefresh: { refreshCalled = true }
-        )
-
-        #expect(refreshCalled)
     }
 
     @Test("Switch model clears optimistic on failure")
@@ -381,8 +352,7 @@ struct ModelPickerStateTests {
             currentModel: "claude-opus-4-20250514",
             onOptimisticSet: { _ in },
             onSuccess: { _, _ in },
-            onError: { _, _ in },
-            onContextRefresh: { }
+            onError: { _, _ in }
         )
 
         #expect(state.optimisticModelName == nil)
@@ -491,8 +461,7 @@ struct ModelPickerStateTests {
             onError: { error, revert in
                 receivedError = error
                 receivedRevertModel = revert
-            },
-            onContextRefresh: { }
+            }
         )
 
         #expect(receivedError != nil)

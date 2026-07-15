@@ -140,8 +140,6 @@ extension ChatViewModel: TurnLifecycleContext {
         )
     }
 
-    // refreshContextFromServer() is already defined in ChatViewModel
-
     // MARK: - Session Persistence (Protocol Methods)
 
     /// Update session tokens in database (TurnLifecycleContext)

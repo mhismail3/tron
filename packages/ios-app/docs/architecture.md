@@ -582,6 +582,12 @@ model applies its token fields to `ContextTrackingState`; there is no parallel
 client-side token history. Current model, turn count, workspace, session tree,
 file activity, and metadata remain owned by server reconstruction metadata,
 `CachedSession`, or raw durable events rather than duplicated projection fields.
+Model-catalog prefetch and the selected `ModelInfo` establish the mounted
+context-window limit, while `agent.turn_end.contextLimit` provides the live
+server correction. Turn-end token records plus `agent.compaction` and
+`agent.context_cleared` update mounted token state directly; they do not launch
+a second context-refresh lifecycle. Session Briefing keeps its server-owned
+snapshot and reload work sheet-local through `ContextControlRepository`.
 
 `EventStoreManager` owns the client generation for each persistence operation;
 it passes one strongly captured client into every page of that operation.
