@@ -609,6 +609,16 @@ Apple to allow that key/account to manage App Store signing; a cloud signing
 permission error means either grant that access or use the local signing
 secrets.
 
+ASC authentication is environment-backed in CI; the workflow does not create
+a repo-local `.asc/config.json`. Before manual signing changes the user
+keychain search list or default, it records both exactly. An always-run final
+step restores those preferences, deletes the temporary private key,
+certificate, and keychain, and removes only provisioning profiles the job
+created. Identical pre-existing profiles are reused, while a UUID collision
+with different content fails instead of overwriting runner state. Cleanup
+continues after individual errors but fails the job if any restoration or
+removal is incomplete.
+
 Required GitHub Actions secrets:
 
 | Secret | Purpose |

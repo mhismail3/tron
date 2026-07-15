@@ -1,6 +1,7 @@
 //! Living contracts for repository-owned validation and documentation entry points.
 
 use std::collections::BTreeSet;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -464,6 +465,176 @@ fn release_workflows_fail_closed_before_live_builds() {
             );
         }
     }
+}
+
+#[test]
+fn ios_release_credentials_are_ephemeral_and_restored() {
+    let workflow = read_repo_file(".github/workflows/release-ios.yml");
+    for forbidden in [
+        "asc auth login",
+        "ASC_PROFILE=ci",
+        "security list-keychains -d user -s \"$keychain_path\"\n",
+    ] {
+        assert!(
+            !workflow.contains(forbidden),
+            "iOS release must not retain persistent credential behavior {forbidden:?}"
+        );
+    }
+    for required in [
+        "export ASC_PRIVATE_KEY_PATH=\"$key_path\"",
+        "ASC_PRIVATE_KEY_PATH=$key_path",
+        "ios-keychain-snapshot-ready",
+        "security list-keychains -d user -s \"$keychain_path\" \"${original_keychains[@]}\"",
+        "security default-keychain -d user -s \"$keychain_path\"",
+        "ios-installed-profile-uuids",
+        "cmp -s \"$profile_path\" \"$destination\"",
+        "printf '%s\\n' \"$uuid\" >> \"$installed_profile_uuids\"",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "iOS release missing {required}"
+        );
+    }
+    let snapshot = workflow
+        .find(": > \"$snapshot_ready\"")
+        .expect("manual signing must mark a complete snapshot");
+    let mutation = workflow
+        .find("security list-keychains -d user -s \"$keychain_path\"")
+        .expect("manual signing must prepend its keychain");
+    assert!(
+        snapshot < mutation,
+        "keychain snapshot must precede mutation"
+    );
+
+    let summary = workflow
+        .rfind("      - name: Summary\n")
+        .expect("iOS release must end with a summary");
+    let cleanup_start = workflow
+        .find("      - name: Tear down iOS release credentials\n")
+        .expect("iOS release must own credential teardown");
+    assert!(summary < cleanup_start, "credential teardown must be final");
+    assert_eq!(workflow.matches("        if: always()\n").count(), 1);
+    let cleanup = workflow_step_script(&workflow, "Tear down iOS release credentials");
+    for required in [
+        "security list-keychains -d user -s \"${original_keychains[@]}\"",
+        "security default-keychain -d user -s \"$original_default\"",
+        "security delete-keychain \"$keychain_path\"",
+        "tron-asc-api-key.p8",
+        "ios-distribution.p12",
+        "installed_profile_uuids",
+        "exit \"$cleanup_failed\"",
+    ] {
+        assert!(
+            cleanup.contains(required),
+            "iOS teardown missing {required}"
+        );
+    }
+
+    let state = tempfile::tempdir().expect("cleanup probe state should exist");
+    let runner_temp = state.path().join("runner temp");
+    let home = state.path().join("home");
+    let bin = state.path().join("bin");
+    let profiles = home.join("Library/MobileDevice/Provisioning Profiles");
+    std::fs::create_dir_all(&runner_temp).unwrap();
+    std::fs::create_dir_all(&profiles).unwrap();
+    std::fs::create_dir_all(&bin).unwrap();
+    let security_log = state.path().join("security.log");
+    let security = bin.join("security");
+    std::fs::write(
+        &security,
+        r#"#!/bin/bash
+printf '%s\n' "$*" >> "$SECURITY_LOG"
+if [[ "$1" == "list-keychains" && "${FAIL_SECURITY_RESTORE:-0}" == "1" ]]; then
+  exit 1
+fi
+if [[ "$1" == "delete-keychain" ]]; then
+  /bin/rm -f "$2"
+fi
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&security).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&security, permissions).unwrap();
+
+    let uuid = "12345678-1234-1234-1234-123456789ABC";
+    let keychain = runner_temp.join("ios-signing.keychain-db");
+    let profile = profiles.join(format!("{uuid}.mobileprovision"));
+    let transient_names = [
+        "tron-asc-api-key.p8",
+        "ios-distribution.p12",
+        "app.mobileprovision",
+        "share-extension.mobileprovision",
+        "app-profile.plist",
+        "share-extension-profile.plist",
+    ];
+    let seed = || {
+        std::fs::write(&keychain, "keychain").unwrap();
+        std::fs::write(&profile, "profile").unwrap();
+        std::fs::write(
+            runner_temp.join("ios-installed-profile-uuids"),
+            format!("{uuid}\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            runner_temp.join("ios-original-keychains"),
+            "/Users/runner/Library/Keychains/login keychain-db\n/other.keychain-db\n",
+        )
+        .unwrap();
+        std::fs::write(
+            runner_temp.join("ios-original-default-keychain"),
+            "/Users/runner/Library/Keychains/login keychain-db\n",
+        )
+        .unwrap();
+        std::fs::write(runner_temp.join("ios-keychain-snapshot-ready"), "").unwrap();
+        for name in transient_names {
+            std::fs::write(runner_temp.join(name), "credential").unwrap();
+        }
+    };
+    let run_cleanup = |fail_restore: bool| {
+        Command::new("/bin/bash")
+            .args(["-c", &cleanup])
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("RUNNER_TEMP", &runner_temp)
+            .env("HOME", &home)
+            .env("SECURITY_LOG", &security_log)
+            .env(
+                "FAIL_SECURITY_RESTORE",
+                if fail_restore { "1" } else { "0" },
+            )
+            .output()
+            .expect("credential teardown probe should start")
+    };
+
+    seed();
+    let output = run_cleanup(false);
+    assert!(output.status.success(), "teardown failed: {output:?}");
+    assert!(!keychain.exists() && !profile.exists());
+    for name in transient_names {
+        assert!(!runner_temp.join(name).exists(), "teardown left {name}");
+    }
+    let calls = std::fs::read_to_string(&security_log).unwrap();
+    let list = calls.find("list-keychains -d user -s").unwrap();
+    let default = calls.find("default-keychain -d user -s").unwrap();
+    let delete = calls.find("delete-keychain").unwrap();
+    assert!(list < default && default < delete);
+    assert!(calls.contains("login keychain-db"));
+    assert!(
+        run_cleanup(false).status.success(),
+        "teardown must be idempotent"
+    );
+
+    seed();
+    let failed = run_cleanup(true);
+    assert!(
+        !failed.status.success(),
+        "restore failure must fail teardown"
+    );
+    assert!(
+        !keychain.exists() && !profile.exists(),
+        "failed restore must still clean material"
+    );
 }
 
 #[test]

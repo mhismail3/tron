@@ -33,6 +33,12 @@
 # layout without requiring Apple signing credentials. Only an explicit manual
 # dry-run may omit the ASC credentials; release tags fail before the build when
 # any required credential is missing.
+#
+# Credential lifecycle invariant: ASC uses the job's environment-backed key
+# directly. Manual signing snapshots the user keychain preferences before it
+# prepends and selects a job-owned keychain. One final `if: always()` step
+# restores those preferences and removes the private key, certificate, created
+# profiles, and keychain without deleting state that predated the job.
 
 name: Release (iOS TestFlight)
 
@@ -287,31 +293,23 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          key_path="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          key_path="$RUNNER_TEMP/tron-asc-api-key.p8"
           printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$key_path"
+          test -s "$key_path" || { echo "::error::decoded ASC private key is empty"; exit 1; }
+          export ASC_PRIVATE_KEY_PATH="$key_path"
+          export ASC_BYPASS_KEYCHAIN=true
+          export ASC_STRICT_AUTH=true
+          asc auth status
           {
             echo "APPLE_API_KEY_ID=$ASC_KEY_ID"
             echo "APPLE_API_ISSUER_ID=$ASC_ISSUER_ID"
             echo "APPLE_API_KEY_PATH=$key_path"
-            echo "ASC_PROFILE=ci"
+            echo "ASC_KEY_ID=$ASC_KEY_ID"
+            echo "ASC_ISSUER_ID=$ASC_ISSUER_ID"
+            echo "ASC_PRIVATE_KEY_PATH=$key_path"
             echo "ASC_STRICT_AUTH=true"
             echo "ASC_BYPASS_KEYCHAIN=true"
           } >> "$GITHUB_ENV"
-
-      - name: Configure ASC CLI auth
-        if: steps.drymode.outputs.dry_run != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          asc auth login \
-            --bypass-keychain \
-            --local \
-            --name ci \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer-id "$APPLE_API_ISSUER_ID" \
-            --private-key "$APPLE_API_KEY_PATH" \
-            --skip-validation
-          asc auth status
 
       - name: Check for existing ASC build
         id: existing
@@ -387,10 +385,45 @@ jobs:
           cert_path="$RUNNER_TEMP/ios-distribution.p12"
           keychain_path="$RUNNER_TEMP/ios-signing.keychain-db"
           keychain_password="$(uuidgen)"
+          original_keychains_path="$RUNNER_TEMP/ios-original-keychains"
+          original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
+          snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
+          installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
           profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$profiles_dir"
+          : > "$original_keychains_path"
+          : > "$installed_profile_uuids"
+
+          original_keychains=()
+          keychain_list="$(security list-keychains -d user)"
+          while IFS= read -r existing_keychain; do
+            existing_keychain="${existing_keychain#"${existing_keychain%%[![:space:]]*}"}"
+            existing_keychain="${existing_keychain%"${existing_keychain##*[![:space:]]}"}"
+            existing_keychain="${existing_keychain#\"}"
+            existing_keychain="${existing_keychain%\"}"
+            if [[ -n "$existing_keychain" ]]; then
+              original_keychains+=("$existing_keychain")
+              printf '%s\n' "$existing_keychain" >> "$original_keychains_path"
+            fi
+          done <<< "$keychain_list"
+          if (( ${#original_keychains[@]} == 0 )); then
+            echo "::error::user keychain search list is empty"
+            exit 1
+          fi
+          original_default="$(security default-keychain -d user)"
+          original_default="${original_default#"${original_default%%[![:space:]]*}"}"
+          original_default="${original_default%"${original_default##*[![:space:]]}"}"
+          original_default="${original_default#\"}"
+          original_default="${original_default%\"}"
+          if [[ -z "$original_default" ]]; then
+            echo "::error::user default keychain is empty"
+            exit 1
+          fi
+          printf '%s\n' "$original_default" > "$original_default_path"
+          : > "$snapshot_ready"
 
           printf '%s' "$IOS_DISTRIBUTION_CERT_P12_BASE64" | base64 -d > "$cert_path"
+          test -s "$cert_path" || { echo "::error::decoded iOS distribution certificate is empty"; exit 1; }
           security create-keychain -p "$keychain_password" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$keychain_password" "$keychain_path"
@@ -400,7 +433,8 @@ jobs:
             -T /usr/bin/codesign \
             -T /usr/bin/security \
             -T /usr/bin/xcodebuild
-          security list-keychains -d user -s "$keychain_path"
+          rm -f "$cert_path"
+          security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
           security default-keychain -d user -s "$keychain_path"
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
@@ -414,7 +448,7 @@ jobs:
 
           install_profile() {
             local label="$1" bundle_id="$2" base64_value="$3"
-            local profile_path decoded_plist uuid name application_id provisions_all xcode_managed
+            local profile_path decoded_plist uuid name application_id provisions_all xcode_managed destination
             profile_path="$RUNNER_TEMP/$label.mobileprovision"
             decoded_plist="$RUNNER_TEMP/$label-profile.plist"
             printf '%s' "$base64_value" | base64 -d > "$profile_path"
@@ -431,6 +465,10 @@ jobs:
               echo "::error::$label provisioning profile is missing a UUID" >&2
               return 1
             fi
+            if [[ ! "$uuid" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+              echo "::error::$label provisioning profile has invalid UUID '$uuid'" >&2
+              return 1
+            fi
             if [[ "$application_id" != "$APPLE_TEAM_ID.$bundle_id" ]]; then
               echo "::error::$label provisioning profile is for '$application_id', expected '$APPLE_TEAM_ID.$bundle_id'" >&2
               return 1
@@ -440,8 +478,22 @@ jobs:
               return 1
             fi
 
-            /bin/cp -f "$profile_path" "$profiles_dir/$uuid.mobileprovision"
-            echo "::notice::installed App Store profile '$name' for $bundle_id" >&2
+            destination="$profiles_dir/$uuid.mobileprovision"
+            if [[ -L "$destination" ]]; then
+              echo "::error::$label provisioning profile destination is a symlink: $destination" >&2
+              return 1
+            elif [[ -e "$destination" ]]; then
+              if ! cmp -s "$profile_path" "$destination"; then
+                echo "::error::$label provisioning profile UUID collides with different existing content" >&2
+                return 1
+              fi
+              echo "::notice::reusing existing App Store profile '$name' for $bundle_id" >&2
+            else
+              printf '%s\n' "$uuid" >> "$installed_profile_uuids"
+              /bin/cp "$profile_path" "$destination"
+              echo "::notice::installed temporary App Store profile '$name' for $bundle_id" >&2
+            fi
+            rm -f "$profile_path" "$decoded_plist"
             printf '%s\t%s' "$uuid" "$xcode_managed"
           }
 
@@ -1190,3 +1242,88 @@ jobs:
               fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tear down iOS release credentials
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          cleanup_failed=0
+          keychain_path="$RUNNER_TEMP/ios-signing.keychain-db"
+          original_keychains_path="$RUNNER_TEMP/ios-original-keychains"
+          original_default_path="$RUNNER_TEMP/ios-original-default-keychain"
+          snapshot_ready="$RUNNER_TEMP/ios-keychain-snapshot-ready"
+          installed_profile_uuids="$RUNNER_TEMP/ios-installed-profile-uuids"
+          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          # Restore persistent user preferences before deleting the keychain
+          # they currently reference. The marker is written before mutation.
+          if [[ -f "$snapshot_ready" ]]; then
+            original_keychains=()
+            while IFS= read -r original_keychain; do
+              [[ -n "$original_keychain" ]] && original_keychains+=("$original_keychain")
+            done < "$original_keychains_path"
+            if (( ${#original_keychains[@]} == 0 )) || ! security list-keychains -d user -s "${original_keychains[@]}"; then
+              echo "::error::failed to restore the user keychain search list"
+              cleanup_failed=1
+            fi
+            original_default="$(<"$original_default_path")"
+            if [[ -z "$original_default" ]] || ! security default-keychain -d user -s "$original_default"; then
+              echo "::error::failed to restore the user default keychain"
+              cleanup_failed=1
+            fi
+          fi
+
+          if [[ -e "$keychain_path" ]]; then
+            if ! security delete-keychain "$keychain_path"; then
+              echo "::error::failed to delete the iOS signing keychain"
+              cleanup_failed=1
+              /bin/rm -f "$keychain_path"
+            fi
+          fi
+          if [[ -e "$keychain_path" || -L "$keychain_path" ]]; then
+            echo "::error::iOS signing keychain remains after cleanup"
+            cleanup_failed=1
+          fi
+
+          # The UUID manifest contains only profiles this job created. An
+          # identical pre-existing profile is reused and never recorded.
+          if [[ -f "$installed_profile_uuids" ]]; then
+            while IFS= read -r uuid; do
+              [[ -n "$uuid" ]] || continue
+              if [[ ! "$uuid" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+                echo "::error::refusing invalid provisioning profile UUID $uuid"
+                cleanup_failed=1
+                continue
+              fi
+              profile_path="$profiles_dir/$uuid.mobileprovision"
+              if ! /bin/rm -f "$profile_path"; then
+                echo "::error::failed to remove temporary provisioning profile $profile_path"
+                cleanup_failed=1
+              fi
+            done < "$installed_profile_uuids"
+          fi
+
+          temporary_credentials=(
+            "$RUNNER_TEMP/tron-asc-api-key.p8"
+            "$RUNNER_TEMP/ios-distribution.p12"
+            "$RUNNER_TEMP/app.mobileprovision"
+            "$RUNNER_TEMP/share-extension.mobileprovision"
+            "$RUNNER_TEMP/app-profile.plist"
+            "$RUNNER_TEMP/share-extension-profile.plist"
+            "$original_keychains_path"
+            "$original_default_path"
+            "$snapshot_ready"
+            "$installed_profile_uuids"
+          )
+          for path in "${temporary_credentials[@]}"; do
+            if ! /bin/rm -f "$path"; then
+              echo "::error::failed to remove temporary credential file $path"
+              cleanup_failed=1
+            fi
+            if [[ -e "$path" || -L "$path" ]]; then
+              echo "::error::temporary credential file remains at $path"
+              cleanup_failed=1
+            fi
+          done
+          exit "$cleanup_failed"
