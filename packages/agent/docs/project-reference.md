@@ -629,7 +629,7 @@ transport/
 └── runtime/      Runtime services, external-worker socket, stream projection, setup
 engine/
 ├── authority/    Grants, leases, and compensation audit records
-├── catalog/      Discovery, capability client, live registry, catalog changes
+├── catalog/      Discovery, live registry, catalog changes
 ├── durability/   Ledger, queue, resources, state, streams, and SQLite codecs
 ├── invocation/   Invocation model, host, handles, dispatch, idempotency flow
 ├── kernel/       IDs, errors, policy, schemas, and core catalog type contracts

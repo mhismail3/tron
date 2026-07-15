@@ -180,21 +180,6 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         "engine primitive registrations",
     );
 
-    let capability_client = read_repo_file("packages/agent/src/engine/catalog/capabilities.rs");
-    assert_absent(
-        &capability_client,
-        &[
-            "AutonomyApprovalPromptMode",
-            "EngineApprovalRequest",
-            "EngineApprovalTargetMetadata",
-            "approval_required",
-            "request_approval",
-            "auto_approve_and_invoke",
-            "approval primitives are owned",
-        ],
-        "agent capability client",
-    );
-
     let host = read_repo_file("packages/agent/src/engine/invocation/host/mod.rs");
     assert_absent(
         &host,
@@ -269,10 +254,6 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         (
             "packages/agent/src/domains/settings/profile/types/server.rs",
             "server settings",
-        ),
-        (
-            "packages/agent/src/engine/catalog/capabilities.rs",
-            "capability client",
         ),
         (
             "packages/agent/src/engine/authority/grants/mod.rs",

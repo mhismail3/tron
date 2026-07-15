@@ -12,7 +12,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | [`authority`] | Grants, leases, compensation, and authorization policy |
-//! | [`catalog`] | Live catalog registry, discovery, capability views, and revision changes |
+//! | [`catalog`] | Live catalog registry, discovery, and revision changes |
 //! | [`durability`] | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
 //! | [`invocation`] | Host handle, invocation records, handler dispatch, and model-facing context |
 //! | [`kernel`] | Engine ids, definitions, shared types, and error model |
@@ -142,7 +142,6 @@ pub use authority::grants::{
     ListGrants,
 };
 pub use authority::leases::{AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus};
-pub use catalog::capabilities::AgentCapabilityClient;
 pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use catalog::registry::LiveCatalog;
 pub use durability::ledger::{
