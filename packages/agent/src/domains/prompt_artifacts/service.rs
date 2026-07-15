@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLocation,
-    EngineResourceScope, EngineResourceVersion, Invocation, ListResources, PublishStreamEvent,
-    WorkerId,
+    CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
+    EngineResourceLocation, EngineResourceScope, EngineResourceVersion, Invocation, ListResources,
+    PublishStreamEvent, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -16,19 +16,19 @@ use super::contract::{
 };
 use super::projection::{inspected_prompt_artifact, prompt_artifact_summary};
 use super::validation::*;
-use super::{Deps, PROMPT_ARTIFACT_KIND, PROMPT_ARTIFACT_SCHEMA_ID};
+use super::{PROMPT_ARTIFACT_KIND, PROMPT_ARTIFACT_SCHEMA_ID};
 
 const IDEMPOTENCY_FINGERPRINT_ALGORITHM: &str = "sha256:tron.prompt_artifact.idempotency.v1";
 const IDEMPOTENCY_FINGERPRINT_DOMAIN: &[u8] = b"tron.prompt_artifact.idempotency.v1\0";
 
 pub(crate) async fn record_prompt_artifact_value_at(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
     operation_at: DateTime<Utc>,
 ) -> Result<Value, CapabilityError> {
     reject_raw_prompt_artifact_fields(payload)?;
-    ensure_write_authority(deps, invocation, "prompt_artifact_record").await?;
+    ensure_write_authority(engine_host, invocation, "prompt_artifact_record").await?;
     let idempotency_key = idempotency_key(invocation, payload)?;
     let scope = resource_scope(invocation)?;
     let artifact_id = optional_string(payload, "artifactId")?
@@ -67,8 +67,7 @@ pub(crate) async fn record_prompt_artifact_value_at(
     let now = operation_at.to_rfc3339();
     let resource_id = prompt_artifact_resource_id(&scope, &artifact_id, &idempotency_key);
 
-    if let Some(existing) = deps
-        .engine_host
+    if let Some(existing) = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -106,8 +105,7 @@ pub(crate) async fn record_prompt_artifact_value_at(
         idempotency_key: &idempotency_key,
         revision: 1,
     });
-    let resource = deps
-        .engine_host
+    let resource = engine_host
         .create_resource(CreateResource {
             resource_id: Some(resource_id.clone()),
             kind: PROMPT_ARTIFACT_KIND.to_owned(),
@@ -134,7 +132,7 @@ pub(crate) async fn record_prompt_artifact_value_at(
         .clone()
         .ok_or_else(|| invalid("prompt artifact resource was created without a current version"))?;
     publish_lifecycle_event(
-        deps,
+        engine_host,
         invocation,
         "prompt_artifact.recorded",
         &resource,
@@ -156,17 +154,17 @@ pub(crate) async fn record_prompt_artifact_value_at(
         "idempotentReplay": false,
         "promptArtifactResourceId": resource.resource_id,
         "promptArtifactVersionId": version_id,
-        "record": prompt_artifact_summary_for_resource(deps, &resource).await?,
+        "record": prompt_artifact_summary_for_resource(engine_host, &resource).await?,
         "resourceRefs": [resource_ref(&resource, "prompt_artifact")]
     }))
 }
 
 pub(crate) async fn list_prompt_artifact_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "prompt_artifact_list").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "prompt_artifact_list").await?;
     let scope = resource_scope(invocation)?;
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
@@ -176,8 +174,7 @@ pub(crate) async fn list_prompt_artifact_value(
     let artifact_kind = optional_string(payload, "artifactKind")?
         .map(|value| bounded_token("artifactKind", &value, TOKEN_MAX_BYTES))
         .transpose()?;
-    let resources = deps
-        .engine_host
+    let resources = engine_host
         .list_resources(ListResources {
             kind: Some(PROMPT_ARTIFACT_KIND.to_owned()),
             scope: Some(scope.clone()),
@@ -193,8 +190,7 @@ pub(crate) async fn list_prompt_artifact_value(
     let truncated = resources.len() > limit;
     let mut records = Vec::new();
     for resource in resources.into_iter().take(limit) {
-        let Some(inspection) = deps
-            .engine_host
+        let Some(inspection) = engine_host
             .inspect_resource(&resource.resource_id)
             .await
             .map_err(engine_error)?
@@ -237,16 +233,15 @@ fn field_mismatch(payload: &Value, field: &str, expected: Option<&str>) -> bool 
 }
 
 pub(crate) async fn inspect_prompt_artifact_value(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let _grant = inspect_read_grant(deps, invocation, "prompt_artifact_inspect").await?;
+    let _grant = inspect_read_grant(engine_host, invocation, "prompt_artifact_inspect").await?;
     let resource_id = required_string(payload, "promptArtifactResourceId")?;
     validate_prompt_artifact_resource_id(&resource_id)?;
     let scope = resource_scope(invocation)?;
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource_id)
         .await
         .map_err(engine_error)?
@@ -335,11 +330,10 @@ fn prompt_artifact_record(input: PromptArtifactRecordInput<'_>) -> Value {
 }
 
 async fn prompt_artifact_summary_for_resource(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     resource: &EngineResource,
 ) -> Result<Value, CapabilityError> {
-    let inspection = deps
-        .engine_host
+    let inspection = engine_host
         .inspect_resource(&resource.resource_id)
         .await
         .map_err(engine_error)?
@@ -409,13 +403,13 @@ fn validate_prompt_artifact_resource_id(value: &str) -> Result<(), CapabilityErr
 }
 
 async fn publish_lifecycle_event(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     invocation: &Invocation,
     event_type: &str,
     resource: &EngineResource,
     payload: Value,
 ) -> Result<(), CapabilityError> {
-    deps.engine_host
+    engine_host
         .publish_stream_event(PublishStreamEvent {
             topic: PROMPT_ARTIFACT_LIFECYCLE_TOPIC.to_owned(),
             payload: json!({

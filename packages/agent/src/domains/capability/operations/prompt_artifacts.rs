@@ -13,11 +13,8 @@ pub(super) async fn prompt_artifact_record(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let prompt_artifact_deps = crate::domains::prompt_artifacts::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::prompt_artifacts::service::record_prompt_artifact_value_at(
-        &prompt_artifact_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -34,11 +31,8 @@ pub(super) async fn prompt_artifact_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let prompt_artifact_deps = crate::domains::prompt_artifacts::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::prompt_artifacts::service::list_prompt_artifact_value(
-        &prompt_artifact_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -58,11 +52,8 @@ pub(super) async fn prompt_artifact_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let prompt_artifact_deps = crate::domains::prompt_artifacts::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::prompt_artifacts::service::inspect_prompt_artifact_value(
-        &prompt_artifact_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
