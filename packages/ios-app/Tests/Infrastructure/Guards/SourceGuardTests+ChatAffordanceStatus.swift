@@ -156,7 +156,7 @@ extension SourceGuardTests {
             .deletingLastPathComponent()
         let retiredSurfaceName = "Agent " + "Control"
         let retiredIdentifierPrefix = "agent-" + "control"
-        let readme = try String(
+        let projectReference = try String(
             contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/project-reference.md"),
             encoding: .utf8
         )
@@ -180,16 +180,12 @@ extension SourceGuardTests {
             contentsOf: repoRoot.appendingPathComponent("packages/agent/src/domains/context_control/tests.rs"),
             encoding: .utf8
         )
-        let contextAudit = try String(
-            contentsOf: repoRoot.appendingPathComponent("packages/agent/docs/context-control-primitive-ui-audit.md"),
-            encoding: .utf8
-        )
         let uiTest = iosRoot.appendingPathComponent("UITests/SessionBriefingUITests.swift")
 
         #expect(FileManager.default.fileExists(atPath: uiTest.path))
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("UITests/" + "Agent" + "Control" + "UITests.swift").path))
-        #expect(readme.contains("Session Briefing sheet opened from the composer context ring"))
-        #expect(!readme.contains(retiredSurfaceName + " sheet opened from the composer context ring"))
+        #expect(projectReference.contains("Session Briefing sheet opened from the composer context ring"))
+        #expect(!projectReference.contains(retiredSurfaceName + " sheet opened from the composer context ring"))
         #expect(contextButton.contains("Context Briefing Button"))
         #expect(contextButton.contains(".accessibilityLabel(\"Session Briefing\")"))
         #expect(!contextButton.contains("Opens " + retiredSurfaceName))
@@ -206,14 +202,6 @@ extension SourceGuardTests {
         #expect(!contextContract.contains("First-party " + retiredSurfaceName + " UI wrapper"))
         #expect(!contextContract.contains(#"""# + retiredIdentifierPrefix + #"""#))
         #expect(!contextContractTests.contains(retiredSurfaceName))
-        #expect(contextAudit.contains("restored Session Briefing surface"))
-        #expect(contextAudit.contains("Implemented Candidate: Session Briefing / Context Control"))
-        #expect(contextAudit.contains("retired broad chat control panel"))
-        #expect(contextAudit.contains("Old surface history: the retired chat model/percentage pill control"))
-        #expect(!contextAudit.contains(retiredSurfaceName))
-        #expect(!contextAudit.contains("restored " + retiredSurfaceName + " surface"))
-        #expect(!contextAudit.contains("Implemented Candidate: " + retiredSurfaceName + " / Context Control"))
-        #expect(!contextAudit.contains("inside an " + retiredSurfaceName + " host surface"))
     }
 
     @Test("Session list rows use inset liquid glass containers")

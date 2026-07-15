@@ -592,7 +592,7 @@ text and raw body pointers. It does not implement semantic retrieval,
 embeddings, vector stores, generated summaries, episodic event retrieval,
 procedural rules, hidden prompt memory, automatic retention, or network-backed
 memory behavior.
-`domains/context_control` is the implementation-candidate owner for user and
+`domains/context_control` is the authoritative server owner for user and
 agent context-management visibility. It exposes `context_control_status` for
 read-only current-session context composition without recording a snapshot or
 action; model-facing calls pass only `operation` because the trusted runtime
@@ -630,9 +630,10 @@ uses first-party `context_control::ui_*` wrappers that validate the current
 session and record through the same server-owned context-control service instead
 of widening model-facing authority. It does not restore memory retain/edit,
 skill activation, source-control controls, or prompt-library controls. Broader
-pre-primitive UI families are tracked as review-gated
-candidate cards in
-`packages/agent/docs/context-control-primitive-ui-audit.md`.
+fixed pre-primitive UI families remain absent. Any future surface must establish
+a current module owner, server contract, and source-owned tests; the
+[iOS architecture](../../ios-app/docs/architecture.md) owns current mobile
+composition rather than a historical candidate ledger.
 `domains/filesystem` owns two separate surfaces: the iOS workspace-browser
 functions for home/list/create-dir selection and the Phase 2 agent filesystem
 toolbox. Agent operations resolve only from trusted working-directory metadata,
