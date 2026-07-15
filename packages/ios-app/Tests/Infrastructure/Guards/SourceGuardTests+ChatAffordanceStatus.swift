@@ -19,6 +19,26 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(removedStatusPath).path))
     }
 
+    @Test("Chat composer reads canonical connection repository without a view-model mirror")
+    func testChatComposerReadsCanonicalConnectionRepository() throws {
+        let iosRoot = iosAppRoot()
+        let messageList = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView+MessageList.swift"),
+            encoding: .utf8
+        )
+        let viewModel = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Session/Chat/ViewModel/ChatViewModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(messageList.contains("isConnected: services.connection.isConnected"))
+        #expect(!messageList.contains("viewModel.connectionState"))
+        #expect(!viewModel.contains("var connectionState:"))
+        #expect(!viewModel.contains("connectionState = state"))
+        #expect(viewModel.contains("observeLoop({ connection.connectionState })"))
+        #expect(viewModel.contains("if case .disconnected = state"))
+    }
+
     @Test("Chat timeline autoloads earlier messages without manual pill")
     func testChatTimelineDoesNotMountManualEarlierMessagesPill() throws {
         let iosRoot = iosAppRoot()

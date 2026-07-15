@@ -12,7 +12,7 @@ extension ChatView {
                     config: InputBarConfig(
                         agentPhase: viewModel.agentPhase,
                         isCompacting: viewModel.isCompacting,
-                        isConnected: viewModel.connectionState == .connected,
+                        isConnected: services.connection.isConnected,
                         isRecording: viewModel.isRecording,
                         recordingAudioLevel: viewModel.recordingAudioLevel,
                         isTranscribing: viewModel.isTranscribing,

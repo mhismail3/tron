@@ -19,7 +19,6 @@ final class ChatViewModel {
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
     /// because context maintenance can trigger it asynchronously. A turn_start resets it.
     var isCompacting = false
-    var connectionState: ConnectionState = .disconnected
     var showSettings = false
     var errorMessage: String?
     var showError: Bool { errorMessage != nil }
@@ -263,7 +262,6 @@ final class ChatViewModel {
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
         self.photoPickerDataLoader = photoPickerDataLoader
-        self.connectionState = services.connection.connectionState
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
         setupBindings()
         setupEventProcessingCallbacks()
@@ -284,7 +282,6 @@ final class ChatViewModel {
 
         observationTasks.append(Self.observeLoop({ connection.connectionState }) { [weak self] state in
             guard let self else { return }
-            connectionState = state
 
             if case .disconnected = state {
                 if agentPhase != .idle {

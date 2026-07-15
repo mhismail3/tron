@@ -306,6 +306,10 @@ drain, capability completion ordering, and live event processing lives in
 the root state object. Its session-lifetime observation tasks retain only their
 observed sources, capture the view model weakly for mutations, and use a
 cancellation-aware wait so releasing the view model terminates idle bindings;
+the connection binding owns disconnect cleanup only. `ChatView` reads raw
+connectivity from the repository as an immediate `InputBarConfig` transport-safety
+gate, while `InteractionPolicy` remains the shared debounced read-only policy;
+neither state is mirrored;
 PhotosPicker transfers use a narrow I/O adapter and one cancel-and-replace task
 that never retains the view model across data loading or image preparation.
 Chat-scoped error routing lives in

@@ -57,14 +57,13 @@ final class SessionSwitchingTests: XCTestCase {
         XCTAssertFalse(viewModel.isProcessing)
     }
 
-    func testNewChatViewModelHasDisconnectedState() {
-        // Given: A fresh ChatViewModel
+    func testNewChatViewModelUsesDisconnectedConnectionRepository() {
         let mockURL = URL(string: "ws://localhost:8080/engine")!
         let engineClient = EngineClient(serverURL: mockURL)
         let viewModel = ChatViewModel(engineClient: engineClient, sessionId: "test-session")
 
-        // Then: Connection state should be disconnected
-        XCTAssertEqual(viewModel.connectionState, .disconnected)
+        XCTAssertEqual(viewModel.services.connection.connectionState, .disconnected)
+        XCTAssertFalse(viewModel.services.connection.isConnected)
     }
 
     func testNewChatViewModelHasEmptyInputState() {

@@ -2,9 +2,9 @@ import Foundation
 
 /// Central read-only / interaction policy for the app.
 ///
-/// Every mutation surface (send button, mic, new session, archive swipe,
-/// plugin source, etc.) reads predicates from this type via the SwiftUI environment
-/// and applies `.disabled(!policy.canX)`. No surface checks connection state directly anymore.
+/// Mutation surfaces read this policy through the SwiftUI environment for shared,
+/// debounced readiness. Transport-facing controls may also read raw repository
+/// connectivity as an immediate safety gate; that does not replace this policy.
 ///
 /// Transitions into `.connected` are debounced (default 500ms) to avoid UI flicker from rapid
 /// reconnects. Transitions out of `.connected` (disconnect, failed, reconnecting) flip read-only
@@ -32,7 +32,7 @@ final class InteractionPolicy {
     /// Raw passthrough of the current connection state.
     var state: ConnectionState { connection.state }
 
-    /// Debounced "are we ready for writes" flag — the single truth for UI gating.
+    /// Shared, debounced "are we ready for writes" UI policy.
     private(set) var isConnected: Bool
 
     var isReadOnly: Bool { !isConnected }
