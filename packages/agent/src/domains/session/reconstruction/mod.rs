@@ -16,7 +16,10 @@
 //! are past "generating" status, preventing duplicate content on iOS reconstruction.
 //! Before capability execution starts, `streaming.type` is derived from the last
 //! active content-sequence item, so reconnects distinguish active thinking from
-//! active assistant text.
+//! active assistant text. Reconstruction snapshots the turn accumulator directly
+//! only while the run registry reports an active run. An active run without an
+//! accumulator therefore returns `inFlight: null`; `isRunning`, `runId`, and
+//! `agentPhase` remain derived independently from the run registry.
 //!
 //! ## Response shape
 //!
@@ -210,7 +213,11 @@ impl SessionReconstructionService {
         let run_id = orchestrator.get_run_id(&session_id);
         let is_running = run_id.is_some();
         let in_flight = if is_running {
-            let state = Self::build_in_flight_state(&orchestrator, &session_id);
+            let state = orchestrator.turn_accumulators().get_state(&session_id).map(
+                |(text, capability_invocations, content_sequence)| {
+                    Self::reconcile_in_flight(text, capability_invocations, content_sequence)
+                },
+            );
             if let Some(ref s) = state {
                 debug!(
                     session_id,
@@ -276,21 +283,6 @@ impl SessionReconstructionService {
             "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
         }))
-    }
-
-    /// Build the in-flight state from the turn accumulator.
-    fn build_in_flight_state(
-        orchestrator: &crate::domains::agent::r#loop::orchestrator::core::Orchestrator,
-        session_id: &str,
-    ) -> Option<Value> {
-        let (text, capability_invocations, content_sequence) =
-            orchestrator.turn_accumulators().get_state(session_id)?;
-
-        Some(Self::reconcile_in_flight(
-            text,
-            capability_invocations,
-            content_sequence,
-        ))
     }
 
     /// Reconcile in-flight accumulator state against persisted events.

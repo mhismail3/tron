@@ -245,7 +245,9 @@ fn sol_session_event_store_lifecycle_is_source_backed() {
         "get_latest_events",
         "resolve_event_payloads",
         "current_sequence(&session_id)",
-        "build_in_flight_state",
+        "turn_accumulators()",
+        ".get_state(&session_id)",
+        "Self::reconcile_in_flight",
     ] {
         assert!(
             reconstruction.contains(required),
