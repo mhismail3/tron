@@ -66,6 +66,7 @@ jobs:
               - 'packages/agent/**'
               - 'packages/mac-app/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release-mac.yml'
 
   personal-info-guard:
     name: Personal-info guard
@@ -311,16 +312,35 @@ jobs:
             -quiet build
           APP_PATH="$(find build/dd -name 'TronMac.app' -print -quit)"
           if [[ -z "$APP_PATH" ]]; then
-            echo "::warning::TronMac.app not produced by debug build"
-            exit 0
+            echo "::error::TronMac.app not produced by debug build"
+            exit 1
           fi
           test -x "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+          DMG_SOURCE="$RUNNER_TEMP/tron-dmg-source"
+          rm -rf "$DMG_SOURCE"
+          mkdir -p "$DMG_SOURCE"
+          ditto "$APP_PATH" "$DMG_SOURCE/TronMac.app"
           mkdir -p dist
-          # Minimal DMG — layout args can fail without a signing identity.
-          create-dmg --volname "Tron Dry-Run" --hdiutil-quiet \
-            "dist/Tron-dryrun.dmg" "$APP_PATH" \
-            || echo "::warning::create-dmg returned non-zero in dry-run — acceptable without signing"
-          ls -la dist/ || true
+          DMG_PATH="$(pwd)/dist/Tron-dryrun.dmg"
+          rm -f "$DMG_PATH"
+          create-dmg --skip-jenkins \
+            --volname "Tron Dry-Run" \
+            --app-drop-link 405 170 \
+            --hdiutil-quiet \
+            "$DMG_PATH" "$DMG_SOURCE"
+          test -s "$DMG_PATH"
+
+          MOUNT_POINT="$RUNNER_TEMP/tron-dmg-mount"
+          rm -rf "$MOUNT_POINT"
+          mkdir -p "$MOUNT_POINT"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
+          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
+          test -d "$MOUNT_POINT/TronMac.app"
+          test -x "$MOUNT_POINT/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+          test -L "$MOUNT_POINT/Applications"
+          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
+          hdiutil detach "$MOUNT_POINT"
+          trap - EXIT
 
   # Aggregate gate — the main ruleset points at this single check.
   # Adding a new required job? List it under `needs:` here too AND add a

@@ -73,10 +73,9 @@ for App ID `6761511764`; contributor PRs do not need App Store Connect access.
 The Mac SwiftUI wrapper lives at `packages/mac-app/`. It's a SwiftUI app that
 bundles the headless Rust agent inside helper apps under
 `Contents/Library/LoginItems/Tron Server*.app/Contents/MacOS/tron` and presents
-a first-run wizard + menu bar icon. Both Debug and Release configurations
-build `TronMac.app` (the bundle name follows the XcodeGen target); Debug uses
-bundle ID `com.tron.mac.dev` (lives in DerivedData), Release uses
-`com.tron.mac` and ships as a notarized DMG (`Tron.app` to the end user). This
+a first-run wizard + menu bar icon. Debug builds `TronMac.app` with bundle ID
+`com.tron.mac.dev` in DerivedData. Release overrides the product name to build
+`Tron.app` with bundle ID `com.tron.mac` and ships it in a notarized DMG. This
 is wholly separate from `tron dev`'s headless agent at
 `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) — see
 [`packages/mac-app/docs/architecture.md` → Workflows & Variants](packages/mac-app/docs/architecture.md#workflows--variants).
@@ -95,12 +94,14 @@ xcodebuild test \
   -configuration Debug
 ```
 
-CI exercises the same flow on every PR that touches `packages/mac-app/**` or
-`packages/agent/**` (the agent binary is embedded, so a Rust change affects
-the Mac app bundle). The iOS and Mac `project.yml` files are authoritative; CI
-generates their ignored Xcode projects before building. It also runs focused
-non-flaky wrapper tests for paths/status/Tailscale coverage and keeps a dry-run
-DMG assembly to catch breakage in `release-mac.yml` before tag push.
+CI exercises the same flow on every PR that touches `packages/mac-app/**`,
+`packages/agent/**`, or `release-mac.yml` (the agent binary is embedded, so a
+Rust change affects the Mac app bundle). The iOS and Mac `project.yml` files are
+authoritative; CI generates their ignored Xcode projects before building. It
+also runs focused non-flaky wrapper tests for paths/status/Tailscale coverage
+and builds, remounts, and inspects a headless DMG before tag push. Missing apps,
+failed packaging, empty images, or images without the wrapper, helper, and
+`Applications` link fail the job.
 
 ## Testing
 

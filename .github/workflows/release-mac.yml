@@ -1,4 +1,4 @@
-# Mac DMG Release Pipeline (Plan §E, Phase 6)
+# Mac DMG Release Pipeline
 #
 # Builds a signed, notarized, stapled DMG for `Tron.app` and attaches it to
 # a GitHub Release. Triggered by:
@@ -14,8 +14,9 @@
 #   3. Stage both helpers into the embedded `Tron Server.app` Login Item via
 #      `packages/mac-app/scripts/bundle-agent.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
-#      `TronMac` scheme with automatic signing.
-#   5. Export the `.app` from the archive (Developer ID Application).
+#      `TronMac` scheme with explicit Developer ID signing for a release;
+#      dry-runs disable signing and exercise only structural packaging.
+#   5. Locate the archived `.app`; publishing uses Developer ID Application.
 #   6. Notarize the `.app` via `xcrun notarytool submit --wait`; staple with
 #      `stapler`.
 #   7. Build and sign the DMG via `create-dmg` into
@@ -297,13 +298,12 @@ jobs:
 
       # ── Archive + export ───────────────────────────────────────────
       #
-      # Two signing paths:
+      # Two archive paths:
       #   - Real release: CODE_SIGN_STYLE=Manual + the imported
       #     Developer ID identity. Notarization-ready.
-      #   - Dry-run: ad-hoc sign (`-`). Produces a runnable archive
-      #     suitable for layout/build verification but unsigned for
-      #     distribution. Without this, dry-run on a fork (no cert)
-      #     would fail the archive step entirely.
+      #   - Dry-run: disable code signing. Produces an archive suitable
+      #     for structural layout/build verification only. Without this,
+      #     a dry-run on a fork (no certificate) would fail the archive.
       - name: xcodebuild archive
         working-directory: packages/mac-app
         run: |
@@ -420,9 +420,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           DMG_PATH="$(pwd)/dist/${{ steps.ver.outputs.dmg_name }}"
-          # `--skip-jenkins` keeps create-dmg from trying to open a GUI
-          # window on the headless runner. `--hdiutil-quiet` suppresses
-          # the verbose Apple tooling output that otherwise spams logs.
+          DMG_SOURCE="$(pwd)/build/dmg-source"
+          rm -rf "$DMG_SOURCE"
+          mkdir -p "$DMG_SOURCE"
+          ditto "$APP_PATH" "$DMG_SOURCE/$APP_BUNDLE"
+          rm -f "$DMG_PATH"
           create-dmg \
             --volname "${APP_NAME} ${{ steps.ver.outputs.version }}" \
             --window-size 540 340 \
@@ -431,17 +433,20 @@ jobs:
             --hide-extension "$APP_BUNDLE" \
             --hdiutil-quiet \
             "$DMG_PATH" \
-            "$APP_PATH" \
-            || {
-              # create-dmg exits non-zero on benign cases (e.g. no code
-              # sign identity in dry-run). Retry with a minimal invocation
-              # just to ensure we still produce a DMG artifact.
-              echo "::warning::create-dmg with layout args failed — retrying minimal"
-              rm -f "$DMG_PATH"
-              create-dmg --volname "${APP_NAME} ${{ steps.ver.outputs.version }}" \
-                --hdiutil-quiet \
-                "$DMG_PATH" "$APP_PATH"
-            }
+            "$DMG_SOURCE"
+          test -s "$DMG_PATH"
+
+          MOUNT_POINT="$(pwd)/build/dmg-verify"
+          rm -rf "$MOUNT_POINT"
+          mkdir -p "$MOUNT_POINT"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG_PATH"
+          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
+          test -d "$MOUNT_POINT/$APP_BUNDLE"
+          test -x "$MOUNT_POINT/$APP_BUNDLE/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
+          test -L "$MOUNT_POINT/Applications"
+          test "$(readlink "$MOUNT_POINT/Applications")" = "/Applications"
+          hdiutil detach "$MOUNT_POINT"
+          trap - EXIT
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Sign DMG

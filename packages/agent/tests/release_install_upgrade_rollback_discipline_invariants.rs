@@ -634,6 +634,17 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     ] {
         assert!(ci.contains(required), "CI missing {required}");
     }
+    let mac_filter = ci
+        .split_once("            mac:\n")
+        .expect("CI must define a Mac path filter")
+        .1
+        .split_once("\n\n  personal-info-guard:")
+        .expect("Mac path filter must end before the first validation job")
+        .0;
+    assert!(
+        mac_filter.contains("- '.github/workflows/release-mac.yml'"),
+        "Mac release workflow changes must schedule Mac CI"
+    );
 
     let release_mac = read_repo_file(".github/workflows/release-mac.yml");
     for required in [
@@ -669,6 +680,131 @@ fn generated_project_and_release_packaging_policy_is_guarded() {
     assert!(mac_gitignore.contains("TronMac.xcodeproj/"));
     let root_gitignore = read_repo_file(".gitignore");
     assert!(root_gitignore.contains("packages/ios-app/TronMobile.xcodeproj/"));
+}
+
+#[test]
+fn mac_dmg_workflows_fail_closed_and_verify_the_staged_app() {
+    let ci = read_repo_file(".github/workflows/ci.yml");
+    let ci_dmg = ci
+        .split_once("- name: Dry-run DMG assembly")
+        .expect("CI must own the DMG dry-run step")
+        .1
+        .split_once("  # Aggregate gate")
+        .expect("CI DMG dry-run must end before the aggregate gate")
+        .0;
+    for required in [
+        "echo \"::error::TronMac.app not produced by debug build\"",
+        "ditto \"$APP_PATH\" \"$DMG_SOURCE/TronMac.app\"",
+        "test -s \"$DMG_PATH\"",
+        "test -d \"$MOUNT_POINT/TronMac.app\"",
+        "test -x \"$MOUNT_POINT/TronMac.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron\"",
+        "test -L \"$MOUNT_POINT/Applications\"",
+        "test \"$(readlink \"$MOUNT_POINT/Applications\")\" = \"/Applications\"",
+    ] {
+        assert!(
+            ci_dmg.contains(required),
+            "CI DMG dry-run missing {required}"
+        );
+    }
+    for forbidden in [
+        "exit 0",
+        "acceptable without signing",
+        "ls -la dist/ || true",
+    ] {
+        assert!(
+            !ci_dmg.contains(forbidden),
+            "CI DMG dry-run must not fail open through {forbidden}"
+        );
+    }
+    let ci_create_dmg = ci_dmg
+        .split_once("create-dmg --skip-jenkins")
+        .expect("CI must invoke create-dmg")
+        .1
+        .split_once("test -s \"$DMG_PATH\"")
+        .expect("CI must validate the image immediately after create-dmg")
+        .0;
+    for required in [
+        "--app-drop-link 405 170",
+        "--hdiutil-quiet",
+        "\"$DMG_PATH\" \"$DMG_SOURCE\"",
+    ] {
+        assert!(
+            ci_create_dmg.contains(required),
+            "CI create-dmg invocation missing {required}"
+        );
+    }
+    assert!(
+        !ci_create_dmg.contains("||"),
+        "CI create-dmg invocation must fail closed"
+    );
+    assert_eq!(
+        ci_dmg
+            .lines()
+            .filter(|line| line.trim_start().starts_with("create-dmg "))
+            .count(),
+        1,
+        "CI DMG step must have exactly one create-dmg invocation"
+    );
+
+    let release = read_repo_file(".github/workflows/release-mac.yml");
+    let release_dmg = release
+        .split_once("- name: Build DMG")
+        .expect("release workflow must own the DMG build step")
+        .1
+        .split_once("- name: Sign DMG")
+        .expect("DMG build must finish before DMG signing")
+        .0;
+    for required in [
+        "ditto \"$APP_PATH\" \"$DMG_SOURCE/$APP_BUNDLE\"",
+        "test -s \"$DMG_PATH\"",
+        "test -d \"$MOUNT_POINT/$APP_BUNDLE\"",
+        "test -x \"$MOUNT_POINT/$APP_BUNDLE/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron\"",
+        "test -L \"$MOUNT_POINT/Applications\"",
+        "test \"$(readlink \"$MOUNT_POINT/Applications\")\" = \"/Applications\"",
+    ] {
+        assert!(
+            release_dmg.contains(required),
+            "Mac release DMG step missing {required}"
+        );
+    }
+    for forbidden in ["retrying minimal", "just to ensure we still produce a DMG"] {
+        assert!(
+            !release_dmg.contains(forbidden),
+            "Mac release DMG step must not retain fallback marker {forbidden}"
+        );
+    }
+    let release_create_dmg = release_dmg
+        .split_once("create-dmg \\")
+        .expect("release workflow must invoke create-dmg")
+        .1
+        .split_once("test -s \"$DMG_PATH\"")
+        .expect("release workflow must validate the image immediately after create-dmg")
+        .0;
+    for required in [
+        "--window-size 540 340",
+        "--icon \"$APP_BUNDLE\" 135 170",
+        "--app-drop-link 405 170",
+        "--hide-extension \"$APP_BUNDLE\"",
+        "\"$DMG_PATH\"",
+        "\"$DMG_SOURCE\"",
+    ] {
+        assert!(
+            release_create_dmg.contains(required),
+            "release create-dmg invocation missing {required}"
+        );
+    }
+    assert!(
+        !release_create_dmg.contains("||") && !release_create_dmg.contains("--skip-jenkins"),
+        "release create-dmg invocation must fail closed and retain its Finder layout"
+    );
+    assert_eq!(
+        release_dmg
+            .lines()
+            .filter(|line| line.trim_start().starts_with("create-dmg "))
+            .count(),
+        1,
+        "release DMG step must have exactly one create-dmg invocation"
+    );
 }
 
 #[test]

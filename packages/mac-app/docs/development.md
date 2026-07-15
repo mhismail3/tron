@@ -176,7 +176,7 @@ GitHub's Mac CI pins the destination to the runner architecture, uses `xcodebuil
 
 To simulate the menu-bar-only mode without onboarding, just `touch ~/.tron/internal/run/.onboarded` before launching.
 
-## CI pipeline (Phase 6+)
+## CI pipeline
 
 Defined in `.github/workflows/release-mac.yml`. Broadly:
 
@@ -186,15 +186,15 @@ Defined in `.github/workflows/release-mac.yml`. Broadly:
 4. `xcodegen generate` inside `packages/mac-app/`.
 5. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies the helper Library tree and Constitution defaults.
 6. Export the `.app`, verify the helper executable and LaunchAgent plist are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
-7. Notarize the signed app via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple the app, package it into a DMG via `create-dmg`, sign the DMG, then notarize and staple the DMG separately because notary tickets are artifact-specific.
+7. Notarize the signed app via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple the app, copy `Tron.app` into a dedicated DMG source directory, and build the intended `create-dmg` layout. Packaging fails closed on any layout error, then remounts the DMG and verifies the exact app, embedded helper, and `Applications -> /Applications` install link before signing, notarizing, and stapling the DMG separately because notary tickets are artifact-specific.
 8. Keep dSYMs in the archive/release artifacts for Apple crash diagnostics.
 9. `scripts/tron-release-notes` generates a bounded draft changelog body from first-parent git history since the previous release tag, with DMG, SHA256, and full compare-link details included. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta2 release intentionally compares against the historical Mac-scoped beta1 tag so the tag-prefix rename does not turn beta2 into an all-history changelog.
 10. `gh release create server-v0.1.0-beta.1 ./tron-v0.1.0-beta1.dmg` creates or updates a draft pre-release titled `Tron Server v0.1 (Beta 1)` with the generated changelog.
 11. `if: always()` cleanup: remove the keychain from the search list, delete it, dd-overwrite the password file, remove `cert.p12`.
 
-PR builds (no tag) take a dry-run path: same `xcodebuild archive` + DMG assembly but ad-hoc-signed (`-`) so fork PRs without certs still validate the pipeline.
+Manual workflow dry-runs disable code signing, then exercise the same Release archive shape and intended DMG layout for structural verification only. PR CI builds the Debug wrapper, creates a headless unsigned DMG from a dedicated source directory, and remounts it to require `TronMac.app`, the embedded helper, and the `Applications` link; a missing app, failed `create-dmg`, empty image, or invalid payload fails the job.
 
-See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml) (added in Phase 6, hardened in Phase 8).
+See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml).
 
 ## Common tasks
 
