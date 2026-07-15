@@ -11,7 +11,6 @@ const EVIDENCE_PATH: &str =
     "packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md";
 const INVENTORY_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.md";
 const INVENTORY_TSV_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.tsv";
-const PROGRESS_PATH: &str = "packages/agent/docs/ios-affordance-restoration-progress.md";
 const README_PATH: &str = "packages/agent/docs/project-reference.md";
 const PHASE2_SCORECARD_PATH: &str =
     "packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md";
@@ -379,7 +378,6 @@ fn artifacts_lineage_and_docs_wiring_exist() {
         EVIDENCE_PATH,
         INVENTORY_PATH,
         INVENTORY_TSV_PATH,
-        PROGRESS_PATH,
         TARGET_PATH,
     ] {
         assert!(repo_path(path).exists(), "missing IARM artifact: {path}");
@@ -408,7 +406,7 @@ fn artifacts_lineage_and_docs_wiring_exist() {
         TARGET_PATH,
         TARGET_NAME,
         "iOS Affordance Restoration Map",
-        "Phase 2 agent-execution restoration plan",
+        "Phase 2 agent-execution restoration",
     ] {
         assert!(
             readme.contains(required),
@@ -419,10 +417,9 @@ fn artifacts_lineage_and_docs_wiring_exist() {
     assert_contains_all(
         "packages/ios-app/docs/architecture.md",
         &[
-            "iOS Affordance Restoration Map",
-            "functional-only",
-            "does not restore deleted product panels",
-            "Notification and inbox affordances remain deferred",
+            "historical iOS Affordance Restoration Map",
+            "without restoring deleted product panels",
+            "Fixed notification and inbox product affordances remain absent",
             "server-owned device, notification, and delivery resources",
             "Phase 2 agent-execution restoration plan",
         ],
@@ -478,6 +475,7 @@ fn inventory_uses_controlled_vocabulary_and_review_queue() {
         "IARM-SURFACE-019",
         "IARM-SURFACE-020",
         "IARM-SURFACE-021",
+        "IARM-SURFACE-033",
         "IARM-SURFACE-035",
     ] {
         assert!(ids.contains(required), "IARM inventory missing {required}");
@@ -681,7 +679,7 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
             "## Historical Handoff",
             "This original map handoff is historical.",
             "Phase 1 is now closed",
-            "`ios-affordance-restoration-progress.md`",
+            "`packages/ios-app/docs/architecture.md`",
             "`phase-2-agent-execution-restoration-*`",
         ],
     );
@@ -692,7 +690,7 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
             "## Historical Phase 1 Review Queue",
             "historical evidence",
             "not as live scheduling state",
-            "Current restoration status is recorded in `ios-affordance-restoration-progress.md`",
+            "Current iOS behavior is documented in `packages/ios-app/docs/architecture.md`",
             "That plan now exists in",
             PHASE2_SCORECARD_PATH.trim_start_matches("packages/agent/docs/"),
             PHASE2_EVIDENCE_PATH.trim_start_matches("packages/agent/docs/"),
@@ -701,21 +699,12 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
             "It is not the live Phase 1 queue",
         ],
     );
-    assert_contains_all(
-        PROGRESS_PATH,
-        &[
-            "## Phase 1 Closeout",
-            "Phase 1 local-native/user-facing affordance restoration is closed",
-            "No remaining Phase 1 slice is queued.",
-        ],
-    );
-
     let readme = normalize_whitespace(&read_repo_file("packages/agent/docs/project-reference.md"));
     for required in [
         "historical Phase 1",
         "original Phase 2 agent-execution anchor",
         "original Phase 1 review queue as historical planning evidence",
-        "tracks Phase 1 closeout",
+        "Current iOS behavior belongs to `packages/ios-app/docs/architecture.md`",
         PHASE2_SCORECARD_PATH,
         PHASE2_EVIDENCE_PATH,
         PHASE2_INVENTORY_PATH,
@@ -738,15 +727,10 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
             INVENTORY_PATH,
             "A full Phase 2 agent-execution restoration plan is still required",
         ),
-        (PROGRESS_PATH, "current Phase 1 queue"),
         (README_PATH, "defines the Phase 1 review queue"),
         (
             README_PATH,
             "preserves the requirement for a later full Phase 2 agent-execution restoration plan",
-        ),
-        (
-            PROGRESS_PATH,
-            "The next planned body of work is the full Phase 2 agent-execution restoration goal plan",
         ),
     ] {
         assert_normalized_not_contains(path, forbidden);
@@ -778,74 +762,20 @@ fn docs_do_not_store_physical_ios_device_uuid_like_identifiers() {
 }
 
 #[test]
-fn slice_six_notification_inbox_decision_is_deferred_until_apns_restoration() {
-    assert_contains_all(
-        PROGRESS_PATH,
-        &[
-            "Phase 1 Slice 6: Notification/Inbox Concept Review",
-            "Do not implement a Phase 1 notification/inbox affordance.",
-            "central engine/resource mechanism",
-            "This is not a permanent rejection of APNs.",
-            "Current production source has no notification bell",
-            "Direct inspection of the local Tron SQLite database",
-            "Rejected for Phase 1: fake unread counts",
-            "Deferred to Phase 2/restoration: APNs",
-            "No Swift UI, public `/engine` methods, database tables",
-            "Simulator validation:",
-            "Not required. Slice 6 made no Swift or UI changes",
-            "## Phase 1 Closeout",
-            "No remaining Phase 1 slice is queued.",
-        ],
-    );
-
-    let progress = read_repo_file(PROGRESS_PATH);
-    assert!(
-        !progress.contains("The next recommended restoration slice is `phase1_slice_6`"),
-        "Slice 6 is no longer the next recommended slice after the defer decision"
-    );
-}
-
-#[test]
-fn slice_one_attachment_camera_evidence_records_full_scope_and_boundaries() {
-    for path in [PROGRESS_PATH, EVIDENCE_PATH] {
-        assert_contains_all(
-            path,
-            &[
-                "Phase 1 Slice 1",
-                "Composer Attachment / Camera / Native Menu",
-                "473cce8b3 Restore chat attachment camera sheet",
-                "62b577047 Refine camera capture glass button",
-                "84451c969 Refine camera capture confirmation controls",
-                "019f3b9ce Restore native attachment menu",
-                "279fafe4e Tighten native attachment menu sizing",
-                "d69afc6a1 Rename attachment menu actions",
-                "Take Photo",
-                "Select Photos",
-                "Attach Files",
-                "CameraCaptureSheet",
-                "PhotosPicker",
-                "document picker",
-                "native SwiftUI `Menu`",
-                "Skills, prompt snippets/templates, queue controls, plugin/catalog concepts",
-                "menu actions remain absent",
-            ],
-        );
-    }
-
-    assert_normalized_contains_all(
-        PROGRESS_PATH,
-        &[
-            "Entering captured-photo preview stops the live `AVCaptureSession`",
-            "retake is the preview-to-live restart path",
-            "Current retrospective closeout validation reruns the focused simulator tests",
-            "No physical-device manual validation is recorded for Slice 1",
-            "must not be read back onto the camera/photo/file picker slice",
-        ],
-    );
-
+fn slice_one_historical_evidence_preserves_commits_menu_and_validation_boundaries() {
     assert_normalized_contains_all(
         EVIDENCE_PATH,
         &[
+            "## Phase 1 Slice 1 Addendum: Composer Attachment / Camera / Native Menu",
+            "473cce8b3 Restore chat attachment camera sheet",
+            "62b577047 Refine camera capture glass button",
+            "84451c969 Refine camera capture confirmation controls",
+            "019f3b9ce Restore native attachment menu",
+            "279fafe4e Tighten native attachment menu sizing",
+            "d69afc6a1 Rename attachment menu actions",
+            "Take Photo",
+            "Select Photos",
+            "Attach Files",
             "SourceGuardTests",
             "IPadSheetPresentationTests",
             "Real camera capture is not treated as simulator-deterministic hardware validation",
@@ -853,31 +783,17 @@ fn slice_one_attachment_camera_evidence_records_full_scope_and_boundaries() {
             "not claimed",
         ],
     );
+    assert_normalized_contains_all(
+        "packages/ios-app/docs/architecture.md",
+        &[
+            "Entering captured-photo preview stops the live `AVCaptureSession`",
+            "retake is the path that leaves preview and restarts the session",
+        ],
+    );
 }
 
 #[test]
-fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
-    assert_contains_all(
-        PROGRESS_PATH,
-        &[
-            "## Phase 1 Closeout",
-            "Phase 1 local-native/user-facing affordance restoration is closed",
-            "No remaining Phase 1 slice is queued",
-            "session-list/cockpit placement cleanup",
-            "moved Runtime Cockpit access into Servers -> Diagnostics",
-            "No old notification bell",
-            "No chat-mounted passive worker-runtime banner",
-            "No temporary chat timeline loading spinner/text row",
-            "No custom session list row press implementation remains",
-            "Remaining live work is execution of the approved Phase 2 slices",
-            "phase-2-agent-execution-restoration-scorecard.md",
-            "phase-2-agent-execution-restoration-evidence-manifest.md",
-            "phase-2-agent-execution-restoration-inventory.md",
-            "phase-2-agent-execution-restoration-inventory.tsv",
-            "central engine/resource mechanism",
-        ],
-    );
-
+fn retired_phase_one_scaffolding_remains_absent_from_sources() {
     let source_text = tracked_text_under(&["packages/ios-app/Sources"]);
     for retired in [
         "ChatTimelineAuxiliaryState",

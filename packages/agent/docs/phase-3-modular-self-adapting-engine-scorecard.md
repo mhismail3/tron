@@ -121,7 +121,7 @@ even if focused tests pass.
 
 | Row | Name | Weight | Status | Evidence |
 | --- | --- | ---: | --- | --- |
-| P3MSA-0 | Source baseline and restoration goal | 7 | passed | Baseline commit, old-branch comparison point, Phase 1/2 ledgers, and Phase 2 closeout state are identified. |
+| P3MSA-0 | Source baseline and restoration goal | 7 | passed | Baseline commit, old-branch comparison point, retained IARM/Phase 2 artifacts, and Phase 2 closeout state are identified. |
 | P3MSA-1 | Minimal core boundary | 9 | passed | Core-owned primitives are explicitly limited to provider, authority, resource/event/replay, storage, module supervision, and observability substrate. |
 | P3MSA-2 | Module manifest and registry roadmap | 10 | passed | Slice 23A defines the manifest, registry, package identity, capability schema, resource declarations, authority needs, settings, dependency intents, provenance, and provider-safe inspection path. |
 | P3MSA-3 | Agent self-authoring lifecycle roadmap | 10 | passed | Slices 23B through 23E define governed module proposal, workspace, validation, review, install, enable, disable, quarantine, and rollback flow. |

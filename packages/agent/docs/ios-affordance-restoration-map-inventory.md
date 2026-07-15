@@ -64,8 +64,8 @@ Every future slice must answer these questions before implementation:
 ## Historical Phase 1 Review Queue
 
 The queue below was the original Phase 1 planning order. It is retained as
-historical evidence, not as live scheduling state. Current restoration status is
-recorded in `ios-affordance-restoration-progress.md`.
+historical evidence, not as live scheduling state. Current iOS behavior is
+documented in `packages/ios-app/docs/architecture.md` and concern-owned tests.
 
 1. Chat composer affordance/menu sheet restoration.
 2. Dictation/audio capture and voice input affordance audit.
@@ -77,9 +77,9 @@ recorded in `ios-affordance-restoration-progress.md`.
 7. Remaining local-native affordance families from the inventory after user
    review.
 
-## Future Slice Review Packet
+## Historical Slice Review Packet
 
-Each future slice must present this packet before implementation:
+The original Phase 1 process required this packet before implementation:
 
 - old surface name and old paths;
 - current gap;
@@ -117,9 +117,8 @@ agent-execution UI.
 
 This map does not restore any UI or backend behavior. It records the historical
 review taxonomy and original slice ordering. It is not the live Phase 1 queue:
-Phase 1 closeout and shipped/deferred behavior are recorded in
-`ios-affordance-restoration-progress.md`, while live Phase 2 planning is
-recorded in the `phase-2-agent-execution-restoration-*` artifacts. Any future
-slice that changes Swift source must run the relevant iOS
-build/test/simulator checks and update the iOS architecture docs with actual
-restored behavior.
+current behavior belongs to `packages/ios-app/docs/architecture.md`,
+concern-owned iOS docs, and source tests, while Phase 2 lineage remains in the
+`phase-2-agent-execution-restoration-*` artifacts. Any future change to Swift
+source must run the relevant iOS build/test/simulator checks and update the
+owning iOS architecture documentation.

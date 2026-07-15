@@ -22,7 +22,7 @@ Planning baseline HEAD:
 The plan was derived from repository artifacts instead of chat history. The
 audit covered:
 
-- Phase 1 iOS affordance map, inventory, TSV, evidence, and progress ledger;
+- historical Phase 1 iOS affordance map, inventory, TSV, and evidence;
 - retained BPRC restoration backlog lineage;
 - current README architecture, capabilities, event, settings, database, iOS,
   testing, and invariant sections;
@@ -41,7 +41,7 @@ audit covered:
 | Row | Status | Evidence | Validation anchor |
 | --- | --- | --- | --- |
 | P2AER-0 | passed | The scorecard records current branch, baseline HEAD, inspected artifacts, planning-only scope, and no feature implementation. | Scorecard Source Baseline and Scope sections. |
-| P2AER-1 | passed | The roadmap carries forward Phase 1 Slice 6 notification/APNs deferral, server-backed workspace-browser limitations, passive cockpit placement deferral, and the Phase 2 reminder categories from the progress ledger. | Scorecard Exhaustive Feature Coverage and Slice 13. |
+| P2AER-1 | passed | The roadmap carries forward the historical IARM classifications, server-backed workspace-browser limits, and Phase 2 categories; current APNs and iOS behavior remains source-owned. | Scorecard Exhaustive Feature Coverage and Slice 13. |
 | P2AER-2 | passed | The TSV contains rows for all 24 BPRC feature buckets and the scorecard roadmap maps those buckets to implementation slices. | TSV `bprc_refs` column and inventory summary. |
 | P2AER-3 | passed | Each row in the TSV uses the controlled classification set for primitive, modular package, iOS-only, server-fact rendering, deferred, or reject candidate surfaces. | Inventory Controlled Vocabulary. |
 | P2AER-4 | passed | The memory section defines engine-owned memory primitives, replaceable memory engines, memory store families, privacy, provenance, confidence, expiry, edit/delete/export/migration, evals, engine comparison, iOS audit, and hidden-memory static gates. | Scorecard Deep Memory Architecture. |

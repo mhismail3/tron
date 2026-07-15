@@ -323,7 +323,7 @@ Discovery workers must:
 
 - start from clean `origin/main`;
 - read this inventory, the TSV row, the Phase 3 scorecard, Phase 2 inventory,
-  Phase 1 progress ledger, README, and relevant module `mod.rs` docs;
+  current iOS architecture docs, README, and relevant module `mod.rs` docs;
 - restate the product outcome in modular self-adapting-engine terms;
 - derive the slice from first principles: agent needs, user control, authority,
   data flow, lifecycle, failure semantics, replay, and redaction before files;

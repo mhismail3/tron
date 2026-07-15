@@ -47,8 +47,8 @@ truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
 source-control state, worker state, or product panels locally.
 
-Notification and inbox affordances remain deferred in the current Phase 1
-shell. Local chat error pills, app-global connection toasts, timeline system
+Fixed notification and inbox product affordances remain absent. Local chat
+error pills, app-global connection toasts, timeline system
 events, Logs, Server Diagnostics, and feedback are the current attention
 surfaces. A notification bell, unread inbox, and fixed delivery chips remain
 absent. APNs registration and push delivery are narrow lifecycle effects backed
@@ -58,10 +58,10 @@ push service owns token callbacks; the app retries registration after pairing,
 connection, and foreground transitions. Per-install identity plus server-side
 bundle/environment identity keeps side-by-side variants independent.
 
-The iOS Affordance Restoration Map is the active planning artifact for
-functional-only Phase 1 iOS UX restoration. It classifies every deleted or
-renamed old iOS path before implementation, starts with local-native and
-current server-fact affordances, and does not restore deleted product panels.
+The historical iOS Affordance Restoration Map classifies every deleted or
+renamed old iOS path without restoring deleted product panels. It is retained
+as source-backed old-path coverage, not as current planning or execution state;
+this document and focused tests own current iOS behavior.
 The full Phase 2 agent-execution restoration plan now lives in
 `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md` and
 covers capability discovery, filesystem, jobs, workers, subagents, approvals,

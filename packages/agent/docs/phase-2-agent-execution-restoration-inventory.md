@@ -56,7 +56,7 @@ Memory involvement values:
 
 ## Inventory Summary
 
-The TSV carries every Phase 2 reminder from the Phase 1 progress ledger:
+The TSV carries every Phase 2 category from retained BPRC/IARM lineage:
 capability discovery, filesystem tools, jobs/processes, worker self-extension,
 subagents, goals/queues/questions, approvals, web, git/worktrees,
 skills/rules/hooks, memory, MCP, scheduling, program execution,

@@ -58,9 +58,9 @@ This original map handoff is historical. Its first implementation candidate was
 chat composer affordance and menu sheet restoration, with the old input bar,
 attachment, skills, prompt, and queue concepts presented as a first-principles
 review packet before Swift changes. Phase 1 is now closed; live restoration
-state is recorded in `ios-affordance-restoration-progress.md`, and the durable
-Phase 2 plan is recorded in the `phase-2-agent-execution-restoration-*`
-artifacts.
+behavior is owned by `packages/ios-app/docs/architecture.md`, the concern-owned
+iOS docs, and focused source tests. The durable Phase 2 record remains in the
+`phase-2-agent-execution-restoration-*` artifacts.
 
 ## Phase 1 Slice 1 Addendum: Composer Attachment / Camera / Native Menu
 

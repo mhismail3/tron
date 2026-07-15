@@ -290,16 +290,12 @@ Current living entry points:
   implementation.
 - `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`:
   companion evidence manifest for IARM old-tree coverage, failed-attempt
-  policy, validation commands, and Phase 1 handoff.
+  policy, validation commands, and the historical Phase 1 handoff.
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.md`:
   completed IARM taxonomy, first-principles review rubric, historical Phase 1
   queue, and original Phase 2 agent-execution anchor.
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`:
   machine-readable IARM coverage map used by static gates.
-- `packages/agent/docs/ios-affordance-restoration-progress.md`:
-  active execution ledger for completed iOS affordance restoration slices,
-  accepted off-plan UI/runtime work, validation evidence, deferred behavior, and
-  the Phase 1 closeout state.
 - `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`:
   completed planning scorecard for the Phase 2 agent-execution restoration
   roadmap, primitive-vs-capability classifications, memory architecture, slice
@@ -3034,9 +3030,9 @@ packages/ios-app/Sources/
   The map exhaustively classifies deleted or renamed old iOS paths and preserves
   the original Phase 1 review queue as historical planning evidence. It does
   not mean those affordances are restored.
-  `packages/agent/docs/ios-affordance-restoration-progress.md` tracks Phase 1
-  closeout, shipped slices, accepted off-plan work, validation, and deferred
-  behavior. The durable Phase 2 agent-execution restoration plan is recorded in
+  Current iOS behavior belongs to `packages/ios-app/docs/architecture.md`,
+  concern-owned iOS docs, and focused source tests. The durable Phase 2
+  agent-execution restoration record is maintained in
   `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`,
   `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
   `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and

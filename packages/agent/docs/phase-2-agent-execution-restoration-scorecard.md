@@ -259,7 +259,6 @@ Inspected planning sources:
 - `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.md`
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`
-- `packages/agent/docs/ios-affordance-restoration-progress.md`
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.md`
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`
@@ -525,8 +524,7 @@ Modular boundaries: plan only.
 Likely files/areas: `packages/agent/docs`, README, iOS architecture docs, and
 static inventory rows.
 
-Old evidence paths: IARM progress Phase 2 reminder, IARM TSV Phase 2 rows,
-and retained BPRC backlog rows.
+Historical lineage: IARM TSV Phase 2 rows and retained BPRC backlog rows.
 
 Acceptance criteria: plan artifacts exist, source-backed scope is complete,
 TSV has one row per feature family, and validations in the evidence manifest
@@ -697,8 +695,8 @@ rendering.
 iOS validation: screenshots only if native file preview is added; otherwise
 generic result surface tests.
 
-Docs/static updates: README capabilities/database, filesystem domain docs,
-IARM progress deferral note.
+Docs/static updates: README capabilities/database, filesystem domain docs, and
+the current iOS architecture owner.
 
 User decisions: when writes require approval, whether destructive patches need
 native review, and default file size limits.
@@ -2429,8 +2427,9 @@ provider schema/instruction text, BPRC/IARM guards, README, and this Phase 2
 inventory. Platform APNs, iOS app delegate/entitlements/inbox, and physical
 push validation remain later slices after backend proof.
 
-Old evidence paths: `BPRC-FEATURE-12`, `IARM-SURFACE-019`,
-`IARM-SURFACE-033`, Phase 1 Slice 6 progress ledger.
+Historical lineage: `BPRC-FEATURE-12`, `IARM-SURFACE-019`, and
+`IARM-SURFACE-033`. Current APNs behavior is owned by
+`packages/ios-app/docs/apns.md` and the device/notification source tests.
 
 Acceptance criteria: no fake local inbox; device tokens are secret; APNs
 environment is explicit; delivery/read state is durable; badge semantics are

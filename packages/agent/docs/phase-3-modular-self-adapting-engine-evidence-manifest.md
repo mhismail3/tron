@@ -18,7 +18,7 @@ state. The audit covered:
 
 - the retained BPRC backlog lineage derived from the historical comparison
   with `origin/next/modular-capability-engine`;
-- the Phase 1 iOS affordance progress ledger;
+- the historical Phase 1 iOS affordance map and current iOS architecture docs;
 - the completed Phase 2 agent-execution restoration scorecard, evidence
   manifest, narrative inventory, and TSV;
 - current README sections for primitive engine scope, capabilities, resources,
@@ -56,7 +56,6 @@ state. The audit covered:
 | `sed -n '1,180p' packages/agent/docs/phase-2-agent-execution-restoration-inventory.md` | exit 0 | Phase 2 controlled vocabulary and execution roadmap shape were inspected before drafting Phase 3. |
 | `sed -n '1,220p' packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md` | exit 0 | Phase 2 scorecard structure, closeout status, and slice evidence style were inspected. |
 | `sed -n '1,80p' packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv` | exit 0 | Phase 2 machine-readable row format was inspected before creating the Phase 3 TSV. |
-| `sed -n '1,180p' packages/agent/docs/ios-affordance-restoration-progress.md` | exit 0 | Phase 1 shipped user-facing work and deferred behavior were inspected. |
 | `sed -n '320,430p' README.md` | exit 0 | README documentation index placement was inspected before wiring Phase 3 artifacts. |
 | `sed -n '1,180p' packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs` | exit 0 | DESI scorecard/evidence companion requirements were inspected before adding a new scorecard. |
 

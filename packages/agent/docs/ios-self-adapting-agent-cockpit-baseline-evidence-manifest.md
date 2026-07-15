@@ -170,8 +170,8 @@ Observed simulator evidence on iPhone 17 Pro, iOS 26.5:
 Because Computer Use could inspect but not interact after recovery, and `simctl`
 does not expose tap injection, final screenshot validation proves launch,
 pairing, connection, and session-list rendering. Current placement is covered
-by focused Swift/source-guard tests and the later placement-cleanup validation
-recorded in `ios-affordance-restoration-progress.md`. The cockpit sheet
+by focused Swift/source-guard tests and `packages/ios-app/docs/architecture.md`.
+The cockpit sheet
 internals are covered by focused Swift state/view-model tests, source
 invariants, generated surface renderer tests, and the live `/engine`
 resource-read probe rather than an interactive screenshot.
