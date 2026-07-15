@@ -206,6 +206,10 @@
 //! | `operations::operation_contract` | Canonical typed operation registry plus input/output, ownership, effect, context, idempotency, and base-authority contracts for every execute operation |
 //! | `pool` | Operation/catalog-function classification for agent-facing discovery |
 //!
+//! Capability-pool metadata stays typed internally and owns one explicit
+//! provider-safe JSON projection; it does not maintain a parallel serializable
+//! DTO or reload the full pool to derive operation usage guidance.
+//!
 //! # INVARIANT: the model-facing surface is tiny
 //!
 //! Provider integrations must expose exactly this one tool. Additional behavior

@@ -13,7 +13,6 @@
 
 use std::borrow::Cow;
 
-use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{
@@ -23,8 +22,7 @@ use super::{
     operations::{OperationEffect, OperationId, operation_effect},
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolSurface {
     AgentOperation,
     CatalogFunction,
@@ -39,8 +37,7 @@ impl CapabilityPoolSurface {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolAudience {
     SessionWork,
     AgentDiagnostics,
@@ -61,8 +58,7 @@ impl CapabilityPoolAudience {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolReplacementClass {
     RuntimeRoutable,
     ProducerExtensible,
@@ -79,8 +75,7 @@ impl CapabilityPoolReplacementClass {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolVisibility {
     DefaultVisible,
     SearchVisible,
@@ -99,8 +94,7 @@ impl CapabilityPoolVisibility {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CapabilityPoolMinimalityDecision {
     KeepCore,
     KeepGovernance,
@@ -137,45 +131,25 @@ pub(crate) struct CapabilityPoolMetadata<'a> {
 }
 
 impl<'a> CapabilityPoolMetadata<'a> {
-    pub(crate) fn provider_projection(&self) -> CapabilityPoolProjection<'a> {
-        CapabilityPoolProjection {
-            id: self.id.clone(),
-            surface: self.surface.as_str(),
-            family: self.family.clone(),
-            owner: self.owner.clone(),
-            audience: self.audience.as_str(),
-            replacement_class: self.replacement_class.as_str(),
-            agent_default_visibility: self.agent_default_visibility.as_str(),
-            purpose: self.purpose,
-            effect: self.effect,
-            risk: self.risk,
-            authority_boundary: self.authority_boundary,
-            evidence_boundary: self.evidence_boundary,
-            minimality_decision: self.minimality_decision.as_str(),
-            evolution_path: self.evolution_path,
-            next_action: self.next_action,
-        }
+    pub(crate) fn provider_projection(&self) -> Value {
+        json!({
+            "id": self.id,
+            "surface": self.surface.as_str(),
+            "family": self.family,
+            "owner": self.owner,
+            "audience": self.audience.as_str(),
+            "replacementClass": self.replacement_class.as_str(),
+            "agentDefaultVisibility": self.agent_default_visibility.as_str(),
+            "purpose": self.purpose,
+            "effect": self.effect,
+            "risk": self.risk,
+            "authorityBoundary": self.authority_boundary,
+            "evidenceBoundary": self.evidence_boundary,
+            "minimalityDecision": self.minimality_decision.as_str(),
+            "evolutionPath": self.evolution_path,
+            "nextAction": self.next_action,
+        })
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CapabilityPoolProjection<'a> {
-    id: Cow<'a, str>,
-    surface: &'static str,
-    family: Cow<'a, str>,
-    owner: Cow<'a, str>,
-    audience: &'static str,
-    replacement_class: &'static str,
-    agent_default_visibility: &'static str,
-    purpose: &'static str,
-    effect: &'static str,
-    risk: &'static str,
-    authority_boundary: &'static str,
-    evidence_boundary: &'static str,
-    minimality_decision: &'static str,
-    evolution_path: &'static str,
-    next_action: &'static str,
 }
 
 pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolMetadata<'static>> {
@@ -212,8 +186,8 @@ pub(crate) fn operation_pool_metadata(operation: &str) -> Option<CapabilityPoolM
 
 pub(crate) fn operation_agent_usage_projection(operation: &str) -> Option<Value> {
     let binding = operation_binding_metadata(operation)?;
-    let audience = operation_pool_metadata(binding.operation)?
-        .audience
+    let audience = operation_audience_and_visibility(binding.family, binding.ownership_class)
+        .0
         .as_str();
     let effect = operation_effect(operation)?;
     let risk = operation_risk(operation)?;
@@ -864,11 +838,39 @@ mod tests {
 
     #[test]
     fn operation_pool_metadata_covers_supported_operations() {
+        const PROVIDER_FIELDS: [&str; 15] = [
+            "agentDefaultVisibility",
+            "audience",
+            "authorityBoundary",
+            "effect",
+            "evidenceBoundary",
+            "evolutionPath",
+            "family",
+            "id",
+            "minimalityDecision",
+            "nextAction",
+            "owner",
+            "purpose",
+            "replacementClass",
+            "risk",
+            "surface",
+        ];
+        let provider_fields = BTreeSet::from(PROVIDER_FIELDS);
         for operation in supported_operation_names() {
             let metadata = operation_pool_metadata(operation)
                 .unwrap_or_else(|| panic!("missing operation pool metadata for {operation}"));
             assert_eq!(metadata.id.as_ref(), *operation);
             assert_eq!(metadata.surface, CapabilityPoolSurface::AgentOperation);
+            let projection = metadata.provider_projection();
+            assert_eq!(
+                projection
+                    .as_object()
+                    .expect("provider projection object")
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+                provider_fields
+            );
             assert_ne!(
                 metadata.agent_default_visibility,
                 CapabilityPoolVisibility::HiddenUnlessEvolutionMode
