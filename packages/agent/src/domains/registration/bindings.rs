@@ -171,7 +171,7 @@ macro_rules! operation_bindings {
     ) => {
         pub(crate) fn function_registrations(
             specs: Vec<$crate::domains::registration::catalog::CapabilitySpec>,
-            deps: Deps,
+            deps: $deps_ty,
         ) -> $crate::engine::Result<Vec<$crate::domains::registration::worker::DomainFunctionRegistration>> {
             $crate::domains::registration::bindings::function_registrations(
                 specs,
@@ -206,7 +206,7 @@ macro_rules! operation_bindings {
     ) => {
         pub(crate) fn function_registrations(
             specs: Vec<$crate::domains::registration::catalog::CapabilitySpec>,
-            deps: Deps,
+            deps: $deps_ty,
         ) -> $crate::engine::Result<Vec<$crate::domains::registration::worker::DomainFunctionRegistration>> {
             $crate::domains::registration::bindings::function_registrations(
                 specs,
@@ -218,7 +218,7 @@ macro_rules! operation_bindings {
 
         pub(crate) fn handler_for_operation(
             operation_key: impl AsRef<str>,
-            deps: Deps,
+            deps: $deps_ty,
         ) -> $crate::engine::Result<std::sync::Arc<dyn $crate::engine::InProcessFunctionHandler>> {
             $crate::domains::registration::bindings::handler_for_operation(
                 operation_key.as_ref(),
