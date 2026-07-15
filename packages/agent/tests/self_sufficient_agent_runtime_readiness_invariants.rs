@@ -177,7 +177,6 @@ fn predecessor_inventories_classify_ssarr_artifacts() {
         "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
         "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
-        "packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv",
     ] {
         let source = read_repo_file(predecessor);
         for required_path in required_paths {

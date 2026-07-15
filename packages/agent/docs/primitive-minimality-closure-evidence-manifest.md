@@ -65,7 +65,6 @@ Mac source, or deploy commands.
 | `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_minimality_closure_invariants -- --nocapture` | exit 0 | PMC-6, PMC-7, PMC-8, PMC-9 |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | PMC-6 |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | PMC-6, PMC-7 |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test developer_experience_repo_hygiene_automation_invariants -- --nocapture` | exit 0 | PMC-6, PMC-7 |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | PMC-6 |
 | `scripts/tron ci fmt check clippy test` | exit 0 | PMC-9 |
 | `scripts/personal-info-guard.sh` | exit 0 | PMC-9 |

@@ -233,17 +233,6 @@ Current living entry points:
   completed IOSTC iOS client surface taxonomy and ownership notes.
 - `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`:
   machine-readable IOSTC inventory used by static gates.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md`:
-  completed Developer Experience / Repo Hygiene / Automation scorecard for
-  setup, dev server, local/GitHub CI parity, generated projects, docs upkeep,
-  ignored artifacts, version helpers, branch handoff, and closeout hygiene.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md`:
-  companion evidence manifest for DXRHA source findings, verification commands,
-  stale-branch quarantine, and residual workflow risks.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md`:
-  completed DXRHA contributor workflow taxonomy and ownership notes.
-- `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
-  machine-readable DXRHA workflow inventory used by static gates.
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md`:
   completed Self-Sufficient Agent Runtime Readiness scorecard for auditing
   clean extension points for generated workers, learned rules/memory, tool
@@ -445,11 +434,10 @@ Current living entry points:
   wiring, deleted iOS product panels, successor/server-ownership residue,
   settings parity references, generated project policy, focused simulator
   evidence, and predecessor inventory rows.
-- `packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs`:
-  completed DXRHA gates for scorecard/evidence, inventory coverage, local and
-  GitHub static-gate parity, generated/ignored artifact policy, setup/dev
-  runtime-state docs, version/release helper checks, concise root-README
-  progressive disclosure, branch handoff, and predecessor inventory rows.
+- `packages/agent/tests/repository_workflow_invariants.rs`: source-owned checks
+  for dynamic Cargo target scheduling, fail-fast local execution, fail-closed
+  GitHub aggregation, concise front-door documentation, and tracked ignore
+  hygiene.
 - `packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs`:
   completed SSARR gates for readiness scorecard/evidence/inventory integrity,
   successor-term classification, negative generated-worker/learned-memory/tool
@@ -3365,11 +3353,12 @@ cargo test --test db_path_guard -- --nocapture          # Focused integration ta
 The agent is a single `tron` crate. The repository-owned schedule runs its library and binary tests serially, then executes every top-level integration target discovered from `packages/agent/tests/*.rs`, with the process-global `integration` target last. Test counts are intentionally not hardcoded here because they drift quickly.
 
 For repository CI, Cargo's default auto-discovery of top-level
-`packages/agent/tests/*.rs` files owns the integration-target fact set.
+`packages/agent/tests/*.rs` files owns the integration-target fact set. The
+source-owned guard is `packages/agent/tests/repository_workflow_invariants.rs`.
 `scripts/tron ci test` derives that set from the same source layout, runs each
 target once in deterministic order, and reserves `integration` for the final
 serial invocation because it shares process-global test-server plumbing. The
-developer-experience repository invariant compares the derived schedule with
+repository workflow invariant compares the derived schedule with
 Cargo and verifies GitHub Actions delegates to `scripts/tron ci test` rather
 than carrying a second target list.
 

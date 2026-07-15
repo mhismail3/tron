@@ -121,8 +121,10 @@ quality path for every repository change. Cargo's default auto-discovery of
 top-level `packages/agent/tests/*.rs` files owns the integration-target fact
 set. The test command derives that set from the same source layout, runs each
 target once in deterministic order, and reserves `integration` for the final
-serial invocation. The repository CI test compares that schedule with Cargo
-and verifies GitHub delegates to this local owner. On pull requests, iOS and
+serial invocation. The
+[repository workflow invariant](packages/agent/tests/repository_workflow_invariants.rs)
+compares that schedule with Cargo and verifies GitHub delegates to this local
+owner. On pull requests, iOS and
 Mac jobs run for their package paths, their release workflows, or relevant
 labels. Both run on `main` and manual dispatch. `CI summary` requires successful
 change detection and all unconditional jobs; it accepts a skipped client job

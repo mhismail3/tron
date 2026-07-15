@@ -403,7 +403,6 @@ fn evidence_manifest_records_required_commands_without_placeholders() {
         "cargo check --manifest-path packages/agent/Cargo.toml",
         "cargo test --manifest-path packages/agent/Cargo.toml --test primitive_minimality_closure_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test developer_experience_repo_hygiene_automation_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture",
         "git diff --check",
         "git ls-files -ci --exclude-standard",
@@ -458,7 +457,6 @@ fn predecessor_inventories_classify_pmc_artifacts() {
         "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
         "packages/agent/docs/observability-diagnostics-auditability-inventory.tsv",
         "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
-        "packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv",
         "packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv",
     ] {
         let source = read_repo_file(predecessor);

@@ -25,8 +25,10 @@
 #
 # Adding a new ecosystem:
 #   1. Add a filter under `changes.steps.filter`.
-#   2. Add a new job gated on `needs.changes.outputs.<name>` + label.
-#   3. List the job under `ci.needs` + the result-check loop.
+#   2. Add a `<name>_required` output combining non-PR, filter, and label rules;
+#      gate the new job only on that output.
+#   3. List the job under `ci.needs` and expose both its result and required
+#      output to the aggregate script.
 #   4. Document in CONTRIBUTING.md.
 
 name: CI
@@ -52,8 +54,8 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-latest
     outputs:
-      ios: ${{ steps.filter.outputs.ios }}
-      mac: ${{ steps.filter.outputs.mac }}
+      ios_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ios == 'true' || contains(github.event.pull_request.labels.*.name, 'ios') }}
+      mac_required: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mac == 'true' || contains(github.event.pull_request.labels.*.name, 'mac') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -137,10 +139,7 @@ jobs:
     name: iOS (xcodebuild test)
     runs-on: macos-15
     needs: changes
-    if: |
-      github.event_name != 'pull_request' ||
-      needs.changes.outputs.ios == 'true' ||
-      contains(github.event.pull_request.labels.*.name, 'ios')
+    if: needs.changes.outputs.ios_required == 'true'
     defaults:
       run:
         working-directory: packages/ios-app
@@ -198,10 +197,7 @@ jobs:
     name: Mac wrapper (build + test, dry-run DMG)
     runs-on: macos-15
     needs: changes
-    if: |
-      github.event_name != 'pull_request' ||
-      needs.changes.outputs.mac == 'true' ||
-      contains(github.event.pull_request.labels.*.name, 'mac')
+    if: needs.changes.outputs.mac_required == 'true'
     defaults:
       run:
         working-directory: packages/mac-app
@@ -349,7 +345,6 @@ jobs:
     needs: [changes, personal-info-guard, version-drift, workflow-lint, rust, ios, mac]
     if: always()
     env:
-      EVENT_NAME: ${{ github.event_name }}
       RESULT_CHANGES: ${{ needs.changes.result }}
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
       RESULT_VERSION: ${{ needs.version-drift.result }}
@@ -357,6 +352,8 @@ jobs:
       RESULT_RUST: ${{ needs.rust.result }}
       RESULT_IOS: ${{ needs.ios.result }}
       RESULT_MAC: ${{ needs.mac.result }}
+      REQUIRE_IOS: ${{ needs.changes.outputs.ios_required }}
+      REQUIRE_MAC: ${{ needs.changes.outputs.mac_required }}
     steps:
       - name: Verify all required jobs passed
         run: |
@@ -371,8 +368,10 @@ jobs:
           for name in IOS MAC; do
             var="RESULT_$name"
             result="${!var}"
+            required_var="REQUIRE_$name"
+            required="${!required_var}"
             [[ "$result" == "success" ]] && continue
-            [[ "$EVENT_NAME" == "pull_request" && "$result" == "skipped" ]] && continue
+            [[ "$required" == "false" && "$result" == "skipped" ]] && continue
             echo "::error::$name job: $result"; fail=1
           done
           if [[ $fail -ne 0 ]]; then exit 1; fi

@@ -54,7 +54,6 @@ const POST_PPACD_STALE_BRANCHES: &[&str] = &[
     "codex/configuration-profile-environment-discipline-recovery",
     "codex/release-install-upgrade-rollback-discipline",
     "codex/ios-thin-client-generic-runtime-shell",
-    "codex/developer-experience-repo-hygiene-automation",
     "codex/documentation-evidence-scorecard-integrity",
     "codex/self-sufficient-agent-runtime-readiness",
 ];

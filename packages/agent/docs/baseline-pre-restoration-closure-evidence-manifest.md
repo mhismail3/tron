@@ -34,7 +34,6 @@ Invariant target:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | passed | SSARR predecessor invariant passed after BPRC wording/classification. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_minimality_closure_invariants -- --nocapture` | passed | PMC predecessor invariant passed after BPRC closeout target wiring. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | passed | IOSTC predecessor invariant passed; no Swift source changes were made. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test developer_experience_repo_hygiene_automation_invariants -- --nocapture` | passed | DXRHA local/GitHub gate parity passed. |
 | `scripts/tron ci fmt check clippy test` | passed | Full Rust CI passed with BPRC in the closeout target set. |
 | `scripts/personal-info-guard.sh` | passed | Full personal-info guard passed. |
 | `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | passed | XcodeGen drift check passed. |
