@@ -62,6 +62,18 @@ create_launchd_plist() {
 PLIST
 }
 
+install_runtime_cli_payload() {
+    mkdir -p "$CONTRIBUTOR_DIR"
+    cp "$SCRIPT_DIR"/{tron-cli,tron-lib.sh,tron-agent.entitlements} "$CONTRIBUTOR_DIR/"
+    [ ! -f "$SCRIPT_DIR/AppIcon.icns" ] \
+        || cp "$SCRIPT_DIR/AppIcon.icns" "$CONTRIBUTOR_DIR/AppIcon.icns"
+    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
+    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
+    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
+    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
+    printf '%s\n' "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
+}
+
 write_restart_sentinel() {
     local action="$1"
     local commit="$2"
@@ -279,6 +291,9 @@ cmd_manual_deploy() {
         fi
     fi
 
+    # Install the contributor CLI payload before disrupting the existing service.
+    install_runtime_cli_payload
+
     # Write lock
     mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
     echo "$$" > "$DEPLOY_LOCK_FILE"
@@ -305,21 +320,6 @@ cmd_manual_deploy() {
     print_status "Creating app bundle..."
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
     sign_and_notarize "$INSTALLED_BUNDLE"
-
-    # Install runtime CLI, shared library, and entitlements (only if changed)
-    for f in tron-cli tron-lib.sh tron-agent.entitlements AppIcon.icns; do
-        if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"; then
-            cp "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"
-            [ "$f" = "tron-cli" ] && chmod +x "$CONTRIBUTOR_DIR/$f"
-            print_success "Updated $f"
-        fi
-    done
-    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
-    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
-    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
-
-    # Record workspace path
-    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
 
     # Regenerate plists so paths (e.g. log file) stay current
     print_status "Updating launchd plist..."
@@ -452,16 +452,8 @@ cmd_install() {
     _emit_event plist ok "$PLIST_PATH"
 
     _emit_event cli start ""
-    cp "$SCRIPT_DIR/tron-lib.sh" "$CONTRIBUTOR_DIR/tron-lib.sh"
-    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
-    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
-    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
-    cp "$SCRIPT_DIR/tron-cli" "$CONTRIBUTOR_DIR/tron-cli"
-    cp "$SCRIPT_DIR/tron-agent.entitlements" "$CONTRIBUTOR_DIR/tron-agent.entitlements"
-    cp "$SCRIPT_DIR/AppIcon.icns" "$CONTRIBUTOR_DIR/AppIcon.icns" 2>/dev/null || true
-    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
+    install_runtime_cli_payload
     [ "$gui_helper" -eq 0 ] && print_success "Installed runtime CLI"
-    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
     _emit_event cli ok "$CONTRIBUTOR_DIR/tron-cli"
 
     _emit_event symlink start "$BIN_DIR/tron"
@@ -580,17 +572,7 @@ cmd_setup() {
     # Install runtime CLI, shared library, and create symlink
     print_status "Setting up tron command..."
     mkdir -p "$HOME/.local/bin"
-    mkdir -p "$CONTRIBUTOR_DIR"
-
-    cp "$SCRIPT_DIR/tron-lib.sh" "$CONTRIBUTOR_DIR/tron-lib.sh"
-    rm -rf "$CONTRIBUTOR_DIR/tron-lib.d"
-    mkdir -p "$CONTRIBUTOR_DIR/tron-lib.d"
-    cp "$SCRIPT_DIR"/tron-lib.d/*.sh "$CONTRIBUTOR_DIR/tron-lib.d/"
-    cp "$SCRIPT_DIR/tron-cli" "$CONTRIBUTOR_DIR/tron-cli"
-    chmod +x "$CONTRIBUTOR_DIR/tron-cli"
-
-    # Record workspace path
-    echo "$PROJECT_DIR" > "$CONTRIBUTOR_DIR/workspace-path"
+    install_runtime_cli_payload
 
     ln -sf "$CONTRIBUTOR_DIR/tron-cli" "$HOME/.local/bin/tron"
     print_success "Created symlink: ~/.local/bin/tron -> $CONTRIBUTOR_DIR/tron-cli"

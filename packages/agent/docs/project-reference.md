@@ -1113,7 +1113,7 @@ See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for commit conventions, TDD expe
 
 ## CLI Reference
 
-The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. Contributor-binary recovery has one owner in `scripts/tron-lib.d/service.sh`: it prefers `tron.bak`, then uses a release artifact only when the workspace entrypoint explicitly grants its repository-owned path; the shared library clears inherited recovery input. When adding or renaming a subcommand, update the dispatcher and the owning module together.
+The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. `scripts/tron.d/manual-deploy.sh::install_runtime_cli_payload` is the single installer for the contributor CLI, shared runtime helpers, signing resources, and workspace delegation path used by setup, install, and manual deploy. Contributor-binary recovery has one owner in `scripts/tron-lib.d/service.sh`: it prefers `tron.bak`, then uses a release artifact only when the workspace entrypoint explicitly grants its repository-owned path; the shared library clears inherited recovery input. When adding or renaming a subcommand, update the dispatcher and the owning module together.
 
 ### Development (workspace only)
 
@@ -3335,7 +3335,7 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 3. Builds the release binary (`cargo build --release`).
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
-6. Uses contributor-only artifacts directly under `~/.tron/internal/run/`.
+6. Installs the contributor-only runtime payload under `~/.tron/internal/run/` before the service stop phase.
 7. Seeds managed defaults and runtime support.
 8. Starts the contributor service and waits for `/health`.
 9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.

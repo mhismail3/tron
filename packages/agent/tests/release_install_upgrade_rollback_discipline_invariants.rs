@@ -448,6 +448,15 @@ fn contributor_binary_recovery_has_one_service_owner() {
 fn manual_deploy_and_rollback_fail_closed_on_unhealthy_helpers() {
     let manual = read_repo_file("scripts/tron.d/manual-deploy.sh");
     assert_order(
+        manual
+            .split_once("cmd_manual_deploy() {")
+            .expect("manual deploy command missing")
+            .1,
+        "install_runtime_cli_payload",
+        "launchd_stop \"$PLIST_NAME\"",
+        "manual deploy must validate its runtime payload before stopping the service",
+    );
+    assert_order(
         &manual,
         "if service_is_running && wait_for_service_health 12; then",
         "echo \"$new_commit\" > \"$DEPLOYED_COMMIT_FILE\"",
@@ -548,6 +557,9 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
             "setup/install path missing {required}"
         );
     }
+    assert_eq!(manual.matches("install_runtime_cli_payload").count(), 4);
+    assert_eq!(manual.matches("tron-cli,tron-lib.sh,tron-agent").count(), 1);
+    assert_eq!(manual.matches("workspace-path").count(), 1);
 
     let service = read_repo_file("scripts/tron-lib.d/service.sh");
     for required in [
