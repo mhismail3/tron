@@ -552,13 +552,13 @@ fn setup_install_uninstall_and_clean_machine_boundaries_are_narrow() {
             && auth.contains("installed Tron CLI has no paired helper binary"),
         "installed auth must use only its paired helper binary"
     );
-    let rotate = auth
-        .split_once("cmd_auth_rotate() {")
-        .expect("auth rotate command missing")
-        .1;
     assert!(
-        rotate.contains("_run_with_contributor_pair_read _run_tron_auth_owner rotate"),
-        "installed auth rotation must hold the pair reader mutex while invoking Rust"
+        auth.contains("        rotate)\n            shift\n            # The Rust owner serializes rotation with every other auth writer.\n            _run_with_contributor_pair_read _run_tron_auth_owner rotate \"$@\"\n            ;;"),
+        "auth rotate arm must shift the action and hold the pair reader mutex around the exact Rust owner invocation"
+    );
+    assert!(
+        !auth.contains("cmd_auth_rotate"),
+        "auth rotate must not regain a single-caller forwarding wrapper"
     );
     assert_eq!(manual.matches("install_runtime_cli_payload").count(), 3);
     assert_eq!(manual.matches("tron-cli,tron-lib.sh,tron-agent").count(), 1);

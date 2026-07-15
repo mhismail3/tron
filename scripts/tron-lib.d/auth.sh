@@ -494,7 +494,8 @@ cmd_auth() {
     case "$action" in
         rotate)
             shift
-            cmd_auth_rotate "$@"
+            # The Rust owner serializes rotation with every other auth writer.
+            _run_with_contributor_pair_read _run_tron_auth_owner rotate "$@"
             ;;
         ""|-h|--help)
             echo ""
@@ -516,9 +517,4 @@ cmd_auth() {
             return 1
             ;;
     esac
-}
-
-cmd_auth_rotate() {
-    # The Rust owner serializes rotation with every other auth writer.
-    _run_with_contributor_pair_read _run_tron_auth_owner rotate "$@"
 }

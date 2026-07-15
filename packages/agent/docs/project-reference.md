@@ -2711,8 +2711,9 @@ tron auth rotate
 Rotation is serialized through a process-wide mutex plus the canonical auth-file `flock`, then persisted atomically (`tempfile + sync_all + rename`). It therefore cannot lose a concurrent provider refresh or contributor OAuth update from another process. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
 
 Both `scripts/tron` and the installed `tron-cli` route this runtime command
-directly to the shared `scripts/tron-lib.d/auth.sh` owner; the installed CLI
-does not delegate it to a workspace checkout.
+directly to the shared `scripts/tron-lib.d/auth.sh::cmd_auth` owner. Its `rotate`
+arm keeps the installed contributor-pair reader lock around the complete Rust
+auth-owner invocation instead of delegating to a workspace checkout.
 
 The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
