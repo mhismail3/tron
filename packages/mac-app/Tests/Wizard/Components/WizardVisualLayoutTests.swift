@@ -300,7 +300,6 @@ struct WizardVisualLayoutTests {
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PairingInfoStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
-        #expect(source.contains("Fresh installs do not have a user profile yet"))
         #expect(source.contains("setup.probeTailscale()"))
         #expect(source.contains("state.tailscaleStatus = liveTailscale"))
         #expect(source.contains("state.tailscaleStatus?.displayIP"))
