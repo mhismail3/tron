@@ -1008,7 +1008,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron dev` | Start the dev-profile server in the foreground. The command builds exactly once before stopping the installed helper: `-b` places that build before optional `-t` tests, while without `-b` tests run first; `-d` selects the launchd-backed background takeover. It then stops the installed `com.tron.server` job before binding port `9847`; foreground terminal output defaults to `RUST_LOG=info,ort=error` unless the caller sets `RUST_LOG`, while persisted database diagnostics remain engine-managed. Background mode waits up to 30 seconds for `/health`, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop or when candidate preparation/launch fails. Restoration succeeds only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
 | `tron ci` | Warning-clean CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step derives Cargo's top-level integration targets from their source files and keeps `integration` last and serial |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
-| `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
+| `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`, `test`, and hosted-CI `github-output`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | Check prerequisites, build, and link `~/.local/bin/tron` to the workspace entrypoint when no installed pair owns it; an installed CLI is preserved. Complete runtime/profile initialization remains owned by first server startup. |
 
 ### Manual Deployment (workspace only)
@@ -3249,7 +3249,10 @@ documents registration repair, variants, and mutual exclusion.
 
 ### DMG Release Pipeline
 
-Release identity is centralized in `VERSION.env`. On a matching `server-v*` tag,
+Release identity is centralized in `VERSION.env`. Both hosted release workflows
+delegate mirror validation, release-tag matching, and GitHub step outputs to
+`scripts/tron version github-output`; the workflows do not parse version fields
+themselves. On a matching `server-v*` tag,
 [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac.yml)
 checks every version mirror, builds the locked Rust agent, verifies the tracked
 helper metadata, stages the executable into both helper bundles, generates the

@@ -31,6 +31,7 @@ Commands:
   print              Print derived version fields as KEY=value lines
   check              Validate all mirrored version fields
   sync [--check]     Update mirrors from VERSION.env, or validate with --check
+  github-output      Validate a hosted release ref and write GitHub step outputs
   bump beta|patch|minor
                      Update VERSION.env, sync mirrors, and print the result
   test               Run shell-level version helper tests
@@ -109,6 +110,38 @@ TRON_RELEASE_TITLE=$TRON_RELEASE_TITLE
 TRON_DMG_NAME=$TRON_DMG_NAME
 TRON_IS_PRERELEASE=$TRON_IS_PRERELEASE
 EOF
+}
+
+write_github_release_outputs() {
+    check_versions
+    [ -n "${GITHUB_OUTPUT:-}" ] || die "GITHUB_OUTPUT is required for github-output"
+
+    local mode
+    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
+        if [ "$GITHUB_REF_NAME" != "$TRON_RELEASE_TAG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION.env release tag $TRON_RELEASE_TAG" >&2
+            return 1
+        fi
+        mode="tag"
+    else
+        mode="VERSION.env"
+    fi
+
+    if [[ -z "$TRON_VERSION" || -z "$TRON_RELEASE_TAG" || -z "$TRON_DMG_NAME" ||
+          -z "$TRON_DISPLAY_VERSION" || -z "$TRON_APPLE_BUILD" ||
+          -z "$TRON_APPLE_MARKETING_VERSION" || -z "$TRON_RELEASE_TITLE" ||
+          -z "$TRON_IS_PRERELEASE" ]]; then
+        echo "::error::could not resolve centralized version fields" >&2
+        return 1
+    fi
+
+    printf '%s\n' \
+        "version=$TRON_VERSION" "mode=$mode" "tag=$TRON_RELEASE_TAG" \
+        "dmg_name=$TRON_DMG_NAME" "display_version=$TRON_DISPLAY_VERSION" \
+        "apple_build=$TRON_APPLE_BUILD" "marketing_version=$TRON_APPLE_MARKETING_VERSION" \
+        "release_title=$TRON_RELEASE_TITLE" "is_prerelease=$TRON_IS_PRERELEASE" \
+        >> "$GITHUB_OUTPUT"
+    echo "Resolved version=$TRON_VERSION ($TRON_DISPLAY_VERSION) / Apple build $TRON_APPLE_BUILD from $mode"
 }
 
 replace_regex() {
@@ -327,6 +360,30 @@ self_test() {
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
     "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null
 
+    local github_output output_keys
+    github_output="$(mktemp)"
+    for ref_type in branch tag; do
+        : > "$github_output"
+        GITHUB_OUTPUT="$github_output" GITHUB_REF_TYPE="$ref_type" \
+            GITHUB_REF_NAME="$([ "$ref_type" = tag ] && echo "$TRON_RELEASE_TAG" || echo main)" \
+            "$PROJECT_DIR/scripts/tron" version github-output >/dev/null
+        grep -Fqx "mode=$([ "$ref_type" = tag ] && echo tag || echo VERSION.env)" "$github_output" \
+            || die "github-output omitted $ref_type mode"
+    done
+    output_keys="$(cut -d= -f1 "$github_output" | paste -sd, -)"
+    [ "$output_keys" = "version,mode,tag,dmg_name,display_version,apple_build,marketing_version,release_title,is_prerelease" ] \
+        || die "github-output keys changed: $output_keys"
+
+    : > "$github_output"
+    if GITHUB_OUTPUT="$github_output" \
+        GITHUB_REF_TYPE="tag" \
+        GITHUB_REF_NAME="${TRON_RELEASE_TAG}-mismatch" \
+        "$PROJECT_DIR/scripts/tron" version github-output >/dev/null 2>&1; then
+        die "github-output accepted a mismatched release tag"
+    fi
+    [ ! -s "$github_output" ] || die "github-output wrote fields for a mismatched release tag"
+    rm -f "$github_output"
+
     local invalid
     for invalid in 0.1 0.1-b1 v0.1.b1 0.1.0.0 0.1.0-beta.x 0.1.0-beta.0; do
         TRON_VERSION="$invalid"
@@ -345,6 +402,9 @@ case "$cmd" in
         ;;
     check)
         check_versions
+        ;;
+    github-output)
+        write_github_release_outputs
         ;;
     sync)
         if [ "${2:-}" = "--check" ]; then

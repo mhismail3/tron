@@ -452,6 +452,11 @@ fn release_workflows_fail_closed_before_live_builds() {
 
     for (path, required_secrets) in workflows {
         let workflow = read_repo_file(path);
+        assert_eq!(
+            workflow_step_script(&workflow, "Resolve version").trim(),
+            "./scripts/tron version github-output",
+            "{path} must delegate version resolution to its script owner"
+        );
         assert!(
             workflow.contains("default: true") && workflow.contains("type: boolean"),
             "{path} must expose a typed, safe dry-run default"

@@ -101,44 +101,7 @@ jobs:
         id: ver
         shell: bash
         run: |
-          set -euo pipefail
-          ./scripts/tron version check
-          while IFS='=' read -r key value; do
-            case "$key" in
-              TRON_VERSION) version="$value" ;;
-              TRON_RELEASE_TAG) tag="$value" ;;
-              TRON_DMG_NAME) dmg_name="$value" ;;
-              TRON_DISPLAY_VERSION) display_version="$value" ;;
-              TRON_APPLE_BUILD) apple_build="$value" ;;
-              TRON_RELEASE_TITLE) release_title="$value" ;;
-              TRON_IS_PRERELEASE) is_prerelease="$value" ;;
-            esac
-          done < <(./scripts/tron version print)
-
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" == server-v* ]]; then
-            if [[ "${GITHUB_REF_NAME}" != "$tag" ]]; then
-              echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION.env release tag $tag"
-              exit 1
-            fi
-            mode="tag"
-          else
-            mode="VERSION.env"
-          fi
-          if [[ -z "${version:-}" || -z "${tag:-}" || -z "${dmg_name:-}" || -z "${display_version:-}" || -z "${apple_build:-}" || -z "${release_title:-}" || -z "${is_prerelease:-}" ]]; then
-            echo "::error::could not resolve centralized version fields"
-            exit 1
-          fi
-          {
-            echo "version=$version"
-            echo "mode=$mode"
-            echo "tag=$tag"
-            echo "dmg_name=$dmg_name"
-            echo "display_version=$display_version"
-            echo "apple_build=$apple_build"
-            echo "release_title=$release_title"
-            echo "is_prerelease=$is_prerelease"
-          } >> "$GITHUB_OUTPUT"
-          echo "Resolved version=$version ($display_version) from $mode"
+          ./scripts/tron version github-output
 
       - name: Resolve dry-run flag
         id: drymode
