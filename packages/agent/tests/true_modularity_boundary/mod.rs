@@ -218,6 +218,20 @@ fn transport_is_adapter_only() {
 }
 
 #[test]
+fn shared_protocol_does_not_depend_on_domains() {
+    let leaks = rust_source_lines("packages/agent/src/shared/protocol")
+        .into_iter()
+        .filter(|line| line_has_identifier(line, "domains"))
+        .collect::<Vec<_>>();
+
+    assert!(
+        leaks.is_empty(),
+        "shared protocol must remain domain-neutral:\n{}",
+        leaks.join("\n")
+    );
+}
+
+#[test]
 fn ios_ui_uses_repositories_not_engine_transport() {
     let banned_identifiers = [
         "EngineClient",

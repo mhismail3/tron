@@ -19,9 +19,9 @@ mod projections;
 #[cfg(test)]
 mod tests;
 
+pub use projections::MessagePreview;
 #[cfg(test)]
 use projections::extract_text_from_payload;
-pub use projections::{ActivitySummaryLine, MessagePreview};
 
 /// Options for creating a new session.
 pub struct CreateSessionOptions<'a> {

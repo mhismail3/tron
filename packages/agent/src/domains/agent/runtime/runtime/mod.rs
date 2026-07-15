@@ -6,7 +6,8 @@
 use std::time::Duration;
 
 use crate::domains::agent::r#loop::orchestrator::session_reconstructor::ReconstructedState;
-use crate::domains::session::event_store::{ActivitySummaryLine, MessagePreview};
+use crate::domains::session::event_store::MessagePreview;
+use crate::shared::protocol::events::ActivitySummaryLine;
 
 mod session_update;
 mod user_event;

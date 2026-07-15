@@ -7,12 +7,12 @@ use crate::domains::session::event_store::identity::{
 };
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::{
-    ActivitySummaryLine, CreateSessionOptions, IncrementCounters, ListSessionsOptions,
-    MessagePreview, SessionRepo,
+    CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
+use crate::shared::protocol::events::ActivitySummaryLine;
 
 use super::{CreateSessionResult, EventStore, ForkOptions, ForkResult};
 

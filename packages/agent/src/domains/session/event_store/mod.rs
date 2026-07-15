@@ -42,14 +42,17 @@
 //! ## Dependency Direction
 //!
 //! Depends on: shared protocol/foundation types, SQLite storage helpers, and
-//! event payload DTOs. Depended on by session lifecycle/query/reconstruction,
-//! the agent loop, logs/blob/message domains, and transport read surfaces.
+//! event payload DTOs. Shared protocol owns event wire DTO shape; SQLite
+//! projections only construct those neutral values. Depended on by session
+//! lifecycle/query/reconstruction, the agent loop, logs/blob/message domains,
+//! and transport read surfaces.
 //!
 //! ## Invariants
 //!
 //! - This root uses normal folder-backed modules only and must not hide
 //!   ownership behind `#[path]` aliases.
 //! - SQLite row shape and migrations stay under the SQLite owner.
+//! - Shared event DTOs are not reexported through the persistence owner.
 //! - Reconstruction is deterministic over persisted event order.
 //! - `model.provider_request` is written before any provider stream opens.
 //! - Provider audit events project bulk strings to byte-count and digest
@@ -94,7 +97,7 @@ pub use reconstruction::{
     COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };
 pub use sqlite::repositories::event::ListEventsOptions;
-pub use sqlite::repositories::session::{ActivitySummaryLine, ListSessionsOptions, MessagePreview};
+pub use sqlite::repositories::session::{ListSessionsOptions, MessagePreview};
 pub use sqlite::row_types::{BlobRow, EventRow, SessionRow, WorkspaceRow};
 pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,

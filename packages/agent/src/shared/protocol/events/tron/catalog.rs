@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::super::{CapabilityEventIdentity, CapabilityInvocationSummary};
+use super::super::{ActivitySummaryLine, CapabilityEventIdentity, CapabilityInvocationSummary};
 use super::{BaseEvent, CompactionReason};
 use crate::shared::protocol::content::ThinkingContentKind;
 use crate::shared::protocol::messages::TokenUsage;
@@ -460,7 +460,7 @@ tron_events! {
         #[serde(rename = "parentSessionId", skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
         #[serde(rename = "activityLines", skip_serializing_if = "Option::is_none")]
-        activity_lines: Option<Vec<crate::domains::session::event_store::ActivitySummaryLine>>,
+        activity_lines: Option<Vec<ActivitySummaryLine>>,
     } => "session_updated",
 
     /// Context cleared.
