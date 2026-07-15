@@ -888,6 +888,8 @@ fn dev_quality_environment_and_app_wrapper_do_not_hide_production_deploys() {
     );
     let installed_cli = read_repo_file("scripts/tron-cli");
     assert!(installed_cli.contains("dev|manual-deploy|ci|bench|version|preflight|setup|install"));
+    assert!(installed_cli.contains("auth)            shift; cmd_auth \"$@\""));
+    assert!(installed_cli.contains("auth rotate     Rotate the WebSocket bearer token"));
     assert!(
         !installed_cli
             .lines()

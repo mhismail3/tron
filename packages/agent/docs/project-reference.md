@@ -1045,7 +1045,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm); success requires the restored helper to pass `/health` |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
-| `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
+| `tron auth rotate` | Rotate the WebSocket bearer token from either the workspace or installed CLI (forces every paired iOS device to pair again) |
 | `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
 | `tron errors` | Show recent errors |
 
@@ -2721,6 +2721,10 @@ tron auth rotate
 ```
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
+
+Both `scripts/tron` and the installed `tron-cli` route this runtime command
+directly to the shared `scripts/tron-lib.d/auth.sh` owner; the installed CLI
+does not delegate it to a workspace checkout.
 
 The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
