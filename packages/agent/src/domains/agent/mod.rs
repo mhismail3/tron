@@ -5,6 +5,8 @@
 //! work. Hidden functions serialize those prompts into the provider loop; the
 //! model-facing capability surface after that loop starts is the single
 //! `capability::execute` primitive.
+//! Worker composition carries the optional model responder factory directly;
+//! prompt validation reports `NotAvailable` when that runtime owner is absent.
 //!
 //! ## Prompt Execution Flow
 //!

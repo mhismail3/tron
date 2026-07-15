@@ -20,9 +20,7 @@ use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomp
 use crate::domains::model::responder::{DefaultModelResponderFactory, ModelResponderFactory};
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
 use crate::domains::settings::db_path_policy::resolve_production_db_path;
-use crate::shared::server::context::{
-    AgentDeps, ServerRuntimeContext, register_blocking_supervisor_shutdown,
-};
+use crate::shared::server::context::{ServerRuntimeContext, register_blocking_supervisor_shutdown};
 use crate::transport::runtime::streams::EngineStreamEventPump;
 
 /// Run either the requested CLI subcommand or the long-running server.
@@ -222,7 +220,7 @@ struct ServiceState {
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
     transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
-    agent_deps: Option<AgentDeps>,
+    responder_factory: Arc<dyn ModelResponderFactory>,
 }
 
 /// Build core services: orchestrator, session manager, providers, and capabilities.
@@ -247,9 +245,6 @@ async fn init_services(
     let (responder_factory, shared_http_client) = init_model_responder_factory(settings).await;
     let _ = shared_http_client;
 
-    let agent_deps = Some(AgentDeps {
-        responder_factory: responder_factory.clone(),
-    });
     let transcription_runtime = crate::domains::transcription::SharedTranscriptionEngine::new();
 
     Ok(ServiceState {
@@ -257,7 +252,7 @@ async fn init_services(
         session_manager,
         orchestrator,
         transcription_runtime,
-        agent_deps,
+        responder_factory,
     })
 }
 
@@ -341,7 +336,7 @@ fn build_server_runtime_context(
         ),
         settings_path,
         profile_runtime,
-        agent_deps: services.agent_deps,
+        responder_factory: Some(services.responder_factory),
         server_start_time: std::time::Instant::now(),
         shutdown_coordinator: None,
         origin,

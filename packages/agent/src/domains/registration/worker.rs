@@ -18,10 +18,11 @@ use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::registration::catalog;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerDefinition, WorkerKind};
-use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
+use crate::shared::server::context::ServerRuntimeContext;
 
 #[derive(Clone)]
 pub(crate) struct DomainRegistrationContext {
@@ -30,7 +31,7 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) transcription_runtime: crate::domains::transcription::SharedTranscriptionEngine,
     pub(crate) apns_runtime: crate::platform::apns::ApnsRuntime,
-    pub(crate) agent_deps: Option<AgentDeps>,
+    pub(crate) responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     pub(crate) profile_runtime: Arc<ProfileRuntime>,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     pub(crate) origin: String,
@@ -55,7 +56,7 @@ impl DomainRegistrationContext {
             event_store: Arc::clone(&ctx.event_store),
             transcription_runtime: ctx.transcription_runtime.clone(),
             apns_runtime: ctx.apns_runtime.clone(),
-            agent_deps: ctx.agent_deps.clone(),
+            responder_factory: ctx.responder_factory.clone(),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),
             origin: ctx.origin.clone(),

@@ -160,13 +160,6 @@ pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>
     );
 }
 
-/// Dependencies needed to create and run agents.
-#[derive(Clone)]
-pub struct AgentDeps {
-    /// Factory that creates a fresh model responder per request.
-    pub responder_factory: Arc<dyn ModelResponderFactory>,
-}
-
 /// Broad server runtime context used at app setup and domain registration.
 ///
 /// Runtime domain handlers should not store this type directly. Each domain
@@ -190,8 +183,9 @@ pub struct ServerRuntimeContext {
     pub settings_path: PathBuf,
     /// Compiled active profile runtime.
     pub profile_runtime: Arc<crate::domains::agent::r#loop::profile_runtime::ProfileRuntime>,
-    /// Agent execution dependencies (None = prompt handler returns error).
-    pub agent_deps: Option<AgentDeps>,
+    /// Factory that creates a fresh model responder per prompt. When absent,
+    /// the prompt handler returns `NotAvailable`.
+    pub responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
     /// Shutdown coordinator for registering background task handles.
@@ -296,7 +290,7 @@ mod tests {
     use super::*;
     use crate::domains::model::responder::ModelResponderFactory;
     use crate::shared::server::test_support::{
-        ModelAwareMockFactory, StrictMockFactory, make_test_agent_deps, make_test_context,
+        MockModelResponderFactory, ModelAwareMockFactory, StrictMockFactory, make_test_context,
     };
 
     #[test]
@@ -521,32 +515,20 @@ mod tests {
         assert!(!ctx.settings_path.as_os_str().is_empty());
     }
 
-    // ── AgentDeps tests ──
-
     #[test]
-    fn context_without_agent_deps_returns_not_available_in_handlers() {
+    fn context_can_leave_responder_factory_unconfigured() {
         let ctx = make_test_context();
-        assert!(ctx.agent_deps.is_none());
-    }
-
-    #[test]
-    fn context_with_agent_deps() {
-        let mut ctx = make_test_context();
-        ctx.agent_deps = Some(make_test_agent_deps());
-        assert!(ctx.agent_deps.is_some());
-    }
-
-    #[test]
-    fn agent_deps_responder_factory_accessible() {
-        let deps = make_test_agent_deps();
-        assert!(Arc::strong_count(&deps.responder_factory) >= 1);
+        assert!(ctx.responder_factory.is_none());
     }
 
     #[tokio::test]
-    async fn agent_deps_factory_creates_responder() {
-        let deps = make_test_agent_deps();
-        let responder = deps
+    async fn context_responder_factory_creates_requested_model() {
+        let mut ctx = make_test_context();
+        ctx.responder_factory = Some(Arc::new(MockModelResponderFactory));
+        let responder = ctx
             .responder_factory
+            .as_ref()
+            .unwrap()
             .create_for_model("claude-opus-4-6")
             .await
             .unwrap();
@@ -570,11 +552,5 @@ mod tests {
             Err(e) => assert_eq!(e.category(), "auth"),
             Ok(_) => panic!("expected auth error"),
         }
-    }
-
-    #[test]
-    fn agent_deps_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<AgentDeps>();
     }
 }

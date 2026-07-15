@@ -73,7 +73,7 @@ async fn boot_server() -> TestServer {
         apns_runtime: tron::platform::apns::ApnsRuntime::disabled(),
         settings_path,
         profile_runtime: Arc::new(ProfileRuntime::load(&home).unwrap()),
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "127.0.0.1:0".to_owned(),

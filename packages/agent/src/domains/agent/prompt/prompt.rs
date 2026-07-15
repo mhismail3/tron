@@ -1,9 +1,12 @@
 //! Agent workflow operations.
+use std::sync::Arc;
+
 use super::{
     AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest, errors,
 };
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::engine::{FunctionId, Invocation};
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::opt_array;
@@ -58,7 +61,8 @@ pub(crate) async fn prompt_apply_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
-    let (submission, _session, _agent_deps) = validate_prompt_submission(params, deps).await?;
+    let (submission, _session, _responder_factory) =
+        validate_prompt_submission(params, deps).await?;
 
     publish_prompt_stream(
         invocation,
@@ -85,7 +89,7 @@ pub(crate) async fn run_turn_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let run_id = require_string_param(params, "runId")?;
-    let (submission, session, agent_deps) = validate_prompt_submission(params, deps).await?;
+    let (submission, session, responder_factory) = validate_prompt_submission(params, deps).await?;
 
     let started_run = deps
         .orchestrator
@@ -109,7 +113,7 @@ pub(crate) async fn run_turn_value(
     .await;
     spawn_prompt_run(
         &deps.prompt_runtime(),
-        &agent_deps,
+        responder_factory,
         &session,
         started_run,
         run_id.clone(),
@@ -135,7 +139,7 @@ pub(crate) async fn validate_prompt_submission(
     (
         PromptSubmission,
         crate::domains::session::event_store::SessionRow,
-        crate::shared::server::context::AgentDeps,
+        Arc<dyn ModelResponderFactory>,
     ),
     CapabilityError,
 > {
@@ -169,10 +173,9 @@ pub(crate) async fn validate_prompt_submission(
         })?;
         validate_attachment_array(attachments.as_deref(), &policy)?;
     }
-    let agent_deps =
-        deps.agent_deps
-            .as_ref()
-            .cloned()
+    let responder_factory =
+        deps.responder_factory
+            .clone()
             .ok_or_else(|| CapabilityError::NotAvailable {
                 message: "Agent execution dependencies are not configured".into(),
             })?;
@@ -184,7 +187,7 @@ pub(crate) async fn validate_prompt_submission(
             attachments,
         },
         session,
-        agent_deps,
+        responder_factory,
     ))
 }
 
@@ -328,7 +331,29 @@ pub(crate) async fn publish_prompt_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::registration::worker::DomainRegistrationContext;
     use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+    use crate::shared::server::test_support::make_test_context;
+
+    #[tokio::test]
+    async fn prompt_validation_requires_a_responder_factory() {
+        let context = make_test_context();
+        let session_id = context
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+        let registration = DomainRegistrationContext::from_context(&context);
+        let deps = crate::domains::agent::Deps::from_engine(&registration);
+        let params = json!({"sessionId": session_id, "prompt": "hello"});
+
+        let result = validate_prompt_submission(Some(&params), &deps).await;
+
+        assert!(matches!(
+            result,
+            Err(CapabilityError::NotAvailable { message })
+                if message == "Agent execution dependencies are not configured"
+        ));
+    }
 
     #[test]
     fn hidden_prompt_child_context_is_engine_owned_not_public_caller() {

@@ -2,6 +2,7 @@
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
 use std::path::PathBuf;
@@ -10,7 +11,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub(crate) struct Deps {
     pub(super) auth_path: PathBuf,
-    pub(super) agent_deps: Option<crate::shared::server::context::AgentDeps>,
+    pub(super) responder_factory: Option<Arc<dyn ModelResponderFactory>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
@@ -24,7 +25,7 @@ impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             auth_path: deps.auth_path.clone(),
-            agent_deps: deps.agent_deps.clone(),
+            responder_factory: deps.responder_factory.clone(),
             engine_host: deps.engine_host.clone(),
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),

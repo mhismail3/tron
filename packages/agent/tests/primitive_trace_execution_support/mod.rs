@@ -67,7 +67,7 @@ pub fn test_runtime() -> TestRuntime {
         apns_runtime: tron::platform::apns::ApnsRuntime::disabled(),
         settings_path,
         profile_runtime,
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_owned(),

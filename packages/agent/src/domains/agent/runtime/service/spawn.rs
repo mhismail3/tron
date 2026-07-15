@@ -1,10 +1,11 @@
-use super::{
-    AgentDeps, PromptRequest, PromptRunPlan, PromptRuntimeDeps, StartedRun, execute_prompt_run,
-};
+use std::sync::Arc;
+
+use super::{PromptRequest, PromptRunPlan, PromptRuntimeDeps, StartedRun, execute_prompt_run};
+use crate::domains::model::responder::ModelResponderFactory;
 
 pub fn spawn_prompt_run(
     runtime_deps: &PromptRuntimeDeps,
-    agent_deps: &AgentDeps,
+    responder_factory: Arc<dyn ModelResponderFactory>,
     session: &crate::domains::session::event_store::SessionRow,
     started_run: StartedRun,
     run_id: String,
@@ -15,7 +16,7 @@ pub fn spawn_prompt_run(
         orchestrator: runtime_deps.orchestrator.clone(),
         session_manager: runtime_deps.session_manager.clone(),
         broadcast: runtime_deps.orchestrator.broadcast().clone(),
-        responder_factory: agent_deps.responder_factory.clone(),
+        responder_factory,
         event_store: runtime_deps.event_store.clone(),
         shutdown_token: runtime_deps
             .shutdown_coordinator

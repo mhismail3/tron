@@ -1,6 +1,6 @@
 //! Shared test fixtures for server capability tests.
 //!
-//! Mock providers, factory wrappers, and an in-memory `ServerRuntimeContext` builder
+//! Mock providers, responder factories, and an in-memory `ServerRuntimeContext` builder
 //! are used by engine and service tests via
 //! `crate::shared::server::test_support::*`. Keeping the helpers in
 //! their own file (instead of an inline `#[cfg(test)] mod` in `mod.rs`)
@@ -20,7 +20,7 @@ use crate::domains::model::responder::{
     ModelResponseRequest,
 };
 use crate::domains::session::event_store::EventStore;
-use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
+use crate::shared::server::context::ServerRuntimeContext;
 
 static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -130,13 +130,6 @@ impl ModelResponderFactory for StrictMockFactory {
     }
 }
 
-/// Build `AgentDeps` for testing with a mock provider factory.
-pub fn make_test_agent_deps() -> AgentDeps {
-    AgentDeps {
-        responder_factory: Arc::new(MockModelResponderFactory),
-    }
-}
-
 /// Build an `ServerRuntimeContext` backed by an in-memory event store.
 pub fn make_test_context() -> ServerRuntimeContext {
     let pool = crate::domains::session::event_store::new_in_memory(
@@ -176,7 +169,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         apns_runtime: crate::platform::apns::ApnsRuntime::disabled_for_test(),
         settings_path,
         profile_runtime,
-        agent_deps: None,
+        responder_factory: None,
         server_start_time: Instant::now(),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
