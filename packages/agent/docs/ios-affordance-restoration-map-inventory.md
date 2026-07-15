@@ -18,7 +18,7 @@ deleted or renamed:
 - 567 `Sources/` paths;
 - 266 `Tests/` paths;
 - 2 `docs/` paths;
-- 13 `.claude/rules/` paths.
+- 13 legacy path-scoped rule files.
 
 The live static gate recomputes deleted and renamed affordance paths from the
 old reference to `HEAD` and verifies that each path is covered by at least one
