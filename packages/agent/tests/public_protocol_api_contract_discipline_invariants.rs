@@ -449,17 +449,12 @@ fn predecessor_inventories_classify_ppacd_artifacts() {
         INVENTORY_TSV_PATH,
         INVARIANT_PATH,
     ];
-    for predecessor in [
-        "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv",
-    ] {
-        let source = read_repo_file(predecessor);
-        for required_path in required_paths {
-            assert!(
-                source.contains(required_path),
-                "{predecessor} missing PPACD artifact {required_path}"
-            );
-        }
+    let predecessor = "packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv";
+    let source = read_repo_file(predecessor);
+    for required_path in required_paths {
+        assert!(
+            source.contains(required_path),
+            "{predecessor} missing PPACD artifact {required_path}"
+        );
     }
 }

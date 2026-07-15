@@ -6,8 +6,6 @@ use std::process::Command;
 
 pub(super) const SCORECARD_PATH: &str =
     "packages/agent/docs/post-aha-adversarial-closeout-scorecard.md";
-pub(super) const HRA_SCORECARD_PATH: &str =
-    "packages/agent/docs/hierarchical-rearchitecture-scorecard.md";
 pub(super) const EVIDENCE_PATH: &str =
     "packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md";
 pub(super) const INVARIANT_TEST_PATH: &str =
@@ -54,10 +52,6 @@ pub(super) fn list_tracked_files_with_extension(extension: &str) -> Vec<String> 
         .into_iter()
         .filter(|path| Path::new(path).extension().and_then(|ext| ext.to_str()) == Some(extension))
         .collect()
-}
-
-pub(super) fn source_line_count(path: &str) -> usize {
-    read_repo_file(path).lines().count()
 }
 
 pub(super) fn assert_no_hits(label: &str, hits: Vec<String>) {

@@ -17,7 +17,7 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
         "AHA-3 | CI and static-gate parity | 12 | passed_after_fix",
         "AHA-4 | Xcode project drift and Mac test execution | 8 | passed_after_fix",
         "AHA-5 | Rust module ownership cleanup | 10 | passed_after_fix",
-        "AHA-6 | Rust progressive docs and near-budget guard | 6 | passed_after_fix",
+        "AHA-6 | Rust progressive docs | 6 | passed_after_fix",
         "AHA-7 | iOS transport/domain residue | 10 | passed_after_fix",
         "AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix",
         "AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix",

@@ -270,9 +270,6 @@ Inspected planning sources:
 - `packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md`
 - `packages/agent/docs/true-primitive-cleanup-scorecard.md`
 - `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`
-- `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`
-- `packages/agent/docs/hierarchical-rearchitecture-inventory.md`
-- `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`
 - `packages/agent/src/lib.rs`
 - `packages/agent/src/domains/mod.rs`
 - relevant domain `mod.rs` files for `agent`, `auth`, `blob`,

@@ -652,8 +652,6 @@ fn generated_project_and_simulator_evidence_are_recorded() {
 fn predecessor_inventory_wiring_is_recorded() {
     let inventory = read_repo_file(INVENTORY_TSV_PATH);
     let predecessors = [
-        "hierarchical-rearchitecture-file-inventory.tsv",
-        "hierarchical-rearchitecture-current-ownership-map.tsv",
         "public-protocol-api-contract-discipline-inventory.tsv",
         "configuration-profile-environment-discipline-inventory.tsv",
         "release-install-upgrade-rollback-discipline-inventory.tsv",
@@ -670,8 +668,6 @@ fn predecessor_inventory_wiring_is_recorded() {
     }
 
     for path in [
-        "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
         "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
         "packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv",
         "packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv",

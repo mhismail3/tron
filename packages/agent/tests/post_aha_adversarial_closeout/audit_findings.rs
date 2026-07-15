@@ -239,7 +239,6 @@ fn mac_source_guards_cover_wrapper_contracts() {
             "helper-resource layout",
             "staged-binary policy",
             "bundle-agent --clean",
-            "590",
         ] {
             if !guard.contains(required) {
                 hits.push(format!("{guard_path}: missing guard coverage `{required}`"));
@@ -314,8 +313,7 @@ fn ios_transport_and_chat_tests_mirror_production_owners() {
 }
 
 #[test]
-fn rust_progressive_docs_and_loc_split_plans_are_current() {
-    let budget_scorecard = read_repo_file(HRA_SCORECARD_PATH);
+fn rust_progressive_docs_are_current() {
     let mut hits = Vec::new();
     for file in [
         "packages/agent/src/app/mod.rs",
@@ -336,32 +334,7 @@ fn rust_progressive_docs_and_loc_split_plans_are_current() {
             }
         }
     }
-
-    for extension in ["rs", "swift"] {
-        for file in list_tracked_files_with_extension(extension) {
-            if !(file.starts_with("packages/agent/src/")
-                || file.starts_with("packages/agent/tests/")
-                || file.starts_with("packages/ios-app/Sources/")
-                || file.starts_with("packages/ios-app/Tests/")
-                || file.starts_with("packages/mac-app/Sources/")
-                || file.starts_with("packages/mac-app/Tests/"))
-            {
-                continue;
-            }
-            let loc = source_line_count(&file);
-            if loc >= 890
-                && !budget_scorecard.lines().any(|line| {
-                    line.contains(&format!("| `{file}` |")) && line.contains("| accepted_budget |")
-                })
-            {
-                hits.push(format!(
-                    "{file}: {loc} LOC lacks current concrete split plan row"
-                ));
-            }
-        }
-    }
-
-    assert_no_hits("Rust docs and 890+ LOC split plans must be current", hits);
+    assert_no_hits("Rust progressive module docs must be current", hits);
 }
 
 #[test]

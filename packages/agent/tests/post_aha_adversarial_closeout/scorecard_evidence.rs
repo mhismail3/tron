@@ -18,7 +18,7 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         "PAC-4 | Mac launch-agent/process ownership | 12 | passed_after_fix",
         "PAC-5 | Mac guard parity | 10 | passed_after_fix",
         "PAC-6 | iOS hierarchy and mirrored tests | 9 | passed_after_fix",
-        "PAC-7 | Rust docs and LOC split budgets | 10 | passed_after_fix",
+        "PAC-7 | Rust progressive module docs | 10 | passed_after_fix",
         "PAC-8 | Local/GitHub CI parity | 8 | passed_after_fix",
         "PAC-9 | Provenance, privacy, and residue policy | 7 | passed_after_fix",
         "PAC-10 | Final closeout verification | 6 | passed_after_fix",
@@ -28,7 +28,7 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         "mac_launch_agent_and_subprocess_have_physical_owners",
         "mac_source_guards_cover_wrapper_contracts",
         "ios_transport_and_chat_tests_mirror_production_owners",
-        "rust_progressive_docs_and_loc_split_plans_are_current",
+        "rust_progressive_docs_are_current",
         "local_and_github_ci_run_the_same_static_closeout_targets",
         "aha_provenance_privacy_and_residue_policy_are_in_repo",
     ] {

@@ -451,14 +451,6 @@ fn predecessor_inventory_rows_record_pmbd_as_current_original_slice() {
             "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv",
             "PMBD provider/model boundary artifacts extend PPACD public protocol hardening evidence",
         ),
-        (
-            "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-            "Provider / Model Boundary Discipline",
-        ),
-        (
-            "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-            "Provider / Model Boundary Discipline",
-        ),
     ] {
         let source = read_repo_file(path);
         assert!(

@@ -400,12 +400,6 @@ Current living entry points:
   foundations, accepted Slice 7A goal/question foundation, and accepted Slice
   8A through Slice 8E web source/provenance, citation, extraction, retention,
   and robots policy foundations.
-- `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
-  whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
-  scripts, docs, inventories, and static gates.
-- `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
-  companion evidence manifest for the completed hierarchical rearchitecture
-  scorecard.
 - `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: completed
   closeout campaign for adversarial audit findings after hierarchical
   rearchitecture completion.
@@ -417,20 +411,6 @@ Current living entry points:
   closeout campaign for adversarial audit findings after AHA completion.
 - `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md`:
   companion evidence manifest for the post-AHA adversarial closeout campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-inventory.md`: HRA
-  live-tree inventory summary and target architecture notes.
-- `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`: in-repo
-  summary of the operator HRA handoff plan and provenance boundary.
-- `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`:
-  machine-readable tracked-file inventory for the hierarchical rearchitecture
-  campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv`:
-  machine-readable current ownership map for the hierarchical rearchitecture
-  campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv`:
-  HRA-8 source/test Swift current ownership map for the iOS hierarchy phases.
-- `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md`:
-  HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership map.
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.
@@ -439,15 +419,16 @@ Current living entry points:
   provider request audit wiring, replay manifest hashing, stable ordering,
   cross-record replay references, offline roundtrip proof, docs parity, and
   closeout.
-- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: completed
-  hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
-  large-file-budget gates.
+- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: living Rust
+  crate-root, module-path, domain-owner, mirrored-test, and progressive-module
+  documentation guards retained from the hierarchy repair.
 - `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: completed
   post-HRA adversarial hardening gates for source identity, deleted-doc
-  residue, CI parity, Rust ownership, iOS transport, inventory, and provenance.
+  residue, CI parity, Rust physical ownership and module docs, and iOS
+  transport/source-guard contracts.
 - `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
   post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
-  ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
+  ownership, Rust module docs, CI parity, provenance, privacy, and residue.
 - `packages/agent/tests/true_modularity_boundary_invariants.rs`: completed TMB
   scorecard, boundary inventory, responder, facade, domain, storage, transport,
   iOS engine-access, boundary-error, and final closeout gates.

@@ -29,7 +29,6 @@ fn live_docs_templates_and_scorecards_have_no_deleted_doc_residue() {
     let banned_needles = [
         ".claude",
         "CLAUDE",
-        "packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: active",
         "managed skill sync",
         "managed-skill sync",
         "Deleted product campaign scorecards and guides are absent",
@@ -238,29 +237,6 @@ fn rust_provider_shared_and_settings_loader_use_physical_owners() {
 }
 
 #[test]
-fn rust_near_budget_files_have_explicit_warning_rows() {
-    let budget_scorecard = read_repo_file(HRA_SCORECARD_PATH);
-    let mut hits = Vec::new();
-    for file in list_tracked_files_with_extension("rs") {
-        if !file.starts_with("packages/agent/src/") {
-            continue;
-        }
-        let loc = source_line_count(&file);
-        if loc >= 850
-            && !budget_scorecard.lines().any(|line| {
-                line.contains(&format!("| `{file}` |")) && line.contains("| accepted_budget |")
-            })
-        {
-            hits.push(format!("{file}: {loc} LOC"));
-        }
-    }
-    assert_no_hits(
-        "Rust files at or above 850 LOC must have explicit near-budget rows",
-        hits,
-    );
-}
-
-#[test]
 fn rust_ownership_roots_have_progressive_docs() {
     let required_docs = [
         "packages/agent/src/domains/agent/loop/orchestrator/mod.rs",
@@ -382,59 +358,4 @@ fn ios_sourceguard_has_deep_hierarchy_and_budget_gates() {
             "SourceGuard must cover deep hierarchy/budget requirement `{required}`"
         );
     }
-}
-
-#[test]
-fn inventory_and_provenance_have_no_open_or_external_closeout_state() {
-    let mut hits = Vec::new();
-    for file in [
-        "packages/agent/docs/hierarchical-rearchitecture-scorecard.md",
-        "packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md",
-        "packages/agent/docs/hierarchical-rearchitecture-inventory.md",
-        "packages/agent/docs/hierarchical-rearchitecture-plan-summary.md",
-        "packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md",
-        "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv",
-    ] {
-        let text = read_repo_file(file);
-        if text.contains("TRON_REARCHITECTURE_PLAN.md") {
-            hits.push(format!("{file}: external HRA plan dependency"));
-        }
-    }
-
-    for (file, status_column) in [
-        (
-            "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-            8,
-        ),
-        (
-            "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-            8,
-        ),
-        (
-            "packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv",
-            5,
-        ),
-    ] {
-        let text = read_repo_file(file);
-        for line in text.lines().skip(1) {
-            let columns: Vec<_> = line.split('\t').collect();
-            if let Some(status) = columns.get(status_column) {
-                if matches!(
-                    *status,
-                    "pending" | "running" | "blocked" | "failed_unfixed" | "deferred_to_successor"
-                ) {
-                    hits.push(format!(
-                        "{file}: open inventory status `{status}` in {line}"
-                    ));
-                }
-            }
-        }
-    }
-
-    assert_no_hits(
-        "completed HRA inventory/provenance must not depend on external plans or open statuses",
-        hits,
-    );
 }

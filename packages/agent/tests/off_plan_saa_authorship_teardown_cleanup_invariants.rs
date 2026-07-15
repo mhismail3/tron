@@ -532,13 +532,8 @@ fn memory_rule_runtime_substrate_is_removed_from_active_sources() {
 }
 
 #[test]
-fn active_readme_and_predecessor_inventories_do_not_claim_saa_complete_current_architecture() {
-    for path in [
-        "README.md",
-        "packages/agent/docs/hierarchical-rearchitecture-inventory.md",
-        "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
-    ] {
+fn active_readme_does_not_claim_saa_complete_current_architecture() {
+    for path in ["README.md"] {
         let source = read_repo_file(path);
         for forbidden in [
             "self-adapting-agent-authorship",
@@ -676,11 +671,7 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         "README.md"
         | "packages/agent/docs/project-reference.md"
         | "packages/agent/docs/restoration-retrospective-audit-status.md"
-        | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
-        | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
-        | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
-        | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md"
-        | "packages/agent/tests/hierarchical_rearchitecture/scorecard_inventory.rs" => {
+        | "packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md" => {
             Some(ResidueClass::HistoricalCleanupEvidence)
         }
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md"

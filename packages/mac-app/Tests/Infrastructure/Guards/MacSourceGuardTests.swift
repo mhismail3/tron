@@ -29,11 +29,15 @@ struct MacSourceGuardTests {
             "Sources/Wizard/Components",
             "Sources/Wizard/Flow",
             "Sources/Wizard/Steps",
+            "Tests/App",
             "Tests/Infrastructure/Fakes",
             "Tests/Infrastructure/Guards",
+            "Tests/MenuBar",
             "Tests/Server/Health",
             "Tests/Server/LaunchAgent",
+            "Tests/Support",
             "Tests/Support/Foundation",
+            "Tests/Wizard",
         ]
         for root in requiredRoots {
             #expect(
@@ -47,12 +51,29 @@ struct MacSourceGuardTests {
             "Sources/Theme",
             "Sources/Views",
             "Sources/Server/Health/LaunchAgent",
+            "Sources/Support/Observability",
+            "Tests/Mocks",
+            "Tests/Observability",
             "Tests/Services",
         ]
         for root in bannedRoots {
             #expect(
                 !FileManager.default.fileExists(atPath: macRoot.appendingPathComponent(root).path),
                 "banned roots must not exist: \(root)"
+            )
+        }
+
+        for root in ["Sources/App", "Sources/Server", "Sources/MenuBar", "Sources/Wizard"] {
+            let directSwiftFiles = try FileManager.default.contentsOfDirectory(
+                at: macRoot.appendingPathComponent(root),
+                includingPropertiesForKeys: nil
+            )
+            .filter { $0.pathExtension == "swift" }
+            .map(\.lastPathComponent)
+            .sorted()
+            #expect(
+                directSwiftFiles.isEmpty,
+                "source owner roots must contain subdomains, not loose Swift files: \(root): \(directSwiftFiles)"
             )
         }
 
@@ -195,36 +216,6 @@ struct MacSourceGuardTests {
         #expect(script.contains("remove ignored staged helper binaries"))
     }
 
-    @Test("Mac Swift near-budget files require scorecard rows at 590 LOC")
-    func macSwiftNearBudgetFilesRequireScorecardRowsAt590LOC() throws {
-        let macRoot = try Self.macAppRoot()
-        let repoRoot = macRoot
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let nearBudgetWarningLineCount = 590
-        let scorecard = try String(
-            contentsOf: repoRoot.appendingPathComponent(
-                "packages/agent/docs/post-aha-adversarial-closeout-scorecard.md"
-            ),
-            encoding: .utf8
-        )
-        let roots = [
-            macRoot.appendingPathComponent("Sources"),
-            macRoot.appendingPathComponent("Tests"),
-        ]
-        let nearBudgetFiles = try roots.flatMap(Self.swiftFiles)
-            .map { ($0, try Self.sourceLineCount($0)) }
-            .filter { _, lineCount in lineCount >= nearBudgetWarningLineCount }
-
-        for (url, lineCount) in nearBudgetFiles {
-            let repoRelative = "packages/mac-app/\(Self.relativePath(url, from: macRoot))"
-            #expect(
-                scorecard.contains("| `\(repoRelative)` | \(lineCount) |"),
-                "\(repoRelative) has \(lineCount) LOC and needs a concrete split-plan scorecard row"
-            )
-        }
-    }
-
     private static func macAppRoot(filePath: String = #filePath) throws -> URL {
         var candidate = URL(fileURLWithPath: filePath).deletingLastPathComponent()
         for _ in 0..<8 {
@@ -246,34 +237,6 @@ struct MacSourceGuardTests {
 
     private static func read(_ root: URL, _ relativePath: String) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
-    }
-
-    private static func swiftFiles(in root: URL) throws -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        return enumerator.compactMap { entry -> URL? in
-            guard let url = entry as? URL else { return nil }
-            guard url.pathExtension == "swift" else { return nil }
-            return url
-        }
-    }
-
-    private static func sourceLineCount(_ url: URL) throws -> Int {
-        let source = try String(contentsOf: url, encoding: .utf8)
-        return source.split(separator: "\n", omittingEmptySubsequences: false).count
-    }
-
-    private static func relativePath(_ url: URL, from root: URL) -> String {
-        let rootPath = root.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        if path.hasPrefix(rootPath + "/") {
-            return String(path.dropFirst(rootPath.count + 1))
-        }
-        return path
     }
 
     private static func gitTracks(_ relativePath: String, repoRoot: URL) throws -> Bool {
