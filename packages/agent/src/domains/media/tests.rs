@@ -6,10 +6,10 @@ use super::contract::{READ_SCOPE, RESOURCE_READ_SCOPE, RESOURCE_WRITE_SCOPE, WRI
 use super::service::{
     archive_media_value_at, create_media_value_at, inspect_media_value, list_media_value,
 };
-use super::{Deps, MEDIA_ARTIFACT_KIND, MEDIA_ARTIFACT_SCHEMA_ID};
+use super::{MEDIA_ARTIFACT_KIND, MEDIA_ARTIFACT_SCHEMA_ID};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, FunctionId, Invocation,
-    InvocationId, ListResources, RiskLevel, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, DeriveGrant, EngineHostHandle, FunctionId,
+    Invocation, InvocationId, ListResources, RiskLevel, TraceId,
 };
 use crate::shared::server::test_support::make_test_context;
 
@@ -21,7 +21,7 @@ const IDEMPOTENCY_LEAK_PREFIX: &str = "MEDIA_IDEMPOTENCY_LEAK_PREFIX";
 const IDEMPOTENCY_LEAK_SUFFIX: &str = "MEDIA_IDEMPOTENCY_LEAK_SUFFIX";
 
 struct Fixture {
-    deps: Deps,
+    engine_host: EngineHostHandle,
     session_id: String,
     write_grant_id: AuthorityGrantId,
     read_grant_id: AuthorityGrantId,
@@ -30,12 +30,10 @@ struct Fixture {
 impl Fixture {
     async fn new(label: &str) -> Self {
         let ctx = make_test_context();
-        let deps = Deps {
-            engine_host: ctx.engine_host.clone(),
-        };
+        let engine_host = ctx.engine_host.clone();
         let session_id = format!("{label}-session");
         let write_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-write"),
             &[
                 READ_SCOPE,
@@ -49,7 +47,7 @@ impl Fixture {
         )
         .await;
         let read_grant_id = derive_grant(
-            &deps,
+            &engine_host,
             &format!("{label}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MEDIA_ARTIFACT_KIND],
@@ -58,7 +56,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps,
+            engine_host,
             session_id,
             write_grant_id,
             read_grant_id,
@@ -67,7 +65,7 @@ impl Fixture {
 
     async fn clone_for_session(&self, session_id: &str) -> Self {
         let read_grant_id = derive_grant(
-            &self.deps,
+            &self.engine_host,
             &format!("{session_id}-read"),
             &[READ_SCOPE, RESOURCE_READ_SCOPE],
             &[MEDIA_ARTIFACT_KIND],
@@ -76,7 +74,7 @@ impl Fixture {
         )
         .await;
         Self {
-            deps: self.deps.clone(),
+            engine_host: self.engine_host.clone(),
             session_id: session_id.to_owned(),
             write_grant_id: self.write_grant_id.clone(),
             read_grant_id,
@@ -89,15 +87,20 @@ impl Fixture {
 
     async fn create_at(&self, key: &str, payload: Value, operation_at: DateTime<Utc>) -> Value {
         let invocation = self.write_invocation(key, payload);
-        create_media_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
-            .await
-            .expect("create media")
+        create_media_value_at(
+            &self.engine_host,
+            &invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await
+        .expect("create media")
     }
 
     async fn create_error(&self, key: &str, payload: Value) -> String {
         let invocation = self.write_invocation(key, payload);
         create_media_value_at(
-            &self.deps,
+            &self.engine_host,
             &invocation,
             &invocation.payload,
             default_operation_at(),
@@ -109,21 +112,21 @@ impl Fixture {
 
     async fn list(&self, key: &str, payload: Value) -> Value {
         let invocation = self.read_invocation(key, payload);
-        list_media_value(&self.deps, &invocation, &invocation.payload)
+        list_media_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("list media")
     }
 
     async fn inspect(&self, key: &str, resource_id: &str) -> Value {
         let invocation = self.read_invocation(key, json!({"mediaResourceId": resource_id}));
-        inspect_media_value(&self.deps, &invocation, &invocation.payload)
+        inspect_media_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect("inspect media")
     }
 
     async fn inspect_error(&self, key: &str, resource_id: &str) -> String {
         let invocation = self.read_invocation(key, json!({"mediaResourceId": resource_id}));
-        inspect_media_value(&self.deps, &invocation, &invocation.payload)
+        inspect_media_value(&self.engine_host, &invocation, &invocation.payload)
             .await
             .expect_err("inspect should fail")
             .to_string()
@@ -131,7 +134,6 @@ impl Fixture {
 
     async fn raw_current_payload(&self, resource_id: &str) -> Value {
         let inspection = self
-            .deps
             .engine_host
             .inspect_resource(resource_id)
             .await
@@ -162,9 +164,14 @@ impl Fixture {
                 "reason": "retention cleanup"
             }),
         );
-        archive_media_value_at(&self.deps, &invocation, &invocation.payload, operation_at)
-            .await
-            .expect("archive media")
+        archive_media_value_at(
+            &self.engine_host,
+            &invocation,
+            &invocation.payload,
+            operation_at,
+        )
+        .await
+        .expect("archive media")
     }
 
     async fn derive_grant(
@@ -175,7 +182,7 @@ impl Fixture {
         network_policy: &str,
     ) -> AuthorityGrantId {
         derive_grant(
-            &self.deps,
+            &self.engine_host,
             suffix,
             scopes,
             &[MEDIA_ARTIFACT_KIND],
@@ -233,7 +240,6 @@ async fn create_list_inspect_archive_media_resource_schema_and_lifecycle() {
     let version_id = created["mediaVersionId"].as_str().unwrap();
 
     let stored = fixture
-        .deps
         .engine_host
         .inspect_resource(resource_id)
         .await
@@ -305,7 +311,6 @@ async fn create_list_inspect_archive_media_resource_schema_and_lifecycle() {
     assert_eq!(archived_list["media"].as_array().unwrap().len(), 1);
 
     let streams = fixture
-        .deps
         .engine_host
         .replay_snapshot(&fixture.session_id)
         .await
@@ -378,7 +383,7 @@ async fn media_validation_rejects_raw_audio_disallowed_mime_and_oversize() {
     );
     overlong_payload.causal_context.idempotency_key = None;
     let overlong_payload_error = create_media_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &overlong_payload,
         &overlong_payload.payload,
         default_operation_at(),
@@ -441,7 +446,7 @@ async fn media_idempotency_evidence_is_fingerprinted_without_raw_key_leaks() {
     create_invocation.causal_context.trace_id =
         TraceId::new("trace-media-idempotency-create").expect("trace id");
     let created = create_media_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &create_invocation,
         &create_invocation.payload,
         default_operation_at(),
@@ -473,7 +478,7 @@ async fn media_idempotency_evidence_is_fingerprinted_without_raw_key_leaks() {
     archive_invocation.causal_context.trace_id =
         TraceId::new("trace-media-idempotency-archive").expect("trace id");
     let archived = archive_media_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &archive_invocation,
         &archive_invocation.payload,
         dt("2026-06-25T13:00:00Z"),
@@ -503,7 +508,6 @@ async fn media_idempotency_evidence_is_fingerprinted_without_raw_key_leaks() {
         .await;
     let stream_payloads = Value::Array(
         fixture
-            .deps
             .engine_host
             .replay_snapshot(&fixture.session_id)
             .await
@@ -534,7 +538,7 @@ async fn media_authority_requires_exact_scopes_selectors_and_none_network() {
     let fixture = Fixture::new("media-authority").await;
     let read_only = fixture.read_invocation("read-only-create", voice_note_payload());
     let read_only_error = create_media_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &read_only,
         &read_only.payload,
         default_operation_at(),
@@ -569,7 +573,7 @@ async fn media_authority_requires_exact_scopes_selectors_and_none_network() {
         ],
     );
     let wildcard_error = create_media_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &wildcard,
         &wildcard.payload,
         default_operation_at(),
@@ -607,7 +611,7 @@ async fn media_authority_requires_exact_scopes_selectors_and_none_network() {
         ],
     );
     let network_error = create_media_value_at(
-        &fixture.deps,
+        &fixture.engine_host,
         &network,
         &network.payload,
         default_operation_at(),
@@ -636,7 +640,6 @@ async fn media_scope_isolation_and_idempotent_replay_are_enforced() {
     assert!(error.contains("outside the current scope"), "{error}");
 
     let resources = fixture
-        .deps
         .engine_host
         .list_resources(ListResources {
             kind: Some(MEDIA_ARTIFACT_KIND.to_owned()),
@@ -686,15 +689,14 @@ fn id_token_like_idempotency_key(label: &str) -> String {
 }
 
 async fn derive_grant(
-    deps: &Deps,
+    engine_host: &EngineHostHandle,
     suffix: &str,
     scopes: &[&str],
     resource_kinds: &[&str],
     selectors: &[&str],
     network_policy: &str,
 ) -> AuthorityGrantId {
-    let grant = deps
-        .engine_host
+    let grant = engine_host
         .derive_authority_grant(DeriveGrant {
             grant_id: Some(AuthorityGrantId::new(format!("media-{suffix}")).unwrap()),
             parent_grant_id: AuthorityGrantId::new("engine-system").unwrap(),

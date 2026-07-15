@@ -28,7 +28,8 @@
 //! transcription providers, do not expose provider-visible raw audio, and store
 //! idempotency evidence as deterministic fingerprints rather than raw caller
 //! keys. Media timestamps are supplied by `capability::execute` or tests; this
-//! domain does not sample wall-clock time directly.
+//! domain does not sample wall-clock time directly. Services borrow the engine
+//! host directly and own no parallel dependency or engine-state container.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -37,11 +38,6 @@ pub(crate) mod contract;
 mod projection;
 pub(crate) mod service;
 mod validation;
-
-#[derive(Clone)]
-pub(crate) struct Deps {
-    pub(crate) engine_host: crate::engine::EngineHostHandle,
-}
 
 pub(crate) use crate::engine::{MEDIA_ARTIFACT_KIND, MEDIA_ARTIFACT_SCHEMA_ID};
 

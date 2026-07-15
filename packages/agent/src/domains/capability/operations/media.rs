@@ -13,11 +13,8 @@ pub(super) async fn media_create(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let media_deps = crate::domains::media::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::media::service::create_media_value_at(
-        &media_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
@@ -30,11 +27,8 @@ pub(super) async fn media_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let media_deps = crate::domains::media::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::media::service::list_media_value(
-        &media_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -54,11 +48,8 @@ pub(super) async fn media_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let media_deps = crate::domains::media::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::media::service::inspect_media_value(
-        &media_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
     )
@@ -75,11 +66,8 @@ pub(super) async fn media_archive(
     deps: &Deps,
     operation_at: DateTime<Utc>,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let media_deps = crate::domains::media::Deps {
-        engine_host: deps.engine_host.clone(),
-    };
     let details = crate::domains::media::service::archive_media_value_at(
-        &media_deps,
+        &deps.engine_host,
         invocation,
         &invocation.payload,
         operation_at,
